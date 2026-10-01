@@ -36,7 +36,7 @@ def shipped_default(name):
     module - the live one has already had admin_config.py and settings.conf
     applied over it, so it says what THIS machine is configured to, not what
     the project ships."""
-    with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
+    with io.open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
     for node in tree.body:
         target = None
@@ -51,7 +51,7 @@ def shipped_default(name):
 
 
 def irc_source():
-    with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+    with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
         return handle.read()
 
 
@@ -63,7 +63,7 @@ class NothingIsShippedPointingAtAChannelWeOwn(unittest.TestCase):
     def test_no_project_channel_is_shipped_as_any_default(self):
         """The general rule, so the next setting to want a channel cannot
         reintroduce this. A shipped channel name is a shared room."""
-        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         offenders = []
         for node in tree.body:
@@ -137,7 +137,7 @@ class ABlankValueJoinsNothing(unittest.TestCase):
         shared room for any install whose config omits the setting."""
         offenders = []
         for name in ("irc.py", "commands.py"):
-            with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
                 tree = ast.parse(handle.read())
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)

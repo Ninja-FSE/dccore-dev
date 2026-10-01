@@ -217,7 +217,7 @@ class TheReviewOf958(Case):
         self.assertEqual(session.sent, [])
 
     def test_the_status_burst_asks_for_it(self):
-        with io.open(os.path.join(REPO_ROOT, "adminchat.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "adminchat.py"), encoding="utf-8") as handle:
             code = handle.read()
         at = code.index("    def send_status(self):")
         body = code[at:code.index("    def request_status", at)]
@@ -252,7 +252,7 @@ class TheFollowUpTo958(Case):
         real = irc.WHOIS_STATUS_MAX
         irc.WHOIS_STATUS_MAX = 3
         self.addCleanup(setattr, irc, "WHOIS_STATUS_MAX", real)
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         at = code.index('if is_server_numeric(line, "352"):')
         self.assertIn("while len(config.whois_status) > WHOIS_STATUS_MAX:", code[at:at + 1200])
@@ -267,7 +267,7 @@ class NothingAnswers(Case):
         self.assertEqual(self.spoken(), [])
 
     def test_the_capture_path_has_no_send_in_it(self):
-        with io.open(os.path.join(REPO_ROOT, "serverschat.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "serverschat.py"), encoding="utf-8") as handle:
             code = handle.read()
         body = code[code.index("def capture("):code.index("def _enqueue(")]
         # Statements only: the docstring is prose, which is not a send (a guard that reads prose passes or fails on words).
@@ -310,7 +310,7 @@ class MemoryOnlyAndBounded(Case):
         self.assertLess(len(runtime.chat_rate), 50)
 
     def test_nothing_is_written_to_disk(self):
-        with io.open(os.path.join(REPO_ROOT, "serverschat.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "serverschat.py"), encoding="utf-8") as handle:
             code = handle.read()
         for word in ("import db", "db.", "open(", "json"):
             self.assertNotIn(word, code)
@@ -544,7 +544,7 @@ class AskingWho(Case):
         self.assertIn("somebot", self.session.sent[0].lower())
 
     def test_it_runs_from_the_servers_ping(self):
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         at = code.index('if line.startswith("PING"):')
         self.assertIn("_refresh_chat_peers()", code[at:at + 900])
@@ -554,7 +554,7 @@ class AskingWho(Case):
         silence FROM it, and the keepalive below fires at 45s - so the
         server always hears from the bot first and never sends its own
         PING. Without this, refresh_peers() never ran on its own at all."""
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         at = code.index('s.sendall(b"PING :lagcheck\\r\\n")')
         self.assertIn("_refresh_chat_peers()", code[at:at + 650])
@@ -564,7 +564,7 @@ class AskingWho(Case):
         nicknames only - never a realname - so this is the earliest a WHO
         round can find a peer at all. Without it the first one waited for
         the keepalive or the advert thread, both minutes away."""
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         at = code.index("if target_channels.issubset(channels_confirmed):")
         self.assertIn("_refresh_chat_peers()", code[at:at + 1050])
@@ -662,25 +662,25 @@ class TheConsoleCommand(Case):
 
 class TheReadLoop(Case):
     def test_the_privmsg_branch_hands_it_on(self):
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         at = code.index("privmsg_parsed = parse_privmsg(line)")
         self.assertIn("_capture_chat_message(user, target_chan, msg, user_host)", code[at:at + 3500])
 
     def test_the_who_reply_and_the_departures_are_watched(self):
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         self.assertIn("_note_chat_peers(line)", code)
         self.assertIn("_forget_chat_peer(p_user, p_chan)", code)
         self.assertIn("_forget_chat_peer(q_user)", code)
 
     def test_a_join_is_watched_too(self):
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         self.assertIn("_note_chat_join(joined_user, joined_chan)", code)
 
     def test_a_notice_is_not_chat(self):
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         at = code.index("notice_parsed = parse_notice(line)")
         self.assertNotIn("_capture_chat", code[at:at + 1500])

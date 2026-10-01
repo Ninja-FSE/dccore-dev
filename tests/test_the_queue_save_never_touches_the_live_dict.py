@@ -155,7 +155,7 @@ class TheWakeInTheFinallyIsGuarded(unittest.TestCase):
     test below drives the real thing where it can; this one runs everywhere."""
 
     def finally_body(self):
-        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "dcc.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         func = next(node for node in ast.walk(tree)
                     if isinstance(node, ast.FunctionDef) and node.name == "start_dcc_send")

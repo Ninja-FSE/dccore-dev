@@ -426,7 +426,7 @@ class TheSampleStaysInStepWithConfig(unittest.TestCase):
         # (ORIGINAL_NICK, MY_IP_OR_DOCK), which are not settings anybody can
         # put in a file.
         import ast
-        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         missing = []
         # Both node types: an annotated setting (`MAX_DCC_SLOTS: int = 3`) is
@@ -561,7 +561,7 @@ class ConfigDeclaresEachSettingsType(unittest.TestCase):
         would report them, and would also depend on which tests happened to
         run first.
         """
-        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
 
         annotated = {node.target.id for node in tree.body

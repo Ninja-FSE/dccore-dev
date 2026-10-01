@@ -116,7 +116,7 @@ def keys_referenced_in_source():
     js = read("app.js")
     found.update(JS_KEY_SHAPED_STRING.findall(js))
 
-    with io.open(os.path.join(REPO_ROOT, "webserver.py"), encoding="utf-8") as handle:
+    with io.open(os.path.join(REPO_ROOT, "src", "webserver.py"), encoding="utf-8") as handle:
         found.update(SETUP_KEY_STRING.findall(handle.read()))
 
     return found

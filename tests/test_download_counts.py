@@ -290,7 +290,7 @@ class TheSendPathCountsWhatItSent(unittest.TestCase):
     is the #119 shape: a correct function no live path reaches."""
 
     def source(self):
-        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "dcc.py"), encoding="utf-8") as handle:
             return handle.read()
 
     def test_a_completed_send_records_a_download(self):

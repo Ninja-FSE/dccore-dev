@@ -91,7 +91,7 @@ class NothingTrackedCarriesOne(unittest.TestCase):
 
         found = {}
         for name in files:
-            with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8",
+            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8",
                          errors="replace") as handle:
                 hits = markers_in(handle.read())
             if hits:

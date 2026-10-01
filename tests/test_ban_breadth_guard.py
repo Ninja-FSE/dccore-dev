@@ -207,7 +207,7 @@ class TheSampleDoesNotPutTheDashboardOnTheLan(unittest.TestCase):
         """
         import ast
         declared = {}
-        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         for node in tree.body:
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):

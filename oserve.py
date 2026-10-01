@@ -4,6 +4,12 @@ import time
 import sys
 import os
 
+# Every other daemon module lives in src/ (#959): put it on the path before
+# any of them is imported, so every existing "import irc" / "import defaults
+# as config" throughout the codebase keeps working unchanged - the modules
+# still only ever refer to each other by bare name, never a package prefix.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+
 # FIRST, before anything else can print. Several modules print at import time,
 # and on a console whose code page cannot encode the Swedish log strings
 # (cp1253, cp1251, cp932, ascii - anything but Western European) an unguarded

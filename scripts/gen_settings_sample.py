@@ -22,6 +22,9 @@ import textwrap
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+SRC_DIR = os.path.join(REPO_ROOT, "src")  # settings_file.py/settings_help.py live there (#959)
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 
 import settings_file  # noqa: E402
 import settings_help  # noqa: E402
@@ -68,7 +71,7 @@ def _render(value):
 
 
 def build():
-    path = os.path.join(REPO_ROOT, "defaults.py")
+    path = os.path.join(SRC_DIR, "defaults.py")
     with io.open(path, encoding="utf-8") as handle:
         source = handle.read()
     lines = source.split("\n")

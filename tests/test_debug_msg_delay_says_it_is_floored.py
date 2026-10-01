@@ -31,7 +31,12 @@ from tests.support import DCCoreTestCase  # noqa: E402
 
 
 def read(*parts):
-    with io.open(os.path.join(REPO_ROOT, *parts), encoding="utf-8") as handle:
+    # src/ first (#959: where most daemon modules live now), the repository
+    # root otherwise - web/, settings.conf.sample and the rest never moved.
+    path = os.path.join(REPO_ROOT, "src", *parts)
+    if not os.path.exists(path):
+        path = os.path.join(REPO_ROOT, *parts)
+    with io.open(path, encoding="utf-8") as handle:
         return handle.read()
 
 

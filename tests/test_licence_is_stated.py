@@ -30,7 +30,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def read(name):
-    with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+    with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
         return handle.read()
 
 

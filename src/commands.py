@@ -2182,9 +2182,13 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
         # than none: it would be attached to a rebuild it did not measure.
         started = time.time()
         try:
-            base_path = os.path.dirname(os.path.abspath(__file__))
+            # update_list.py is an entry point of its own (README/INSTALL.md
+            # say "python3 update_list.py"), so it stays at the repository
+            # root - one directory up from this file, which moved into src/
+            # with everything else (#959).
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             script_path = os.path.join(base_path, "update_list.py")
-            
+
             if not os.path.exists(script_path):
                 announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
                 # #224: build_update_list_status_payload() used to report only

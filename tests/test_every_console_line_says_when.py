@@ -342,7 +342,7 @@ class TheDaemonInstallsIt(unittest.TestCase):
         """setup_check.py and configure.py print a report for a person to read
         once, not a log; a stamp on every line of a report is noise."""
         for name in ("scripts/setup_check.py", "configure.py"):
-            with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
                 with self.subTest(script=name):
                     self.assertNotIn("install_console_timestamps", handle.read())
 
