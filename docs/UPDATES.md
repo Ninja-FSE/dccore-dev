@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 `-remove <file>` works for a user whose queue is frozen (#1042)
+
+Audit 2026-10-01 L1. `handle_queue_remove_file()` walked `frozen_queues` as if it held rows, but it maps a nick to the
+time its queue froze (a frozen user's rows stay in `dcc_queue`). A user who had left the channel and sent
+`@<nick>-remove <file>` within the five minutes hit `TypeError: 'float' object is not iterable` after the row was already
+gone in memory: no `save_dcc_queue()`, no NOTICE, and a packed archive deleted that `dcc_queue.txt` still named. It now
+walks `dcc_queue` alone, and removing a frozen user's last file also unfreezes them, as the bare `-remove` does. The
+old test built `frozen_queues` as rows, which is why it passed; it now uses the real shape. Tests:
+`tests/test_a_single_file_can_be_removed_from_the_queue.py`.
+
 ### 📦 An older dccore.mrc is not sent PEERS or CONSOLEFEED lines (#1045)
 
 Audit 2026-10-01 L4. The 1.5 script v1.13.1 shipped has no branch for either line and prints a type it does not know
