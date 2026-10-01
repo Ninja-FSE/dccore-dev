@@ -1528,17 +1528,24 @@ def check_queue_and_send(irc_sock, completed_user):
                     )
                     pack_in_progress = getattr(config, 'rar_inprogress', False)
 
+                    pack_turned_away = None
                     if user_already_locked:
-                        print(f"[RAR-BLOCK] {completed_user} is already locked in memory; blocking a stale thread.")
-                        return
-                    if pack_in_progress:
-                        print(f"[RAR-HOLD] {completed_user} waits in the queue while another packing run is in progress...")
-                        return
+                        pack_turned_away = f"[RAR-BLOCK] {completed_user} is already locked in memory; blocking a stale thread."
+                    elif pack_in_progress:
+                        pack_turned_away = f"[RAR-HOLD] {completed_user} waits in the queue while another packing run is in progress..."
+                    else:
+                        config.rar_inprogress = True
+                        if not hasattr(config, 'user_processing_lock'):
+                            config.user_processing_lock = set()
+                        config.user_processing_lock.add(completed_user.lower())
 
-                    config.rar_inprogress = True
-                    if not hasattr(config, 'user_processing_lock'):
-                        config.user_processing_lock = set()
-                    config.user_processing_lock.add(completed_user.lower())
+                if pack_turned_away:
+                    # A pack that takes no slot leaves the one just freed to the
+                    # nick that has waited longest (#1038): nothing else would
+                    # dispatch it, and a newcomer is kept out of it meanwhile.
+                    print(pack_turned_away)
+                    check_queue_and_send(irc_sock, "system_next_trigger_fallback")
+                    return
 
                 def inline_rar_packer(sock):
                     # This runs with config.rar_inprogress already True and the user held in
@@ -1773,6 +1780,10 @@ def check_queue_and_send(irc_sock, completed_user):
 
                 # At exactly the right level, so it wakes the function above immediately
                 threading.Thread(target=inline_rar_packer, args=(irc_sock,), daemon=True).start()
+                # Packing holds no slot, and a pack can take up to RAR_TIMEOUT: the
+                # slot just freed goes to the longest-waiting nick meanwhile (#1038).
+                # The packed archive is a plain row and waits its turn for a slot.
+                check_queue_and_send(irc_sock, "system_next_trigger_fallback")
                 return
 
              # Plain audio file (.mp3/.flac), not a RAR folder pack.
@@ -1831,8 +1842,10 @@ def check_queue_and_send(irc_sock, completed_user):
         else:
             # Not in any of our channels: freeze and start the countdown. The
             # policy lives in freeze_absent_user() so the global sweep below
-            # applies exactly the same one (#530).
+            # applies exactly the same one (#530). The slot this nick just
+            # freed goes on to the next waiting nick (#1038).
             freeze_absent_user(irc_sock, completed_user, target_chan)
+            check_queue_and_send(irc_sock, "system_next_trigger_fallback")
             return
 
     # =====================================================================
