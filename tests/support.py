@@ -72,6 +72,7 @@ RUNTIME_CONTAINERS = {
     "whois_status": dict,
     "failed_transfers": dict,
     "vip_queue": list,
+    "fetch_request_queue": list,
     "send_queue": dict,
     "user_processing_lock": set,
     "broadcast_search_results": list,

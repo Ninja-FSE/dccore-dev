@@ -50,9 +50,9 @@ class EveryOutboundLineGoesOutWhole(unittest.TestCase):
                          "send() returns how many bytes it took and the caller "
                          "discards it, so a full kernel buffer truncates the "
                          "line")
-        self.assertEqual(code.count("current_sock.sendall("), 2,
-                         "both the VIP lane and the standard lane must send "
-                         "the whole line")
+        self.assertEqual(code.count("current_sock.sendall("), 3,
+                         "the fetch lane, the VIP lane and the standard lane "
+                         "must each send the whole line")
 
     def test_it_encodes_the_way_the_other_writer_does(self):
         """A filename the socket cannot spell must cost a character, not raise

@@ -4108,6 +4108,7 @@ def irc_loop():
         # oserve.queue_message() never writes - adverts go to vip_queue -
         # so it cleared nothing (#630). queue_worker does the same on a
         # failed send; this is the same decision at the other exit.
+        del config.fetch_request_queue[:]
         stale_vip = len(getattr(config, 'vip_queue', ()) or ())
         if stale_vip:
             del config.vip_queue[:]
