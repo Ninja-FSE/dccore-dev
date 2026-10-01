@@ -43,6 +43,20 @@ had less than twice its size free - #964's re-ask loop in a narrower window. `_r
 being weighed as `exclude`, and `handle_incoming_offer()` passes it. Tests:
 `tests/test_an_offer_is_not_weighed_against_itself.py`.
 
+### 📦 A folder pack turned away while every slot was busy gets its turn (#1034)
+
+Found in the review of #1033. Only `check_queue_and_send()`'s specific-user path (section A) can start a folder pack,
+and every caller hands it the nick that just finished; the sweep (section B) skipped a pack head. So a `!rar` pack
+turned away at `[DCC-BLOCK]` was never tried again - it stayed queued until its owner's next transfer ended, which for
+a nick with only the pack is never. `redispatch_waiting_pack()` covered only `[RAR-HOLD]`. Now the sweep, reaching a
+pack head in wait order (#1032) with a slot free and no other pack being made, starts its owner's own dispatch after
+the lock and keeps a slot for it: a nick further on is promoted in the same pass only if a second slot is free, or
+with one slot the plain file would win the race every time. And section A's yield counts a pack that has
+waited longer, as it does a plain file, while packs can start - so a pack is no longer stuck behind a long plain
+queue. While another pack is being made nothing changes: the packer's release wakes it, and the sweep looks further.
+`test_a_folder_pack_waiting_does_not_hold_back_a_plain_file` asserted the old order and now covers the pack-being-made
+case. Tests: `tests/test_a_blocked_pack_is_woken.py`.
+
 ### 📦 A freed slot goes to the nick that has waited longest (#1032)
 
 The nick that had just finished was handed its own next file straight away, so a nick with a long queue took every slot
@@ -528,6 +542,7 @@ the bot for not answering PING. It shipped in v1.13.1.
 inside the one before it; order and case; a stranger's line never classified; and a bot we are waiting on still read
 and moved. Mutation-checked 5 ways (the regex back, no word start, order not kept, no cap, strangers classified),
 each failing a test. The existing reply and fetch-queue tests (35) pass unchanged.
+
 ### 🎯 A remembered lookup respects the pasted size (#962)
 
 Audit 2026-09-27 H1. The lookup memories from #886 were keyed on the name alone: `_lookup_hits[(list, name)]`, and
@@ -737,6 +752,7 @@ open with its tabs and badge counting held lists; and the IRC, summary and page 
 mutations each fail a test.
 The one that does not - removing the "never itself" filter from the candidates - is covered by the "old nick is not
 here" check right before it, which does fail its own mutation.
+
 ### 📚 The Stats page's Library counts every served list, not the primary alone (#952)
 
 `build_stats_payload()` read the Library block without saying which list: no name to
@@ -2312,6 +2328,7 @@ packer thread was released but never waited for, and its finally - `config.rar_i
 round now, the join asserts the thread finished, and `TheFixtureLeavesNoPackerBehind` runs one of the class's
 tests on its own and checks no thread of its own is left alive and `runtime.packer_thread` is None - which
 fails with the old order.
+
 ### 🔐 Every dashboard POST is checked against its own host (#672)
 
 Audit L8. `SameSite=Lax` and the JSON content-type were the dashboard's only CSRF defences, and seven mutating
@@ -3257,6 +3274,7 @@ refused searcher returns before the `try`, so its `finally` cannot release someb
 `handle_list_update_request()` checks and raises `search_inprogress` inside that same gate, and its `finally`
 clears it only when this request raised it (with PAUSE_ON_UPDATE off the flag belonged to a running search). The
 test forces the interleaving with a barrier inside the old window instead of betting on the scheduler.
+
 ### 🧪 The resume-reply test joins its helper before the next test
 
 `test_the_reply_carries_the_latest_position` (#725) failed with `2 != 1`
@@ -3294,6 +3312,7 @@ server dropped the bot. The claim (`user_processing_lock.add` and the `active_tr
 lock; the notice, the thread spawn and the save now run after it is released, the way section A's plain-file branch
 always has. A test drives all three paths and records whether the lock was held at the notice, the save and the
 thread start. The freeze sweep's `save_dcc_queue()` (once per expired timer) still runs under the lock.
+
 ### 🔒 A rehash no longer rewrites the live runtime containers with no lock held (#604)
 
 `commands.restore_preserved_runtime()` now skips a key whose preserved value *is* the live container (`value is
@@ -3308,6 +3327,7 @@ active" or "nobody banned"; and `clear()` under the IRC read thread's iteration 
 restored, so the `[REHASH RAM]` line is unchanged. The merge path is kept for a future key that is not
 runtime.py-bound; it is the only path that writes, and it still runs with no lock. Tests: instrumented dict and list
 containers must see zero writes when they are their own snapshot, and a fresh container must still be filled.
+
 ### 📍 The panel's Since box is the bot's start (#754)
 
 `runtime.feed_counts` counts FAIL and SEARCH in `announce.feed_event` (runtime, so a rehash does not reset it; counted
@@ -3333,6 +3353,7 @@ Settings page that will not exist. The shipped default is untouched. INSTALL.md 
 Tests: `tests/test_the_setup_page_starts_with_the_dashboard_ticked.py`.
 
 ### 📍 The panel's Since box is the bot's start (#754)
+
 ### 📍 Every command is in the @DCCore menu (#550)
 
 `menu @DCCore` now has submenus for every `/dccore` command and every console command that is worth a click. Prompts
@@ -5472,6 +5493,7 @@ between the gate and the work puts the flag back; leaving it raised would deny
 every future update for the life of the process.
 
 Five mutation-checked properties, no survivors.
+
 ### 🟢 Three documents that were wrong
 
 Found by the pre-publication audit sweep. Closes #448, #449 and #466.
@@ -6470,6 +6492,7 @@ the call names the function too - so the extract stopped before any of the
 conditions and three tests were asserting against prose. It splits on the call
 with its arguments now, and strips comments. That is the third time this
 session; the pattern is always the same, and always mine.
+
 ### 🟢 A thread that outlived its test wrote real state
 
 Preflight's state-write guard kept failing with
@@ -6911,6 +6934,7 @@ also pointed at an element id the page does not define, which
 
 Eleven mutants killed, including the two that matter most - the index rows
 left behind, and the extra markers left behind while the main list goes.
+
 ### 🟢 The one-listener test raced with itself
 
 `test_ten_concurrent_offers_open_one_listener` failed on **ubuntu/3.10 alone**
@@ -10028,6 +10052,7 @@ And the timeout mutation did not fail the suite, it HUNG it: Disabling the timeo
 it: from outside, "caught" and "never returns" look identical. The two wait
 tests now bound their own loop by counting sleeps, so a broken timeout fails
 them instead of stopping the run.
+
 ### 🔁 Changing the server or port now says a restart is needed (#302)
 
 > when a user changes ports or other core configurations that affect `irc.py`
@@ -11178,6 +11203,7 @@ removes it again - so two runs against one checkout fail each other with a
 `FileNotFoundError` naming a file neither of them ships, which reads as a real
 defect and is not one. A name that is gone by the time we open it cannot be a
 source file anyone ships, so the scan skips it.
+
 ### 🔍 What a multi-agent audit found in the same day's work
 
 Thirteen agents over the four unmerged branches, then a refutation pass over
@@ -11535,6 +11561,7 @@ batch in flight - this change's and the List Browser work's alike - was re-run
 with the caches cleared and `-B` before either was believed. The runners clear
 `__pycache__` and pass `-B` as a matter of course now, rather than relying on
 two same-length edits never landing in the same second.
+
 ### 📦 Bringing an OmenServe operator's history across (#69)
 
 The single biggest barrier to trying this bot is not features - it is
@@ -11638,6 +11665,7 @@ One of the four fixes was written twice. The first version guarded `inf` and
 NaN explicitly and then caught `OverflowError` underneath, and the mutation run
 showed the guard was dead: deleting it changed nothing, because the catch
 below already answered both. The catch stayed and the guard went.
+
 ### 📥 The list request answers AutoQ's own menu item
 
 Read out of `AutoQ.mrc`, the queue script these channels actually use. Its
@@ -11704,6 +11732,7 @@ DCCore lists every file type, a `.flac` or `.mkv` row silently vanishes for
 any user who has not added it. Nothing to fix here - the row is correct and
 the client discards it - but operators need to know, so INSTALL.md says which
 mIRC setting to change.
+
 ### 🔒 A timed ban on somebody who never came back stayed for ever
 
 The last of the audit's flood-tracking findings, and the one the roadmap has
@@ -11778,6 +11807,7 @@ Nothing bounded how many listeners could be OPEN at once. So a handful of passiv
 One listener at a time now, which is the same shape as the `_pending` rule one step further on - "at most one connected-but-unauthenticated session" - applied to the step before it. A refused offer costs the sender nothing but another CTCP once the current one resolves, and a real operator makes one at a time.
 
 The flag is cleared in `reset_state_for_tests()` alongside `_session` and `_pending`, because it is module state exactly like them: a test whose listener thread outlived it refused every passive offer in every test that ran afterwards, which is how the omission was found - the suite went from green to four failures that all passed in isolation.
+
 ### 🔄 A rebuild that failed partway published half of itself, and said it had not
 `generate_master_list()` published the master index, the album index and the download artifact as three independent `os.replace` calls, then wrote the two size side files and the base-name marker, then pruned. **No rollback anywhere.**
 
@@ -11805,6 +11835,7 @@ Handing `send_from_directory()` the *wrapped* directory does not fix it either, 
 **"Up" from a lowercase drive root left the machine root.** `browse_roots()` builds its entries from the uppercase letters A-Z and `os.path.abspath()` preserves whatever case the caller sent, so `c:\` missed the root list and the parent fell through to `ntpath.dirname("c:")` - which is `"c:"`, a *drive-relative* path meaning "the current directory on C:". Clicking Up from a lowercase drive root browsed the daemon's own working directory.
 
 **A dead "Get folder as .rar" button.** Rendered for every group of a foreign bot's list including the unnamed one, while `requestFolderRar()` drops the click on `if (!bot || !folder)` - so it was there, clickable, and did nothing at all: no request, no message.
+
 ### 🧮 Four ways a configuration change did not mean what it said
 All found by the full-program audit.
 
@@ -11845,6 +11876,7 @@ Matching the host and not the whole mask is the difference between working and a
 `|` is an ordinary IRC nick character - RFC 2812's specials are `[]\`_^{|}`, and `Bot|Away` is one of the commonest nick shapes on the network - and is illegal in a Windows path. So `os.makedirs()` on the extraction directory failed with `WinError 123` **after the zip had already come over DCC**. The transfer worked, the bytes were on disk, and the fetch failed at the last step, every time, for that bot. `*`, `"`, `<`, `>`, `?` and `:` do the same.
 
 A whitelist now, as the docstring always claimed. Legal nick specials that are also legal in a path (`[]{}^\`_-.`) are kept, so the directory is still recognisably that bot's.
+
 ### 📐 The master index has a grammar, and three things wrote into it without one
 All three found by the full-program audit.
 
@@ -11903,6 +11935,7 @@ Listings are capped at `FOLDER_BROWSE_MAX_ENTRIES` and **say they were capped**:
 A mutation found one weak test, again: dropping the `isdir()` check still fails, because `scandir()` raises and the handler catches it. What the check buys is the **message** - "not a folder on this machine" rather than "[WinError 267] The directory name is invalid", which is an OS string and localised into whatever language the machine runs in. The test pins the sentence now.
 
 **#164 is complete with this.** All five steps of its order of work have landed.
+
 ### 🚨 A served folder that is a drive root refused every file under it
 `dcc.is_safe_path()` and `library.is_inside()` both compared with `path.startswith(base + os.sep)` - and `os.path.realpath("D:\\")` is `"D:\\"`, which already ends in a separator. So that built `"D:\\\\"`, a doubled separator no real path can start with, and **every file on a drive served whole was refused**.
 
@@ -12148,6 +12181,7 @@ Found on a real install. A nickname longer than the server's `NICKLEN` is not re
 The shortened name goes into `NICKNAME` only - `ORIGINAL_NICK` keeps the configured value. That is what keeps the master list working: it is built by a subprocess importing fresh config, so its request lines carry the configured name, and `get_bot_aliases()` already answers to both because it was written for the same divergence after a `433`.
 
 13 tests, against real `001` lines from three networks. The negatives matter more than the positives and are mutation-verified: a forged `PRIVMSG` carrying `001` must not rename the bot (unanchored matching once read `!DCCore 001 - Enter Sandman.flac` as a numeric), the pre-registration `*` target is not a nick, `NICKLEN` in the trailing prose is not a limit, and `MAXNICKLEN=` is not `NICKLEN=`.
+
 ### 🧭 Turning the Console off no longer disables the whole dashboard
 Reported from a real install, running the shipped default. `WEBUI_CONSOLE_ENABLED` is off, so `/api/console/log` answers 404, so `disableConsoleUi()` ran - and it **removed** `#view-console` from the page.
 
@@ -12156,6 +12190,7 @@ Reported from a real install, running the shipped default. `WEBUI_CONSOLE_ENABLE
 The nav button is hidden now and the section stays in the DOM. `activateView()` also checks for null before dereferencing - one absent section must not take the router with it, whatever removes it next time.
 
 Two structural guards in `tests/test_web_assets.py`, both mutation-verified against the exact defect. Neither can prove the navigation works - nothing here executes JavaScript - but they refuse the move that broke it: deleting a section the router still looks up, and dereferencing that lookup without a check.
+
 ### 🪟 The Windows instructions name a command Windows has
 Reported from a real install: someone following the setup on Windows was told to run `python3 configure.py`. A python.org install gives you `py` and `python` and **not** `python3` - and Windows 10 and 11 ship an App Execution Alias for that exact name, so typing it opens the Microsoft Store or prints "Python was not found" on a machine where Python is installed and working perfectly. A confusing failure at the very first step, from a document written on Linux.
 
@@ -12346,7 +12381,9 @@ Issue #100 (an operator's own filing) proposes making identity-critical settings
 - **The AST tooling that reads `config.py` was blind to the annotated form (#101, #102):** three checks (the settings-sample generator, and two guards asserting nothing rebinds a runtime container or derives a setting above its override point) matched the older, unannotated assignment shape only. Two of the three would have failed *silently* - reporting a clean, guarded file while no longer checking anything - the moment `#108`'s annotations landed. All three now handle both forms, verified against synthetic sources so the check itself can't quietly stop matching again.
 
 ---
+
 ## 🟦 v1.10.0-RC3 (2026-08-28) - "The English & Reliability Release"
+
 ### 🌍 Full English translation
 Every module's comments and log strings are now English, closing the loop on a translation effort that started as an accent scan and finished as a permanent guard:
 - **Nine modules translated outright** (`stats_mgr.py`, `list.py`, `queue_mgr.py`, `security.py`, `db.py`, `config.py`, `oserve.py`, `announce.py`, `update_list.py`), followed by the three largest and busiest (`dcc.py`, `irc.py`, `commands.py`) - 273 lines of comments, docstrings and log text, none of it control flow, identifiers, or anything a test or the protocol actually parses.
@@ -12371,7 +12408,9 @@ Every module's comments and log strings are now English, closing the loop on a t
 - 528 tests total, all green on Linux and Windows CI.
 
 ---
+
 ## 🟦 v1.10.0-RC2 (2026-08-26) - "The Admin Console Release"
+
 ### 🚀 New features
 - **🔐 Authenticated admin console over DCC CHAT (`adminchat.py`):** Closes the "known open item" from v1.10.0-RC1 - `is_admin()`'s nick-based gate, which anyone could inherit by taking the admin nick while the real operator was offline. The console instead requires two independent factors: the operator's Undernet services login, proved by the `+x` host only the IRC server can issue, and a PBKDF2-SHA256-hashed password compared in constant time. An unrecognised host gets no reply at all - not even a banner - so a stranger learns nothing about whether their guess was close. Full setup guide in `docs/ADMIN-CONSOLE.md`.
 - **Connection fallback (`ADMIN_CHAT_MODE`):** The console normally dials the connecting client the way iroffer's non-passive DCC does, opening no new inbound port. When that dial can't succeed - a VPN exit address with nothing forwarded, a router that drops rather than rejects - it now falls back to listening on the bot's own DCC port range instead, the same range every DCC SEND already uses. `"auto"` (default) tries both; `"listen"` or `"connect"` pin one behaviour.
@@ -12389,7 +12428,9 @@ Every module's comments and log strings are now English, closing the loop on a t
 439 tests total, all green on both Linux and Windows. Coverage added this release: the admin console's entire authentication and transport path (real loopback-socket end-to-end tests, not mocks) and the master-list scanner (`generate_master_list()`), previously the last untested path in a module that deletes files.
 
 ---
+
 ## 🟦 v1.10.0-RC1 (2026-08-25) - "The Platform & Forgery-Hardening Release"
+
 ### 🚀 New features
 - **🪟 Windows support (`platform_compat.py`):** Isolated every genuine Linux/Windows difference into one new module - the DCC listener's socket option, the rar binary lookup, long-path handling, and TCP keepalive tuning. Every function is a no-op or identity on Linux, so production behaviour on Linux is unchanged; the daemon now also runs on Windows, verified by CI on both platforms.
 - **⚙️ Per-machine config overrides (`local_config.py`):** `config.py` now optionally imports a gitignored `local_config.py` so one machine can override paths, nickname, or channels without editing a tracked file or showing up as a deployment diff.
@@ -12413,7 +12454,9 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 `is_admin()` is still nick-based with no `ident@host` verification - an Undernet nick isn't owned without services auth, so anyone taking the admin nick while the real admin is offline gains every admin command, including `!clearqueue`. Closing this needs `irc.py`'s PRIVMSG regex to capture the hostmask (currently discarded) plus a config-format decision. Tracked as follow-up work, not fixed in this release.
 
 ---
+
 ## 🟦 v1.9.0-RC1 (2026-08-15) - "The Gold & Audio Handshake Release"
+
 ### 🚀 New features
 - **🛡️ Apostrophes survive packing (`Single Quote Filter`):** `inline_rar_packer` in `dcc.py` now derives the archive name with `os.path.basename`. A source folder containing an apostrophe (`'`) keeps it in the finished `.rar` name (e.g. `A_Winter's_Tale_(1995).rar`) instead of having it replaced by an underscore, so the packed file is named the same as the folder that was requested.
 - **💽 Multidisc sets are listed differently in each list (`update_list.py`):** The list generator now treats the two text lists differently. The plain list (`.txt`) shows full subfolders such as `\Digital Media 1\` and `\CD2\` to preserve the track structure, while the album list (`-RAR-.txt`) is stripped as it is written: multidisc suffixes are cut so a whole box set appears on a single line (e.g. `Mission Underground (2026)\`).
@@ -12429,7 +12472,9 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 - **📊 Calibrated channel advert:** The slots figure in `announce.py` now divides total throughput by the number of active downloads, giving a real per-slot average instead of the implausible speeds (tens of millions of MB/s) it used to advertise.
 
 ---
+
 ## 🟦 v1.5.0-BETA (2026-08-10) - "The RAM Dictionary Queue & Inline RAR Packer Update"
+
 ### 🚀 New features
 - **📦 In-memory dictionary queue (`dcc_queue.txt`):** The queue was rewritten from flat text strings to a structured JSON/dictionary form held in memory. Each entry now carries real metadata: nick, channel, absolute path, file type, and the `is_unpacked_rar_folder` and `is_temporary_zip` flags.
 - **⚡ Inline RAR packer (`inline_rar_packer`):** A thread-safe compression step in `dcc.py` built on `subprocess.run(["rar", "a", ...])`. The bot recognises a requested album folder, builds a temporary `.rar` archive in the local cache directory (`data/tmp_zips/`), and streams that.
@@ -12442,11 +12487,14 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 ---
 
 ## 🟦 v1.4.5-BETA (2026-07-31) - "The Multi-Character Regex Sanitizer Update"
+
 ### 🚀 New features
 - **🧹 Search terms are sanitised (`@find`):** `re.sub(r'[-*_.]', ' ', search_term)` in `list.py`'s search function. Asterisks (`*`), underscores (`_`), dots (`.`) and hyphens (`-`) become spaces before the search terms are split, so a query typed with separators (e.g. `metallica*red*alert`) still matches.
 
 ---
+
 ## 🟦 v1.4.4-BETA (2026-07-30) - "The External Indexer & Micro-Read Update"
+
 ### 🚀 New features
 - **🎛️ List rebuild from IRC (`!update`):** An admin command in `commands.py` that runs the external `update_list.py` script in a background thread via `subprocess.run`, so the library can be re-indexed without shell access to the host.
 - **⚡ Micro-read optimisation:** `get_count_from_list` reads only the first line of the master list (`f.readline()`) and matches it against the pattern `List of X Files` to recover the file count, without reading or walking the rest of the file.
@@ -12459,6 +12507,7 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 ---
 
 ## 🟦 v1.4.3-BETA (2026-07-30) - "The Clean Config & Security Sync Update"
+
 ### 🚀 New features
 - **🧼 Import-free `config.py`:** The central configuration file was cleared of functional code - hidden `import os` statements and dynamic `BASE_DIR` computation. The paths to `stats.txt`, `bans.txt` and `hard_bans.txt` are now plain, normalised strings.
 - **🛡️ Live anti-flood and mute tracking:** `announce.send_debug` is now called from `is_flooding` in `security.py`. A colour-coded purple **`[TEMPBAN]`** notice goes out as soon as a user exceeds the rate limit; their queue is cleared, and an escalation to a day-long ban until midnight is logged.
@@ -12470,6 +12519,7 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 ---
 
 ## 🟦 v1.4.2-BETA (2026-07-30) - "The Hard Ban & Admin Category Update"
+
 ### 🚀 New features
 - **🛡️ Permanent wildcard blocks (`hard_bans.txt`):** A separate file under `data/` for fixed spambot patterns (e.g. `spammer_*`). It is exempt from the automatic midnight clearing that applies to ordinary flood bans.
 - **🛠️ Admin commands (`!ban` / `!unban`):** Two commands in `commands.py` that write to and clean up the permanent ban file from IRC, with no shell access and no manual `!rehash` needed.
@@ -12479,6 +12529,7 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 ---
 
 ## 🟦 v1.4.1-BETA (2026-07-30) - "The Intelligent Wildcard Search Update"
+
 ### 🚀 New features
 - **🔍 Word-by-word wildcard search (`@find`):** `execute_search` in `list.py` was rewritten as a word-by-word scan. The search string is split into individual words with loose hyphens removed, and matching is order-independent: every word has to appear on the line, in any order (so `metallica red alert` and `red alert metallica` both match).
 
@@ -12488,6 +12539,7 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 ---
 
 ## 🟦 v1.4.0-BETA (2026-07-30) - "The Live Rehash & Channel Sync Update"
+
 ### 🚀 New features
 - **🔄 Live module rehash (`!rehash`):** `importlib.reload()` in `commands.py` reloads every core module in place, with no need to stop or kill the process.
 - **🌐 Automatic channel sync:** A rehash compares the configured channel list against the joined one, sending `JOIN` for channels added to `config.py` and `PART` for channels removed from it.
@@ -12501,6 +12553,7 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 ---
 
 ## 🟥 v1.3.0-BETA (2026-07-28) - "The Debug & Theme Sync Update"
+
 ### 🚀 New features
 - **🛠️ Debug channel:** An automatic gateway that sends timestamped, colour-coded CLI logs live to a dedicated debug channel on IRC.
 - **🏎️ Express logging:** `send_debug` was switched to `is_vip=True` so system logs go out immediately, without waiting behind the normal queue.
@@ -12514,6 +12567,7 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 ---
 
 ## 🟨 v1.2.0-BETA (2026-07-27) - "The Database & Index Sync"
+
 ### 🚀 New features
 - **📉 Seven-column live statistics:** Total files sent, total bytes sent, and today's and yesterday's counters are all incremented on every completed transfer.
 - **💾 Forced disk flush (`fsync`):** `db.save_advanced_stats` calls `f.flush()` and `os.fsync()` so the change reaches the disk rather than sitting in the operating system's write buffer.
@@ -12525,6 +12579,7 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 ---
 
 ## 🟩 v1.1.0-BETA (2026-07-26) - "The VIP Express & Architecture Update"
+
 ### 🚀 New features
 - **🚅 Isolated VIP send path:** A new `is_vip=False` flag in `oserve.queue_message`. Commands passing `is_vip=True` go straight past the normal flood-protection queue.
 - **⛓️ Chained command parser:** The command parser in `irc.py` was rebuilt as a closed `if / elif` chain, and `continue` was changed to `return` in the CTCP filter, which removed the duplicated replies appearing in channels.
