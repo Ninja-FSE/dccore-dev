@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Clear failed lets the other bot go of a request it may still hold (#1047)
+
+Audit 2026-10-01 L6. A file given up on for silence ("no response") may still sit in a busy DCCore peer's queue, and
+its own Delete sends that peer `@<bot>-remove <file>`. `build_fetch_clear_result()` - the Downloads page's "Clear
+failed", and the mIRC window's clear - forgot such rows here only, so the peer sent the file when its turn came and it
+was refused as unsolicited, its send slot wasted. It now calls `drop_our_request_at()` for those rows after the lock,
+as Delete does: only a failed "no response" file row, only one whose request left (not taken back from the lane), and
+only ever to a DCCore peer. Tests: `tests/test_clear_failed_tells_the_other_bot.py`.
+
 ### 📦 A fetch request that has not gone out survives a lost connection (#1044)
 
 Audit 2026-10-01 L3. #1028 gave fetch requests a lane of their own, and the row that owns one counts it as sent once
