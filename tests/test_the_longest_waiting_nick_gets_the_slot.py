@@ -141,7 +141,11 @@ class TheSweepKeepsTheSameOrder(Case):
         self.pick_up("system_next_trigger_fallback")
         self.assertEqual(self.running(), ["erin"])
 
-    def test_a_folder_pack_waiting_does_not_hold_back_a_plain_file(self):
+    def test_a_folder_pack_being_made_elsewhere_does_not_hold_back_a_plain_file(self):
+        """While another pack is being made erin's could not start; the packer's
+        release wakes it, so dave is not held back for it. (A pack that CAN start
+        takes its turn: test_a_blocked_pack_is_woken.)"""
+        self.set_config(rar_inprogress=True)
         config.dcc_queue["erin"] = [queue_row(user="erin", filename="Album.rar", is_unpacked_rar_folder=True,
                                               is_temporary_zip=True)]
         config.dcc_queue["dave"] = [queue_row(user="dave", filename="A.flac")]
