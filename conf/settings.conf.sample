@@ -582,10 +582,10 @@
 #DOWNLOAD_COUNTS_FILE = ./data/download_counts.json
 
 # Where a record of every finished transfer is kept: what it was, its size,
-# its speed and how long it waited in the queue, and nothing about who asked.
-# Empty turns it off.
+# its speed, how long it waited in the queue, and the nick it went to or came
+# from (no host, no channel). Empty turns it off.
 #
-# A row is about 100 bytes, so it is never rotated or trimmed.
+# A row is about 120 bytes, so it is never rotated or trimmed.
 #TRANSFER_LOG_FILE = ./data/transfers.db
 
 # Where the bot remembers which other bots' lists it holds.

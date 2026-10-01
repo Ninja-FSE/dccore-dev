@@ -3934,8 +3934,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # downloads.
             db.record_download(*download_count_identity(file_path, file_name))
 
-            # The same send, for the record that keeps what and how fast but
-            # not who (#1068). transfer_log catches its own write errors.
+            # The same send, for the record of what went to whom and how
+            # fast (#1068). transfer_log catches its own write errors.
             import stats_mgr
             _queued_at = next_file.get("queued_at") if isinstance(next_file, dict) else None
             _key, _shown, _kind = download_count_identity(file_path, file_name)
@@ -3946,7 +3946,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             transfer_log.record_sent(
                 _kind, _key, _shown, file_size, _wire_bytes, _seconds,
                 _wire_bytes / _seconds if stats_mgr.speed_is_measurable(_seconds, file_size) else None,
-                (offered_at - _queued_at) if isinstance(_queued_at, (int, float)) else None)
+                (offered_at - _queued_at) if isinstance(_queued_at, (int, float)) else None,
+                nick=user)
         except _ShortSend:
             print(f"[DB COUNTER] Not counted: {file_name} for {user} ended "
                   f"short at {bytes_sent} of {file_size} bytes. A partial send "

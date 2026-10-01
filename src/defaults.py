@@ -392,7 +392,7 @@ LIST_AUDIO_INFO_MINUTES: int = 5  # Minutes one rebuild may spend reading new au
 # capped by the library itself.
 DOWNLOAD_COUNTS_FILE: str = "./data/download_counts.json"
 
-# A row is about 100 bytes, so it is never rotated or trimmed.
+# A row is about 120 bytes, so it is never rotated or trimmed.
 TRANSFER_LOG_FILE: str = "./data/transfers.db"
 
 # Which bots we hold a fetched list for, and where it lives on disk - one

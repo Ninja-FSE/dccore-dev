@@ -1,10 +1,13 @@
-"""A record of finished transfers, with nothing in it that points at a person (#1068).
+"""A record of finished transfers (#1068).
 
 One row is written when a transfer ends, so a figure nobody thought of yet can
-still be worked out later. A row says WHAT moved, how big it was, how fast, and
-how long it waited in the queue. It does not say who asked: no nick, no
-user@host, no channel and no other bot's name are ever stored, so the file
-cannot answer "who downloaded what", and that is the point.
+still be worked out later. A row says WHAT moved, how big it was, how fast, how
+long it waited in the queue, and the nick it went to or came from, as KeepTrack
+does, so the file can answer "who got what" and rank the nicks.
+
+The nick is kept in lower case as the IRC server showed it. It is not followed
+across a nick change, and no user@host and no channel is stored. forget_nick()
+and forget_all() remove it again.
 
 Only completed transfers are written, as with stats.txt. A write that fails is
 printed and dropped, and never reaches the transfer that called it.
@@ -28,6 +31,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS transfers (
     id         INTEGER PRIMARY KEY,
     direction  TEXT    NOT NULL,
+    nick       TEXT,
     kind       TEXT    NOT NULL,
     ended_at   INTEGER NOT NULL,
     item_key   TEXT,
@@ -40,6 +44,7 @@ CREATE TABLE IF NOT EXISTS transfers (
 );
 CREATE INDEX IF NOT EXISTS transfers_by_direction_and_time ON transfers (direction, ended_at);
 CREATE INDEX IF NOT EXISTS transfers_by_item ON transfers (direction, kind, item_key);
+CREATE INDEX IF NOT EXISTS transfers_by_nick ON transfers (nick, direction);
 """
 
 
@@ -63,8 +68,8 @@ def _record(row):
             try:
                 with conn:
                     conn.execute(
-                        "INSERT INTO transfers (direction, kind, ended_at, item_key, name,"
-                        " size, bytes, seconds, speed, waited) VALUES (?,?,?,?,?,?,?,?,?,?)", row)
+                        "INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name,"
+                        " size, bytes, seconds, speed, waited) VALUES (?,?,?,?,?,?,?,?,?,?,?)", row)
             finally:
                 conn.close()
         return True
@@ -88,8 +93,13 @@ def _positive(value):
     return number if number > 0 else None
 
 
-def record_sent(kind, item_key, name, size, wire_bytes, seconds, speed, waited):
-    """One completed send.
+def _nick(value):
+    value = str(value or "").strip().lower()
+    return value or None
+
+
+def record_sent(kind, item_key, name, size, wire_bytes, seconds, speed, waited, nick=None):
+    """One completed send to `nick`.
 
     `speed` is None when the transfer was too small to measure (see
     stats_mgr.speed_is_measurable), `waited` None when the queue row carried no
@@ -98,18 +108,18 @@ def record_sent(kind, item_key, name, size, wire_bytes, seconds, speed, waited):
     """
     if kind == KIND_LIST:
         item_key = name = None
-    return _record((SENT, kind, int(time.time()), item_key, name, _whole(size),
+    return _record((SENT, _nick(nick), kind, int(time.time()), item_key, name, _whole(size),
                     _whole(wire_bytes), _positive(seconds),
                     None if speed is None else _whole(speed),
                     None if waited is None else max(0.0, float(waited))))
 
 
-def record_received(kind, size):
-    """One completed download from another bot: how big, and nothing else.
+def record_received(kind, size, nick=None):
+    """One completed download from the bot `nick`: how big, and not what it was called.
 
-    No name, so nothing about what another bot shares is kept either.
+    No file name, so nothing about what another bot shares is kept.
     """
-    return _record((RECEIVED, kind, int(time.time()), None, None, _whole(size),
+    return _record((RECEIVED, _nick(nick), kind, int(time.time()), None, None, _whole(size),
                     _whole(size), None, None, None))
 
 
@@ -180,3 +190,61 @@ def summary(since=None):
         "files_received": int(received[0] or 0),
         "bytes_received": int(received[1] or 0),
     }
+
+
+def top_nicks(direction=SENT, limit=10, since=None):
+    """The nicks with the most files, as [(nick, files, bytes)], most files first.
+
+    Ties go to the larger total and then to the nick. A list is not a file, so
+    it counts for neither figure, and a row without a nick is not ranked.
+    """
+    rows = _query(
+        "SELECT nick, SUM(kind != ?), SUM(CASE WHEN kind != ? THEN bytes ELSE 0 END) FROM transfers"
+        " WHERE direction = ? AND nick IS NOT NULL AND ended_at >= ?"
+        " GROUP BY nick HAVING SUM(kind != ?) > 0 ORDER BY 2 DESC, 3 DESC, nick LIMIT ?",
+        (KIND_LIST, KIND_LIST, direction, since or 0, KIND_LIST, max(0, int(limit))))
+    return [(nick, int(files), int(size)) for nick, files, size in rows]
+
+
+def nick_summary(nick, since=None):
+    """What one nick has had from this bot and what this bot has had from it."""
+    nick = _nick(nick)
+    since = since or 0
+    figures = {"files_sent": 0, "lists_sent": 0, "bytes_sent": 0, "files_received": 0, "bytes_received": 0}
+    if nick is None:
+        return figures
+    sent = _one(3,
+        "SELECT SUM(kind != ?), SUM(kind = ?), SUM(CASE WHEN kind != ? THEN bytes ELSE 0 END)"
+        " FROM transfers WHERE direction = ? AND nick = ? AND ended_at >= ?",
+        (KIND_LIST, KIND_LIST, KIND_LIST, SENT, nick, since))
+    received = _one(2,
+        "SELECT SUM(kind != ?), SUM(CASE WHEN kind != ? THEN size ELSE 0 END)"
+        " FROM transfers WHERE direction = ? AND nick = ? AND ended_at >= ?",
+        (KIND_LIST, KIND_LIST, RECEIVED, nick, since))
+    figures.update(files_sent=int(sent[0] or 0), lists_sent=int(sent[1] or 0), bytes_sent=int(sent[2] or 0),
+                   files_received=int(received[0] or 0), bytes_received=int(received[1] or 0))
+    return figures
+
+
+def _delete(sql, args=()):
+    path = _path()
+    if not path or not os.path.exists(path):
+        return 0
+    with runtime.transfer_log_lock:
+        conn = _connect(path)
+        try:
+            with conn:
+                return conn.execute(sql, args).rowcount
+        finally:
+            conn.close()
+
+
+def forget_nick(nick):
+    """Take one nick out of the record. The rows go; the figures that do not name a nick go with them."""
+    nick = _nick(nick)
+    return 0 if nick is None else _delete("DELETE FROM transfers WHERE nick = ?", (nick,))
+
+
+def forget_all():
+    """Empty the record. Returns how many rows were removed."""
+    return _delete("DELETE FROM transfers")

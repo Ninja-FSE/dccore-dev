@@ -4,19 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
-### 📦 A record of every finished transfer, with nothing in it that points at a person (#1068)
+### 📦 A record of every finished transfer, with the nick it went to or came from (#1068)
 
 The bot kept only totals, so a question about last month - which files went most, how long people waited, how fast the
-sends were - could not be answered once the day had passed. One row is now written to `data/transfers.db` (SQLite,
-`transfer_log.py`) when a transfer ends. It holds what moved (a file, a packed folder or a list), its size, how many
-bytes went out, how long that took, the speed, and how long the request waited in the queue. It holds no nick, no
-user@host, no channel and no other bot's name, so it cannot say who asked for anything. A received file is a row with
-its size and nothing else. Only completed transfers are written, and a write that fails is printed and dropped, so it
-cannot reach the transfer. `TRANSFER_LOG_FILE` sets the path; empty turns the record off.
+sends were, who took the most - could not be answered once the day had passed. One row is now written to
+`data/transfers.db` (SQLite, `src/transfer_log.py`) when a transfer ends. It holds what moved (a file, a packed folder
+or a list), its size, how many bytes went out, how long that took, the speed, how long the request waited in the queue,
+and the nick: the one a send went to, or the bot a download came from. The nick is stored in lower case and is not
+followed across a nick change, as a different nick is a different key. No user@host and no channel is stored. A received
+file is a row with its size and its sender and no file name. Only completed transfers are written, and a write that
+fails is printed and dropped, so it cannot reach the transfer. `TRANSFER_LOG_FILE` sets the path; empty turns the record
+off.
 
 `transfer_log.summary()` gives files sent (lists left out), lists sent, top and average speed (bytes over seconds, the
 sends too small to time left out), files received with their size and the average wait in the queue; `top_files()`
-gives the ten most-sent files. Both take a start time. Nothing shows them on the dashboard yet.
+gives the ten most-sent files; `top_nicks()` ranks the nicks by files and bytes, sent or received; `nick_summary()` gives
+the figures of one nick. All take a start time. `forget_nick()` removes one nick from the record and `forget_all()`
+empties it. Nothing shows any of it on the dashboard yet, and nothing is said to the nick in IRC.
 
 The queue rows now carry the time they were asked for (`queued_at`), which is where the wait comes from; a row saved
 before this has none and is left out of the average. `stats.txt` and `download_counts.json` are unchanged.

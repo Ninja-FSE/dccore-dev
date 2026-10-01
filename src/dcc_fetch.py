@@ -2634,7 +2634,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
         transfer_log.record_received(
             {"list": transfer_log.KIND_LIST, "folder": transfer_log.KIND_ALBUM}.get(
                 row.get("request_type"), transfer_log.KIND_FILE),
-            bytes_received)
+            bytes_received, nick=row.get("bot"))
         if row.get("request_type") == "list":
             # The DCC transfer itself succeeded (declared size matched what
             # arrived) - that is what "complete" above means, and is left
