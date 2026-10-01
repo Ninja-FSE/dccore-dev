@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 An offer is not weighed against its own request's old size (#1039)
+
+Audit 2026-10-01 M2. A file row asked for again after a restart or a disk-full hold keeps the `total_size` of its last
+offer (`_as_asked()` clears it for folder and list rows only). When the new offer arrives,
+`_claim_matching_offer_locked()` has already moved the row to "receiving", so `_room_left_locked()` counted that old
+size as a transfer under way: the offer was weighed against itself, held, asked again and held again, while the disk
+had less than twice its size free - #964's re-ask loop in a narrower window. `_room_left_locked()` takes the request
+being weighed as `exclude`, and `handle_incoming_offer()` passes it. Tests:
+`tests/test_an_offer_is_not_weighed_against_itself.py`.
+
 ### 📦 A freed slot goes to the nick that has waited longest (#1032)
 
 The nick that had just finished was handed its own next file straight away, so a nick with a long queue took every slot
