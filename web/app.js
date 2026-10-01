@@ -839,6 +839,13 @@
     var again;
     if (row.request_type === "list") {
       again = postJson("/api/filelists/fetch", { bot: row.bot });
+    } else if (row.request_type === "folder") {
+      // By the folder route (#1040): posted as a file, "!rar <folder>" became a
+      // file row matched by name, and the pack the other bot sent back was
+      // refused as unsolicited.
+      var folder = String(row.requested_filename || "").replace(/^!rar\s+/i, "");
+      if (!folder) { button.disabled = false; return; }
+      again = postJson("/api/filelists/fetch-folder-rar", { bot: row.bot, folder: folder });
     } else {
       // requested_filename, not filename: for a folder row the second is the
       // name the OTHER bot eventually advertised, and for a failed one it may
@@ -889,10 +896,15 @@
       : t("download.confirmDeleteFile");
     if (!window.confirm(prompt)) { return; }
     btn.disabled = true;
-    postJson("/api/fetch/" + encodeURIComponent(requestId) + "/delete", {}).then(function (res) {
+    // Cancel asks for a request that has not started and nothing else
+    // (#1046): one that finished while this dialog was open is refused with a
+    // 409, and its file stays.
+    var body = btn.dataset.pending ? { only_waiting: true } : {};
+    postJson("/api/fetch/" + encodeURIComponent(requestId) + "/delete", body).then(function (res) {
       if (!res.ok) {
         window.alert(t("download.couldNotDelete").replace("{error}", (res.data && res.data.error) || ("HTTP " + res.status)));
         btn.disabled = false;
+        if (res.status === 409) { loadDownloads(); }
         return;
       }
       loadDownloads();
@@ -4378,6 +4390,7 @@
     CUSTOM_THEME_ACCENT: "settings.field.CUSTOM_THEME_ACCENT",
     ANNOUNCE_TRANSFERS: "settings.field.ANNOUNCE_TRANSFERS",
     REJOIN_ATTEMPTS: "settings.field.REJOIN_ATTEMPTS",
+    ON_CONNECT_CHECK_MINUTES: "settings.field.ON_CONNECT_CHECK_MINUTES",
     ANNOUNCE_INTERVAL: "settings.field.ANNOUNCE_INTERVAL",
     BROADCAST_SEARCH_CHANNEL: "settings.field.BROADCAST_SEARCH_CHANNEL",
     BROADCAST_SEARCH_COOLDOWN: "settings.field.BROADCAST_SEARCH_COOLDOWN",
@@ -4707,6 +4720,10 @@
       '<div class="served-folder-actions">' +
         '<button type="button" class="btn btn-accent on-connect-save">' +
         t("settings.saveOnConnectCommands") + "</button>" +
+        // Beside Save (#1066): the saved commands, sent to the server now.
+        '<button type="button" class="btn on-connect-resend" title="' +
+        escapeHtml(t("settings.resendOnConnectTitle")) + '">' +
+        t("settings.resendOnConnectCommands") + "</button>" +
       "</div>" + note + "</div>";
   }
 
@@ -4759,6 +4776,25 @@
           problems: parts.length > 1 ? parts : []
         };
       }
+      renderSettingsCategory();
+    });
+  }
+
+  // Sends what is SAVED (#1066). A box that differs from it is said rather
+  // than sent: the operator would think the edited lines went out.
+  function resendOnConnect() {
+    var box = el.settingsFields.querySelector(".on-connect-commands");
+    var saved = ((state.onConnect || {}).commands || []).join("\n");
+    if (box && box.value.split("\n").map(function (line) { return line.trim(); })
+          .filter(Boolean).join("\n") !== saved) {
+      state.onConnectNote = { ok: false, text: t("settings.resendSaveFirst") };
+      renderSettingsCategory();
+      return;
+    }
+    return postJson("/api/on-connect/resend", {}).then(function (res) {
+      state.onConnectNote = res.ok
+        ? { ok: true, text: res.data.message }
+        : { ok: false, text: (res.data && res.data.error) || ("HTTP " + res.status) };
       renderSettingsCategory();
     });
   }
@@ -5565,6 +5601,10 @@
     // ones and a shared handler would have to tell them apart anyway.
     if (evt.target.closest(".on-connect-save")) {
       saveOnConnect();
+      return;
+    }
+    if (evt.target.closest(".on-connect-resend")) {
+      resendOnConnect();
       return;
     }
 

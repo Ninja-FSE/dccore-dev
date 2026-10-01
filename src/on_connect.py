@@ -286,3 +286,233 @@ def redacted(commands):
         first = str(command).strip().split(" ", 1)[0]
         shown.append(f"{first} ..." if first else "...")
     return shown
+
+
+# ---------------------------------------------------------------------------
+# DID THEY WORK? (#1066)
+#
+# The commands go out once, before the JOIN. When the network is split, the
+# X login among them can go nowhere - X is on the other side - and the bot
+# then sits in its channels with its real host for the rest of the session,
+# with nothing noticing and nothing trying again until the next reconnect.
+#
+# So the bot looks: a while after the JOIN and then every
+# ON_CONNECT_CHECK_MINUTES, it asks the server for its own user modes, and
+# sends every command again if one they set is missing.
+#
+# +x IS NOT A HIDDEN HOST. On Undernet's ircd (ircu 2.10.12) the +x flag is
+# taken whenever it is asked for, but the host is only hidden once the user
+# is also logged in to an account - and only then does the server send 396,
+# "is now your hidden host". A bot whose login failed in a split shows +x
+# with its real host in plain view, so +x counts as done only once a 396 has
+# arrived on this connection. ircu, UnrealIRCd, InspIRCd and Solanum all send
+# 396 when they hide or cloak a host.
+#
+# A network that takes +x and never sends 396 would have the login sent for
+# ever, so the resends are capped per connection, and the log says so once.
+# ---------------------------------------------------------------------------
+
+CHECK_FIRST_DELAY = 60      # seconds after the JOIN before the first look
+REPLY_WAIT = 30             # seconds a `MODE <nick>` query gets for its 221
+RESEND_MOST = 6             # resends per connection before the bot stops trying
+
+# `MODE <target> <modes>` - the target is %nick% or the nick itself.
+_MODE_COMMAND_RE = re.compile(r"^\s*MODE\s+(\S+)\s+([+-]\S*)", re.IGNORECASE)
+
+
+def _apply_modes(current, change):
+    """`current` with a mode string like "+ix-w" applied to it."""
+    modes = set(current or ())
+    sign = "+"
+    for letter in change:
+        if letter in "+-":
+            sign = letter
+        elif sign == "+":
+            modes.add(letter)
+        else:
+            modes.discard(letter)
+    return modes
+
+
+def wanted_modes(commands, nickname):
+    """The user modes the commands set on us: what a `MODE %nick% +x` line
+    (or one naming our nick) adds. A letter a later line takes away again is
+    not wanted. Channel modes and other people's modes are not ours."""
+    wanted = set()
+    nick = str(nickname or "").lower()
+    for command in commands or []:
+        match = _MODE_COMMAND_RE.match(normalize(command))
+        if match and match.group(1).lower() in ("%nick%", nick):
+            wanted = _apply_modes(wanted, match.group(2))
+    return wanted
+
+
+def missing_modes(wanted, modes, hidden):
+    """What the server has not given us of `wanted`. +x also needs the hidden
+    host itself (see above)."""
+    missing = set(wanted) - set(modes or ())
+    if "x" in wanted and not hidden:
+        missing.add("x")
+    return missing
+
+
+_FRESH = {"modes": None, "listings": 0, "hidden": False, "resends": 0,
+          "gave_up": False}
+
+
+def _state():
+    """runtime.on_connect_state with every key present. The caller holds
+    runtime.on_connect_lock. Filled rather than assumed: the test harness
+    empties runtime's containers between tests, as it does every other."""
+    import runtime
+    state = runtime.on_connect_state
+    for key, value in _FRESH.items():
+        state.setdefault(key, value)
+    return state
+
+
+def reset_state():
+    """A new connection: nothing is known about it yet."""
+    import runtime
+    with runtime.on_connect_lock:
+        runtime.on_connect_state.update(_FRESH)
+        runtime.on_connect_lock.notify_all()
+
+
+def note_server_line(line, nickname):
+    """Called for every line the server sends. Keeps what the check needs:
+    the 221 that lists our modes, a 396 that says our host is hidden, and a
+    MODE change on ourselves. Anything else returns at once.
+
+    Read from the line's own fields, never a substring: a channel message is a
+    line too, and a "221" or "396" someone types must not count."""
+    parts = str(line).split()
+    if len(parts) < 3 or not parts[0].startswith(":"):
+        return
+    if parts[2].lower() != str(nickname or "").lower():
+        return
+    import runtime
+    kind = parts[1].upper()
+    if kind == "221":
+        modes = _apply_modes((), parts[3].lstrip(":") if len(parts) > 3 else "")
+        with runtime.on_connect_lock:
+            state = _state()
+            state["modes"] = modes
+            state["listings"] += 1
+            runtime.on_connect_lock.notify_all()
+    elif kind == "396":
+        with runtime.on_connect_lock:
+            _state()["hidden"] = True
+            runtime.on_connect_lock.notify_all()
+    elif kind == "MODE" and len(parts) > 3:
+        # From the server, or from ourselves (`:nick!user@host MODE nick :+x`).
+        # Nobody else can change our user modes, so anything else is not one.
+        source = parts[0][1:]
+        if "!" in source and source.split("!", 1)[0].lower() != str(nickname).lower():
+            return
+        with runtime.on_connect_lock:
+            state = _state()
+            state["modes"] = _apply_modes(state["modes"], parts[3].lstrip(":"))
+
+
+def send_commands(sock, commands, gap, nickname, sleep=None):
+    """Send the commands the way delayed_join() does at connect: normalised,
+    %nick% expanded, `gap` seconds apart. Never logs their text - an X login
+    holds a password."""
+    import time
+    sleep = sleep or time.sleep
+    for index, command in enumerate(commands):
+        if index:
+            sleep(gap)
+        line = expand(normalize(command), nickname)
+        sock.sendall((line + "\r\n").encode("utf-8", errors="ignore"))
+
+
+def check_once(sock, nickname, commands, gap, wait=REPLY_WAIT, sleep=None):
+    """One look: ask for our modes, wait for the answer, and send every
+    command again if something they set is missing. Returns what it found:
+    "nothing" (no user mode to check), "no-answer", "ok", "resent" or
+    "gave-up"."""
+    import runtime
+    wanted = wanted_modes(commands, nickname)
+    if not wanted:
+        return "nothing"
+    with runtime.on_connect_lock:
+        before = _state()["listings"]
+    sock.sendall(f"MODE {nickname}\r\n".encode("utf-8", errors="ignore"))
+    with runtime.on_connect_lock:
+        runtime.on_connect_lock.wait_for(
+            lambda: _state()["listings"] > before, timeout=wait)
+        state = _state()
+        if state["listings"] <= before:
+            return "no-answer"
+        missing = missing_modes(wanted, state["modes"], state["hidden"])
+        if not missing:
+            return "ok"
+        letters = "".join(sorted(missing))
+        if state["resends"] >= RESEND_MOST:
+            if not state["gave_up"]:
+                state["gave_up"] = True
+                print(f"[CONNECT] Still missing +{letters} after {RESEND_MOST} "
+                      f"resends of the on-connect commands; not sending them "
+                      f"again on this connection. The dashboard's Resend "
+                      f"commands button tries once more.")
+            return "gave-up"
+        state["resends"] += 1
+        attempt = state["resends"]
+    host_note = " (the host is not hidden yet)" if "x" in missing else ""
+    print(f"[CONNECT] The server has not given us +{letters}{host_note}; sending "
+          f"the {len(commands)} on-connect command(s) again ({attempt} of "
+          f"{RESEND_MOST}): {', '.join(redacted(commands))}")
+    send_commands(sock, commands, gap, nickname, sleep=sleep)
+    return "resent"
+
+
+def check_minutes():
+    """ON_CONNECT_CHECK_MINUTES as a whole number; 0 turns the check off."""
+    try:
+        return max(0, int(getattr(config, "ON_CONNECT_CHECK_MINUTES", 5)))
+    except (TypeError, ValueError):
+        return 5
+
+
+def watch(sock, epoch, sleep=None):
+    """The check's own thread, one per connection: started once the JOIN has
+    gone out, and gone as soon as a newer connection claims the epoch."""
+    import time
+    sleep = sleep or time.sleep
+    first = True
+    while getattr(config, "connection_epoch", None) == epoch:
+        minutes = check_minutes()
+        if minutes <= 0:
+            sleep(60)   # off: look again in a minute, in case it is turned on
+            continue
+        sleep(CHECK_FIRST_DELAY if first else minutes * 60)
+        first = False
+        if getattr(config, "connection_epoch", None) != epoch:
+            return
+        try:
+            commands, gap = load()
+            check_once(sock, getattr(config, "NICKNAME", ""), commands, gap, sleep=sleep)
+        except Exception as err:
+            print(f"[CONNECT] Could not check the on-connect commands: {err}")
+
+
+def resend_now(sock, nickname):
+    """The dashboard's Resend commands: the saved commands, sent now on their
+    own thread. Also lets the automatic check try again after it gave up.
+    Returns how many commands are being sent."""
+    import runtime
+    import threading
+    commands, gap = load()
+    if not commands:
+        return 0
+    with runtime.on_connect_lock:
+        state = _state()
+        state["resends"] = 0
+        state["gave_up"] = False
+    print(f"[CONNECT] Sending the {len(commands)} on-connect command(s) again, "
+          f"asked from the dashboard: {', '.join(redacted(commands))}")
+    threading.Thread(target=send_commands, args=(sock, commands, gap, nickname),
+                     daemon=True).start()
+    return len(commands)

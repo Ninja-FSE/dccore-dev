@@ -2415,11 +2415,23 @@ def build_fetch_clear_result(payload):
     states = FETCH_CLEAR_STATES.get(which)
     if states is None:
         return 400, {"error": "Clear which rows? Use finished, complete or failed."}
+    # A failed row the other bot may still hold - one given up on for silence
+    # (#1047) - is let go there too, as its own Delete does: forgotten here
+    # only, the other bot sent the file when its turn came and it was refused
+    # as unsolicited, its send slot wasted. drop_our_request_at() only ever
+    # tells a DCCore peer; a request that never left is not mentioned to it.
+    still_held = []
     with dcc_fetch._fetch_lock():
         queue = dcc_fetch._ensure_fetch_queue()
         doomed = [rid for rid, row in queue.items() if row.get("state") in states]
         for rid in doomed:
-            dcc_fetch.take_back_unsent_request(queue.pop(rid))
+            row = queue.pop(rid)
+            never_sent = dcc_fetch.take_back_unsent_request(row)
+            if (row.get("state") == "failed" and row.get("reason") == "no response"
+                    and row.get("request_type", "file") == "file" and not never_sent):
+                still_held.append((row.get("bot"), row.get("requested_filename") or row.get("filename")))
+    for bot, asked_for in still_held:
+        dcc_fetch.drop_our_request_at(bot, asked_for)
     if doomed:
         dcc_fetch.persist_fetch_history()
     return 200, {"cleared": len(doomed)}
@@ -2684,6 +2696,7 @@ def start_list_update():
 # slotted in fails a test instead of silently never showing up.
 SETTINGS_CATEGORIES = (
     ("identity",      "Identity & network",    ["SERVER", "PORT", "NICKNAME", "ALT_NICKNAME", "REJOIN_ATTEMPTS",
+                                                "ON_CONNECT_CHECK_MINUTES",
                                                 "ADMIN_NICK", "CHANNEL", "DEBUG_CHANNEL",
                                                 "CHECK_FOR_UPDATES"]),
     ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_USER_QUEUE",
@@ -2899,6 +2912,7 @@ SETTINGS_LABELS = {
     "CUSTOM_THEME_ACCENT": "Custom theme: accent colour",
     "ANNOUNCE_TRANSFERS": "Announce finished transfers in the channel",
     "REJOIN_ATTEMPTS": "Rejoin attempts after a kick (0 = never)",
+    "ON_CONNECT_CHECK_MINUTES": "Check the on-connect commands worked every (minutes, 0 = never)",
     "ANNOUNCE_INTERVAL": "Advert interval (seconds)",
     "BROADCAST_SEARCH_CHANNEL": "Broadcast search channel",
     "BROADCAST_SEARCH_COOLDOWN": "Broadcast search cooldown (seconds)",
@@ -3567,10 +3581,35 @@ def apply_on_connect_changes(payload):
         "commands": written,
         "delay_seconds": float(delay),
         "reconnect_required": bool(written),
-        "message": ("Saved. They run at the next connection - use them now "
-                    "by reconnecting." if written
+        "message": ("Saved. They run when the bot next reconnects - or now, "
+                    "with Resend commands." if written
                     else "Cleared. Nothing is sent on connect."),
     }
+
+
+def build_on_connect_resend_result():
+    """POST /api/on-connect/resend: send the SAVED commands to the server now
+    (#1066). For when the automatic check gave up, or the operator wants the
+    X login and +x again after a net split without reconnecting.
+
+    Returns (http_status, payload_dict). The text of the commands is never in
+    the answer or the log: an X login holds a password.
+    """
+    import on_connect
+
+    commands, _gap = on_connect.load()
+    if not commands:
+        return 400, {"error": "No on-connect commands are saved."}
+    oserve = sys.modules.get("oserve")
+    sock = getattr(oserve, "irc_connection", None) if oserve else None
+    if sock is None or not getattr(config, "bot_joined_channel", False):
+        return 409, {"error": "The bot is not connected, so nothing was sent."}
+    try:
+        sent = on_connect.resend_now(sock, getattr(config, "NICKNAME", ""))
+    except Exception as err:
+        return 500, {"error": f"Could not send them: {err}"}
+    return 200, {"sent": sent,
+                 "message": f"Sending {sent} on-connect command(s) to the server."}
 
 
 def build_lists_payload():
@@ -4641,7 +4680,12 @@ if HAVE_FLASK:
 
         @app.route("/api/fetch/<request_id>/delete", methods=["POST"])
         def api_fetch_delete(request_id):
-            status, result = build_fetch_delete_result(request_id)
+            # Cancel says {"only_waiting": true} (#1046): it means a request
+            # that has not started, so a row that finished while the page was
+            # stale or its confirm dialog open is refused, never its file removed.
+            body = json_object(request.get_json(silent=True))
+            only = ("pending", "offered", "queued") if body.get("only_waiting") is True else None
+            status, result = build_fetch_delete_result(request_id, only_states=only)
             return jsonify(result), status
 
         @app.route("/api/settings")
@@ -4691,6 +4735,11 @@ if HAVE_FLASK:
         @app.route("/api/on-connect")
         def api_on_connect():
             return jsonify(build_on_connect_payload())
+
+        @app.route("/api/on-connect/resend", methods=["POST"])
+        def api_on_connect_resend():
+            status, result = build_on_connect_resend_result()
+            return jsonify(result), status
 
         @app.route("/api/on-connect", methods=["POST"])
         def api_on_connect_save():

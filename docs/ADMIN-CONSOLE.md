@@ -767,7 +767,11 @@ title and its first lines say so.
   no channel without one (`chat * <text>`). Right-click → *Send to* picks one
   channel instead, and that channel is listened on too. `/dccore chat <text>`
   does the same from anywhere. What you type goes on the bot's express lane,
-  so it is not held up behind a line for each of its other channels.
+  so it is not held up behind a line for each of its other channels. With
+  nothing picked, an answer goes where the conversation is: privately to a
+  peer who wrote to you privately, or to the channel the last line you see
+  came from. A private conversation is never moved to a channel by itself -
+  only a pick does that.
 - **Listening:** every channel the bot is in, by default. Only lines from
   other DCCore bots arrive at all, so there is little to filter. Untick
   *Listen on all the bot's channels* (right-click, or `/dccore options`) and

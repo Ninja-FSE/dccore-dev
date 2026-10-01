@@ -1635,9 +1635,14 @@ alias dccore.chat.window {
 alias dccore.chat.title {
   if (!$window($dccore.chat.win)) { return }
   var %to = $dccore.opt(chat.to)
-  var %auto = (%to == $null) || (%to == *)
-  var %where = $iif(%auto,$iif($dccore.st(chat.replyto) != $null,$dccore.st(chat.replyto),every channel with other DCCore bots),%to)
-  var %priv = (!%auto) && ($left(%to,1) !isin #&+!)
+  ; /var stores a condition as its TEXT - never empty, so always "true" to
+  ; $iif - so each is evaluated by $iif here (#1041). And "privately" is
+  ; decided by where the line goes, the automatic target included: with no
+  ; pick, a peer who wrote privately is answered privately.
+  var %auto = $iif((%to == $null) || (%to == *),1,0)
+  var %target = $iif(%auto,$dccore.st(chat.replyto),%to)
+  var %where = $iif(%target != $null,%target,every channel with other DCCore bots)
+  var %priv = $iif((%target != $null) && ($left(%target,1) !isin $+($chr(35),&+!)),1,0)
   titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot typing sends $iif(%priv,privately to,to) %where $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot)
 }
 alias dccore.chat.sys {
@@ -1666,7 +1671,19 @@ alias dccore.chat.feed {
   ; happens to land (#958 follow-up). Never "-" or "*" - those are only an
   ; OWN fan-out line's channel. A private line's channel is "@<nick>" -
   ; reply there means privately to that nick, so the "@" is dropped.
-  if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) { hadd dccore.live chat.replyto $iif($left($2,1) == @,$mid($2,2-),$2) | dccore.chat.title }
+  ;
+  ; A PRIVATE CONVERSATION IS NEVER MOVED TO A CHANNEL BY ITSELF. Any line
+  ; used to move the target, so one arriving from a channel while a private
+  ; reply was being typed sent that reply to the channel, in public. Now a
+  ; private line always takes the target, and a channel line only while the
+  ; target is no one or a channel - and only from a channel listened on,
+  ; since a line nobody sees is no reason to move. The bot's own remarks
+  ; (nick "*") never move it. A manual pick still overrides all of this.
+  if ($3 != $dccore.bot) && ($3 != *) && ($2 != $null) && ($2 != -) {
+    var %rt = $dccore.st(chat.replyto)
+    if ($left($2,1) == @) { hadd dccore.live chat.replyto $mid($2,2-) | dccore.chat.title }
+    elseif ($dccore.chat.listens($2)) && ((%rt == $null) || ($left(%rt,1) isin $+($chr(35),&))) { hadd dccore.live chat.replyto $2 | dccore.chat.title }
+  }
   ; Your own lines, and any private line (its "@<nick>" channel was never
   ; something to tick in the Listen on menu), always show (#958 follow-up):
   ; one said with `chat *` comes back with "-" for its channel, since it

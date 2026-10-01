@@ -621,6 +621,19 @@ def script_draws_downloads(version):
     return theirs is not None and theirs >= ours
 
 
+# The first script that surely reads PEERS and CONSOLEFEED lines (#1045). PEERS
+# came in while the script still said 1.6, CONSOLEFEED with 1.7, and the 1.5
+# that v1.13.1 shipped has neither: it would print "[PEERS] ..." as text on
+# every connect, every WHO round and every peer that joined or left.
+PEERS_SCRIPT_VERSION = "1.7"
+
+
+def script_reads_peers(version):
+    ours = _version_tuple(PEERS_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is not None and theirs >= ours
+
+
 def _download_name(row):
     if row.get("request_type") == "list":
         return f"{row.get('bot') or '?'}'s file list"
@@ -884,6 +897,7 @@ class Session:
         self._rebuild_sent_at = 0.0
         self._rebuild_shown = False   # a REBUILD line is on the script's panel
         self.draws_downloads = False  # ... and the Downloads window's rows (#1022)
+        self.reads_peers = False      # ... and PEERS and CONSOLEFEED lines (#1045)
         self.downloads_finished = 0   # > 0 while that window is open: how many finished rows it wants
         self._downloads_sent_at = 0.0
         self._downloads_last = None   # the last snapshot sent, to send only a change
@@ -1714,6 +1728,15 @@ def _cmd_dlagain(session, args):
     if row.get("request_type") == "list":
         ok, message = _ask_for_list(bot)
         session.send(message if not ok else f"Asked {bot} for its list again.")
+    elif row.get("request_type") == "folder":
+        # By the folder route (#1040): asked as a file, "!rar <folder>" was a
+        # file row matched by name, and the pack the other bot sent back was
+        # refused as unsolicited.
+        import dcc_fetch
+        import webserver
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(bot, dcc_fetch.folder_asked_for(row))
+        session.send(f"Asked {bot} for {_download_name(row)} again." if status == 200
+                     else (result.get("error") or "Refused."))
     else:
         import webserver
         wanted = row.get("requested_filename") or row.get("filename") or ""
@@ -1794,6 +1817,7 @@ def _cmd_hello(session, args):
     session.draws_fetching = script_draws_fetching(version)
     session.draws_rebuild = script_draws_rebuild(version)
     session.draws_downloads = script_draws_downloads(version)
+    session.reads_peers = script_reads_peers(version)
     session.send(hello_line())
     if script_is_too_old(version):
         # After HELLO, as a plain OUT line the window shows (#709): the
@@ -1816,7 +1840,8 @@ def _cmd_hello(session, args):
     # `hello` line with a plain-text half: a checkbox no one has looked at
     # yet is a quieter kind of "wrong" than an empty window is.
     console_feed_on = getattr(config, "DEBUG_TO_CONSOLE", True)
-    session.send(f"DCCORE CONSOLEFEED {'on' if console_feed_on else 'off'}")
+    if session.reads_peers:
+        session.send(f"DCCORE CONSOLEFEED {'on' if console_feed_on else 'off'}")
     if not console_feed_on:
         # The #1009 review: this used to point at "/dccore
         # consolefeed on" (not a real /dccore subcommand - dccore.mrc's
@@ -1834,8 +1859,9 @@ def _cmd_hello(session, args):
     import serverschat
     session._chat_channels = serverschat.channels_line()
     session.send(session._chat_channels)
-    for chan in serverschat.channels():
-        session.send(serverschat.peers_channel_line(chan))
+    if session.reads_peers:
+        for chan in serverschat.channels():
+            session.send(serverschat.peers_channel_line(chan))
     for line in serverschat.recent_lines():
         session.send(line)
     session.send_status()
