@@ -3,7 +3,6 @@
 ## Unreleased
 
 - **Fixed: the DCCore Chat window's title always said your next line would go "privately"**, and named the wrong place when you had picked a channel or a person to talk to. It now names where the line really goes.
-
 - **Fixed: "Download again" on a failed folder (`!rar`) download now asks for the folder again.** From the dashboard or the mIRC Downloads window, it asked in a way that made DCCore refuse the album when it arrived.
 - **Fixed: "Clear failed" on the Downloads page now also cancels a request another DCCore bot is still holding**, as removing a single row already did - so that bot no longer sends a file you have cleared.
 - **Fixed: a download request that had not gone out yet when the bot lost its connection was given up on as "no response"** - for a folder, after up to half an hour, although it had never been sent. It now goes out once the bot is back.
