@@ -89,7 +89,7 @@ class NothingIsShippedPointingAtAChannelWeOwn(unittest.TestCase):
     def test_the_sample_does_not_fill_one_in_either(self):
         """settings.conf.sample is generated, so this catches a regeneration
         against a machine that has one set."""
-        with io.open(os.path.join(REPO_ROOT, "settings.conf.sample"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "conf", "settings.conf.sample"), encoding="utf-8") as handle:
             for line in handle:
                 stripped = line.strip().lstrip("#").strip()
                 if stripped.startswith("DEBUG_CHANNEL"):
@@ -137,7 +137,7 @@ class ABlankValueJoinsNothing(unittest.TestCase):
         shared room for any install whose config omits the setting."""
         offenders = []
         for name in ("irc.py", "commands.py"):
-            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
+            with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", name), os.path.join(REPO_ROOT, "conf", name), os.path.join(REPO_ROOT, name)) if os.path.exists(p)), os.path.join(REPO_ROOT, name))), encoding="utf-8") as handle:
                 tree = ast.parse(handle.read())
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)

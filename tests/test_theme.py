@@ -183,7 +183,7 @@ class TheLookDidNotChange(ThemedPathCase):
 
         readers = 0
         for name in ("announce.py", "list.py"):
-            tree = ast.parse(io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)),
+            tree = ast.parse(io.open((next((p for p in (os.path.join(REPO_ROOT, "src", name), os.path.join(REPO_ROOT, "conf", name), os.path.join(REPO_ROOT, name)) if os.path.exists(p)), os.path.join(REPO_ROOT, name))),
                                      encoding="utf-8").read())
             for node in ast.walk(tree):
                 if (isinstance(node, ast.Call)
@@ -213,7 +213,7 @@ class NoNinthCopy(unittest.TestCase):
     def test_no_module_but_theme_contains_a_block_code(self):
         offenders = []
         for name in self.modules():
-            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
+            with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", name), os.path.join(REPO_ROOT, "conf", name), os.path.join(REPO_ROOT, name)) if os.path.exists(p)), os.path.join(REPO_ROOT, name))), encoding="utf-8") as handle:
                 for number, line in enumerate(handle, 1):
                     for literal in BLOCK_LITERALS:
                         if literal in line:

@@ -37,7 +37,7 @@ HEADER = """\
 # Copy this file to settings.conf and uncomment the lines you want to
 # change. Anything left commented out keeps its default, shown here.
 #
-#     cp settings.conf.sample settings.conf
+#     cp conf/settings.conf.sample conf/settings.conf
 #
 # settings.conf is gitignored, so your values never show up as a diff
 # and are never overwritten by an update.
@@ -142,7 +142,7 @@ def build():
 
 
 def main():
-    target = os.path.join(REPO_ROOT, "settings.conf.sample")
+    target = os.path.join(REPO_ROOT, "conf", "settings.conf.sample")
     content = build()
     with io.open(target, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(content)

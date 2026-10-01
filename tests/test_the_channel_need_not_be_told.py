@@ -163,7 +163,7 @@ class TheChannelNoticeCanBeTurnedOff(DCCoreTestCase):
 class TheSampleAndTheSettingAgree(unittest.TestCase):
 
     def test_the_shipped_sample_carries_it(self):
-        with open(os.path.join(REPO_ROOT, "settings.conf.sample"),
+        with open(os.path.join(REPO_ROOT, "conf", "settings.conf.sample"),
                   encoding="utf-8") as f:
             sample = f.read()
 
@@ -172,7 +172,7 @@ class TheSampleAndTheSettingAgree(unittest.TestCase):
     def test_and_explains_what_stays_on(self):
         """An operator reading only the sample should not have to guess
         whether turning this off stops answering requests."""
-        with open(os.path.join(REPO_ROOT, "settings.conf.sample"),
+        with open(os.path.join(REPO_ROOT, "conf", "settings.conf.sample"),
                   encoding="utf-8") as f:
             sample = f.read()
         note = sample.split("ANNOUNCE_TRANSFERS", 1)[0].rsplit("\n\n", 1)[-1]

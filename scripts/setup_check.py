@@ -308,7 +308,9 @@ def main(platform):
     # hard-fail whenever admin_config.py was absent, even when settings.conf
     # alone had already configured everything - contradicting this check's own
     # later "Applied N setting(s)" output on the very same run.
-    admin_config_present = os.path.exists(os.path.join(REPO, "admin_config.py"))
+    # At the root, or in conf/ where the daemon moves it (#959).
+    admin_config_present = any(os.path.exists(os.path.join(REPO, *where, "admin_config.py"))
+                               for where in ((), ("conf",)))
     try:
         import settings_file
         settings_conf_present = os.path.exists(settings_file.settings_path())

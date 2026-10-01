@@ -109,7 +109,7 @@ class AnIndentedLineIsAMistake(unittest.TestCase):
 
     def test_the_shipped_sample_still_parses(self):
         """The file every install starts from."""
-        with io.open(os.path.join(REPO_ROOT, "settings.conf.sample"),
+        with io.open(os.path.join(REPO_ROOT, "conf", "settings.conf.sample"),
                      encoding="utf-8") as handle:
             settings_file.parse(handle.read())
 

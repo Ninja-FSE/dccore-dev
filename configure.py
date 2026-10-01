@@ -415,11 +415,12 @@ NEW_ADMIN_CONFIG_HEADER = """\
 # admin_config.py - created by the DCCore setup.
 #
 # The setup writes only the console/dashboard password here. Everything else
-# it asked for went to settings.conf, which defaults.py applies AFTER this
-# file - so a setting present in both takes settings.conf's value, and a
+# it asked for went to conf/settings.conf, which defaults.py applies AFTER
+# this file - so a setting present in both takes settings.conf's value, and a
 # line added here for a name settings.conf also sets does nothing (the daemon
 # says so at startup). Edit settings.conf, or the dashboard's Settings page,
-# for those. admin_config.py.sample explains what else can go in this file.
+# for those. admin_config.py.sample, right here in conf/, explains what else
+# can go in this file.
 """
 
 
@@ -432,7 +433,7 @@ def write_admin_config_password(password_hash, path=None):
     all. `path` overrides the real repo location - tests use it, real runs
     never pass it.
     """
-    path = path or os.path.join(REPO_ROOT, "admin_config.py")
+    path = path or os.path.join(REPO_ROOT, "conf", "admin_config.py")
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as handle:
             existing_text = handle.read()

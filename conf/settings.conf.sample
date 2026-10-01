@@ -4,7 +4,7 @@
 # Copy this file to settings.conf and uncomment the lines you want to
 # change. Anything left commented out keeps its default, shown here.
 #
-#     cp settings.conf.sample settings.conf
+#     cp conf/settings.conf.sample conf/settings.conf
 #
 # settings.conf is gitignored, so your values never show up as a diff
 # and are never overwritten by an update.

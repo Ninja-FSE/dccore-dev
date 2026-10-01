@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗂️ The daemon's modules live in `src/`, this install's own files in `conf/` (#959)
+
+Phase 1 (#960) moves every module that is only ever imported - `irc.py`, `adminchat.py`, `defaults.py`,
+`webserver.py`, `serverschat.py` and the rest - into a flat `src/`; `oserve.py`, `configure.py` and `update_list.py`,
+which an operator runs by hand, stay at the root. The modules still import each other by bare name: `src/` goes on
+`sys.path` before any of them loads (and `tests/__init__.py` does the same for the suite), and the few that found a
+file from their own `__file__` (`settings_file.DEFAULT_PATH`, `webserver.WEB_DIR`, the scripts' `REPO_ROOT`s) look
+one level up. Phase 2 (#983) moves `settings.conf` and `admin_config.py` into `conf/` with their samples: the daemon
+moves an existing install's own two files there the first time it starts, once, logged, and not when
+`DCCORE_SETTINGS_FILE` points elsewhere. The launchers (`start-dccore.sh`, `start-dccore.bat`, both autostart
+installers) and `setup_check.py` look for them in `conf/` as well as at the root - they decide "first run" before any
+Python runs, and looking at the root alone sent an upgraded install back to first-run setup on its second start.
+`scripts/preflight.py` watches `conf/` for a test writing real state. Tests: `tests/test_the_launchers_find_the_conf_dir.py`
+reads each launcher's check and runs the shell one where bash is available.
+
 ### 📦 The on-connect commands are checked, sent again when they did not take, and a Resend button (#1066)
 
 From the operator: when Undernet has net splits, the X login among the on-connect commands sometimes goes nowhere -

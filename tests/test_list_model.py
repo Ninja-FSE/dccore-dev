@@ -426,7 +426,7 @@ class TheHandlersAskThatQuestion(ListCase):
     all, and that a channel bound to nothing is answered with silence."""
 
     def source(self, name):
-        with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
+        with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", name), os.path.join(REPO_ROOT, "conf", name), os.path.join(REPO_ROOT, name)) if os.path.exists(p)), os.path.join(REPO_ROOT, name))), encoding="utf-8") as handle:
             return handle.read()
 
     def test_every_folder_lookup_in_the_request_path_is_scoped(self):

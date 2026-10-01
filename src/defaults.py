@@ -15,6 +15,7 @@
 # !rehash reloads THIS file, which reset every one of them.
 import os
 import re
+import sys
 import runtime
 
 # ---------------------------------------------------------------------
@@ -1315,14 +1316,15 @@ def _migrate_local_config_to_admin_config(directory=None, log=print):
     name wins over anything left from before), and os.replace so an
     interrupted run leaves one intact file rather than two halves.
 
-    `directory` defaults to wherever this file itself lives - the real
-    installation directory admin_config.py/local_config.py actually sit in -
-    and is only ever overridden by a test.
+    `directory` defaults to the repository root - the real installation
+    directory admin_config.py/local_config.py actually sit in, both before
+    and after #959 phase 1 moved this file itself into src/ - and is only
+    ever overridden by a test.
 
     Returns True if a rename happened, for the tests.
     """
     if directory is None:
-        directory = os.path.dirname(os.path.abspath(__file__))
+        directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     admin_config_path = os.path.join(directory, "admin_config.py")
     local_config_path = os.path.join(directory, "local_config.py")
 
@@ -1345,7 +1347,55 @@ def _migrate_local_config_to_admin_config(directory=None, log=print):
     return True
 
 
+def _migrate_admin_config_into_conf_dir(repo_root=None, log=print):
+    """Carry admin_config.py from the repository root into conf/ (#959 phase 2).
+
+    Runs AFTER _migrate_local_config_to_admin_config() and before `from
+    admin_config import *` below, for the same reason that one has to run
+    early: admin_config.py is gitignored, so a real install's copy sits
+    wherever it always has until something moves it. A local_config.py from
+    years ago is carried across by the function above first, landing at the
+    repository root under its current name - and is then carried the rest
+    of the way by this one, in the same startup pass.
+
+    Same safety shape: only when conf/admin_config.py does not already
+    exist, and a retrying replace so an interrupted run leaves one intact
+    file rather than two halves.
+
+    `repo_root` is only ever overridden by a test. Returns True if a move
+    happened.
+    """
+    if repo_root is None:
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    conf_dir = os.path.join(repo_root, "conf")
+    new_path = os.path.join(conf_dir, "admin_config.py")
+    old_path = os.path.join(repo_root, "admin_config.py")
+
+    if os.path.exists(new_path) or not os.path.exists(old_path):
+        return False
+
+    try:
+        import platform_compat
+        os.makedirs(conf_dir, exist_ok=True)
+        platform_compat.replace_with_retry(old_path, new_path)
+    except OSError as err:
+        log(f"[MIGRATE] Could not move admin_config.py into conf/: {err}. "
+            f"Move it yourself: conf/admin_config.py is where it is read from now.")
+        return False
+
+    log("[MIGRATE] Moved admin_config.py into conf/ - the repository's layout "
+        "changed (#959); nothing in it changed.")
+    return True
+
+
 _migrate_local_config_to_admin_config()
+_migrate_admin_config_into_conf_dir()
+
+# conf/ on the path (#959 phase 2): admin_config.py lives there now, next to
+# settings.conf, apart from the daemon's own source in src/.
+_CONF_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf")
+if _CONF_DIR not in sys.path:
+    sys.path.insert(0, _CONF_DIR)
 
 try:
     from admin_config import *  # noqa: F401,F403

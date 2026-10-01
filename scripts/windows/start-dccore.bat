@@ -223,7 +223,7 @@ rem  pull renamed defaults.py for them and could not touch theirs. The daemon
 rem  renames it at import time - but this check runs first, so without this
 rem  branch the operator is told to copy the sample, and doing so is exactly
 rem  the condition that makes the migration skip for good.
-if not exist "admin_config.py" if not exist "settings.conf" if exist "local_config.py" (
+if not exist "admin_config.py" if not exist "settings.conf" if not exist "conf\admin_config.py" if not exist "conf\settings.conf" if exist "local_config.py" (
     echo.
     echo   Found local_config.py, which #170 renamed to admin_config.py.
     echo.
@@ -246,8 +246,10 @@ rem  music folder, dashboard, password - and writes settings.conf and
 rem  admin_config.py; it used to be a separate terminal step this file then
 rem  told people to go and do. A tree without configure.py (a broken
 rem  extract) still gets the old instruction, so nothing is worse than before.
-if not exist "admin_config.py" if not exist "settings.conf" if exist "configure.py" goto :first_run
-if not exist "admin_config.py" if not exist "settings.conf" (
+rem  At the root, or in conf\ (#959): the daemon moves them there the first
+rem  time it starts, so a second start would otherwise look like a first run.
+if not exist "admin_config.py" if not exist "settings.conf" if not exist "conf\admin_config.py" if not exist "conf\settings.conf" if exist "configure.py" goto :first_run
+if not exist "admin_config.py" if not exist "settings.conf" if not exist "conf\admin_config.py" if not exist "conf\settings.conf" (
     echo.
     echo   No admin_config.py and no settings.conf found, and no configure.py
     echo   to create them with - this does not look like a complete DCCore
