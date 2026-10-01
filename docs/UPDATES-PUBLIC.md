@@ -3,7 +3,6 @@
 ## Unreleased
 
 - **Fixed: `@<nick>-remove <file>` did nothing for someone who had just left the channel** - no reply, and their queue on disk was not updated. It removes the file and says so now.
-
 - **Fixed: with an older `dccore.mrc`, the DCCore window filled with `[PEERS] ...` lines** after the bot was updated - on every connect, every ten minutes and whenever another DCCore bot came or went. The bot now sends those lines only to a script that can read them (1.7 or later).
 - **Fixed: the DCCore Chat window's title always said your next line would go "privately"**, and named the wrong place when you had picked a channel or a person to talk to. It now names where the line really goes.
 - **Fixed: "Download again" on a failed folder (`!rar`) download now asks for the folder again.** From the dashboard or the mIRC Downloads window, it asked in a way that made DCCore refuse the album when it arrived.
