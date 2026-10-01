@@ -4645,7 +4645,12 @@ if HAVE_FLASK:
 
         @app.route("/api/fetch/<request_id>/delete", methods=["POST"])
         def api_fetch_delete(request_id):
-            status, result = build_fetch_delete_result(request_id)
+            # Cancel says {"only_waiting": true} (#1046): it means a request
+            # that has not started, so a row that finished while the page was
+            # stale or its confirm dialog open is refused, never its file removed.
+            body = json_object(request.get_json(silent=True))
+            only = ("pending", "offered", "queued") if body.get("only_waiting") is True else None
+            status, result = build_fetch_delete_result(request_id, only_states=only)
             return jsonify(result), status
 
         @app.route("/api/settings")
