@@ -107,6 +107,81 @@ class Rotation(Case):
         self.assertEqual(self.logged().count("line "), 5)
         self.assertTrue(platform_compat._console_log.active())
 
+    def old_files(self, count):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        for number in range(1, count + 1):
+            with io.open(f"{self.path}.{number}", "w", encoding="utf-8") as handle:
+                handle.write(f"old-{number}\n")
+
+    def contents(self):
+        found = {}
+        for name in sorted(os.listdir(os.path.dirname(self.path))):
+            if name != "dccore.log":
+                with io.open(os.path.join(os.path.dirname(self.path), name), encoding="utf-8") as handle:
+                    found[name] = handle.read()
+        return found
+
+    def refusing(self, source):
+        """os.replace, refused for one source file only."""
+        real = os.replace
+        tried = []
+
+        def replace(src, dst):
+            if os.path.abspath(src) == os.path.abspath(source):
+                tried.append(src)
+                raise PermissionError("in use")
+            return real(src, dst)
+        return mock.patch.object(platform_compat.os, "replace", replace), tried
+
+    def test_a_refused_rename_leaves_the_old_files_alone(self):
+        """Review of #1073: the old files were shifted before the current one
+        was moved, so with it held open every line shifted them once more."""
+        self.max_bytes, self.keep = 50, 3
+        self.old_files(3)
+        before = self.contents()
+        patch, _tried = self.refusing(self.path)
+        with patch:
+            for number in range(8):
+                self.stream.write(f"line {number} " + "y" * 30 + "\n")
+        self.assertEqual(self.contents(), before)
+        self.assertEqual(self.logged().count("line "), 8)
+
+    def test_a_held_file_is_not_tried_again_on_every_line(self):
+        self.max_bytes = 200
+        patch, tried = self.refusing(self.path)
+        with patch:
+            for number in range(10):   # 400 bytes and more
+                self.stream.write(f"line {number} " + "z" * 30 + "\n")
+        self.assertEqual(len(tried), 2, "once at 200 bytes, then again only after another 200")
+
+    def test_once_it_is_let_go_the_rotation_happens(self):
+        self.max_bytes, self.keep = 50, 3
+        self.old_files(1)
+        patch, _tried = self.refusing(self.path)
+        with patch:
+            self.stream.write("held " + "y" * 60 + "\n")
+        self.stream.write("free " + "y" * 60 + "\n")
+        platform_compat._console_log.close()
+        found = self.contents()
+        self.assertEqual(found["dccore.log.2"], "old-1\n")
+        self.assertIn("held", found["dccore.log.1"])
+
+    def test_an_old_file_held_open_keeps_the_current_one_and_dot_1(self):
+        self.max_bytes, self.keep = 50, 3
+        self.old_files(2)
+        patch, _tried = self.refusing(f"{self.path}.2")
+        with patch:
+            self.stream.write("line one " + "y" * 60 + "\n")
+        self.assertEqual(self.contents(), {"dccore.log.1": "old-1\n", "dccore.log.2": "old-2\n"})
+        self.assertIn("line one", self.logged())
+
+    def test_a_lowered_keep_clears_the_files_past_it(self):
+        self.max_bytes, self.keep = 50, 2
+        self.old_files(5)
+        self.stream.write("line one " + "y" * 60 + "\n")
+        platform_compat._console_log.close()
+        self.assertEqual(sorted(self.contents()), ["dccore.log.1", "dccore.log.2"])
+
 
 class WhenTheFileCannotBeWritten(Case):
     def test_the_window_keeps_every_line_and_the_log_says_so_once(self):
