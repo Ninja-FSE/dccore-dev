@@ -74,7 +74,9 @@ writes had split, once the record was more than a page or two deep; every connec
 The rebuild runs under the same lock a write takes, so a send that ends during it waits for it, which is a moment for
 a record of ordinary size, and it needs free disk space about the size of the file while it runs. A write waits
 at most two seconds for a busy file, so a send is never held up long, and a read takes no lock, so a slow query cannot
-hold one up at all. A damaged file is moved aside (kept, never deleted) and a new one started. Nothing shows any of it
+hold one up at all. A damaged file is moved aside (kept, never deleted) and a new one started, whether the damage is
+found when the file is opened or, for a file that is damaged further in than its first page, by the write that hits it
+(#1087; that write is then made once more in the new file, and a read leaves the move to the next write). Nothing shows any of it
 on the dashboard yet, and nothing is said to the nick in IRC.
 
 The queue rows now carry the time they were asked for (`queued_at`), which is where the wait comes from; a row saved
