@@ -1734,6 +1734,30 @@ def _is_a_possible_peer(ip_text):
                 or address.is_reserved)
 
 
+# The states in which a row may be waiting on the other bot (#1083).
+_STILL_WAITING = ("pending", "offered", "queued", "listening", "receiving")
+
+
+def another_row_wants_locked(queue, bot, asked_for):
+    """True if a row still waiting asks `bot` for the same file. Caller holds
+    _fetch_lock, with the row being let go already out of `queue`.
+
+    An "@bot-remove <file>" is matched by name on the other side and takes
+    every entry of ours for it, so letting one row go there would cancel a
+    newer request for the same file - "Download again", or asking again from
+    the list - which then sat queued here with nothing coming (#1083)."""
+    wanted_bot = str(bot or "").strip().lower()
+    wanted = _normalize_filename_for_match(asked_for or "")
+    for row in queue.values():
+        if row.get("state") not in _STILL_WAITING or row.get("request_type", "file") != "file":
+            continue
+        if str(row.get("bot") or "").strip().lower() != wanted_bot:
+            continue
+        if _normalize_filename_for_match(row.get("requested_filename") or row.get("filename") or "") == wanted:
+            return True
+    return False
+
+
 def _normalize_filename_for_match(name):
     """Loosen filename comparison enough to survive the one transformation
     every DCC client applies: replacing spaces with underscores (see dcc.py's
