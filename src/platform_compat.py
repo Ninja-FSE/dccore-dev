@@ -243,19 +243,31 @@ class _TimestampedStream:
         if not text:
             return 0
         fmt = self._formatter()
-        if not fmt:
+        log = _console_log if _console_log.active() else None
+        if not fmt and log is None:
             return self._stream.write(text)
         with self._lock:
             out = []
-            stamp = None
+            logged = []
+            stamp = log_stamp = None
             for piece in text.splitlines(keepends=True):
                 if self._at_line_start:
-                    if stamp is None:
-                        stamp = "[" + time.strftime(fmt) + "] "
-                    out.append(stamp)
+                    if fmt:
+                        if stamp is None:
+                            stamp = "[" + time.strftime(fmt) + "] "
+                        out.append(stamp)
+                    if log is not None:
+                        # The log keeps the date whatever the window shows:
+                        # it spans days, the window is read as it happens.
+                        if log_stamp is None:
+                            log_stamp = "[" + time.strftime(_LOG_STAMP) + "] "
+                        logged.append(log_stamp)
                 out.append(piece)
+                logged.append(piece)
                 self._at_line_start = piece.endswith(("\n", "\r"))
             written = self._stream.write("".join(out))
+            if log is not None:
+                log.write("".join(logged))
         # Report what the CALLER wrote, not what reached the stream. A caller
         # comparing the return value to len(text) must not be told its write
         # was longer than the text it gave.
@@ -273,6 +285,146 @@ class _TimestampedStream:
     @property
     def wrapped(self):
         return self._stream
+
+
+# ---------------------------------------------------------------------
+# The console log file (#1065)
+# ---------------------------------------------------------------------
+# Everything the window shows also goes to a file, so what the bot said is
+# not gone when the window is closed - or never open, which is where #1065
+# goes next: a bot run without its window has nowhere else to say anything.
+# Fed by _TimestampedStream above, the one object every console line already
+# passes through, rather than by a second proxy on sys.stdout: a stream proxy
+# that answered one probe differently from the real stream once took the
+# dashboard down (see write()'s own note).
+#
+# Kept small and in several pieces: when the file passes the size, it becomes
+# dccore.log.1, the one before that .2, and the oldest beyond the count goes.
+# Writing it can never take a line away from the window or stop the bot: a
+# write that fails turns the file off and says so once, on the window.
+
+_LOG_STAMP = "%Y-%m-%d %H:%M:%S"
+
+
+class _ConsoleLog:
+    def __init__(self):
+        self._settings = None   # () -> (path, max_bytes, keep), read per write
+        self._handle = None
+        self._path = None
+        self._hold_until = 0
+        self._failed = False
+        self._lock = threading.Lock()
+
+    def active(self):
+        return self._settings is not None and not self._failed
+
+    def configure(self, settings):
+        with self._lock:
+            self._settings = settings
+            self._failed = False
+            self._close_locked()
+
+    def write(self, text):
+        try:
+            path, max_bytes, keep = self._settings()
+        except Exception:
+            return
+        if not path:
+            with self._lock:
+                self._close_locked()
+            return
+        with self._lock:
+            try:
+                if self._handle is None or self._path != path:
+                    self._open_locked(path)
+                self._handle.write(text)
+                self._handle.flush()
+                if max_bytes and self._handle.tell() >= max(max_bytes, self._hold_until):
+                    self._rotate_locked(path, keep, max_bytes)
+            except Exception as err:
+                self._failed = True
+                self._close_locked()
+                try:
+                    sys.__stdout__.write(f"[LOG] Could not write the log file {path} ({err}); "
+                                         f"it is off until the bot restarts. The window is unaffected.\n")
+                except Exception:
+                    pass
+
+    def _open_locked(self, path):
+        self._close_locked()
+        folder = os.path.dirname(os.path.abspath(path))
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        self._handle = open(path, "a", encoding="utf-8", errors="replace", newline="")
+        self._path = path
+        self._hold_until = 0   # a refused rotation's wait (#1073 review)
+
+    def _close_locked(self):
+        if self._handle is not None:
+            try:
+                self._handle.close()
+            except Exception:
+                pass
+        self._handle = None
+
+    def _rotate_locked(self, path, keep, max_bytes):
+        """The current file becomes .1, .1 becomes .2, and so on.
+
+        The current file is moved aside FIRST, and the old files are shifted
+        only once that has worked: a viewer holding it open on Windows refuses
+        the rename, and shifting before it meant every later line shifted the
+        old files once more until all but one had fallen off the end. Refused,
+        nothing has moved, and the next try waits for another max_bytes, so a
+        file held open is not retried on every line."""
+        self._close_locked()
+        keep = max(1, int(keep or 1))
+        aside = f"{path}.rotating"
+        try:
+            os.replace(path, aside)
+        except OSError:
+            self._open_locked(path)
+            self._hold_until = self._handle.tell() + max_bytes
+            return
+        try:
+            # Shifted down from the oldest end: os.replace() overwrites, so
+            # .keep is replaced by .keep-1 and the oldest is gone.
+            for number in range(keep - 1, 0, -1):
+                if os.path.exists(f"{path}.{number}"):
+                    os.replace(f"{path}.{number}", f"{path}.{number + 1}")
+            os.replace(aside, f"{path}.1")
+        except OSError:
+            # An old file held open instead: the current one goes back where
+            # it was, and .1 is never overwritten by it.
+            try:
+                os.replace(aside, path)
+            except OSError:
+                pass
+            self._open_locked(path)
+            self._hold_until = self._handle.tell() + max_bytes
+            return
+        # A KEEP lowered since the last rotation leaves files past it.
+        number = keep + 1
+        while os.path.exists(f"{path}.{number}"):
+            try:
+                os.remove(f"{path}.{number}")
+            except OSError:
+                break
+            number += 1
+        self._open_locked(path)
+
+    def close(self):
+        with self._lock:
+            self._close_locked()
+
+
+_console_log = _ConsoleLog()
+
+
+def install_console_log(settings):
+    """Send every console line to a file too. `settings` is called on every
+    write and returns (path, max_bytes, keep); an empty path turns it off
+    without a restart. Only the daemon installs it, like the timestamps."""
+    _console_log.configure(settings)
 
 
 _console_timestamp_format = ""

@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Everything the window shows is also written to a log file (#1065, part 1)
+
+What the bot said was gone with its window, and #1065 goes on to let it run with no window at all. Every console line
+now also goes to `CONSOLE_LOG_FILE` (`./data/logs/dccore.log`), stamped `%Y-%m-%d %H:%M:%S` whatever
+`CONSOLE_TIMESTAMP_FORMAT` shows in the window. At `CONSOLE_LOG_MAX_MB` (5) it becomes `dccore.log.1`, the one before
+`.2`, keeping `CONSOLE_LOG_KEEP` (5); the shift relies on `os.replace()` overwriting. The current file is moved aside
+first and the old ones shifted only once that worked: a rename refused (a viewer holding the file on Windows) leaves
+every file where it was, carries on in the same file and tries again only after another `CONSOLE_LOG_MAX_MB`, and an
+old file held open puts the current one back rather than over `.1` (both found in review: shifting first, a held file
+cost every kept log, one per line). Old files past a lowered `CONSOLE_LOG_KEEP` go at the next rotation. The settings
+are read on every line, so a changed or emptied path applies without a restart.
+
+It is fed by `platform_compat._TimestampedStream.write()` - the one object every console line already passes, building
+the log copy in the same pass - not by a second proxy on `sys.stdout`: a proxy that answered click's `write(b"")`
+probe differently once took the dashboard down. A write that fails turns the log off and says so once, on
+`sys.__stdout__`; the window never loses a line. Installed by `oserve.py` in its program-only block, after the window
+format, so importing `oserve` (every test process) writes nothing; `test_run_as_a_script_the_first_line_is_stamped`
+strips the install from its stub, since it runs from the checkout. Checked with `click.echo`, stderr, a thread and Greek
+text. Tests: `tests/test_a_log_file_beside_the_console.py`.
+
 ### 📦 A record of every finished transfer, with the nick it went to or came from (#1068)
 
 The bot kept only totals, so a question about last month - which files went most, how long people waited, how fast the

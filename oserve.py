@@ -38,6 +38,24 @@ if __name__ == "__main__":
     platform_compat.set_console_timestamp_format(
         getattr(config, "CONSOLE_TIMESTAMP_FORMAT", "%H:%M:%S"))
 
+    # And to a file (#1065), from here on. Read on every line through
+    # sys.modules: a settings save reloads defaults, and a changed or emptied
+    # path then takes effect without a restart.
+    def _console_log_settings():
+        current = sys.modules.get("defaults") or config
+        try:
+            megabytes = max(0, int(getattr(current, "CONSOLE_LOG_MAX_MB", 5)))
+        except (TypeError, ValueError):
+            megabytes = 5
+        try:
+            keep = max(1, int(getattr(current, "CONSOLE_LOG_KEEP", 5)))
+        except (TypeError, ValueError):
+            keep = 5
+        return (str(getattr(current, "CONSOLE_LOG_FILE", "") or "").strip(),
+                megabytes * 1024 * 1024, keep)
+
+    platform_compat.install_console_log(_console_log_settings)
+
 # Allocate the locks at startup, in memory. This keeps config.py free of
 # function calls and imports.
 #

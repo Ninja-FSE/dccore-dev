@@ -922,6 +922,28 @@
 # page keeps its own times and is unaffected either way.
 #CONSOLE_TIMESTAMP_FORMAT = %H:%M:%S
 
+# Everything the bot's window shows is also saved here, with the date on every
+# line, so it is still there after the window is closed. Leave blank for no
+# log file.
+#
+# Everything the bot's window shows is also written to this file (#1065), with
+# the date on every line, so what it said is still there after the window is
+# closed. When the file reaches CONSOLE_LOG_MAX_MB it becomes dccore.log.1, the
+# one before that .2, and so on; CONSOLE_LOG_KEEP old files are kept. A
+# changed path takes effect at once. Empty = no log file.
+#CONSOLE_LOG_FILE = ./data/logs/dccore.log
+
+# When the log file reaches this size it is renamed dccore.log.1 and a new one
+# is started.
+#
+# Size at which the log file is started afresh
+#CONSOLE_LOG_MAX_MB = 5
+
+# How many of those older log files are kept before the oldest is deleted.
+#
+# How many old log files are kept
+#CONSOLE_LOG_KEEP = 5
+
 # Show in the console who asked for which file.
 #
 # THE CONSOLE FEED (#528). An OmenServe operator sees every request, send and
