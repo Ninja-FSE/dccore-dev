@@ -17,6 +17,41 @@ fix - but the only way left was a full reconnect.
   takes a new epoch, so the last link's mark never counts. "Not connected" is only said when there is no socket.
 - Tests: `tests/test_on_connect_commands_are_checked.py`.
 
+### 🐛 Clear failed no longer cancels a newer request for the same file (#1083)
+
+Audit 2026-10-02 M3. Clear failed (#1047) sends `@bot-remove <file>` for each old "no response" row, so the other bot
+lets go of a request that may still be sitting in its queue. The remove is matched by name there and takes every entry
+of ours for that file - so when "Download again", or asking again from the list, had a newer row waiting on the same
+bot and file, clearing the old row cancelled the new request too, and it sat queued here with nothing coming until it
+timed out. A row's own Delete did the same.
+
+- `dcc_fetch.another_row_wants_locked()` says whether a row still waiting (pending, offered, queued, listening,
+  receiving) asks the same bot for the same file, comparing names the way the other bot does (spaces as underscores,
+  any case). `build_fetch_clear_result()` drops those files from the removes it sends, still under the lock, and
+  `build_fetch_delete_result()` skips the remove for them. A finished or failed twin, or the same file from another
+  bot, does not stop it.
+- Tests: `tests/test_clear_spares_a_newer_request.py`.
+
+### 🐛 Three things the move into src/ and conf/ left pointing at the old places (#1084, #1088, #1089)
+
+Audit 2026-10-02 M4, L3, L4.
+
+- **Windows autostart could not be installed under the new layout (#1084).** `install-autostart.bat` kept the
+  root-only "is it set up" check after #983 gave every other launcher the `conf\` alternatives, so once the first
+  start had moved `settings.conf` and `admin_config.py` into `conf\` it said "not set up yet" and stopped - advice
+  that cannot help, since that start is what moved them. It now checks all four places, like `start-dccore.bat`.
+  `tests/test_the_launchers_find_the_conf_dir.py` covers it, and on Windows runs the real batch file under `cmd.exe`
+  with stand-in `schtasks`/`powershell` on PATH: config in `conf\`, config at the root, and nothing set up.
+- **"Run `python adminchat.py`" named a file that moved into `src/` (#1088).** The password-hash generator is
+  `src/adminchat.py` now; the instructions in `admin_config.py.sample`, `defaults.py` (so `settings.conf.sample`
+  and the Settings help), `setup_check.py`, the dashboard's refusal message, `configure.py`, `ADMIN-CONSOLE.md` and
+  `WINDOWS.md` say so. A test fails on any `python`/`py`/`{platform.python} adminchat.py` left in them.
+- **The upgrade guide's backup command failed and backed up nothing (#1089).** `cp -r data conf data.backup` needs
+  `data.backup` to exist, and before the upgrade that brings `conf/` the config is at the top of the folder. Step 2
+  now makes the folder first and copies the config from either place; a test runs the block in bash on both
+  layouts. Tests: `tests/test_the_layout_points_where_things_are.py`.
+
+
 ### 📦 Everything the window shows is also written to a log file (#1065, part 1)
 
 What the bot said was gone with its window, and #1065 goes on to let it run with no window at all. Every console line
@@ -54,20 +89,37 @@ row from being written (with the default rollback journal the reader's lock did,
 lost). While the bot runs there are `transfers.db-wal` and `transfers.db-shm` beside the file; copy all three, or stop
 the bot first, to back it up. Forgetting a nick or everything also truncates the WAL (`PRAGMA wal_checkpoint(TRUNCATE)`),
 since a delete is written there first and the old rows would still be readable in it; if a reader that is still open
-holds that up for more than `WRITE_TIMEOUT`, a line on the console says so and the rows go with the next checkpoint. A
+holds that up for more than `WRITE_TIMEOUT`, a line on the console says so and the rows go when a later checkpoint
+empties the log (one that does not truncate leaves the frames past its new writes as they were). A
 damaged file is moved aside together with its `-wal` and `-shm`.
 
 `transfer_log.summary()` gives files sent (lists left out), lists sent, top and average speed (bytes over seconds, the
 sends too small to time left out), files received with their size and the average wait in the queue; `top_files()`
 gives the ten most-sent files; `top_nicks()` ranks the nicks by files and bytes, sent or received; `nick_summary()` gives
 the figures of one nick. All take a start time. `forget_nick()` removes one nick from the record and `forget_all()`
-empties it, and both zero what they free in the file, so a removed nick cannot be read back out of it. A write waits
+empties it, and both then rebuild the file (`VACUUM`) and empty the log, so a removed nick cannot be read back out of
+it (#1082: deleting alone left the nick in the index's interior pages and in the free space of pages that earlier
+writes had split, once the record was more than a page or two deep; every connection also sets `secure_delete` now).
+The rebuild runs under the same lock a write takes, so a send that ends during it waits for it, which is a moment for
+a record of ordinary size, and it needs free disk space about the size of the file while it runs. A write waits
 at most two seconds for a busy file, so a send is never held up long, and a read takes no lock, so a slow query cannot
-hold one up at all. A damaged file is moved aside (kept, never deleted) and a new one started. Nothing shows any of it
+hold one up at all. A damaged file is moved aside (kept, never deleted) and a new one started, whether the damage is
+found when the file is opened or, for a file that is damaged further in than its first page, by the write that hits it
+(#1087; that write is then made once more in the new file, and a read leaves the move to the next write). Nothing shows any of it
 on the dashboard yet, and nothing is said to the nick in IRC.
 
 The queue rows now carry the time they were asked for (`queued_at`), which is where the wait comes from; a row saved
 before this has none and is left out of the average. `stats.txt` and `download_counts.json` are unchanged.
+
+### 🐛 A file that was sent at once is not queued again by a repeat (#1086)
+
+The check from #1077 only looked in the nick's queue. A request that found a free slot goes straight to
+`start_dcc_send()` and never gets a queue row, so a second request for the same file a few seconds later was queued
+and the file went out a second time when the first send was over (a third repeat was then caught by the queued
+copy, so it was at most one extra copy per run of repeats, and only when a slot happened to be free). The
+`active_transfers` entry of such a send now carries the path it is sending, and `dcc.is_being_sent_to()` checks it
+next to the queue: the repeat is not added, and the nick is told once, privately, that the file "is already being
+sent to you". Once the send is over the file can be asked for again, as before. No new setting.
 
 ### 🐛 The same file is not queued twice by one nick (#1077)
 
@@ -78,8 +130,8 @@ waiting. `dcc.queued_position_of()` looks for the resolved path in the nick's ow
 folder, and the nick is told once (per file, per two minutes) that it is already queued and at which position. The
 path decides, not the name, so a same-named track of another album (#110) is a different request. A queued
 file keeps its row for the whole send, and a packed `!rar` folder keeps the folder it came from on the row
-(`source_path`), so a repeat of either is still caught while it is being sent. Only a file that started at once
-(a free slot, so it never had a queue row) lets one repeat through behind it. No new setting.
+(`source_path`), so a repeat of either is still caught while it is being sent. A file that started at once (a free
+slot, so it never had a queue row) is covered since #1086. No new setting.
 
 ### 🐛 Startup no longer reads the whole search index to see which lists it holds (#1071)
 
@@ -141,6 +193,14 @@ while it packs - up to `RAR_TIMEOUT` - so the slot stood idle, and since #1032 a
 waiting nick that nothing would dispatch. Now those exits go on to the global sweep, so the freed slot goes to the nick
 that has waited longest. The packed archive is a plain row and waits its turn for a slot. Tests:
 `tests/test_a_slot_freed_next_to_a_pack_is_offered.py`.
+
+Audit 2026-10-02 M1 (#1081): a pack that finishes with every slot busy leaves its archive queued as a row that still says
+`is_temporary_zip`, and every exit of `start_dcc_send()` took that flag to mean "this send holds `rar_inprogress`". When
+such a row was later sent as a plain row, its end cleared the lock another nick's pack was holding and woke a third
+pack, so two `rar` processes ran at once (on the same album, one deleted or appended to the other's archive).
+Ownership is now explicit: `start_dcc_send(..., owns_packer=True)` is passed only by the packer's own handoff, and only
+a send that owns the lock releases it. Tests in `test_rar_archive_lifecycle`, `test_dcc_dispatch_uses_the_live_socket`
+and `test_the_queue_save_never_touches_the_live_dict`.
 
 ### 📦 In the DCCore Chat window, a private conversation is never moved to a channel by itself
 
