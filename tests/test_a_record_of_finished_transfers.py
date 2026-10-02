@@ -450,6 +450,75 @@ class ADamagedFile(Case):
         self.assertEqual(transfer_log.top_nicks(), [])
         self.assertEqual(self.aside(), [], "a read leaves the repair to the next write")
 
+    def damage_past_the_first_page(self):
+        """What a bad sector or a torn copy does: the header and the schema
+        are intact, so the file opens, and the data pages are not (#1087)."""
+        conn = transfer_log._open(config.TRANSFER_LOG_FILE, 5)
+        with conn:
+            for n in range(600):
+                conn.execute("INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name, size,"
+                             " bytes, seconds, speed, waited) VALUES ('sent', ?, 'file', ?, ?, ?, 1000, 1000, 1, 1000, NULL)",
+                             (f"nick{n % 20}", n, f"k{n}", f"Track {n}.mp3"))
+        conn.close()
+        with io.open(config.TRANSFER_LOG_FILE, "r+b") as handle:
+            handle.seek(4 * 4096)
+            size = os.path.getsize(config.TRANSFER_LOG_FILE)
+            handle.write(os.urandom(size - 4 * 4096))
+
+    def test_a_file_damaged_past_its_first_page_is_moved_aside_by_the_write_that_hits_it(self):
+        self.damage_past_the_first_page()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            written = self.sent("After.mp3", nick="nicka")
+
+        self.assertTrue(written)
+        self.assertEqual(len(self.aside()), 1)
+        self.assertIn("is damaged", out.getvalue())
+        self.assertEqual(transfer_log.top_files(), [("After.mp3", 1)])
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_every_write_after_it_goes_into_the_new_file(self):
+        self.damage_past_the_first_page()
+        for name in ("A.mp3", "B.mp3", "C.mp3"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(self.sent(name))
+
+        self.assertEqual(len(self.aside()), 1)
+        self.assertEqual(sorted(name for name, _ in transfer_log.top_files()), ["A.mp3", "B.mp3", "C.mp3"])
+
+    def test_the_damaged_file_is_kept_whole(self):
+        self.damage_past_the_first_page()
+        before = os.path.getsize(config.TRANSFER_LOG_FILE)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.sent("After.mp3")
+        folder = os.path.dirname(config.TRANSFER_LOG_FILE)
+        self.assertEqual(os.path.getsize(os.path.join(folder, self.aside()[0])), before)
+
+    def test_a_full_disk_on_the_write_does_not_move_a_good_file(self):
+        self.sent("Kept.mp3")
+        real = sqlite3.connect
+
+        class Full(sqlite3.Connection):
+            def execute(self, sql, *args):
+                if sql.startswith("INSERT"):
+                    raise sqlite3.OperationalError("database or disk is full")
+                return super().execute(sql, *args)
+
+        with mock.patch.object(sqlite3, "connect", lambda path, **kw: real(path, factory=Full, **kw)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(self.sent("Lost.mp3"))
+
+        self.assertEqual(self.aside(), [])
+        self.assertEqual(transfer_log.top_files(), [("Kept.mp3", 1)])
+
+    def test_a_file_that_cannot_be_started_afresh_is_told_and_does_not_raise(self):
+        self.damage_past_the_first_page()
+        out = io.StringIO()
+        with mock.patch.object(transfer_log, "_move_aside", side_effect=OSError("read-only")), \
+                contextlib.redirect_stdout(out):
+            self.assertFalse(self.sent("After.mp3"))
+        self.assertIn("Could not record the transfer", out.getvalue())
+
     def test_a_file_that_is_only_busy_is_not_moved(self):
         self.sent()
         blocker = sqlite3.connect(config.TRANSFER_LOG_FILE)

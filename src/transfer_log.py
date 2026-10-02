@@ -112,12 +112,25 @@ def _connect(path, timeout, repair=False):
     try:
         return _open(path, timeout)
     except Exception as err:
-        if not (repair and type(err) is sqlite3.DatabaseError and os.path.isfile(path)):
+        if not (repair and _is_damage(err) and os.path.isfile(path)):
             raise
-        aside = _move_aside(path)
-        print(f"[TRANSFER-LOG] {path} is damaged ({err}); it was moved to {aside} and a new record "
-              f"was started. The old file is kept and still holds its nicks.")
+        _start_afresh(path, err)
         return _open(path, timeout)
+
+
+def _is_damage(err):
+    """True for a bare DatabaseError: the file's content is wrong. A locked file or a full disk is a subclass."""
+    return type(err) is sqlite3.DatabaseError
+
+
+def _start_afresh(path, err):
+    aside = _move_aside(path)
+    print(f"[TRANSFER-LOG] {path} is damaged ({err}); it was moved to {aside} and a new record "
+          f"was started. The old file is kept and still holds its nicks.")
+
+
+_INSERT = ("INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name,"
+           " size, bytes, seconds, speed, waited) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
 
 
 def _record(row):
@@ -128,10 +141,21 @@ def _record(row):
         with runtime.transfer_log_lock:
             conn = _connect(path, WRITE_TIMEOUT, repair=True)
             try:
-                with conn:
-                    conn.execute(
-                        "INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name,"
-                        " size, bytes, seconds, speed, waited) VALUES (?,?,?,?,?,?,?,?,?,?,?)", row)
+                try:
+                    with conn:
+                        conn.execute(_INSERT, row)
+                except sqlite3.DatabaseError as err:
+                    # Opening reads only the header and the schema, so a file
+                    # damaged further in opens fine and fails here, on every
+                    # write from then on (#1087). Same remedy as at open: move
+                    # it aside, start a new one, and write this row once more.
+                    if not _is_damage(err):
+                        raise
+                    conn.close()
+                    _start_afresh(path, err)
+                    conn = _open(path, WRITE_TIMEOUT)
+                    with conn:
+                        conn.execute(_INSERT, row)
             finally:
                 conn.close()
         return True
