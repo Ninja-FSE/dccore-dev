@@ -18,6 +18,24 @@ timed out. A row's own Delete did the same.
   `build_fetch_delete_result()` skips the remove for them. A finished or failed twin, or the same file from another
   bot, does not stop it.
 - Tests: `tests/test_clear_spares_a_newer_request.py`.
+### 🐛 Three things the move into src/ and conf/ left pointing at the old places (#1084, #1088, #1089)
+
+Audit 2026-10-02 M4, L3, L4.
+
+- **Windows autostart could not be installed under the new layout (#1084).** `install-autostart.bat` kept the
+  root-only "is it set up" check after #983 gave every other launcher the `conf\` alternatives, so once the first
+  start had moved `settings.conf` and `admin_config.py` into `conf\` it said "not set up yet" and stopped - advice
+  that cannot help, since that start is what moved them. It now checks all four places, like `start-dccore.bat`.
+  `tests/test_the_launchers_find_the_conf_dir.py` covers it, and on Windows runs the real batch file under `cmd.exe`
+  with stand-in `schtasks`/`powershell` on PATH: config in `conf\`, config at the root, and nothing set up.
+- **"Run `python adminchat.py`" named a file that moved into `src/` (#1088).** The password-hash generator is
+  `src/adminchat.py` now; the instructions in `admin_config.py.sample`, `defaults.py` (so `settings.conf.sample`
+  and the Settings help), `setup_check.py`, the dashboard's refusal message, `configure.py`, `ADMIN-CONSOLE.md` and
+  `WINDOWS.md` say so. A test fails on any `python`/`py`/`{platform.python} adminchat.py` left in them.
+- **The upgrade guide's backup command failed and backed up nothing (#1089).** `cp -r data conf data.backup` needs
+  `data.backup` to exist, and before the upgrade that brings `conf/` the config is at the top of the folder. Step 2
+  now makes the folder first and copies the config from either place; a test runs the block in bash on both
+  layouts. Tests: `tests/test_the_layout_points_where_things_are.py`.
 
 ### 📦 Everything the window shows is also written to a log file (#1065, part 1)
 
