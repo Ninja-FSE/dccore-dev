@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The transfer record on the Stats page, and forgetting a nick (#1102)
+
+The record (#1068) has been written since #1069, but nothing read it and nothing called `forget_nick()`. The Stats
+page now has a **Transfer record** section, after the queue.
+
+- **A period** - 24 hours, 7 days, 30 days, all time - picked with four buttons. `GET /api/stats/record?period=`
+  (`build_record_payload()`) answers `transfer_log.summary()`, `top_files()` and `top_nicks()` both ways, every figure
+  raw and as text through `stats_mgr.format_size_human()`/`format_speed()`, the queue wait in seconds under a minute
+  (`format_uptime()` reads 30 seconds as "0 Min"). All time also counts the imported KeepTrack totals, and the page
+  says so. It is asked for when Stats opens and when the period changes - never on the page's few-second poll, since
+  these are queries over every row.
+- **One nick**: **Look up** (`GET /api/stats/record/nick`) shows what it had and gave in the period, with
+  **Forget {nick}** beside it. `POST /api/stats/record/forget` takes `{"nick": ...}` or `{"everyone": true}` -
+  two separate words, so a blank box can never empty the record; only the boolean `true` counts. Both ask first
+  (`window.confirm`, as Clear failed does), and the log line says how many rows went but never the nick.
+- **Export CSV**: `GET /api/stats/record.csv?period=` streams the period's rows oldest first
+  (`transfer_log.iter_rows()`, one at a time, so a large record is never held in memory) with a readable local time.
+  Nicks and file names are other people's text, so a cell starting with `=`, `+`, `-`, `@`, a tab or a carriage
+  return gets a leading apostrophe and a spreadsheet shows it rather than running it.
+- Every nick and file name is set with `textContent`/`title`, never written into markup. `applyTranslations()`
+  learns `data-i18n-aria-label`, and the unused-key guard reads it. The Settings help for `TRANSFER_LOG_FILE` and
+  `INSTALL.md` say where the record is shown and how a nick is forgotten.
+- Tests: `tests/test_the_record_is_on_the_stats_page.py` - the payload per period, the imported totals, one nick,
+  forgetting (a blank or non-boolean body never wipes), the export and its formula cells, the routes logged in and
+  out, and the rendering in node with a nick and a file name that are markup.
+
 ### 📦 KeepTrack's per-nick history comes into the transfer record (#1064)
 
 KeepTrack's `KTData.txt` keeps one line per nick and direction: `Sent|Received`, a host mask, the nick, files, bytes.

@@ -708,6 +708,67 @@
         </table>
       </div>
 
+      <!-- The transfer record (#1102): what transfer_log.py has written for
+           every finished transfer since #1069, for a chosen period, and the
+           way to forget a nick in it. Loaded when Stats opens and when the
+           period changes - not on the page's poll. Every nick and file name
+           is set as text by renderRecord(), never written into this markup. -->
+      <div class="stat-group-label" data-i18n="stats.transferRecord">Transfer record</div>
+      <div class="record-periods" id="record-periods" role="group"
+           data-i18n-aria-label="stats.recordPeriod" aria-label="Period">
+        <button type="button" class="btn btn-small record-period" data-period="day" data-i18n="stats.periodDay">24 hours</button>
+        <button type="button" class="btn btn-small record-period" data-period="week" data-i18n="stats.periodWeek">7 days</button>
+        <button type="button" class="btn btn-small record-period" data-period="month" data-i18n="stats.periodMonth">30 days</button>
+        <button type="button" class="btn btn-small record-period is-active" data-period="all" data-i18n="stats.periodAll">All time</button>
+      </div>
+      <p class="import-status" id="record-status" hidden></p>
+      <div id="record-body" hidden>
+        <div class="stat-row is-wide" id="record-cards"></div>
+        <div class="record-top-grid">
+          <div>
+            <div class="stat-group-label" data-i18n="stats.recordTopFiles">Sent most</div>
+            <div class="table-wrap">
+              <table class="stat-top-table">
+                <thead><tr><th data-i18n="common.file">File</th><th class="col-num" data-i18n="stats.timesSent">Times sent</th></tr></thead>
+                <tbody id="record-top-files"></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="stat-group-label" data-i18n="stats.recordTopSent">Sent to</div>
+            <div class="table-wrap">
+              <table class="stat-top-table record-nick-table">
+                <thead><tr><th data-i18n="stats.nick">Nick</th><th class="col-num" data-i18n="stats.files">Files</th><th class="col-num" data-i18n="common.size">Size</th></tr></thead>
+                <tbody id="record-top-sent"></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="stat-group-label" data-i18n="stats.recordTopReceived">Received from</div>
+            <div class="table-wrap">
+              <table class="stat-top-table record-nick-table">
+                <thead><tr><th data-i18n="stats.nick">Nick</th><th class="col-num" data-i18n="stats.files">Files</th><th class="col-num" data-i18n="common.size">Size</th></tr></thead>
+                <tbody id="record-top-received"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <p class="stat-foot" id="record-imported" hidden data-i18n="stats.recordIncludesImported">All time includes the totals imported from KeepTrack, which have no date.</p>
+
+        <div class="record-nick">
+          <input type="text" class="search-input" id="record-nick-input" maxlength="64" spellcheck="false"
+                 data-i18n-placeholder="stats.recordNickPlaceholder" placeholder="A nick"
+                 data-i18n-aria-label="stats.recordNickPlaceholder" aria-label="A nick">
+          <button type="button" class="btn btn-small" id="record-nick-show" data-i18n="stats.lookUp">Look up</button>
+        </div>
+        <div class="record-nick-result" id="record-nick-result" hidden></div>
+
+        <div class="record-actions">
+          <a class="btn btn-small" id="record-export" href="/api/stats/record.csv?period=all" download data-i18n="stats.exportCsv">Export CSV</a>
+          <button type="button" class="btn btn-small btn-danger" id="record-forget-all" data-i18n="stats.forgetEveryone">Forget everyone&hellip;</button>
+        </div>
+      </div>
+
       <!-- Bringing an OmenServe operator's history across (#69). The numbers
            live in mIRC's own scripts/vars.ini, written by whichever add-ons
            they run - so this reads what is there and skips what is not.

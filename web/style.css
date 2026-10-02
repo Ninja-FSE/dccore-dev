@@ -1927,6 +1927,70 @@ mark.filter-hit {
   margin: 4px 0;
 }
 
+/* The transfer record on the Stats page (#1102). The period buttons read as
+   tabs, so the chosen one is filled like .filelists-list-tab.is-active. */
+.record-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.record-period.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Three tables rather than .stat-top-grid's two; one column on a narrow screen. */
+.record-top-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 900px) {
+  .record-top-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.record-nick-table .col-num {
+  width: 72px;
+}
+
+.record-nick,
+.record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 14px 0;
+}
+
+.record-nick .search-input {
+  max-width: 260px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.record-nick-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.record-nick-result[hidden] {
+  display: none;
+}
+
+.record-nick-result .import-status {
+  margin: 0;
+}
+
 .tool-status.is-error {
   color: var(--danger);
 }

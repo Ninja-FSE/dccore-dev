@@ -378,6 +378,29 @@ def nick_summary(nick, since=None):
     return figures
 
 
+EXPORT_COLUMNS = ("ended_at", "direction", "nick", "kind", "name", "size", "bytes",
+                  "seconds", "speed", "waited")
+
+
+def iter_rows(since=None):
+    """Every row of the record from a Unix time on (all of them with none),
+    oldest first, as tuples in EXPORT_COLUMNS order - for the CSV export
+    (#1102). Read one at a time, so a large record is never held in memory.
+    The imported totals are not rows and are not here."""
+    path = _path()
+    if not path or not os.path.exists(path):
+        return
+    conn = _connect(path, READ_TIMEOUT)
+    try:
+        cursor = conn.execute(
+            f"SELECT {', '.join(EXPORT_COLUMNS)} FROM transfers WHERE ended_at >= ?"
+            " ORDER BY ended_at, id", (since or 0,))
+        for row in cursor:
+            yield row
+    finally:
+        conn.close()
+
+
 def imported_nicks(source):
     """How many nicks a source imported per direction, as {direction: count} (#1064)."""
     return {direction: int(count or 0) for direction, count in _query(

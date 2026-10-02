@@ -69,7 +69,7 @@
     lang: {}, langFallback: {},
     // The last version check and stats payload drawn, redrawn when a
     // language finishes loading (#976).
-    lastVersionInfo: null, lastStats: null,
+    lastVersionInfo: null, lastStats: null, lastRecord: null,
     // What the previewed OmenServe import would write, held between the
     // preview and the confirm so the button sends exactly what was shown -
     // not a second parse that could have moved on from it.
@@ -247,6 +247,19 @@
     ktdataConfirm:         document.getElementById("ktdata-confirm"),
     ktdataApply:           document.getElementById("ktdata-apply"),
     ktdataCancel:          document.getElementById("ktdata-cancel"),
+    recordPeriods:         document.getElementById("record-periods"),
+    recordStatus:          document.getElementById("record-status"),
+    recordBody:            document.getElementById("record-body"),
+    recordCards:           document.getElementById("record-cards"),
+    recordTopFiles:        document.getElementById("record-top-files"),
+    recordTopSent:         document.getElementById("record-top-sent"),
+    recordTopReceived:     document.getElementById("record-top-received"),
+    recordImported:        document.getElementById("record-imported"),
+    recordNickInput:       document.getElementById("record-nick-input"),
+    recordNickShow:        document.getElementById("record-nick-show"),
+    recordNickResult:      document.getElementById("record-nick-result"),
+    recordExport:          document.getElementById("record-export"),
+    recordForgetAll:       document.getElementById("record-forget-all"),
     importApply:           document.getElementById("import-apply"),
     importCancel:          document.getElementById("import-cancel"),
     stTopAlbums:           document.getElementById("st-top-albums"),
@@ -367,7 +380,7 @@
       if (!state.filelistsLoaded) { loadFilelists(); }
     }
     if (name === "settings" && !state.settingsLoaded) { loadSettings(); }
-    if (name === "stats") { loadStats(); }
+    if (name === "stats") { loadStats(); loadRecord(); }
     if (name === "tools") { loadUpdateListSchedule(); }
     // Loaded here rather than in the badge's own handler, so every way into
     // this view draws it - the badge is the usual one, not the only one.
@@ -6160,6 +6173,194 @@
     }).catch(function () { markConnection(false); });
   }
 
+  // ------------------------------------------------------ Transfer record
+  //
+  // What transfer_log.py has written for every finished transfer (#1102).
+  // Asked for when Stats opens and when the period changes, never on the
+  // poll above: these are queries over every row. Nicks and file names are
+  // other people's text, so every one of them goes in as textContent.
+
+  var record = { period: "all" };
+
+  function recordNote(text, isError) {
+    el.recordStatus.hidden = !text;
+    el.recordStatus.textContent = text || "";
+    el.recordStatus.classList.toggle("is-error", !!isError);
+  }
+
+  function recordCell(row, text, numeric) {
+    var cell = document.createElement("td");
+    if (numeric) { cell.className = "col-num"; }
+    cell.textContent = text;
+    if (!numeric) { cell.title = text; }   // the name column truncates
+    row.appendChild(cell);
+  }
+
+  function recordTable(body, rows, columns, emptyText) {
+    body.textContent = "";
+    if (!rows || !rows.length) {
+      var empty = document.createElement("tr");
+      empty.className = "empty-row";
+      var cell = document.createElement("td");
+      cell.colSpan = columns.length;
+      cell.textContent = emptyText;
+      empty.appendChild(cell);
+      body.appendChild(empty);
+      return;
+    }
+    rows.forEach(function (item) {
+      var row = document.createElement("tr");
+      columns.forEach(function (column, index) {
+        recordCell(row, String(column(item)), index > 0);
+      });
+      body.appendChild(row);
+    });
+  }
+
+  function renderRecord(data) {
+    // Kept, so a language that arrives later can redraw it (#976).
+    state.lastRecord = data;
+    if (!data || data.enabled === false) {
+      el.recordBody.hidden = true;
+      recordNote(t("stats.recordOff"), false);
+      return;
+    }
+    recordNote("", false);
+    el.recordBody.hidden = false;
+    var s = data.summary || {};
+    var cards = [
+      [(s.files_sent || 0).toLocaleString(), "stats.recordFilesSent"],
+      [(s.lists_sent || 0).toLocaleString(), "stats.recordListsSent"],
+      [s.bytes_sent_text || "0B", "stats.recordBytesSent"],
+      [s.top_speed_text || "0k/s", "stats.recordTopSpeed"],
+      [s.average_speed_text || "0k/s", "stats.recordAverageSpeed"],
+      [s.queue_wait_text || "—", "stats.recordQueueWait"],
+      [(s.files_received || 0).toLocaleString(), "stats.recordFilesReceived"],
+      [s.bytes_received_text || "0B", "stats.recordBytesReceived"]
+    ];
+    el.recordCards.textContent = "";
+    cards.forEach(function (card) {
+      var box = document.createElement("div");
+      box.className = "stat-card";
+      var value = document.createElement("div");
+      value.className = "stat-value";
+      value.textContent = card[0];
+      var label = document.createElement("div");
+      label.className = "stat-label";
+      label.textContent = t(card[1]);
+      box.appendChild(value);
+      box.appendChild(label);
+      el.recordCards.appendChild(box);
+    });
+    var nickColumns = [
+      function (r) { return r.nick; },
+      function (r) { return (r.files || 0).toLocaleString(); },
+      function (r) { return r.bytes_text; }
+    ];
+    recordTable(el.recordTopFiles, data.top_files,
+                [function (r) { return r.name; }, function (r) { return r.count; }],
+                t("stats.recordEmpty"));
+    recordTable(el.recordTopSent, data.top_sent, nickColumns, t("stats.recordNoNicks"));
+    recordTable(el.recordTopReceived, data.top_received, nickColumns, t("stats.recordNoNicks"));
+    el.recordImported.hidden = !data.includes_imported;
+  }
+
+  function loadRecord() {
+    return fetchJsonAllowingError("/api/stats/record?period=" + encodeURIComponent(record.period))
+      .then(function (res) {
+        if (!res.ok) {
+          recordNote(t("stats.recordCouldNotLoad").replace("{error}",
+            (res.data && res.data.error) || ("HTTP " + res.status)), true);
+          return;
+        }
+        renderRecord(res.data);
+      })
+      .catch(function (err) {
+        recordNote(t("stats.recordCouldNotLoad").replace("{error}", err.message), true);
+      });
+  }
+
+  function chooseRecordPeriod(period) {
+    record.period = period;
+    el.recordPeriods.querySelectorAll(".record-period").forEach(function (button) {
+      button.classList.toggle("is-active", button.getAttribute("data-period") === period);
+    });
+    el.recordExport.href = "/api/stats/record.csv?period=" + encodeURIComponent(period);
+    el.recordNickResult.hidden = true;
+    loadRecord();
+  }
+
+  function renderRecordNick(data) {
+    var box = el.recordNickResult;
+    box.textContent = "";
+    var f = data.figures || {};
+    var line = document.createElement("p");
+    line.className = "import-status";
+    line.textContent = data.found
+      ? t("stats.recordNickLine").replace("{nick}", data.nick)
+          .replace("{sent}", (f.files_sent || 0).toLocaleString())
+          .replace("{sentSize}", f.bytes_sent_text || "0B")
+          .replace("{lists}", (f.lists_sent || 0).toLocaleString())
+          .replace("{received}", (f.files_received || 0).toLocaleString())
+          .replace("{receivedSize}", f.bytes_received_text || "0B")
+      : t("stats.recordNickUnknown").replace("{nick}", data.nick);
+    box.appendChild(line);
+    // Offered whether or not this period holds the nick: forgetting is for
+    // all of it, and another period may.
+    var forget = document.createElement("button");
+    forget.type = "button";
+    forget.className = "btn btn-small btn-danger record-forget-nick";
+    forget.textContent = t("stats.forgetNick").replace("{nick}", data.nick);
+    forget.addEventListener("click", function () { forgetRecord({ nick: data.nick }); });
+    box.appendChild(forget);
+    box.hidden = false;
+  }
+
+  function lookUpRecordNick() {
+    var nick = el.recordNickInput.value.trim();
+    if (!nick) { return; }
+    fetchJsonAllowingError("/api/stats/record/nick?nick=" + encodeURIComponent(nick) +
+                           "&period=" + encodeURIComponent(record.period))
+      .then(function (res) {
+        if (!res.ok) {
+          recordNote((res.data && res.data.error) || ("HTTP " + res.status), true);
+          return;
+        }
+        recordNote("", false);
+        renderRecordNick(res.data);
+      });
+  }
+
+  // Asked first, as Clear failed is: nothing about a forget can be undone.
+  function forgetRecord(what) {
+    var question = what.everyone
+      ? t("stats.confirmForgetEveryone")
+      : t("stats.confirmForgetNick").replace("{nick}", what.nick);
+    if (!window.confirm(question)) { return; }
+    return postJson("/api/stats/record/forget", what).then(function (res) {
+      if (!res.ok) {
+        recordNote((res.data && res.data.error) || ("HTTP " + res.status), true);
+        return;
+      }
+      el.recordNickResult.hidden = true;
+      return loadRecord().then(function () {
+        recordNote((what.everyone ? t("stats.forgotEveryone") : t("stats.forgotNick"))
+          .replace("{nick}", res.data.nick || "")
+          .replace("{count}", (res.data.removed || 0).toLocaleString()), false);
+      });
+    });
+  }
+
+  el.recordPeriods.addEventListener("click", function (evt) {
+    var button = evt.target.closest(".record-period");
+    if (button) { chooseRecordPeriod(button.getAttribute("data-period")); }
+  });
+  el.recordNickShow.addEventListener("click", lookUpRecordNick);
+  el.recordNickInput.addEventListener("keydown", function (evt) {
+    if (evt.key === "Enter") { lookUpRecordNick(); }
+  });
+  el.recordForgetAll.addEventListener("click", function () { forgetRecord({ everyone: true }); });
+
   // -------------------------------------------------------------- Console
   //
   // Two sources feed the same on-screen log: the ambient debug stream,
@@ -6459,6 +6660,9 @@
     document.querySelectorAll("[data-i18n-title]").forEach(function (node) {
       node.title = t(node.getAttribute("data-i18n-title"));
     });
+    document.querySelectorAll("[data-i18n-aria-label]").forEach(function (node) {
+      node.setAttribute("aria-label", t(node.getAttribute("data-i18n-aria-label")));
+    });
     // The active view's header is set as text in activateView() rather
     // than through data-i18n, since which view is current decides it -
     // redone here so a language change updates it without a re-navigation.
@@ -6529,6 +6733,7 @@
       // a language switch left it, and the Stats cards, in the old one.
       if (state.lastVersionInfo) { renderVersion(state.lastVersionInfo); }
       if (state.lastStats) { renderStats(state.lastStats); }
+      if (state.lastRecord) { renderRecord(state.lastRecord); }
     });
   }
 
