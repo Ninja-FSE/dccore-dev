@@ -4,6 +4,27 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 KeepTrack's per-nick history comes into the transfer record (#1064)
+
+KeepTrack's `KTData.txt` keeps one line per nick and direction: `Sent|Received`, a host mask, the nick, files, bytes.
+`omenserve_import.read_ktdata()` reads it into one row per lower-cased nick and direction - summed, since KeepTrack
+matched a line by nick *or* host and so could give one nick several - and counts every line it cannot use by why (not
+five fields, neither Sent nor Received, not a nick, not a number, out of range). **The host column is read past and
+never kept**: the record stores nicks, not hosts.
+
+- `transfer_log.import_nicks()` writes the rows into #1062's `imported` table, replacing an earlier KeepTrack per-nick
+  import (under `secure_delete`, the WAL emptied after), with KeepTrack's start date when the totals import brought
+  one. `top_nicks()` and `nick_summary()` add each nick's imported figures for all time and leave them out of a
+  period; `forget_nick()` already removes them (#1062).
+- The Stats page has **Choose KTData.txt**, after the `vars.ini` import: `POST /api/stats/import-ktdata/preview` shows
+  how many nicks per direction, their totals, the top ten, the lines skipped and why, and whether an earlier import
+  will be replaced; `POST /api/stats/import-ktdata` reads the text again rather than trusting the preview, and writes
+  it. Refused with the record off, and for text past 8 MB (the app's own body limit).
+
+Tests: `tests/test_keeptrack_per_nick_history_is_imported.py` (the parse, the host never in the file's bytes, the
+rankings for all time and for a period, re-import, the start date, forgetting a nick, the routes, and the page's
+preview under node).
+
 ### 📦 KeepTrack's lifetime totals come in with the OmenServe import (#1062)
 
 An operator ran KeepTrack 6.2 (^OmeN^'s send/receive counter) for years. Its totals are mIRC variables in the same

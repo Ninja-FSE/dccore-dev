@@ -241,6 +241,12 @@
     importWarning:         document.getElementById("import-warning"),
     importConfirm:         document.getElementById("import-confirm"),
     importSource:          document.getElementById("import-source"),
+    ktdataFile:            document.getElementById("ktdata-file"),
+    ktdataStatus:          document.getElementById("ktdata-status"),
+    ktdataPreview:         document.getElementById("ktdata-preview"),
+    ktdataConfirm:         document.getElementById("ktdata-confirm"),
+    ktdataApply:           document.getElementById("ktdata-apply"),
+    ktdataCancel:          document.getElementById("ktdata-cancel"),
     importApply:           document.getElementById("import-apply"),
     importCancel:          document.getElementById("import-cancel"),
     stTopAlbums:           document.getElementById("st-top-albums"),
@@ -3743,6 +3749,106 @@
     }).catch(function (err) {
       el.importApply.disabled = false;
       showImportStatus(t("stats.importFailed").replace("{error}", err.message), true);
+    });
+  });
+
+  // ---------------------------- KeepTrack's per-nick history (#1064)
+
+  // The file's text goes to the bot's own dashboard, which reads it and keeps
+  // nicks and totals only - never the hosts in it. Preview first, then the
+  // import sends the same text again: the server reads it afresh rather than
+  // trusting a figure the page hands back.
+  var ktdata = { text: null };
+
+  function showKTDataStatus(text, isError) {
+    el.ktdataStatus.hidden = !text;
+    el.ktdataStatus.textContent = text || "";
+    el.ktdataStatus.classList.toggle("is-error", !!isError);
+  }
+
+  function resetKTDataPreview() {
+    ktdata.text = null;
+    el.ktdataPreview.hidden = true;
+    el.ktdataPreview.innerHTML = "";
+    el.ktdataConfirm.hidden = true;
+  }
+
+  function ktdataLine(text) {
+    var line = document.createElement("p");
+    line.textContent = text;
+    el.ktdataPreview.appendChild(line);
+  }
+
+  function renderKTDataPreview(payload) {
+    var figures = payload.figures || {};
+    var sent = figures.sent || {}, received = figures.received || {};
+    el.ktdataPreview.innerHTML = "";
+    ktdataLine(t("stats.ktdataSummary")
+      .replace("{sentNicks}", Number(sent.nicks || 0).toLocaleString())
+      .replace("{sentFiles}", Number(sent.files || 0).toLocaleString())
+      .replace("{receivedNicks}", Number(received.nicks || 0).toLocaleString())
+      .replace("{receivedFiles}", Number(received.files || 0).toLocaleString()));
+    [["sent", "stats.ktdataTopSent"], ["received", "stats.ktdataTopReceived"]].forEach(function (pair) {
+      var top = (figures[pair[0]] || {}).top || [];
+      if (!top.length) { return; }
+      ktdataLine(t(pair[1]) + " " + top.map(function (row) {
+        return row.nick + " (" + Number(row.files).toLocaleString() + ")";
+      }).join(", "));
+    });
+    var skipped = payload.skipped || {};
+    var reasons = Object.keys(skipped);
+    if (reasons.length) {
+      ktdataLine(t("stats.ktdataSkipped")
+        .replace("{count}", reasons.reduce(function (n, r) { return n + skipped[r]; }, 0))
+        .replace("{reasons}", reasons.map(function (r) { return r + " (" + skipped[r] + ")"; }).join(", ")));
+    }
+    var replaces = payload.replaces || {};
+    if ((replaces.sent || 0) + (replaces.received || 0) > 0) {
+      ktdataLine(t("stats.ktdataReplaces"));
+    }
+    el.ktdataPreview.hidden = false;
+    el.ktdataConfirm.hidden = !((sent.nicks || 0) + (received.nicks || 0));
+  }
+
+  el.ktdataFile.addEventListener("change", function () {
+    var file = el.ktdataFile.files && el.ktdataFile.files[0];
+    if (!file) { return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var text = String(reader.result || "");
+      postJson("/api/stats/import-ktdata/preview", { text: text }).then(function (res) {
+        if (!res.ok) {
+          resetKTDataPreview();
+          showKTDataStatus((res.data && res.data.error) || ("HTTP " + res.status), true);
+          return;
+        }
+        ktdata.text = text;
+        showKTDataStatus("");
+        renderKTDataPreview(res.data);
+      });
+    };
+    reader.onerror = function () { showKTDataStatus(t("stats.couldNotReadThatFile"), true); };
+    reader.readAsText(file);
+    el.ktdataFile.value = "";
+  });
+
+  el.ktdataCancel.addEventListener("click", function () {
+    resetKTDataPreview();
+    showKTDataStatus("");
+  });
+
+  el.ktdataApply.addEventListener("click", function () {
+    if (ktdata.text === null) { return; }
+    el.ktdataApply.disabled = true;
+    postJson("/api/stats/import-ktdata", { text: ktdata.text }).then(function (res) {
+      el.ktdataApply.disabled = false;
+      if (!res.ok) {
+        showKTDataStatus((res.data && res.data.error) || ("HTTP " + res.status), true);
+        return;
+      }
+      resetKTDataPreview();
+      showKTDataStatus(t("stats.ktdataImported").replace("{rows}", Number(res.data.imported || 0).toLocaleString()));
+      loadStats();
     });
   });
 

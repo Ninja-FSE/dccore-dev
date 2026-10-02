@@ -227,6 +227,65 @@ def _as_int(raw):
         return None
 
 
+# KEEPTRACK'S PER-NICK HISTORY (#1064). KTData.txt holds one line per nick and
+# direction, tab-separated, as KT.Complete writes it:
+#
+#     <Sent|Received> TAB <host mask> TAB <nick> TAB <files> TAB <bytes>
+#
+# The host mask is read past and never kept - the transfer record stores
+# nicks, not hosts (#1068). One nick can have several lines (KeepTrack matched
+# a line by nick OR host, so a nick seen from two hosts got two), and they are
+# summed per lower-cased nick. A line that is not that shape is counted and
+# said, never imported.
+
+# RFC 1459's nick characters; IRC lower-casing of [ ] \ ~ is left alone, as the
+# rest of DCCore does.
+_NICK_RE = re.compile(r"^[A-Za-z\[\]\\`_^{|}][A-Za-z0-9\[\]\\`_^{|}-]{0,29}$")
+KTDATA_DIRECTIONS = {"sent": "sent", "received": "received"}
+
+
+def read_ktdata(text, max_files=2 ** 63 - 1, max_bytes=1 << 50):
+    """What a KTData.txt offers: {"rows": [(direction, nick, files, bytes)],
+    "skipped": {reason: count}, "lines": n}. Rows are one per lower-cased nick
+    and direction, summed; the host column is never in them."""
+    sums = {}
+    skipped = {}
+    lines = 0
+
+    def skip(reason):
+        skipped[reason] = skipped.get(reason, 0) + 1
+
+    for line in str(text or "").splitlines():
+        if not line.strip():
+            continue
+        lines += 1
+        fields = line.rstrip("\r").split("\t")
+        if len(fields) != 5:
+            skip("not five tab-separated fields")
+            continue
+        direction = KTDATA_DIRECTIONS.get(fields[0].strip().lower())
+        if direction is None:
+            skip("neither Sent nor Received")
+            continue
+        nick = fields[2].strip()
+        if not _NICK_RE.match(nick):
+            skip("not a nick")
+            continue
+        try:
+            files, size = int(fields[3].strip()), int(fields[4].strip())
+        except ValueError:
+            skip("a count that is not a whole number")
+            continue
+        if files < 0 or size < 0 or files > max_files or size > max_bytes:
+            skip("a count out of range")
+            continue
+        key = (direction, nick.lower())
+        held = sums.get(key, (0, 0))
+        sums[key] = (held[0] + files, held[1] + size)
+    rows = [(d, n, f, b) for (d, n), (f, b) in sorted(sums.items()) if f or b]
+    return {"rows": rows, "skipped": skipped, "lines": lines}
+
+
 def read_install(text):
     """What an operator's vars.ini offers, ready to preview.
 
