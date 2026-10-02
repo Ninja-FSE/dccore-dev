@@ -18,6 +18,7 @@ timed out. A row's own Delete did the same.
   `build_fetch_delete_result()` skips the remove for them. A finished or failed twin, or the same file from another
   bot, does not stop it.
 - Tests: `tests/test_clear_spares_a_newer_request.py`.
+
 ### 🐛 Three things the move into src/ and conf/ left pointing at the old places (#1084, #1088, #1089)
 
 Audit 2026-10-02 M4, L3, L4.
