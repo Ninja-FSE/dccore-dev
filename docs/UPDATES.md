@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 Resend commands works when the bot is connected but its channel refused it (#1085)
+
+Audit 2026-10-02 M5. The dashboard's **Resend commands** (#1066) asked whether the bot had joined its channel, and said
+"The bot is not connected" when it had not. On Undernet that is the very case the button is for: with a +r channel
+and an X login that went nowhere, the JOIN gets a 477, the channel is never joined, and sending the login again is the
+fix - but the only way left was a full reconnect.
+
+- `delayed_join()` now calls `on_connect.mark_sent(epoch)` once the on-connect commands are out, before the JOIN, and
+  the route asks `on_connect.sent_on(config.connection_epoch)` instead of `bot_joined_channel`. A press while the link
+  is still registering is still refused, now as "still connecting", so the commands are not sent twice; a reconnect
+  takes a new epoch, so the last link's mark never counts. "Not connected" is only said when there is no socket.
+- Tests: `tests/test_on_connect_commands_are_checked.py`.
+
 ### 🐛 Clear failed no longer cancels a newer request for the same file (#1083)
 
 Audit 2026-10-02 M3. Clear failed (#1047) sends `@bot-remove <file>` for each old "no response" row, so the other bot
@@ -37,6 +50,7 @@ Audit 2026-10-02 M4, L3, L4.
   `data.backup` to exist, and before the upgrade that brings `conf/` the config is at the top of the folder. Step 2
   now makes the folder first and copies the config from either place; a test runs the block in bash on both
   layouts. Tests: `tests/test_the_layout_points_where_things_are.py`.
+
 
 ### 📦 Everything the window shows is also written to a log file (#1065, part 1)
 

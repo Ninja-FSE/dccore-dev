@@ -3615,8 +3615,15 @@ def build_on_connect_resend_result():
         return 400, {"error": "No on-connect commands are saved."}
     oserve = sys.modules.get("oserve")
     sock = getattr(oserve, "irc_connection", None) if oserve else None
-    if sock is None or not getattr(config, "bot_joined_channel", False):
+    if sock is None:
         return 409, {"error": "The bot is not connected, so nothing was sent."}
+    # Not whether the channel is joined (#1085): a +r channel refuses the bot
+    # exactly when the X login did not take, and sending the login again is
+    # what this button is for. Only that this connection has sent its own,
+    # so a press while it is still registering does not send them twice.
+    if not on_connect.sent_on(getattr(config, "connection_epoch", None)):
+        return 409, {"error": "The bot is still connecting; its on-connect "
+                              "commands are about to go out, so nothing was sent."}
     try:
         sent = on_connect.resend_now(sock, getattr(config, "NICKNAME", ""))
     except Exception as err:
