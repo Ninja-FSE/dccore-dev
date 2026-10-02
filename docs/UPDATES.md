@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 Clear failed no longer cancels a newer request for the same file (#1083)
+
+Audit 2026-10-02 M3. Clear failed (#1047) sends `@bot-remove <file>` for each old "no response" row, so the other bot
+lets go of a request that may still be sitting in its queue. The remove is matched by name there and takes every entry
+of ours for that file - so when "Download again", or asking again from the list, had a newer row waiting on the same
+bot and file, clearing the old row cancelled the new request too, and it sat queued here with nothing coming until it
+timed out. A row's own Delete did the same.
+
+- `dcc_fetch.another_row_wants_locked()` says whether a row still waiting (pending, offered, queued, listening,
+  receiving) asks the same bot for the same file, comparing names the way the other bot does (spaces as underscores,
+  any case). `build_fetch_clear_result()` drops those files from the removes it sends, still under the lock, and
+  `build_fetch_delete_result()` skips the remove for them. A finished or failed twin, or the same file from another
+  bot, does not stop it.
+- Tests: `tests/test_clear_spares_a_newer_request.py`.
+
 ### 📦 Everything the window shows is also written to a log file (#1065, part 1)
 
 What the bot said was gone with its window, and #1065 goes on to let it run with no window at all. Every console line

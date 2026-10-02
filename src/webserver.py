@@ -2357,6 +2357,9 @@ def build_fetch_delete_result(request_id, only_states=None):
         asked_for = row.get("requested_filename") or row.get("filename")
         del config.fetch_queue[request_id]
         never_sent = dcc_fetch.take_back_unsent_request(row)
+        if at_the_bot and dcc_fetch.another_row_wants_locked(config.fetch_queue, bot, asked_for):
+            # Another row still waits on the same file there (#1083).
+            at_the_bot = False
 
     removed_at_bot = False
     if at_the_bot and not never_sent:
@@ -2430,6 +2433,10 @@ def build_fetch_clear_result(payload):
             if (row.get("state") == "failed" and row.get("reason") == "no response"
                     and row.get("request_type", "file") == "file" and not never_sent):
                 still_held.append((row.get("bot"), row.get("requested_filename") or row.get("filename")))
+        # Never for a file a newer row still waits on there (#1083): the
+        # remove would take that request's place too.
+        still_held = [(bot, asked_for) for bot, asked_for in still_held
+                      if not dcc_fetch.another_row_wants_locked(queue, bot, asked_for)]
     for bot, asked_for in still_held:
         dcc_fetch.drop_our_request_at(bot, asked_for)
     if doomed:
