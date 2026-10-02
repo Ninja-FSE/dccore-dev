@@ -219,6 +219,11 @@ rehash_lock = threading.Lock()
 # two callers both believe they hold it.
 list_index_lock = threading.Lock()
 
+# transfer_log.py's database (#1068). One writer at a time, so two transfers
+# ending together never meet a locked file; here, not in that module, for the
+# reason every other lock in this file is.
+transfer_log_lock = threading.Lock()
+
 # list.count_request_lines()'s cache. Same reason as every other lock here:
 # list.py is reloaded by !rehash, and a lock constructed there would be a new
 # object after every reload while a counter mid-read still held the old one -
