@@ -149,6 +149,55 @@ class AFolderAlreadyWaiting(Case):
         self.assertEqual(len(config.dcc_queue.get("dave", [])), 2)
 
 
+class AFolderThatHasBeenPacked(Case):
+    """The packer replaces the row's path with the archive (dcc.py,
+    "next_file['path'] = target_rar_path"), so a repeat !rar of the folder no
+    longer matched and queued a second pack of the whole album."""
+
+    def pack(self):
+        """What the packer does to the head row when rar has finished."""
+        row = config.dcc_queue["dave"][0]
+        row["source_path"] = row.get("source_path") or row.get("path")
+        row["path"] = os.path.join(self.tree.root, "tmp_zip", "Black Album (1991).rar")
+        row["file"] = "Black Album (1991).rar"
+        row["is_unpacked_rar_folder"] = False
+
+    def test_a_repeat_while_the_archive_is_being_sent_is_still_a_repeat(self):
+        self.request(ALBUM)
+        self.pack()
+        self.request(ALBUM)
+
+        self.assertEqual(len(config.dcc_queue["dave"]), 1)
+        told = self.notices("is already in your personal queue")
+        self.assertEqual(len(told), 1, told)
+        self.assertIn("position #1", told[0])
+
+    def test_the_place_is_found_through_the_folder_it_came_from(self):
+        self.request(ALBUM)
+        folder = config.dcc_queue["dave"][0]["path"]
+        self.pack()
+
+        self.assertEqual(dcc.queued_position_of("dave", folder), 1)
+        self.assertIsNone(dcc.queued_position_of("dave", config.dcc_queue["dave"][0]["path"]),
+                          "the archive is not what anybody asks for")
+
+    def test_the_folder_is_kept_in_the_queue_file_with_the_row(self):
+        import json
+        self.request(ALBUM)
+        self.pack()
+
+        row = json.loads(json.dumps(config.dcc_queue["dave"]))[0]
+        self.assertEqual(row["source_path"], os.path.join(self.tree.music, "Metallica", "Black Album (1991)"))
+
+    def test_the_packer_keeps_the_folder_before_it_overwrites_the_path(self):
+        """Pinned in the source: the real pack needs rar. The row must say
+        where it came from before `path` becomes the archive."""
+        import re
+        body = feed.source("dcc.py")
+        match = re.search(r"next_file\['source_path'\] = .*\n\s*next_file\['path'\] = target_rar_path", body)
+        self.assertIsNotNone(match, "the packer overwrites path without keeping the folder")
+
+
 class ThePathDecides(Case):
     def put(self, *paths):
         config.dcc_queue["dave"] = [{"file": "Intro.flac", "path": path} for path in paths]

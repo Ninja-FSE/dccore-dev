@@ -658,11 +658,14 @@ def queued_position_of(user_key, path):
     """The place (1-based) `path` already holds in this nick's own queue, or None. Caller holds queue_lock.
 
     The path decides, not the name: two albums can hold a track with the same
-    file name (#110), and asking for the second one is not asking twice.
+    file name (#110), and asking for the second one is not asking twice. A
+    packed folder is found by the folder it was packed from (`source_path`),
+    because the packer replaces the row's `path` with the archive.
     """
     wanted = os.path.normcase(os.path.normpath(str(path)))
     for place, row in enumerate(config.dcc_queue.get(user_key, []), start=1):
-        if os.path.normcase(os.path.normpath(str(row.get("path") or ""))) == wanted:
+        held = row.get("source_path") or row.get("path") or ""
+        if os.path.normcase(os.path.normpath(str(held))) == wanted:
             return place
     return None
 
@@ -1738,6 +1741,10 @@ def check_queue_and_send(irc_sock, completed_user):
                         final_size = os.path.getsize(target_rar_path)
                         print(f"[LINEAR RAR] The archive is settled on disk: {final_size:,} bytes")
                         
+                        # The folder it was packed from stays on the row: a
+                        # repeat !rar of it is still a repeat while the
+                        # archive is being sent (#1077).
+                        next_file['source_path'] = next_file.get('source_path') or next_file.get('path')
                         next_file['path'] = target_rar_path
                         next_file['file'] = rar_filename
                         next_file['is_unpacked_rar_folder'] = False

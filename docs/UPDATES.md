@@ -11,8 +11,10 @@ every copy was sent in turn: on a live bot, a queue filled with copies of one mu
 seconds. File requests are still not metered (#888); the queue simply no longer takes what that nick already has
 waiting. `dcc.queued_position_of()` looks for the resolved path in the nick's own queue, for a file and for a `!rar`
 folder, and the nick is told once (per file, per two minutes) that it is already queued and at which position. The
-path decides, not the name, so a same-named track of another album (#110) is a different request. The row being sent
-right now is not in the queue, so one repeat behind it is still allowed. No new setting.
+path decides, not the name, so a same-named track of another album (#110) is a different request. A queued
+file keeps its row for the whole send, and a packed `!rar` folder keeps the folder it came from on the row
+(`source_path`), so a repeat of either is still caught while it is being sent. Only a file that started at once
+(a free slot, so it never had a queue row) lets one repeat through behind it. No new setting.
 
 ### 🐛 Startup no longer reads the whole search index to see which lists it holds (#1071)
 
