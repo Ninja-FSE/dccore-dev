@@ -671,6 +671,22 @@ def queued_position_of(user_key, path):
     return None
 
 
+def is_being_sent_to(user_key, path):
+    """True when a send of `path` to this nick is running and has no queue row. Caller holds queue_lock.
+
+    A request that found a free slot goes straight to start_dcc_send() and
+    never gets a row (#1086), so queued_position_of() cannot see it; its
+    active_transfers entry carries the path instead.
+    """
+    wanted = os.path.normcase(os.path.normpath(str(path)))
+    for tx in config.active_transfers:
+        held = tx.get("path")
+        if held and str(tx.get("user", "")).lower() == user_key \
+                and os.path.normcase(os.path.normpath(str(held))) == wanted:
+            return True
+    return False
+
+
 def start_waiting(user_key):
     """A nick with nothing queued has just queued its first file: its wait begins now. Caller holds queue_lock."""
     if not config.dcc_queue.get(user_key):
@@ -3187,6 +3203,10 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 print(f"[DCC QUEUE] {user} asked again for {file_name!r}: already queued at #{already_at}, not added again.")
                 announce.send_dcc_already_queued_notice(user, file_name, already_at)
                 return
+            if is_being_sent_to(user_key, full_path):
+                print(f"[DCC QUEUE] {user} asked again for {file_name!r}: it is being sent to them now, not added again.")
+                announce.send_dcc_already_queued_notice(user, file_name, None)
+                return
 
             total_global_queued = get_total_queued_count()
             user_queued_count = len(config.dcc_queue.get(user_key, []))
@@ -3225,7 +3245,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
 
                 next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False,
                                   "queued_at": time.time()}
-                config.active_transfers.append({"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name})
+                config.active_transfers.append({"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name,
+                                               "path": full_path})
             else:
                 # This user already has a track running; the row goes to dcc_queue.txt
                 start_waiting(user_key)

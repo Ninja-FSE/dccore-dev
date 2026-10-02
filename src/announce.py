@@ -907,7 +907,8 @@ def send_dcc_error(user, error_type):
         oserve.queue_message(user, msg)
 
 def send_dcc_already_queued_notice(user, file_name, position):
-    """Tell a nick that what it asked for is already in its own queue (#1077).
+    """Tell a nick that what it asked for is already in its own queue (#1077),
+    or, with no position, that it is already being sent to them (#1086).
 
     Said once per file per QUEUE_FULL_REPEAT_SECONDS, like the full-queue
     refusals: a silent refusal reads as the bot ignoring them, but a line back
@@ -921,7 +922,10 @@ def send_dcc_already_queued_notice(user, file_name, position):
         return
     if oserve:
         def _build(shown_name):
-            text = f"{shown_name} is already in your personal queue at position #{position}."
+            if position is None:
+                text = f"{shown_name} is already being sent to you."
+            else:
+                text = f"{shown_name} is already in your personal queue at position #{position}."
             return f"NOTICE {user} :{config.C_BOLD}{text}{config.C_RESET}\r\n"
 
         oserve.queue_message(user, fit_irc_line(_build, file_name))

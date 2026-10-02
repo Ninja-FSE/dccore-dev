@@ -75,6 +75,16 @@ on the dashboard yet, and nothing is said to the nick in IRC.
 The queue rows now carry the time they were asked for (`queued_at`), which is where the wait comes from; a row saved
 before this has none and is left out of the average. `stats.txt` and `download_counts.json` are unchanged.
 
+### 🐛 A file that was sent at once is not queued again by a repeat (#1086)
+
+The check from #1077 only looked in the nick's queue. A request that found a free slot goes straight to
+`start_dcc_send()` and never gets a queue row, so a second request for the same file a few seconds later was queued
+and the file went out a second time when the first send was over (a third repeat was then caught by the queued
+copy, so it was at most one extra copy per run of repeats, and only when a slot happened to be free). The
+`active_transfers` entry of such a send now carries the path it is sending, and `dcc.is_being_sent_to()` checks it
+next to the queue: the repeat is not added, and the nick is told once, privately, that the file "is already being
+sent to you". Once the send is over the file can be asked for again, as before. No new setting.
+
 ### 🐛 The same file is not queued twice by one nick (#1077)
 
 One nick asking for the same file again and again got a new row in its queue each time, up to `MAX_USER_QUEUE`, and
@@ -84,8 +94,8 @@ waiting. `dcc.queued_position_of()` looks for the resolved path in the nick's ow
 folder, and the nick is told once (per file, per two minutes) that it is already queued and at which position. The
 path decides, not the name, so a same-named track of another album (#110) is a different request. A queued
 file keeps its row for the whole send, and a packed `!rar` folder keeps the folder it came from on the row
-(`source_path`), so a repeat of either is still caught while it is being sent. Only a file that started at once
-(a free slot, so it never had a queue row) lets one repeat through behind it. No new setting.
+(`source_path`), so a repeat of either is still caught while it is being sent. A file that started at once (a free
+slot, so it never had a queue row) is covered since #1086. No new setting.
 
 ### 🐛 Startup no longer reads the whole search index to see which lists it holds (#1071)
 
