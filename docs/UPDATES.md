@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 A console-log rotation refused partway changes nothing (#1103)
+
+Found in the re-review of #1073. The current file was already moved aside first, but if a shift of the OLD files was
+then refused partway (a viewer holding `.1`), the files above it had already moved up one step; the current file went
+back, and the next try, another `CONSOLE_LOG_MAX_MB` later, shifted them again over the oldest - one old log lost per
+retry while an old one was held open.
+
+- `_ConsoleLog._rotate_locked()` moves the oldest (`.KEEP`) aside first, so every shift goes into a free name and
+  nothing is overwritten; each completed move is remembered, and a refused one undoes them newest first before the
+  current file goes back. The oldest is deleted only once the whole rotation has worked.
+- Tests: three more in `tests/test_a_log_file_beside_the_console.py` - the reproduction from the issue (`KEEP` 5,
+  `.1` held, three tries), the same with `KEEP` full, and the rotation once the file is let go.
+
 ### 📦 Everything the window shows is also written to a log file (#1065, part 1)
 
 What the bot said was gone with its window, and #1065 goes on to let it run with no window at all. Every console line
