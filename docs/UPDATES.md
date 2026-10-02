@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 A list from a bot whose nick is only symbols is found in the search index (#1091)
+
+Audit 2026-10-02 L6. The search index tokenises with unicode61, which keeps letters and digits and splits on everything
+else, so a nick made only of IRC's special characters - `^_^`, `[_]`, `|-|` - is no phrase at all: `bot:"^_^"` matched
+no row, held or not. Since #1072 asks the index that way at startup, such a list was taken as missing, read from disk
+and written into the index again on every start; and the filter bar, which asks the same way, greyed it out as holding
+no match.
+
+- `list_index._has_tokens()` says whether a name has a letter or digit. `_holds_rows_for()` asks a name without one
+  with `bot = ?` alone, and `bots_with_a_match()` drops the bot phrase from its MATCH for it and lets the equality
+  decide. That is a scan of the table, but only for those names; every other name still asks the index.
+- Tests: `tests/test_symbol_only_nicks_are_found_in_the_index.py`.
+
 ### 📦 Everything the window shows is also written to a log file (#1065, part 1)
 
 What the bot said was gone with its window, and #1065 goes on to let it run with no window at all. Every console line
