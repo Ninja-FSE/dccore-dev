@@ -906,6 +906,27 @@ def send_dcc_error(user, error_type):
     if oserve:
         oserve.queue_message(user, msg)
 
+def send_dcc_already_queued_notice(user, file_name, position):
+    """Tell a nick that what it asked for is already in its own queue (#1077).
+
+    Said once per file per QUEUE_FULL_REPEAT_SECONDS, like the full-queue
+    refusals: a silent refusal reads as the bot ignoring them, but a line back
+    for every repeat is what a pasted run of the same request would turn into
+    a flood of notices. The memory is dropped when something of theirs queues
+    (forget_queue_full_notice), so a later repeat is news again.
+    """
+    import sys
+    oserve = sys.modules.get('oserve')
+    if _already_told_queue_full(user, f"already_queued:{os.path.normcase(str(file_name))}"):
+        return
+    if oserve:
+        def _build(shown_name):
+            text = f"{shown_name} is already in your personal queue at position #{position}."
+            return f"NOTICE {user} :{config.C_BOLD}{text}{config.C_RESET}\r\n"
+
+        oserve.queue_message(user, fit_irc_line(_build, file_name))
+
+
 def send_dcc_queue_notice(user, file_name, position, channel=None):
     """Send the user their queue position privately, in the same colour theme."""
     import sys
