@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: pressing Resend commands, or a Save that was refused, put the saved on-connect commands back over what you had typed.** What you type now stays in the box until it is saved.
 - **Fixed: Resend commands said "not connected" when the bot was connected but its channel would not let it in.** On Undernet that happens when the X login did not take - which is exactly when you want to send it again. It works now whether the channel was joined or not.
 - **Fixed: Clear failed, or deleting an old "no response" row, could cancel a newer request for the same file at the other bot.** It now leaves that bot alone while another request for the same file is still waiting there.
 - **Fixed: on Windows, `install-autostart.bat` said "not set up yet" on every install since the settings moved into `conf\`.** It finds them there now. Also: the instructions for making the admin console password now say `python src/adminchat.py`, and the upgrade guide's backup command works (it failed and copied nothing).

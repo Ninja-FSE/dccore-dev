@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 The on-connect box keeps what was typed until it is saved (#1090)
+
+Audit 2026-10-02 L5. Settings > Identity & network rebuilds its panel for every note it shows, and the on-connect box
+was then filled from the **saved** commands. Pressing **Resend commands** with an edited box - which answers "save the
+commands first" - put the old lines back beside that advice, so following it saved the old set; a refused Save threw the
+typing away the same way.
+
+- `attachOnConnectRows()` keeps `state.onConnectDraft` (the box and the delay) on every input and fills the fields from
+  it while there is one; a successful save drops it, so what the server wrote is shown from then on.
+- Tests: `tests/test_on_connect_box_keeps_its_edits.py` drives the real functions in node through Resend, a refused
+  save and a good one, each redraw on new elements as the page does.
+
 ### 🐛 Resend commands works when the bot is connected but its channel refused it (#1085)
 
 Audit 2026-10-02 M5. The dashboard's **Resend commands** (#1066) asked whether the bot had joined its channel, and said
