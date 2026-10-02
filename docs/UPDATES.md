@@ -16,6 +16,14 @@ file is a row with its size and its sender and no file name. Only completed tran
 fails is printed and dropped, so it cannot reach the transfer. `TRANSFER_LOG_FILE` sets the path; empty turns the record
 off.
 
+The file is in WAL mode: a dashboard query that is still reading when a transfer ends no longer stops that transfer's
+row from being written (with the default rollback journal the reader's lock did, for `WRITE_TIMEOUT`, and the row was
+lost). While the bot runs there are `transfers.db-wal` and `transfers.db-shm` beside the file; copy all three, or stop
+the bot first, to back it up. Forgetting a nick or everything also truncates the WAL (`PRAGMA wal_checkpoint(TRUNCATE)`),
+since a delete is written there first and the old rows would still be readable in it; if a reader that is still open
+holds that up for more than `WRITE_TIMEOUT`, a line on the console says so and the rows go with the next checkpoint. A
+damaged file is moved aside together with its `-wal` and `-shm`.
+
 `transfer_log.summary()` gives files sent (lists left out), lists sent, top and average speed (bytes over seconds, the
 sends too small to time left out), files received with their size and the average wait in the queue; `top_files()`
 gives the ten most-sent files; `top_nicks()` ranks the nicks by files and bytes, sent or received; `nick_summary()` gives

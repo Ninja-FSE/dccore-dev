@@ -17,6 +17,11 @@ A write happens on the transfer thread before its slot is released, so it waits
 at most WRITE_TIMEOUT seconds for a busy file. A read takes no lock of its own
 and so never holds a transfer up, however long a query over many rows takes.
 A damaged file is moved aside, never deleted, and a fresh one is started.
+
+The file is in WAL mode, so a read never stops a write: a dashboard query that is
+still running when a transfer ends no longer costs that transfer its row. Next to
+the file there are a -wal and a -shm file while it is open; forgetting empties the
+-wal, so forgotten nicks are not left in it.
 """
 
 import os
@@ -65,6 +70,11 @@ READ_TIMEOUT = 10
 def _open(path, timeout):
     conn = sqlite3.connect(path, timeout=timeout)
     try:
+        # With the default rollback journal a reader's shared lock stops a
+        # write, so a dashboard query still reading when a transfer ends cost
+        # that transfer its row. In WAL mode readers and the writer do not
+        # block each other. The mode is stored in the file.
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
     except Exception:
         conn.close()
@@ -80,6 +90,13 @@ def _move_aside(path):
         n += 1
         aside = f"{path}.corrupt-{stamp}-{n}"
     os.rename(path, aside)
+    # A WAL left beside a fresh file would be replayed into it and carry the damage back.
+    for suffix in ("-wal", "-shm"):
+        if os.path.exists(path + suffix):
+            try:
+                os.replace(path + suffix, aside + suffix)
+            except OSError:
+                os.remove(path + suffix)
     return aside
 
 
@@ -285,9 +302,32 @@ def _delete(sql, args=()):
             # page is reused, so a forgotten nick could still be read from it.
             conn.execute("PRAGMA secure_delete = ON")
             with conn:
-                return conn.execute(sql, args).rowcount
+                removed = conn.execute(sql, args).rowcount
+            _empty_the_wal(conn, path)
+            return removed
         finally:
             conn.close()
+
+
+def _empty_the_wal(conn, path):
+    """Truncate the write-ahead log, where the rows just removed are still readable.
+
+    In WAL mode a delete is first written to the -wal file and the main file
+    is not touched until a checkpoint, so until then the forgotten nicks are
+    still in both. TRUNCATE copies the change over and cuts the log to nothing.
+    A reader that is still open can hold that up; it is waited for briefly
+    (WRITE_TIMEOUT, so this never holds the lock longer than a send would
+    wait), and if it does not finish the operator is told, because the rows
+    are then still in the file until the next checkpoint.
+    """
+    try:
+        conn.execute(f"PRAGMA busy_timeout = {int(WRITE_TIMEOUT * 1000)}")
+        busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+    except sqlite3.Error as err:
+        busy = err
+    if busy:
+        print(f"[TRANSFER-LOG] Forgotten rows are removed from the record but may still be in "
+              f"{path}-wal until a reader that is open has finished ({'busy' if busy == 1 else busy}).")
 
 
 def forget_nick(nick):

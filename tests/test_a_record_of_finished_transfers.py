@@ -7,6 +7,7 @@ most files - can be worked out from one place. The nick is kept in lower case;
 no host and no channel is.
 """
 
+import contextlib
 import io
 import os
 import shutil
@@ -226,8 +227,13 @@ class TheNicks(Case):
 
 class ForgettingReallyRemoves(Case):
     def raw(self):
-        with io.open(config.TRANSFER_LOG_FILE, "rb") as handle:
-            return handle.read()
+        """The file and the write-ahead log beside it: both are the record."""
+        data = b""
+        for suffix in ("", "-wal"):
+            if os.path.exists(config.TRANSFER_LOG_FILE + suffix):
+                with io.open(config.TRANSFER_LOG_FILE + suffix, "rb") as handle:
+                    data += handle.read()
+        return data
 
     def fill(self):
         for n in range(30):
@@ -272,6 +278,34 @@ class ForgettingReallyRemoves(Case):
         self.assertEqual(len(deletes), 2)
         self.assertEqual(len(pragmas), 2)
         self.assertTrue(all(p < d for p, d in zip(pragmas, deletes)))
+
+    def test_forgetting_leaves_nothing_in_the_log_beside_the_file_while_the_bot_runs(self):
+        """A connection held open for the whole run keeps the WAL from being
+        removed on close, so only the checkpoint after the delete empties it."""
+        self.fill()
+        holder = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        self.addCleanup(holder.close)
+        holder.execute("SELECT COUNT(*) FROM transfers").fetchall()
+        self.assertIn(b"uniquenickone", self.raw())
+        transfer_log.forget_nick("UniqueNickOne")
+        self.assertNotIn(b"uniquenickone", self.raw())
+        self.assertNotIn(b"UniqueTrackName", self.raw())
+        self.assertEqual(os.path.getsize(config.TRANSFER_LOG_FILE + "-wal"), 0)
+
+    def test_a_reader_still_open_is_told_about_and_the_rows_go_when_it_finishes(self):
+        self.fill()
+        reader = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        cursor = reader.execute("SELECT * FROM transfers")
+        cursor.fetchone()
+        out = io.StringIO()
+        with mock.patch.object(transfer_log, "WRITE_TIMEOUT", 0.1), contextlib.redirect_stdout(out):
+            self.assertEqual(transfer_log.forget_nick("UniqueNickOne"), 31)
+        self.assertIn("may still be in", out.getvalue())
+        self.assertEqual(transfer_log.nick_summary("UniqueNickOne")["files_sent"], 0)
+        cursor.close()
+        reader.close()
+        transfer_log.forget_all()
+        self.assertNotIn(b"uniquenickone", self.raw())
 
     def test_a_nick_that_was_also_a_bot_loses_its_received_rows_too(self):
         self.sent("A.mp3", nick="samenick")
@@ -318,6 +352,61 @@ class ATransferIsNeverHeldUp(Case):
         self.assertEqual(len(self.rows()), 1)
 
 
+class AReaderNeverStopsAWrite(Case):
+    def hold_a_read_open(self):
+        for n in range(3):
+            self.sent(f"Old{n}.mp3", nick="nicka")
+        reader = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        cursor = reader.execute("SELECT * FROM transfers")
+        cursor.fetchone()
+        self.addCleanup(reader.close)
+        return reader, cursor
+
+    def test_the_file_is_in_wal_mode(self):
+        self.sent()
+        conn = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        try:
+            self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        finally:
+            conn.close()
+
+    def test_a_send_that_ends_while_a_query_is_still_reading_is_recorded(self):
+        """With the default journal the reader's shared lock stopped the write
+        for WRITE_TIMEOUT and the transfer lost its row."""
+        reader, cursor = self.hold_a_read_open()
+        began = time.time()
+        self.assertTrue(self.sent("During.mp3", nick="nickb"))
+        self.assertLess(time.time() - began, 1, "the write waited for the reader")
+        cursor.close()
+        self.assertIn("During.mp3", [row[6] for row in self.rows()])
+
+    def test_the_reader_keeps_its_own_view_and_the_next_one_sees_the_row(self):
+        reader, cursor = self.hold_a_read_open()
+        self.sent("During.mp3", nick="nickb")
+        self.assertEqual(len(cursor.fetchall()), 2, "the open reader sees the file as it was when it began")
+        cursor.close()
+        self.assertEqual(transfer_log.summary()["files_sent"], 4)
+
+    def test_forgetting_works_while_a_reader_is_open(self):
+        reader, cursor = self.hold_a_read_open()
+        with mock.patch.object(transfer_log, "WRITE_TIMEOUT", 0.1), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(transfer_log.forget_all(), 3)
+        self.assertEqual(transfer_log.summary()["files_sent"], 0)
+
+    def test_an_old_file_in_the_default_journal_mode_is_switched(self):
+        conn = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        conn.executescript(transfer_log._SCHEMA)
+        conn.commit()
+        self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "delete")
+        conn.close()
+        self.assertTrue(self.sent("A.mp3"))
+        conn = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        try:
+            self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        finally:
+            conn.close()
+
+
 class ADamagedFile(Case):
     def damage(self):
         self.sent()
@@ -341,6 +430,19 @@ class ADamagedFile(Case):
         folder = os.path.dirname(config.TRANSFER_LOG_FILE)
         with io.open(os.path.join(folder, self.aside()[0]), "rb") as handle:
             self.assertTrue(handle.read().startswith(b"this is not a database"))
+
+    def test_the_write_ahead_log_of_the_damaged_file_goes_with_it(self):
+        """sqlite normally removes its sidecars on close; when it could not, a
+        WAL left beside a fresh file would be replayed into it."""
+        path = config.TRANSFER_LOG_FILE
+        for suffix, body in (("", b"damaged"), ("-wal", b"stale frames"), ("-shm", b"index")):
+            with io.open(path + suffix, "wb") as handle:
+                handle.write(body)
+        aside = transfer_log._move_aside(path)
+        for suffix, body in (("", b"damaged"), ("-wal", b"stale frames"), ("-shm", b"index")):
+            self.assertFalse(os.path.exists(path + suffix), suffix)
+            with io.open(aside + suffix, "rb") as handle:
+                self.assertEqual(handle.read(), body)
 
     def test_a_read_of_a_damaged_file_says_zero_and_does_not_raise(self):
         self.damage()
