@@ -28,6 +28,7 @@ keeps the new lines with no JavaScript change.
 
 Tests: `tests/test_keeptrack_totals_are_imported.py` (the parse, the notes, the record, the first-run question, and the
 page's source switch under node).
+
 ### 📦 The bot can run minimised or with no window (#1065, part 3)
 
 `BOT_WINDOW` (Debug & logging; `normal`, `minimised`, `hidden`, validated through `settings_file.CHOICES`) decides how
