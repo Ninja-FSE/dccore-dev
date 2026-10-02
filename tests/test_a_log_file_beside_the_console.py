@@ -182,6 +182,43 @@ class Rotation(Case):
         platform_compat._console_log.close()
         self.assertEqual(sorted(self.contents()), ["dccore.log.1", "dccore.log.2"])
 
+    def test_a_shift_refused_partway_changes_nothing(self):
+        """#1103: with .1 held, .4 -> .5 ... had already moved before the
+        refused .1 -> .2, and each later try shifted them over the oldest."""
+        self.max_bytes, self.keep = 100, 5
+        self.old_files(4)
+        before = self.contents()
+        patch, tried = self.refusing(f"{self.path}.1")
+        with patch:
+            for number in range(3):
+                self.stream.write(f"line {number} " + "y" * 100 + "\n")
+        self.assertEqual(len(tried), 3, "each 100 bytes tried again")
+        self.assertEqual(self.contents(), before)
+        self.assertEqual(self.logged().count("line "), 3)
+
+    def test_with_keep_full_the_oldest_survives_a_refusal_too(self):
+        self.max_bytes, self.keep = 100, 3
+        self.old_files(3)
+        before = self.contents()
+        patch, _tried = self.refusing(f"{self.path}.1")
+        with patch:
+            for number in range(3):
+                self.stream.write(f"line {number} " + "y" * 100 + "\n")
+        self.assertEqual(self.contents(), before)
+
+    def test_let_go_it_rotates_and_only_the_oldest_beyond_keep_goes(self):
+        self.max_bytes, self.keep = 100, 3
+        self.old_files(3)
+        patch, _tried = self.refusing(f"{self.path}.1")
+        with patch:
+            self.stream.write("held " + "y" * 100 + "\n")
+        self.stream.write("free " + "y" * 100 + "\n")
+        platform_compat._console_log.close()
+        found = self.contents()
+        self.assertEqual(sorted(found), ["dccore.log.1", "dccore.log.2", "dccore.log.3"])
+        self.assertIn("held", found["dccore.log.1"])
+        self.assertEqual((found["dccore.log.2"], found["dccore.log.3"]), ("old-1\n", "old-2\n"))
+
 
 class WhenTheFileCannotBeWritten(Case):
     def test_the_window_keeps_every_line_and_the_log_says_so_once(self):
