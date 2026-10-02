@@ -311,6 +311,7 @@ class _ConsoleLog:
         self._settings = None   # () -> (path, max_bytes, keep), read per write
         self._handle = None
         self._path = None
+        self._hold_until = 0
         self._failed = False
         self._lock = threading.Lock()
 
@@ -338,8 +339,8 @@ class _ConsoleLog:
                     self._open_locked(path)
                 self._handle.write(text)
                 self._handle.flush()
-                if max_bytes and self._handle.tell() >= max_bytes:
-                    self._rotate_locked(path, keep)
+                if max_bytes and self._handle.tell() >= max(max_bytes, self._hold_until):
+                    self._rotate_locked(path, keep, max_bytes)
             except Exception as err:
                 self._failed = True
                 self._close_locked()
@@ -356,6 +357,7 @@ class _ConsoleLog:
             os.makedirs(folder, exist_ok=True)
         self._handle = open(path, "a", encoding="utf-8", errors="replace", newline="")
         self._path = path
+        self._hold_until = 0   # a refused rotation's wait (#1073 review)
 
     def _close_locked(self):
         if self._handle is not None:
@@ -365,20 +367,49 @@ class _ConsoleLog:
                 pass
         self._handle = None
 
-    def _rotate_locked(self, path, keep):
+    def _rotate_locked(self, path, keep, max_bytes):
+        """The current file becomes .1, .1 becomes .2, and so on.
+
+        The current file is moved aside FIRST, and the old files are shifted
+        only once that has worked: a viewer holding it open on Windows refuses
+        the rename, and shifting before it meant every later line shifted the
+        old files once more until all but one had fallen off the end. Refused,
+        nothing has moved, and the next try waits for another max_bytes, so a
+        file held open is not retried on every line."""
         self._close_locked()
         keep = max(1, int(keep or 1))
+        aside = f"{path}.rotating"
+        try:
+            os.replace(path, aside)
+        except OSError:
+            self._open_locked(path)
+            self._hold_until = self._handle.tell() + max_bytes
+            return
         try:
             # Shifted down from the oldest end: os.replace() overwrites, so
             # .keep is replaced by .keep-1 and the oldest is gone.
             for number in range(keep - 1, 0, -1):
                 if os.path.exists(f"{path}.{number}"):
                     os.replace(f"{path}.{number}", f"{path}.{number + 1}")
-            os.replace(path, f"{path}.1")
+            os.replace(aside, f"{path}.1")
         except OSError:
-            # Something has the file open (a viewer on Windows): carry on in
-            # the same file and try again at the next write past the size.
-            pass
+            # An old file held open instead: the current one goes back where
+            # it was, and .1 is never overwritten by it.
+            try:
+                os.replace(aside, path)
+            except OSError:
+                pass
+            self._open_locked(path)
+            self._hold_until = self._handle.tell() + max_bytes
+            return
+        # A KEEP lowered since the last rotation leaves files past it.
+        number = keep + 1
+        while os.path.exists(f"{path}.{number}"):
+            try:
+                os.remove(f"{path}.{number}")
+            except OSError:
+                break
+            number += 1
         self._open_locked(path)
 
     def close(self):
