@@ -47,14 +47,14 @@ same read-modify-write-and-verify path the dashboard's own settings route
 uses, not a hand-rolled file write. ADMIN_PASSWORD_HASH is different: a
 credential, never meant to be edited from a web form running under the
 password it protects, so it goes to admin_config.py (Python, gitignored)
-instead - matching what running `python3 adminchat.py` directly has always
+instead - matching what running `python3 src/adminchat.py` directly has always
 told an operator to do with the hash it prints.
 
 WHY THE PASSWORD STEP REUSES adminchat.py RATHER THAN REPROMPTING
 
 adminchat.make_password_hash() and adminchat._read_password() are imported
 and called directly, in-process - not by shelling out to
-`python3 adminchat.py` as a subprocess and parsing its printed output, which
+`python3 src/adminchat.py` as a subprocess and parsing its printed output, which
 would mean two ways to get a password into this process (once through this
 script's own prompt, once through whatever adminchat.py's subprocess did
 with its inherited stdin) and a fragile text-scrape of a line meant for a
@@ -223,7 +223,7 @@ def collect_answers():
 
     print()
     print("Admin console password (for the DCC CHAT console - see")
-    print("docs/ADMIN-CONSOLE.md). Same prompt as running adminchat.py by itself.")
+    print("docs/ADMIN-CONSOLE.md). Same prompt as running src/adminchat.py by itself.")
     while True:
         first = adminchat._read_password("Password: ")
         second = adminchat._read_password("Again: ")
