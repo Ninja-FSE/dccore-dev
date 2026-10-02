@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: on Windows, `install-autostart.bat` said "not set up yet" on every install since the settings moved into `conf\`.** It finds them there now. Also: the instructions for making the admin console password now say `python src/adminchat.py`, and the upgrade guide's backup command works (it failed and copied nothing).
 - **New: KeepTrack's per-nick history can be imported.** Choose `KTData.txt` on the Stats page: you see how many nicks and files it holds, the top ten each way and any lines it could not read, then import it. Each nick's KeepTrack totals are added to what the bot has recorded for them since. Only nicks and totals are kept - the hosts in the file are not.
 - **New: KeepTrack's totals can be imported too.** The Stats page's import reads KeepTrack's files and bytes sent and received from the same mIRC `vars.ini` as OmenServe's. If both counted your sends - the same sends twice - you choose which totals to keep. KeepTrack's received totals go into the new transfer record, and the preview says when KeepTrack began counting and which file types it counted (its default list leaves out .rar and .flac).
 - **New: on Windows the bot can run minimised, or with no window at all.** Settings > Debug & logging > The bot's window: `normal` (as before), `minimised` (in the taskbar) or `hidden` (no window; what it says goes to `data\logs\dccore.log`). Stop it with `start-dccore.bat stop`, Tools > Stop the bot, or `shutdown now`. The first run always has its window, for the setup.

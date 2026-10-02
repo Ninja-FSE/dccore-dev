@@ -21,7 +21,7 @@ routes mutating state (queuing an outbound IRC line, dialling an IP:port a
 foreign bot supplies). That changed because WEBUI_HOST is no longer
 guaranteed to stay LAN-only in practice: it shares one password with the DCC
 CHAT admin console (config.ADMIN_PASSWORD_HASH, generated with `python
-adminchat.py`) rather than a second credential to configure and forget about.
+src/adminchat.py`) rather than a second credential to configure and forget about.
 start() now refuses to run at all when that hash is unset - see the check
 near the bottom of this file - so the dashboard is never reachable
 unauthenticated, not even briefly on a fresh install.
@@ -4014,7 +4014,7 @@ def apply_settings_changes(changes):
 
 def build_password_change_result(new_password, confirm_password):
     """POST /api/settings/password's pure logic: validate the pair, hash the
-    new password the same way `python adminchat.py` does, and write it
+    new password the same way `python src/adminchat.py` does, and write it
     through _save_settings_and_rehash() - the same save-then-dispatch-rehash
     tail apply_settings_changes() uses, without its ADMIN_PASSWORD_HASH
     rejection (see that helper's docstring for why this cannot go through
@@ -5583,7 +5583,7 @@ def start():
         return
     if not adminchat.password_is_configured():
         print("[WEBUI] ADMIN_PASSWORD_HASH is not set; refusing to start the dashboard "
-              "without a login. Generate one with `python adminchat.py` and put the "
+              "without a login. Generate one with `python src/adminchat.py` and put the "
               "result in admin_config.py or settings.conf.")
         return
 
