@@ -258,6 +258,8 @@
     verifyRunBtn:         document.getElementById("verify-run-btn"),
     verifyStatus:         document.getElementById("verify-status"),
     verifyResults:        document.getElementById("verify-results"),
+    stopBotRunBtn:        document.getElementById("stop-bot-run-btn"),
+    stopBotStatus:        document.getElementById("stop-bot-status"),
     settingsRail:         document.getElementById("settings-rail"),
     settingsFields:       document.getElementById("settings-fields"),
     settingsSaveBtn:      document.getElementById("settings-save-btn"),
@@ -4008,6 +4010,23 @@
       });
   });
 
+  // Stop the bot (#1065): the same stop as Ctrl-C in its window.
+  el.stopBotRunBtn.addEventListener("click", function () {
+    if (!window.confirm(t("tools.stopBotConfirm"))) { return; }
+    el.stopBotRunBtn.disabled = true;
+    el.stopBotStatus.classList.remove("is-error");
+    postJson("/api/tools/stop", {}).then(function (res) {
+      if (res.ok) {
+        el.stopBotStatus.textContent = t("tools.stopBotStopping");
+        return;
+      }
+      el.stopBotStatus.textContent = t("tools.couldNotStopBot").replace(
+        "{error}", (res.data && res.data.error) || ("HTTP " + res.status));
+      el.stopBotStatus.classList.add("is-error");
+      el.stopBotRunBtn.disabled = false;
+    });
+  });
+
   // ------------------------------------------------------------- Settings
 
   // Values arrive from GET /api/settings already in their real Python types
@@ -4501,6 +4520,10 @@
     CONSOLE_SHOW_SEARCHES: "settings.field.CONSOLE_SHOW_SEARCHES",
     DEBUG_CHANNEL_FEED: "settings.field.DEBUG_CHANNEL_FEED",
     CONSOLE_TIMESTAMP_FORMAT: "settings.field.CONSOLE_TIMESTAMP_FORMAT",
+    CONSOLE_LOG_FILE: "settings.field.CONSOLE_LOG_FILE",
+    CONSOLE_LOG_MAX_MB: "settings.field.CONSOLE_LOG_MAX_MB",
+    CONSOLE_LOG_KEEP: "settings.field.CONSOLE_LOG_KEEP",
+    BOT_WINDOW: "settings.field.BOT_WINDOW",
     PROJECT_URL: "settings.field.PROJECT_URL"
   };
 

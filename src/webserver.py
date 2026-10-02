@@ -2829,7 +2829,9 @@ SETTINGS_CATEGORIES = (
                                                 "CONSOLE_SHOW_SEARCHES", "DEBUG_CHANNEL_FEED"]),
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL",
                                                 "DEBUG_TO_CONSOLE",
-                                                "CONSOLE_TIMESTAMP_FORMAT", "PROJECT_URL"]),
+                                                "CONSOLE_TIMESTAMP_FORMAT", "CONSOLE_LOG_FILE",
+                                                "CONSOLE_LOG_MAX_MB", "CONSOLE_LOG_KEEP", "BOT_WINDOW",
+                                                "PROJECT_URL"]),
     # LAST, and named so nobody opens it by accident. Set once at install, and
     # a wrong value here loses a queue or a statistics file rather than
     # mis-tuning something. They were interleaved with the settings changed
@@ -3005,6 +3007,10 @@ SETTINGS_LABELS = {
     "CONSOLE_SHOW_SEARCHES": "Show searches and their result counts",
     "DEBUG_CHANNEL_FEED": "Also send requests, queue positions, starts and searches to the IRC debug channel",
     "CONSOLE_TIMESTAMP_FORMAT": "Time prefix on every console line (strftime; blank = none)",
+    "CONSOLE_LOG_FILE": "Log file (blank = none)",
+    "CONSOLE_LOG_MAX_MB": "Start a new log file at (MB)",
+    "CONSOLE_LOG_KEEP": "Old log files to keep",
+    "BOT_WINDOW": "The bot's window on Windows (normal, minimised, hidden)",
     "PROJECT_URL": "Project URL",
 }
 
@@ -4788,6 +4794,14 @@ if HAVE_FLASK:
         @app.route("/api/on-connect")
         def api_on_connect():
             return jsonify(build_on_connect_payload())
+
+        @app.route("/api/tools/stop", methods=["POST"])
+        def api_tools_stop():
+            # The Tools page's Stop the bot (#1065): answered first, then the
+            # same stop as Ctrl-C a moment later, so the page hears back.
+            import stopping
+            stopping.request_stop_soon("asked from the dashboard")
+            return jsonify({"stopping": True}), 200
 
         @app.route("/api/on-connect/resend", methods=["POST"])
         def api_on_connect_resend():

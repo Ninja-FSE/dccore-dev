@@ -65,6 +65,10 @@ import time
 # it cannot say whether a pack is still running or merely left a stale flag.
 packer_thread = None
 
+# The stop-file watcher (#1065, stopping.py): one per process, kept here so a
+# !rehash cannot start a second.
+stop_watcher_thread = None
+
 # When the bot's own link went down, while it is down (#652). The freeze
 # box's clock - frozen_queues holds the moment each absent user was frozen -
 # must not run during the bot's own outage, so on the way back every frozen

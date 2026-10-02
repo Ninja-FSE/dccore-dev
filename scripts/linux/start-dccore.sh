@@ -68,6 +68,13 @@ if [ "$1" = "check" ]; then
     exit $?
 fi
 
+# --- stop the bot running from this folder (#1065) ------------------------
+# oserve.py asks it to stop itself (data/dccore.stop) and waits until it has.
+if [ "$1" = "stop" ]; then
+    "$PY" oserve.py --stop
+    exit $?
+fi
+
 # --- the setup questions, in this terminal ------------------------------------
 # Used on a first run when the browser page was declined or is out of reach,
 # and again when the daemon could not serve it (below). Fails when setup did
