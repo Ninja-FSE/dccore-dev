@@ -165,6 +165,14 @@ waiting nick that nothing would dispatch. Now those exits go on to the global sw
 that has waited longest. The packed archive is a plain row and waits its turn for a slot. Tests:
 `tests/test_a_slot_freed_next_to_a_pack_is_offered.py`.
 
+Audit 2026-10-02 M1 (#1081): a pack that finishes with every slot busy leaves its archive queued as a row that still says
+`is_temporary_zip`, and every exit of `start_dcc_send()` took that flag to mean "this send holds `rar_inprogress`". When
+such a row was later sent as a plain row, its end cleared the lock another nick's pack was holding and woke a third
+pack, so two `rar` processes ran at once (on the same album, one deleted or appended to the other's archive).
+Ownership is now explicit: `start_dcc_send(..., owns_packer=True)` is passed only by the packer's own handoff, and only
+a send that owns the lock releases it. Tests in `test_rar_archive_lifecycle`, `test_dcc_dispatch_uses_the_live_socket`
+and `test_the_queue_save_never_touches_the_live_dict`.
+
 ### 📦 In the DCCore Chat window, a private conversation is never moved to a channel by itself
 
 `dccore.chat.feed` moved the automatic reply target (`chat.replyto`) on every incoming line - the bot's own remarks
