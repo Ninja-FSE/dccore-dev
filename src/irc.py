@@ -3282,6 +3282,11 @@ def irc_loop():
                             except Exception as on_connect_err:
                                 print(f"[CONNECT] On-connect commands failed "
                                       f"({on_connect_err}); joining anyway.")
+                            # Registered, and the commands are out: the
+                            # dashboard's Resend may send them from here on,
+                            # joined to the channel or not (#1085).
+                            import on_connect
+                            on_connect.mark_sent(epoch)
                             try:
                                 # A FEW AT A TIME, NOT ALL AT ONCE (#510).
                                 #

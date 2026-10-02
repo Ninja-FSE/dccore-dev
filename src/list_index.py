@@ -302,6 +302,15 @@ def _quote(text):
     return '"' + str(text).replace('"', '""') + '"'
 
 
+def _has_tokens(name):
+    """Whether unicode61 finds any token in `name` (#1091). It keeps letters
+    and digits and splits on everything else, so a nick made only of IRC's
+    special characters - ^_^, [_], |-| - is no phrase at all: `bot:"^_^"`
+    matches no row, held or not. Those names are asked with `bot = ?` alone,
+    a scan, but only for them."""
+    return any(ch.isalnum() for ch in str(name))
+
+
 def filter_segments(text):
     """What a filter-bar query means, as a list of phrases.
 
@@ -582,10 +591,12 @@ def bots_with_a_match(terms, bots):
             # exact where `bot:"name"` is a tokenised phrase, and LIMIT 1 is
             # then enough: one row proves the match.
             wanted = bot.strip().lower()
+            # A name with no tokens is no pre-filter: the filter alone (#1091).
+            match = f"bot:{_quote(wanted)} AND {query}" if _has_tokens(wanted) else query
             try:
                 rows = conn.execute(
                     "SELECT bot FROM entries WHERE entries MATCH ? AND bot = ? LIMIT 1",
-                    (f"bot:{_quote(wanted)} AND {query}", wanted)).fetchall()
+                    (match, wanted)).fetchall()
             except Exception as err:
                 print(f"[LIST-INDEX] Could not check {bot!r} against the "
                       f"filter ({err}); its list is left unmarked rather "
@@ -682,6 +693,11 @@ def _holds_rows_for(conn, bot):
     before the names were stored lower-case still counts its bot as present.
     """
     wanted = str(bot).strip().lower()
+    if not _has_tokens(wanted):
+        # No letters, so no case to fold: the stored name as it is (#1091).
+        row = conn.execute("SELECT 1 FROM entries WHERE bot = ? LIMIT 1",
+                           (wanted,)).fetchone()
+        return row is not None
     row = conn.execute(
         "SELECT 1 FROM entries WHERE entries MATCH ? AND lower(bot) = ? LIMIT 1",
         (f"bot:{_quote(wanted)}", wanted)).fetchone()

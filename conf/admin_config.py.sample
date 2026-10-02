@@ -49,7 +49,7 @@
 # goes here, not your nick.
 ADMIN_HOSTMASKS = [""]
 
-# Generate with:  python adminchat.py
+# Generate with:  python src/adminchat.py
 ADMIN_PASSWORD_HASH = ""
 
 # How the DCC CHAT connection gets made:
@@ -102,7 +102,7 @@ WEBUI_ENABLED = False
 # EVERY ROUTE REQUIRES A LOGIN, including static assets - see webserver.py's
 # module docstring for the detail. The password is the same one
 # ADMIN_PASSWORD_HASH above uses for the DCC CHAT console (generate it with
-# `python adminchat.py`); start() refuses to run at all while that hash is
+# `python src/adminchat.py`); start() refuses to run at all while that hash is
 # empty, so there is no window where the dashboard is reachable
 # unauthenticated.
 #
