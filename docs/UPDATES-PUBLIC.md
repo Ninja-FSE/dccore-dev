@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a list from a bot whose nick is only symbols (such as `^_^`) was read again on every start, and the list filter showed it as holding no match.** Both find it now.
 - **Fixed: pressing Resend commands, or a Save that was refused, put the saved on-connect commands back over what you had typed.** What you type now stays in the box until it is saved.
 - **Fixed: Resend commands said "not connected" when the bot was connected but its channel would not let it in.** On Undernet that happens when the X login did not take - which is exactly when you want to send it again. It works now whether the channel was joined or not.
 - **Fixed: Clear failed, or deleting an old "no response" row, could cancel a newer request for the same file at the other bot.** It now leaves that bot alone while another request for the same file is still waiting there.
