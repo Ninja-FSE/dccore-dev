@@ -51,10 +51,12 @@ class FakeServer:
         if self.answer and line == f"MODE {NICK}":
             on_connect.note_server_line(f":irc.example.org 221 {NICK} {self.modes}", NICK)
 
-    def wait_for(self, count, timeout=10):
+    def wait_for(self, count, timeout=10, keep=lambda line: True):
+        """The lines `keep` accepts, once there are `count` of them."""
         with self.lock:
-            self.got.wait_for(lambda: len(self.sent) >= count, timeout=timeout)
-            return list(self.sent)
+            self.got.wait_for(lambda: len([l for l in self.sent if keep(l)]) >= count,
+                              timeout=timeout)
+            return [l for l in self.sent if keep(l)]
 
 
 class Case(support.DCCoreTestCase):
@@ -229,7 +231,11 @@ class TheResendButton(Case):
             status, result = webserver.build_on_connect_resend_result()
         self.assertEqual(status, 200, result)
         self.assertEqual(result["sent"], 2)
-        self.assertEqual(server.wait_for(2), [X_LOGIN, f"MODE {NICK} +x"])
+        # Only what the resend sends. This fake is the bot's live socket for
+        # the length of the test, and a debug line another test's thread is
+        # still draining to the debug channel can land on it too - CI saw one.
+        resent = server.wait_for(2, keep=lambda line: not line.startswith("PRIVMSG #"))
+        self.assertEqual(resent, [X_LOGIN, f"MODE {NICK} +x"])
         self.assertEqual((runtime.on_connect_state["resends"], runtime.on_connect_state["gave_up"]),
                          (0, False))
         self.assertNotIn("s3cret-word", out.getvalue() + json.dumps(result))
