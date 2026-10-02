@@ -275,8 +275,9 @@ class ForgettingReallyRemoves(Case):
             transfer_log.forget_all()
         deletes = [i for i, sql in enumerate(statements) if sql.startswith("DELETE")]
         pragmas = [i for i, sql in enumerate(statements) if sql == "PRAGMA secure_delete = ON"]
-        self.assertEqual(len(deletes), 2)
-        self.assertEqual(len(pragmas), 2)
+        # Two per forget since #1062: the record's rows and the imported ones.
+        self.assertEqual(len(deletes), 4)
+        self.assertEqual(len(pragmas), 4)
         self.assertTrue(all(p < d for p, d in zip(pragmas, deletes)))
 
     def test_forgetting_leaves_nothing_in_the_log_beside_the_file_while_the_bot_runs(self):

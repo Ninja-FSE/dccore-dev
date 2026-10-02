@@ -240,6 +240,7 @@
     importPreview:         document.getElementById("import-preview"),
     importWarning:         document.getElementById("import-warning"),
     importConfirm:         document.getElementById("import-confirm"),
+    importSource:          document.getElementById("import-source"),
     importApply:           document.getElementById("import-apply"),
     importCancel:          document.getElementById("import-cancel"),
     stTopAlbums:           document.getElementById("st-top-albums"),
@@ -3515,6 +3516,9 @@
 
   function resetImportPreview() {
     state.importValues = null;
+    state.importPayload = null;
+    el.importSource.hidden = true;
+    el.importSource.innerHTML = "";
     el.importPreviewWrap.hidden = true;
     el.importPreview.innerHTML = "";
     el.importWarning.hidden = true;
@@ -3532,7 +3536,14 @@
       "Files sent (packed)": "total_files",
       "Files sent (plain)": "total_files",
       "Bytes sent": "total_bytes",
-      "Speed record": "speed_record"
+      "Speed record": "speed_record",
+      // KeepTrack's (#1062). Its sent totals share the targets above but are
+      // never added to them: the server keeps the sources apart, and the
+      // choice below decides which one "after" shows and the import writes.
+      "Files sent (KeepTrack)": "total_files",
+      "Bytes sent (KeepTrack)": "total_bytes",
+      "Files received (KeepTrack)": "received_files",
+      "Bytes received (KeepTrack)": "received_bytes"
     };
     // The label the server sent is what byTarget above matches on, so it
     // stays untranslated there; this only decides what to SHOW for the ones
@@ -3542,7 +3553,11 @@
       "Files sent (packed)": "stats.filesSentPacked",
       "Files sent (plain)": "stats.filesSentPlain",
       "Bytes sent": "stats.bytesSentImport",
-      "Speed record": "stats.speedRecordImport"
+      "Speed record": "stats.speedRecordImport",
+      "Files sent (KeepTrack)": "stats.filesSentKeepTrack",
+      "Bytes sent (KeepTrack)": "stats.bytesSentKeepTrack",
+      "Files received (KeepTrack)": "stats.filesReceivedKeepTrack",
+      "Bytes received (KeepTrack)": "stats.bytesReceivedKeepTrack"
     };
 
     var body = "";
@@ -3573,6 +3588,8 @@
     el.importPreview.innerHTML = body;
     el.importPreviewWrap.hidden = false;
     state.importValues = values;
+    state.importPayload = payload;
+    renderImportSourceChoice(payload);
 
     // OVERWRITTEN, NOT COMBINED - and said only when it matters. On a fresh
     // install nobody reads that sentence; on a used one it is the only thing
@@ -3588,6 +3605,63 @@
     el.importConfirm.hidden = false;
     showImportStatus("");
   }
+
+  // WHICH SENT TOTALS (#1062). The OmenServe add-ons and KeepTrack counted
+  // the same sends, so when the file has both the operator picks one; they
+  // are never added together. Picking redraws the "after" column from the
+  // server's own figures for that source and is what the import then posts.
+  function renderImportSourceChoice(payload) {
+    var sources = payload.sent_sources || [];
+    if (sources.length < 2) {
+      el.importSource.hidden = true;
+      el.importSource.innerHTML = "";
+      return;
+    }
+    // Built as elements, values set as properties: nothing from the server
+    // is concatenated into an attribute (the rule this page keeps everywhere).
+    el.importSource.innerHTML = "";
+    var question = document.createElement("p");
+    question.textContent = t("stats.sentSourceQuestion");
+    el.importSource.appendChild(question);
+    sources.forEach(function (source) {
+      var label = document.createElement("label");
+      label.className = "import-source-option";
+      var input = document.createElement("input");
+      input.type = "radio";
+      input.name = "import-sent-source";
+      input.value = source.name;
+      input.checked = source.name === payload.sent_source;
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(" " + t("stats.sentSourceOption")
+        .replace("{source}", source.label)
+        .replace("{files}", Number(source.total_files || 0).toLocaleString())));
+      el.importSource.appendChild(label);
+    });
+    el.importSource.hidden = false;
+  }
+
+  function chooseImportSource(name) {
+    var payload = state.importPayload;
+    if (!payload) { return; }
+    var source = (payload.sent_sources || []).filter(function (s) { return s.name === name; })[0];
+    if (!source) { return; }
+    var values = {};
+    Object.keys(payload.values || {}).forEach(function (key) {
+      if (key !== "total_files" && key !== "total_bytes") { values[key] = payload.values[key]; }
+    });
+    ["total_files", "total_bytes"].forEach(function (key) {
+      if (source[key] !== undefined) { values[key] = source[key]; }
+    });
+    payload.values = values;
+    payload.sent_source = name;
+    renderImportPreview(payload);
+  }
+
+  el.importSource.addEventListener("change", function (evt) {
+    if (evt.target && evt.target.name === "import-sent-source") {
+      chooseImportSource(evt.target.value);
+    }
+  });
 
   function previewImportText(text) {
     if (!String(text || "").trim()) {
