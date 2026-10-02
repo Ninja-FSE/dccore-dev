@@ -1779,11 +1779,12 @@ def check_queue_and_send(irc_sock, completed_user):
                         
                         threading.Thread(
                             target=start_dcc_send, 
-                            args=(sock, completed_user, target_rar_path, rar_filename, target_chan, next_file), 
+                            args=(sock, completed_user, target_rar_path, rar_filename, target_chan, next_file, True), 
                             daemon=True
                         ).start()
-                        # Ownership of both interlocks now belongs to that send thread, which
-                        # releases them in its own finally. Pack and send stay serialised.
+                        # Ownership of both interlocks now belongs to that send thread (the
+                        # trailing True is owns_packer), which releases them in its own
+                        # finally. Pack and send stay serialised.
                         return True
                     else:
                         error_msg = process.stderr.strip() if process.stderr else "Unknown RAR engine issue"
@@ -3416,8 +3417,14 @@ def _find_transfer_row(user, file_name):
     return rows[-1] if len(rows) == 1 else None
 
 
-def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
-    """Handle the network ports and the CTCP, and stream the bytes with accurate timing."""
+def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, owns_packer=False):
+    """Handle the network ports and the CTCP, and stream the bytes with accurate timing.
+
+    owns_packer is True only for the send the packer hands its fresh archive to
+    (#1081): that send holds config.rar_inprogress and releases it on every exit.
+    Any other send - including an archive row that waited in the queue and was
+    dispatched as a plain row - never took the lock and must not clear it.
+    """
     # Every failure this transfer reports carries the channel it was asked
     # for in, for the structured feed (#550).
     def report_failure(*args, **kwargs):
@@ -3507,7 +3514,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # NAMES thaw, a completion, a JOIN) re-selects it normally.
         print(f"[DCC HOLD] No live IRC connection right now - holding "
               f"{user}'s queue rather than dispatching into a dead socket.")
-        if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
+        if owns_packer:
             config.rar_inprogress = False
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
@@ -3552,7 +3559,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # did, and clearing a flag another user's pack is holding is how the
         # interlock leaks (see the identical guard a few lines down, at the port-
         # exhaustion branch, which already got this right).
-        if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
+        if owns_packer:
             config.rar_inprogress = False
             # #215: this release is the only moment another user's held pack can
             # start. Nothing else revisits them - every check_queue_and_send()
@@ -3636,7 +3643,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # are still full one instruction later.
         # Only clear rar_inprogress if THIS send owns it - a plain audio file never did, and
         # clearing a flag another user's pack is holding is how the interlock leaks.
-        if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
+        if owns_packer:
             config.rar_inprogress = False
             # #215: this release is the only moment another user's held pack can
             # start. Nothing else revisits them - every check_queue_and_send()
@@ -4195,7 +4202,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # slot, holding the interlock for the whole duration of its own pack) was
         # still running, losing packer serialisation. Same guard as the critical-
         # abort and port-exhaustion branches above.
-        if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
+        if owns_packer:
             config.rar_inprogress = False
             # #215: this release is the only moment another user's held pack can
             # start. Nothing else revisits them - every check_queue_and_send()
