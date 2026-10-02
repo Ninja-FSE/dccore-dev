@@ -19,6 +19,7 @@ import announce
 import db
 import library
 import runtime
+import transfer_log
 
 # THE queue lock: bound to runtime.py's object, not constructed here - dcc.py is
 # reloaded by !rehash (commands.CORE_MODULES), and importlib.reload() re-executing
@@ -2799,7 +2800,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     "channel": target_chan,
                     "user_raw": user,
                     "is_unpacked_rar_folder": True,
-                    "is_temporary_zip": True
+                    "is_temporary_zip": True,
+                    "queued_at": time.time()
                 })
                 user_pos = len(config.dcc_queue[user_key])
 
@@ -3221,14 +3223,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)
 
-                next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False}
+                next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False,
+                                  "queued_at": time.time()}
                 config.active_transfers.append({"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name})
             else:
                 # This user already has a track running; the row goes to dcc_queue.txt
                 start_waiting(user_key)
                 if user_key not in config.dcc_queue:
                     config.dcc_queue[user_key] = []
-                config.dcc_queue[user_key].append({"file": file_name, "path": full_path, "channel": target_chan, "user_raw": user, "is_temporary_zip": False})
+                config.dcc_queue[user_key].append({"file": file_name, "path": full_path, "channel": target_chan, "user_raw": user, "is_temporary_zip": False,
+                                                   "queued_at": time.time()})
                 user_pos = len(config.dcc_queue[user_key])
 
         # EVERYTHING THAT TOUCHES A DISK RUNS AFTER THE LOCK IS RELEASED (#605).
@@ -3472,6 +3476,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             tx['size'] = file_size
     ip_long = get_public_ip_long()
     start_time = time.time()
+    offered_at = start_time   # start_time is reset once the receiver connects; the queue wait ends here
     bytes_sent = 0
     # Only a send loop that ran to completion counts as delivered. A socket timeout, a
     # refused connection or a half-finished stream must not consume the queue row.
@@ -3964,7 +3969,22 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # two albums can hold a track with the same filename (#110), and
             # collapsing them would credit one track with another's
             # downloads.
-            db.record_download(*download_count_identity(file_path, file_name))
+            _key, _shown, _kind = download_count_identity(file_path, file_name)
+            db.record_download(_key, _shown, _kind)
+
+            # The same send, for the record of what went to whom and how
+            # fast (#1068). transfer_log catches its own write errors.
+            import stats_mgr
+            _queued_at = next_file.get("queued_at") if isinstance(next_file, dict) else None
+            _wire_bytes = max(0, bytes_sent - resume_offset)
+            _seconds = transfer_finished_at - start_time
+            if _seconds <= 0:
+                _seconds = 0.1
+            transfer_log.record_sent(
+                _kind, _key, _shown, file_size, _wire_bytes, _seconds,
+                _wire_bytes / _seconds if stats_mgr.speed_is_measurable(_seconds, file_size) else None,
+                (offered_at - _queued_at) if isinstance(_queued_at, (int, float)) else None,
+                nick=user)
         except _ShortSend:
             print(f"[DB COUNTER] Not counted: {file_name} for {user} ended "
                   f"short at {bytes_sent} of {file_size} bytes. A partial send "

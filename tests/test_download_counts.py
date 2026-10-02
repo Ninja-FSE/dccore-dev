@@ -327,9 +327,15 @@ class TheSendPathCountsWhatItSent(unittest.TestCase):
                  and '"""' not in line]
 
         self.assertTrue(calls)
+        # The send path asks once and hands the answer to both the counter and
+        # the transfer record (#1068), so a call may name the result it was
+        # given rather than call the function in place.
+        decided = "_key, _shown, _kind = download_count_identity("
         for call in calls:
             with self.subTest(call=call):
-                self.assertIn("download_count_identity(", call)
+                if "download_count_identity(" not in call:
+                    self.assertEqual(call, "db.record_download(_key, _shown, _kind)")
+                    self.assertEqual(self.source().count(decided), 1)
 
 
 class WhatEachSendIsCountedAs(DCCoreTestCase):

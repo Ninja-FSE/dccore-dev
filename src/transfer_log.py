@@ -1,0 +1,341 @@
+"""A record of finished transfers (#1068).
+
+One row is written when a transfer ends, so a figure nobody thought of yet can
+still be worked out later. A row says WHAT moved, how big it was, how fast, how
+long it waited in the queue, and the nick it went to or came from, as KeepTrack
+does, so the file can answer "who got what" and rank the nicks.
+
+The nick is kept in lower case as the IRC server showed it. It is not followed
+across a nick change, and no user@host and no channel is stored. forget_nick()
+and forget_all() remove it again, and zero what they free in the file, so a removed nick
+cannot be read back out of it afterwards.
+
+Only completed transfers are written, as with stats.txt. A write that fails is
+printed and dropped, and never reaches the transfer that called it.
+
+A write happens on the transfer thread before its slot is released, so it waits
+at most WRITE_TIMEOUT seconds for a busy file. A read takes no lock of its own
+and so never holds a transfer up, however long a query over many rows takes.
+A damaged file is moved aside, never deleted, and a fresh one is started.
+
+The file is in WAL mode, so a read never stops a write: a dashboard query that is
+still running when a transfer ends no longer costs that transfer its row. Next to
+the file there are a -wal and a -shm file while it is open; forgetting empties the
+-wal, so forgotten nicks are not left in it.
+"""
+
+import os
+import sqlite3
+import time
+
+import defaults as config
+import runtime
+
+SENT = "sent"
+RECEIVED = "received"
+
+KIND_FILE = "file"
+KIND_ALBUM = "album"
+KIND_LIST = "list"
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS transfers (
+    id         INTEGER PRIMARY KEY,
+    direction  TEXT    NOT NULL,
+    nick       TEXT,
+    kind       TEXT    NOT NULL,
+    ended_at   INTEGER NOT NULL,
+    item_key   TEXT,
+    name       TEXT,
+    size       INTEGER NOT NULL,
+    bytes      INTEGER NOT NULL,
+    seconds    REAL,
+    speed      INTEGER,
+    waited     REAL
+);
+CREATE INDEX IF NOT EXISTS transfers_by_direction_and_time ON transfers (direction, ended_at);
+CREATE INDEX IF NOT EXISTS transfers_by_item ON transfers (direction, kind, item_key);
+CREATE INDEX IF NOT EXISTS transfers_by_nick ON transfers (nick, direction);
+"""
+
+
+def _path():
+    return str(getattr(config, "TRANSFER_LOG_FILE", "") or "").strip()
+
+
+WRITE_TIMEOUT = 2
+READ_TIMEOUT = 10
+
+
+def _open(path, timeout):
+    conn = sqlite3.connect(path, timeout=timeout)
+    try:
+        # With the default rollback journal a reader's shared lock stops a
+        # write, so a dashboard query still reading when a transfer ends cost
+        # that transfer its row. In WAL mode readers and the writer do not
+        # block each other. The mode is stored in the file.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(_SCHEMA)
+    except Exception:
+        conn.close()
+        raise
+    return conn
+
+
+def _move_aside(path):
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    aside = f"{path}.corrupt-{stamp}"
+    n = 1
+    while os.path.exists(aside):
+        n += 1
+        aside = f"{path}.corrupt-{stamp}-{n}"
+    os.rename(path, aside)
+    # A WAL left beside a fresh file would be replayed into it and carry the damage back.
+    for suffix in ("-wal", "-shm"):
+        if os.path.exists(path + suffix):
+            try:
+                os.replace(path + suffix, aside + suffix)
+            except OSError:
+                os.remove(path + suffix)
+    return aside
+
+
+def _connect(path, timeout, repair=False):
+    """The file open with its schema in place.
+
+    With `repair`, a damaged file is moved aside and a new one started. Only a
+    bare DatabaseError means the file's content is wrong; a locked file or a
+    full disk is an OperationalError and leaves the file alone. The caller
+    holds transfer_log_lock, so nothing else is using the file while it moves.
+    The moved-aside file still holds its nicks: remove it by hand to be rid of them.
+    """
+    try:
+        return _open(path, timeout)
+    except Exception as err:
+        if not (repair and type(err) is sqlite3.DatabaseError and os.path.isfile(path)):
+            raise
+        aside = _move_aside(path)
+        print(f"[TRANSFER-LOG] {path} is damaged ({err}); it was moved to {aside} and a new record "
+              f"was started. The old file is kept and still holds its nicks.")
+        return _open(path, timeout)
+
+
+def _record(row):
+    path = _path()
+    if not path:
+        return False
+    try:
+        with runtime.transfer_log_lock:
+            conn = _connect(path, WRITE_TIMEOUT, repair=True)
+            try:
+                with conn:
+                    conn.execute(
+                        "INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name,"
+                        " size, bytes, seconds, speed, waited) VALUES (?,?,?,?,?,?,?,?,?,?,?)", row)
+            finally:
+                conn.close()
+        return True
+    except Exception as err:
+        print(f"[TRANSFER-LOG ERROR] Could not record the transfer: {err}")
+        return False
+
+
+def _whole(value):
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _positive(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _nick(value):
+    value = str(value or "").strip().lower()
+    return value or None
+
+
+def record_sent(kind, item_key, name, size, wire_bytes, seconds, speed, waited, nick=None):
+    """One completed send to `nick`.
+
+    `speed` is None when the transfer was too small to measure (see
+    stats_mgr.speed_is_measurable), `waited` None when the queue row carried no
+    time of its own (a row saved before this existed). A list is stored without
+    a name, since its name carries the build date and nothing is ranked by it.
+    """
+    if kind == KIND_LIST:
+        item_key = name = None
+    return _record((SENT, _nick(nick), kind, int(time.time()), item_key, name, _whole(size),
+                    _whole(wire_bytes), _positive(seconds),
+                    None if speed is None else _whole(speed),
+                    None if waited is None else max(0.0, float(waited))))
+
+
+def record_received(kind, size, nick=None):
+    """One completed download from the bot `nick`: how big, and not what it was called.
+
+    No file name, so nothing about what another bot shares is kept.
+    """
+    return _record((RECEIVED, _nick(nick), kind, int(time.time()), None, None, _whole(size),
+                    _whole(size), None, None, None))
+
+
+def _query(sql, args=()):
+    path = _path()
+    if not path or not os.path.exists(path):
+        return []
+    try:
+        conn = _connect(path, READ_TIMEOUT)
+        try:
+            return conn.execute(sql, args).fetchall()
+        finally:
+            conn.close()
+    except Exception as err:
+        print(f"[TRANSFER-LOG ERROR] Could not read the record: {err}")
+        return []
+
+
+def _one(width, sql, args=()):
+    rows = _query(sql, args)
+    return rows[0] if rows else (None,) * width
+
+
+def top_files(limit=10, since=None):
+    """The most-sent files as [(name, times sent)], most first, ties by name.
+
+    Lists are not files and never appear here; an album (a packed folder)
+    counts as one item, the way the Most downloaded table counts it.
+    """
+    rows = _query(
+        "SELECT MAX(name), COUNT(*) AS n FROM transfers"
+        " WHERE direction = ? AND kind != ? AND item_key IS NOT NULL AND ended_at >= ?"
+        " GROUP BY item_key ORDER BY n DESC, MAX(name) LIMIT ?",
+        (SENT, KIND_LIST, since or 0, max(0, int(limit))))
+    return [(name, count) for name, count in rows]
+
+
+def summary(since=None):
+    """The figures the record exists for, over everything or since a Unix time.
+
+    files_sent leaves the file lists out and lists_sent counts them; the speed
+    figures come from the sends that were large enough to measure, the average
+    being bytes over seconds rather than a mean of means; queue_wait_seconds is
+    the mean time from being asked for to the send starting, over the rows that
+    know it.
+    """
+    since = since or 0
+    sent = _one(3,
+        "SELECT SUM(kind != ?), SUM(kind = ?), SUM(CASE WHEN kind != ? THEN bytes ELSE 0 END)"
+        " FROM transfers WHERE direction = ? AND ended_at >= ?",
+        (KIND_LIST, KIND_LIST, KIND_LIST, SENT, since))
+    speed = _one(3,
+        "SELECT MAX(speed), SUM(bytes), SUM(seconds) FROM transfers"
+        " WHERE direction = ? AND speed IS NOT NULL AND ended_at >= ?",
+        (SENT, since))
+    waited = _one(1,
+        "SELECT AVG(waited) FROM transfers WHERE direction = ? AND waited IS NOT NULL"
+        " AND ended_at >= ?", (SENT, since))
+    received = _one(2,
+        "SELECT SUM(kind != ?), SUM(CASE WHEN kind != ? THEN size ELSE 0 END)"
+        " FROM transfers WHERE direction = ? AND ended_at >= ?",
+        (KIND_LIST, KIND_LIST, RECEIVED, since))
+    seconds = speed[2] or 0
+    return {
+        "files_sent": int(sent[0] or 0),
+        "lists_sent": int(sent[1] or 0),
+        "bytes_sent": int(sent[2] or 0),
+        "top_speed": int(speed[0] or 0),
+        "average_speed": int((speed[1] or 0) / seconds) if seconds > 0 else 0,
+        "queue_wait_seconds": float(waited[0]) if waited[0] is not None else None,
+        "files_received": int(received[0] or 0),
+        "bytes_received": int(received[1] or 0),
+    }
+
+
+def top_nicks(direction=SENT, limit=10, since=None):
+    """The nicks with the most files, as [(nick, files, bytes)], most files first.
+
+    Ties go to the larger total and then to the nick. A list is not a file, so
+    it counts for neither figure, and a row without a nick is not ranked.
+    """
+    rows = _query(
+        "SELECT nick, SUM(kind != ?), SUM(CASE WHEN kind != ? THEN bytes ELSE 0 END) FROM transfers"
+        " WHERE direction = ? AND nick IS NOT NULL AND ended_at >= ?"
+        " GROUP BY nick HAVING SUM(kind != ?) > 0 ORDER BY 2 DESC, 3 DESC, nick LIMIT ?",
+        (KIND_LIST, KIND_LIST, direction, since or 0, KIND_LIST, max(0, int(limit))))
+    return [(nick, int(files), int(size)) for nick, files, size in rows]
+
+
+def nick_summary(nick, since=None):
+    """What one nick has had from this bot and what this bot has had from it."""
+    nick = _nick(nick)
+    since = since or 0
+    figures = {"files_sent": 0, "lists_sent": 0, "bytes_sent": 0, "files_received": 0, "bytes_received": 0}
+    if nick is None:
+        return figures
+    sent = _one(3,
+        "SELECT SUM(kind != ?), SUM(kind = ?), SUM(CASE WHEN kind != ? THEN bytes ELSE 0 END)"
+        " FROM transfers WHERE direction = ? AND nick = ? AND ended_at >= ?",
+        (KIND_LIST, KIND_LIST, KIND_LIST, SENT, nick, since))
+    received = _one(2,
+        "SELECT SUM(kind != ?), SUM(CASE WHEN kind != ? THEN size ELSE 0 END)"
+        " FROM transfers WHERE direction = ? AND nick = ? AND ended_at >= ?",
+        (KIND_LIST, KIND_LIST, RECEIVED, nick, since))
+    figures.update(files_sent=int(sent[0] or 0), lists_sent=int(sent[1] or 0), bytes_sent=int(sent[2] or 0),
+                   files_received=int(received[0] or 0), bytes_received=int(received[1] or 0))
+    return figures
+
+
+def _delete(sql, args=()):
+    path = _path()
+    if not path or not os.path.exists(path):
+        return 0
+    with runtime.transfer_log_lock:
+        conn = _connect(path, READ_TIMEOUT, repair=True)
+        try:
+            # Without this a deleted row's bytes stay in the file until the
+            # page is reused, so a forgotten nick could still be read from it.
+            conn.execute("PRAGMA secure_delete = ON")
+            with conn:
+                removed = conn.execute(sql, args).rowcount
+            _empty_the_wal(conn, path)
+            return removed
+        finally:
+            conn.close()
+
+
+def _empty_the_wal(conn, path):
+    """Truncate the write-ahead log, where the rows just removed are still readable.
+
+    In WAL mode a delete is first written to the -wal file and the main file
+    is not touched until a checkpoint, so until then the forgotten nicks are
+    still in both. TRUNCATE copies the change over and cuts the log to nothing.
+    A reader that is still open can hold that up; it is waited for briefly
+    (WRITE_TIMEOUT, so this never holds the lock longer than a send would
+    wait), and if it does not finish the operator is told, because the rows
+    are then still in the file until the next checkpoint.
+    """
+    try:
+        conn.execute(f"PRAGMA busy_timeout = {int(WRITE_TIMEOUT * 1000)}")
+        busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+    except sqlite3.Error as err:
+        busy = err
+    if busy:
+        print(f"[TRANSFER-LOG] Forgotten rows are removed from the record but may still be in "
+              f"{path}-wal until a reader that is open has finished ({'busy' if busy == 1 else busy}).")
+
+
+def forget_nick(nick):
+    """Take one nick out of the record. The rows go; the figures that do not name a nick go with them."""
+    nick = _nick(nick)
+    return 0 if nick is None else _delete("DELETE FROM transfers WHERE nick = ?", (nick,))
+
+
+def forget_all():
+    """Empty the record. Returns how many rows were removed."""
+    return _delete("DELETE FROM transfers")

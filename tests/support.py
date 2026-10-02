@@ -238,6 +238,7 @@ _ORPHANED_QUEUE_SINK = os.path.join(_ORPHANED_WRITE_DIR, "dcc_queue.txt")
 # download-count history the same way it emptied the queue.
 _ORPHANED_SPEED_RECORD_SINK = os.path.join(_ORPHANED_WRITE_DIR, "speed_record.txt")
 _ORPHANED_DOWNLOAD_COUNTS_SINK = os.path.join(_ORPHANED_WRITE_DIR, "download_counts.json")
+_ORPHANED_TRANSFER_LOG_SINK = os.path.join(_ORPHANED_WRITE_DIR, "transfers.db")
 
 
 def reset_config(**overrides):
@@ -745,7 +746,8 @@ class DCCoreTestCase(unittest.TestCase):
             BANS_FILE=os.path.join(self._fetch_history_dir, "bans.txt"),
             STATS_FILE=os.path.join(self._fetch_history_dir, "stats.txt"),
             LIST_INDEX_FILE=os.path.join(self._fetch_history_dir, "list_index.db"),
-            LIST_AUDIO_INFO_CACHE=os.path.join(self._fetch_history_dir, "audio_info.db"))
+            LIST_AUDIO_INFO_CACHE=os.path.join(self._fetch_history_dir, "audio_info.db"),
+            TRANSFER_LOG_FILE=os.path.join(self._fetch_history_dir, "transfers.db"))
 
     def tearDown(self):
         restore_daemon_functions()
@@ -812,6 +814,8 @@ class DCCoreTestCase(unittest.TestCase):
         ):
             setattr(_db, name, sink)
             setattr(self.config, name, sink)
+        # transfer_log.py reads its path from config alone, at the moment of the write.
+        self.config.TRANSFER_LOG_FILE = _ORPHANED_TRANSFER_LOG_SINK
 
     def set_config(self, **overrides):
         """Set config attributes for the duration of one test, restoring
