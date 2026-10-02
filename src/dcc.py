@@ -655,6 +655,22 @@ def queue_waiting_since(user_key):
     return runtime.queue_waiting_since.get(str(user_key).lower(), 0.0)
 
 
+def queued_position_of(user_key, path):
+    """The place (1-based) `path` already holds in this nick's own queue, or None. Caller holds queue_lock.
+
+    The path decides, not the name: two albums can hold a track with the same
+    file name (#110), and asking for the second one is not asking twice. A
+    packed folder is found by the folder it was packed from (`source_path`),
+    because the packer replaces the row's `path` with the archive.
+    """
+    wanted = os.path.normcase(os.path.normpath(str(path)))
+    for place, row in enumerate(config.dcc_queue.get(user_key, []), start=1):
+        held = row.get("source_path") or row.get("path") or ""
+        if os.path.normcase(os.path.normpath(str(held))) == wanted:
+            return place
+    return None
+
+
 def start_waiting(user_key):
     """A nick with nothing queued has just queued its first file: its wait begins now. Caller holds queue_lock."""
     if not config.dcc_queue.get(user_key):
@@ -1726,6 +1742,10 @@ def check_queue_and_send(irc_sock, completed_user):
                         final_size = os.path.getsize(target_rar_path)
                         print(f"[LINEAR RAR] The archive is settled on disk: {final_size:,} bytes")
                         
+                        # The folder it was packed from stays on the row: a
+                        # repeat !rar of it is still a repeat while the
+                        # archive is being sent (#1077).
+                        next_file['source_path'] = next_file.get('source_path') or next_file.get('path')
                         next_file['path'] = target_rar_path
                         next_file['file'] = rar_filename
                         next_file['is_unpacked_rar_folder'] = False
@@ -2724,6 +2744,14 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 return
 
             with queue_lock:
+                already_at = queued_position_of(user_key, true_source_dir)
+                if already_at is not None:
+                    print(f"[DCC QUEUE] {user} asked again for {os.path.basename(true_source_dir.rstrip('/'))!r}: "
+                          f"already queued at #{already_at}, not added again.")
+                    announce_mod.send_dcc_already_queued_notice(user, os.path.basename(true_source_dir.rstrip("/")),
+                                                                already_at)
+                    return
+
                 total_global_queued = get_total_queued_count()
                 user_queued_count = len(config.dcc_queue.get(user_key, []))
 
@@ -3151,6 +3179,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                             nick=user, channel=target_chan, kind="file", name=file_name)
 
         with queue_lock:
+            # Asking again for what is already waiting adds nothing (#1077):
+            # one nick pasting the same ISO every few seconds filled its
+            # whole queue with copies of it. Told once, privately.
+            already_at = queued_position_of(user_key, full_path)
+            if already_at is not None:
+                print(f"[DCC QUEUE] {user} asked again for {file_name!r}: already queued at #{already_at}, not added again.")
+                announce.send_dcc_already_queued_notice(user, file_name, already_at)
+                return
+
             total_global_queued = get_total_queued_count()
             user_queued_count = len(config.dcc_queue.get(user_key, []))
 
