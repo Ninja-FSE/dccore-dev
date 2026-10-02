@@ -60,14 +60,19 @@ row from being written (with the default rollback journal the reader's lock did,
 lost). While the bot runs there are `transfers.db-wal` and `transfers.db-shm` beside the file; copy all three, or stop
 the bot first, to back it up. Forgetting a nick or everything also truncates the WAL (`PRAGMA wal_checkpoint(TRUNCATE)`),
 since a delete is written there first and the old rows would still be readable in it; if a reader that is still open
-holds that up for more than `WRITE_TIMEOUT`, a line on the console says so and the rows go with the next checkpoint. A
+holds that up for more than `WRITE_TIMEOUT`, a line on the console says so and the rows go when a later checkpoint
+empties the log (one that does not truncate leaves the frames past its new writes as they were). A
 damaged file is moved aside together with its `-wal` and `-shm`.
 
 `transfer_log.summary()` gives files sent (lists left out), lists sent, top and average speed (bytes over seconds, the
 sends too small to time left out), files received with their size and the average wait in the queue; `top_files()`
 gives the ten most-sent files; `top_nicks()` ranks the nicks by files and bytes, sent or received; `nick_summary()` gives
 the figures of one nick. All take a start time. `forget_nick()` removes one nick from the record and `forget_all()`
-empties it, and both zero what they free in the file, so a removed nick cannot be read back out of it. A write waits
+empties it, and both then rebuild the file (`VACUUM`) and empty the log, so a removed nick cannot be read back out of
+it (#1082: deleting alone left the nick in the index's interior pages and in the free space of pages that earlier
+writes had split, once the record was more than a page or two deep; every connection also sets `secure_delete` now).
+The rebuild runs under the same lock a write takes, so a send that ends during it waits for it, which is a moment for
+a record of ordinary size, and it needs free disk space about the size of the file while it runs. A write waits
 at most two seconds for a busy file, so a send is never held up long, and a read takes no lock, so a slow query cannot
 hold one up at all. A damaged file is moved aside (kept, never deleted) and a new one started. Nothing shows any of it
 on the dashboard yet, and nothing is said to the nick in IRC.

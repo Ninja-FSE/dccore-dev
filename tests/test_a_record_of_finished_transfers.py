@@ -307,6 +307,109 @@ class ForgettingReallyRemoves(Case):
         transfer_log.forget_all()
         self.assertNotIn(b"uniquenickone", self.raw())
 
+    VICTIM = b"secretvictim"
+
+    def fill_many(self, victims=30, others=600):
+        """Enough rows for the table and its indexes to be several pages deep (#1082)."""
+        for n in range(others):
+            self.sent(f"Some Album/Track {n}.flac", nick=f"nick{n % 40}")
+            if n % (others // victims) == 0:
+                self.sent(f"Private/Secret {n}.flac", nick="SecretVictim")
+
+    def test_a_forgotten_nick_is_gone_from_a_record_that_is_many_pages_deep(self):
+        self.fill_many()
+        self.assertGreater(self.raw().count(self.VICTIM), 0)
+
+        removed = transfer_log.forget_nick("SecretVictim")
+
+        self.assertEqual(removed, 30)
+        self.assertEqual(self.raw().count(self.VICTIM), 0)
+        self.assertIn(b"nick7", self.raw())
+        self.assertEqual(transfer_log.nick_summary("secretvictim")["files_sent"], 0)
+        self.assertEqual(len(self.rows()), 600)
+
+    def test_bytes_an_earlier_write_left_in_the_free_space_are_cleaned_too(self):
+        """A record written by an older version, or by a SQLite build that does
+        not zero by default, holds stale cell copies in the free space of pages
+        that still have live rows. The delete only zeroes what it frees itself;
+        the rebuild after it is what removes the rest (#1082)."""
+        conn = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        conn.execute("PRAGMA secure_delete = OFF")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(transfer_log._SCHEMA)
+        with conn:
+            for n in range(1500):
+                nick = "secretvictim" if n % 25 == 0 else f"nick{n % 40}"
+                conn.execute("INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name, size,"
+                             " bytes, seconds, speed, waited) VALUES ('sent', ?, 'file', ?, ?, ?, 1000, 1000, 1, 1000, NULL)",
+                             (nick, n, f"k{n}", f"Name {n}.flac"))
+        with conn:
+            conn.execute("DELETE FROM transfers WHERE nick = 'secretvictim' AND id % 2 = 1")
+        conn.close()
+        self.assertGreater(self.raw().count(self.VICTIM), 60)
+
+        transfer_log.forget_nick("SecretVictim")
+
+        self.assertEqual(self.raw().count(self.VICTIM), 0)
+        self.assertEqual(len(self.rows()), 1440)
+
+    def test_forgetting_everything_from_a_deep_record_leaves_nothing(self):
+        self.fill_many()
+        transfer_log.forget_all()
+        raw = self.raw()
+        for what in (self.VICTIM, b"nick7", b"Some Album", b"Private/Secret"):
+            self.assertNotIn(what, raw)
+
+    def test_the_file_is_rebuilt_after_the_delete_and_before_the_log_is_emptied(self):
+        statements = []
+
+        class Recording(sqlite3.Connection):
+            def execute(self, sql, *args):
+                statements.append(sql)
+                return super().execute(sql, *args)
+
+        real = sqlite3.connect
+        self.fill()
+        with mock.patch.object(sqlite3, "connect",
+                               lambda path, **kw: real(path, factory=Recording, **kw)):
+            transfer_log.forget_nick("UniqueNickOne")
+        order = [sql for sql in statements if sql.startswith(("DELETE", "VACUUM", "PRAGMA wal_checkpoint"))]
+        self.assertEqual(order, ["DELETE FROM transfers WHERE nick = ?", "VACUUM", "PRAGMA wal_checkpoint(TRUNCATE)"])
+
+    def test_every_connection_zeroes_what_it_frees(self):
+        statements = []
+
+        class Recording(sqlite3.Connection):
+            def execute(self, sql, *args):
+                statements.append(sql)
+                return super().execute(sql, *args)
+
+        real = sqlite3.connect
+        with mock.patch.object(sqlite3, "connect",
+                               lambda path, **kw: real(path, factory=Recording, **kw)):
+            self.sent("A.mp3", nick="nicka")
+            transfer_log.top_nicks()
+        self.assertEqual(statements.count("PRAGMA secure_delete = ON"), 2)
+        self.assertEqual(statements[0], "PRAGMA secure_delete = ON")
+
+    def test_a_rebuild_that_fails_is_told_and_the_rows_are_still_removed(self):
+        self.fill()
+        real = sqlite3.connect
+
+        class Failing(sqlite3.Connection):
+            def execute(self, sql, *args):
+                if sql == "VACUUM":
+                    raise sqlite3.OperationalError("database or disk is full")
+                return super().execute(sql, *args)
+
+        out = io.StringIO()
+        with mock.patch.object(sqlite3, "connect", lambda path, **kw: real(path, factory=Failing, **kw)), \
+                contextlib.redirect_stdout(out):
+            removed = transfer_log.forget_nick("UniqueNickOne")
+        self.assertEqual(removed, 31)
+        self.assertIn("could not be rebuilt (database or disk is full)", out.getvalue())
+        self.assertEqual(transfer_log.nick_summary("UniqueNickOne")["files_sent"], 0)
+
     def test_a_nick_that_was_also_a_bot_loses_its_received_rows_too(self):
         self.sent("A.mp3", nick="samenick")
         transfer_log.record_received("file", 10, nick="samenick")
