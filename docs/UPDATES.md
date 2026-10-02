@@ -20,7 +20,10 @@ off.
 sends too small to time left out), files received with their size and the average wait in the queue; `top_files()`
 gives the ten most-sent files; `top_nicks()` ranks the nicks by files and bytes, sent or received; `nick_summary()` gives
 the figures of one nick. All take a start time. `forget_nick()` removes one nick from the record and `forget_all()`
-empties it. Nothing shows any of it on the dashboard yet, and nothing is said to the nick in IRC.
+empties it, and both zero what they free in the file, so a removed nick cannot be read back out of it. A write waits
+at most two seconds for a busy file, so a send is never held up long, and a read takes no lock, so a slow query cannot
+hold one up at all. A damaged file is moved aside (kept, never deleted) and a new one started. Nothing shows any of it
+on the dashboard yet, and nothing is said to the nick in IRC.
 
 The queue rows now carry the time they were asked for (`queued_at`), which is where the wait comes from; a row saved
 before this has none and is left out of the average. `stats.txt` and `download_counts.json` are unchanged.

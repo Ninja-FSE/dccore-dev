@@ -3932,13 +3932,13 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # two albums can hold a track with the same filename (#110), and
             # collapsing them would credit one track with another's
             # downloads.
-            db.record_download(*download_count_identity(file_path, file_name))
+            _key, _shown, _kind = download_count_identity(file_path, file_name)
+            db.record_download(_key, _shown, _kind)
 
             # The same send, for the record of what went to whom and how
             # fast (#1068). transfer_log catches its own write errors.
             import stats_mgr
             _queued_at = next_file.get("queued_at") if isinstance(next_file, dict) else None
-            _key, _shown, _kind = download_count_identity(file_path, file_name)
             _wire_bytes = max(0, bytes_sent - resume_offset)
             _seconds = transfer_finished_at - start_time
             if _seconds <= 0:

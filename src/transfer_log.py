@@ -7,10 +7,16 @@ does, so the file can answer "who got what" and rank the nicks.
 
 The nick is kept in lower case as the IRC server showed it. It is not followed
 across a nick change, and no user@host and no channel is stored. forget_nick()
-and forget_all() remove it again.
+and forget_all() remove it again, and zero what they free in the file, so a removed nick
+cannot be read back out of it afterwards.
 
 Only completed transfers are written, as with stats.txt. A write that fails is
 printed and dropped, and never reaches the transfer that called it.
+
+A write happens on the transfer thread before its slot is released, so it waits
+at most WRITE_TIMEOUT seconds for a busy file. A read takes no lock of its own
+and so never holds a transfer up, however long a query over many rows takes.
+A damaged file is moved aside, never deleted, and a fresh one is started.
 """
 
 import os
@@ -52,10 +58,49 @@ def _path():
     return str(getattr(config, "TRANSFER_LOG_FILE", "") or "").strip()
 
 
-def _connect(path):
-    conn = sqlite3.connect(path, timeout=10)
-    conn.executescript(_SCHEMA)
+WRITE_TIMEOUT = 2
+READ_TIMEOUT = 10
+
+
+def _open(path, timeout):
+    conn = sqlite3.connect(path, timeout=timeout)
+    try:
+        conn.executescript(_SCHEMA)
+    except Exception:
+        conn.close()
+        raise
     return conn
+
+
+def _move_aside(path):
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    aside = f"{path}.corrupt-{stamp}"
+    n = 1
+    while os.path.exists(aside):
+        n += 1
+        aside = f"{path}.corrupt-{stamp}-{n}"
+    os.rename(path, aside)
+    return aside
+
+
+def _connect(path, timeout, repair=False):
+    """The file open with its schema in place.
+
+    With `repair`, a damaged file is moved aside and a new one started. Only a
+    bare DatabaseError means the file's content is wrong; a locked file or a
+    full disk is an OperationalError and leaves the file alone. The caller
+    holds transfer_log_lock, so nothing else is using the file while it moves.
+    The moved-aside file still holds its nicks: remove it by hand to be rid of them.
+    """
+    try:
+        return _open(path, timeout)
+    except Exception as err:
+        if not (repair and type(err) is sqlite3.DatabaseError and os.path.isfile(path)):
+            raise
+        aside = _move_aside(path)
+        print(f"[TRANSFER-LOG] {path} is damaged ({err}); it was moved to {aside} and a new record "
+              f"was started. The old file is kept and still holds its nicks.")
+        return _open(path, timeout)
 
 
 def _record(row):
@@ -64,7 +109,7 @@ def _record(row):
         return False
     try:
         with runtime.transfer_log_lock:
-            conn = _connect(path)
+            conn = _connect(path, WRITE_TIMEOUT, repair=True)
             try:
                 with conn:
                     conn.execute(
@@ -127,12 +172,15 @@ def _query(sql, args=()):
     path = _path()
     if not path or not os.path.exists(path):
         return []
-    with runtime.transfer_log_lock:
-        conn = _connect(path)
+    try:
+        conn = _connect(path, READ_TIMEOUT)
         try:
             return conn.execute(sql, args).fetchall()
         finally:
             conn.close()
+    except Exception as err:
+        print(f"[TRANSFER-LOG ERROR] Could not read the record: {err}")
+        return []
 
 
 def _one(width, sql, args=()):
@@ -231,8 +279,11 @@ def _delete(sql, args=()):
     if not path or not os.path.exists(path):
         return 0
     with runtime.transfer_log_lock:
-        conn = _connect(path)
+        conn = _connect(path, READ_TIMEOUT, repair=True)
         try:
+            # Without this a deleted row's bytes stay in the file until the
+            # page is reused, so a forgotten nick could still be read from it.
+            conn.execute("PRAGMA secure_delete = ON")
             with conn:
                 return conn.execute(sql, args).rowcount
         finally:

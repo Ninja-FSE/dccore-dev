@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from tests import support  # noqa: F401  (path setup)
 
@@ -221,6 +222,139 @@ class TheNicks(Case):
         self.sent("A.mp3", nick="nicka")
         self.set_config(TRANSFER_LOG_FILE="")
         self.assertEqual(transfer_log.forget_all(), 0)
+
+
+class ForgettingReallyRemoves(Case):
+    def raw(self):
+        with io.open(config.TRANSFER_LOG_FILE, "rb") as handle:
+            return handle.read()
+
+    def fill(self):
+        for n in range(30):
+            self.sent(f"UniqueTrackName{n}.mp3", nick="UniqueNickOne")
+        transfer_log.record_received("file", 10, nick="UniqueNickOne")
+        self.sent("Kept.mp3", nick="othernick")
+
+    def test_a_forgotten_nick_and_its_files_are_gone_from_the_file_itself(self):
+        self.fill()
+        self.assertIn(b"uniquenickone", self.raw())
+        self.assertEqual(transfer_log.forget_nick("UniqueNickOne"), 31)
+        raw = self.raw()
+        self.assertNotIn(b"uniquenickone", raw)
+        self.assertNotIn(b"UniqueTrackName", raw)
+        self.assertIn(b"othernick", raw)
+
+    def test_forgetting_everything_leaves_nothing_readable(self):
+        self.fill()
+        transfer_log.forget_all()
+        raw = self.raw()
+        for what in (b"uniquenickone", b"othernick", b"UniqueTrackName", b"Kept.mp3"):
+            self.assertNotIn(what, raw)
+
+    def test_the_pragma_is_set_before_the_delete_whatever_the_sqlite_build_defaults_to(self):
+        # Some SQLite builds zero freed pages by default and some do not, so
+        # the bytes above cannot prove the setting; the statements can.
+        statements = []
+
+        class Recording(sqlite3.Connection):
+            def execute(self, sql, *args):
+                statements.append(sql)
+                return super().execute(sql, *args)
+
+        real = sqlite3.connect
+        self.fill()
+        with mock.patch.object(sqlite3, "connect",
+                               lambda path, **kw: real(path, factory=Recording, **kw)):
+            transfer_log.forget_nick("UniqueNickOne")
+            transfer_log.forget_all()
+        deletes = [i for i, sql in enumerate(statements) if sql.startswith("DELETE")]
+        pragmas = [i for i, sql in enumerate(statements) if sql == "PRAGMA secure_delete = ON"]
+        self.assertEqual(len(deletes), 2)
+        self.assertEqual(len(pragmas), 2)
+        self.assertTrue(all(p < d for p, d in zip(pragmas, deletes)))
+
+    def test_a_nick_that_was_also_a_bot_loses_its_received_rows_too(self):
+        self.sent("A.mp3", nick="samenick")
+        transfer_log.record_received("file", 10, nick="samenick")
+        self.assertEqual(transfer_log.forget_nick("samenick"), 2)
+        self.assertEqual(self.rows(), [])
+
+
+class ATransferIsNeverHeldUp(Case):
+    def test_a_read_does_not_wait_for_the_write_lock(self):
+        self.sent("A.mp3", nick="nicka")
+        results = []
+        with runtime.transfer_log_lock:
+            worker = threading.Thread(target=lambda: results.append(
+                (transfer_log.summary()["files_sent"], transfer_log.top_nicks(), transfer_log.top_files())),
+                daemon=True)
+            worker.start()
+            worker.join(5)
+            self.assertFalse(worker.is_alive(), "a read waited for the lock a send writes under")
+        self.assertEqual(results, [(1, [("nicka", 1, 1000)], [("A.mp3", 1)])])
+
+    def test_a_write_waits_a_short_time_for_a_busy_file(self):
+        seen = []
+        real = sqlite3.connect
+
+        def spy(path, timeout=None, **kw):
+            seen.append(timeout)
+            return real(path, timeout=timeout, **kw)
+
+        with mock.patch.object(sqlite3, "connect", spy):
+            self.sent()
+        self.assertEqual(seen, [transfer_log.WRITE_TIMEOUT])
+        self.assertLessEqual(transfer_log.WRITE_TIMEOUT, 2)
+
+    def test_a_busy_file_costs_a_send_its_short_wait_and_not_the_transfer(self):
+        self.sent()
+        blocker = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        blocker.execute("BEGIN EXCLUSIVE")
+        self.addCleanup(blocker.close)
+        began = time.time()
+        self.assertFalse(self.sent("B.mp3"))
+        self.assertLess(time.time() - began, 5)
+        blocker.rollback()
+        self.assertEqual(len(self.rows()), 1)
+
+
+class ADamagedFile(Case):
+    def damage(self):
+        self.sent()
+        with io.open(config.TRANSFER_LOG_FILE, "wb") as handle:
+            handle.write(b"this is not a database " * 200)
+
+    def aside(self):
+        folder = os.path.dirname(config.TRANSFER_LOG_FILE)
+        base = os.path.basename(config.TRANSFER_LOG_FILE)
+        return [n for n in os.listdir(folder) if n.startswith(base + ".corrupt-")]
+
+    def test_it_is_moved_aside_and_the_next_send_starts_a_new_record(self):
+        self.damage()
+        self.assertTrue(self.sent("Fresh.mp3", nick="nicka"))
+        self.assertEqual(len(self.aside()), 1)
+        self.assertEqual(transfer_log.top_files(), [("Fresh.mp3", 1)])
+
+    def test_the_moved_file_is_kept_and_not_deleted(self):
+        self.damage()
+        self.sent("Fresh.mp3")
+        folder = os.path.dirname(config.TRANSFER_LOG_FILE)
+        with io.open(os.path.join(folder, self.aside()[0]), "rb") as handle:
+            self.assertTrue(handle.read().startswith(b"this is not a database"))
+
+    def test_a_read_of_a_damaged_file_says_zero_and_does_not_raise(self):
+        self.damage()
+        self.assertEqual(transfer_log.summary()["files_sent"], 0)
+        self.assertEqual(transfer_log.top_nicks(), [])
+        self.assertEqual(self.aside(), [], "a read leaves the repair to the next write")
+
+    def test_a_file_that_is_only_busy_is_not_moved(self):
+        self.sent()
+        blocker = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        blocker.execute("BEGIN EXCLUSIVE")
+        self.addCleanup(blocker.close)
+        self.sent("B.mp3")
+        self.assertEqual(self.aside(), [])
 
 
 class TheTopFiles(Case):
