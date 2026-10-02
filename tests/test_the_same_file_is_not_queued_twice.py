@@ -198,6 +198,81 @@ class AFolderThatHasBeenPacked(Case):
         self.assertIsNotNone(match, "the packer overwrites path without keeping the folder")
 
 
+class AFileThatWasSentAtOnce(feed.ServesARealRequest):
+    """A free slot sends at once and never gets a queue row (#1086), so a
+    repeat a few seconds later was queued and the file went out twice."""
+
+    def setUp(self):
+        super().setUp()
+        announce._told_queue_full.clear()
+        self.addCleanup(announce._told_queue_full.clear)
+        config.user_processing_lock = set()
+        self.set_config(MAX_DCC_SLOTS=3)
+
+    def notices(self, text, user="dave"):
+        return [m for who, m, *_ in self.oserve.queued if who == user and text in m]
+
+    def test_a_repeat_while_it_is_sending_adds_no_row(self):
+        self.request("Song.flac")
+        self.request("Song.flac")
+
+        self.assertEqual(config.dcc_queue.get("dave", []), [])
+        self.assertEqual(len(config.active_transfers), 1)
+        self.assertEqual(len(feed.InlineThread.dispatched), 1)
+
+    def test_the_nick_is_told_it_is_being_sent(self):
+        self.request("Song.flac")
+        self.request("Song.flac")
+        self.request("Song.flac")
+
+        told = self.notices("is already being sent to you")
+        self.assertEqual(len(told), 1, told)
+        self.assertIn("Song.flac", told[0])
+        self.assertTrue(told[0].startswith("NOTICE dave :"))
+        self.assertEqual(self.notices("personal queue"), [])
+
+    def test_the_refusal_is_on_the_console(self):
+        self.request("Song.flac")
+        out = io.StringIO()
+        import contextlib
+        with contextlib.redirect_stdout(out):
+            dcc.handle_download_request(self.sock, "dave", "Song.flac", OTHER)
+
+        self.assertIn("asked again for 'Song.flac': it is being sent to them now", out.getvalue())
+
+    def test_another_nick_is_sent_it_as_usual(self):
+        config.channel_users[OTHER].add("erin")
+        self.request("Song.flac", user="dave")
+        self.request("Song.flac", user="erin")
+
+        self.assertEqual(len(config.active_transfers), 2)
+        self.assertEqual(self.notices("being sent", user="erin"), [])
+
+    def test_once_the_send_is_over_it_can_be_asked_for_again(self):
+        self.request("Song.flac")
+        config.active_transfers.clear()
+        config.user_processing_lock.discard("dave")
+        self.request("Song.flac")
+
+        self.assertEqual(len(feed.InlineThread.dispatched), 2)
+        self.assertEqual(self.notices("is already being sent"), [])
+
+    def test_another_file_while_one_is_sending_is_still_queued(self):
+        write_master_list(self.tree.lists, "DCCoreTest",
+                          [(None, [("Song.flac", "4KB"), ("Other.flac", "4KB")])])
+        with io.open(os.path.join(self.tree.music, "Other.flac"), "wb") as handle:
+            handle.write(b"\x00" * 4096)
+        self.request("Song.flac")
+        self.request("Other.flac")
+
+        self.assertEqual([row["file"] for row in config.dcc_queue["dave"]], ["Other.flac"])
+
+    def test_the_entry_carries_the_path_it_is_sending(self):
+        self.request("Song.flac")
+
+        self.assertEqual(config.active_transfers[0]["path"], os.path.join(self.tree.music, "Song.flac"))
+
+
 class ThePathDecides(Case):
     def put(self, *paths):
         config.dcc_queue["dave"] = [{"file": "Intro.flac", "path": path} for path in paths]
