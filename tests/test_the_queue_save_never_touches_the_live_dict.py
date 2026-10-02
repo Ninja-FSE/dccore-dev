@@ -228,7 +228,7 @@ class AFailedWakeStillReleasesTheUser(ack.ARealReceiver):
     Skipped where loopback is not available; TheWakeInTheFinallyIsGuarded
     above is the half that runs everywhere."""
 
-    def start_pack_send(self):
+    def start_pack_send(self, owns_packer=True):
         irc = ack.RecordingIrcSocket()
         self.oserve.irc_connection = irc
         # A temp-archive row is what makes the finally release rar_inprogress
@@ -238,7 +238,7 @@ class AFailedWakeStillReleasesTheUser(ack.ARealReceiver):
                "user_raw": USER, "is_temporary_zip": True}
         sender = threading.Thread(
             target=dcc.start_dcc_send,
-            args=(irc, USER, self.served, "Some_Album.zip", "#somechannel", row),
+            args=(irc, USER, self.served, "Some_Album.zip", "#somechannel", row, owns_packer),
             daemon=True)
         sender.start()
         self.addCleanup(sender.join, 30)
@@ -292,6 +292,16 @@ class AFailedWakeStillReleasesTheUser(ack.ARealReceiver):
     def test_the_pack_interlock_is_released(self):
         self._send_with_a_broken_wake()
         self.assertFalse(config.rar_inprogress)
+
+    def test_a_send_that_owns_no_pack_leaves_another_packs_interlock_alone(self):
+        """#1081: a finished archive row dispatched as a plain row."""
+        config.rar_inprogress = True
+        irc, sender = self.start_pack_send(owns_packer=False)
+        client = self.connect(irc.port())
+        self.receive(client)
+        sender.join(30)
+        self.assertFalse(sender.is_alive(), "the send thread must have finished")
+        self.assertTrue(config.rar_inprogress)
 
 
 for _name in [n for n in dir(ack.ARealReceiver) if n.startswith("test")]:
