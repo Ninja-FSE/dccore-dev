@@ -24,6 +24,79 @@ joined whether it would be read or not. 9.9 s for a million files in 71,429 fold
   paths read; `relative_folder()` against `relpath()` under both ntpath and posixpath rules.
   `test_what_the_scan_does_to_every_file.py` now pins the `relative_folder()` call.
 
+## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
+
+### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)
+
+Performance audit 2026-10-03 P11, on top of #1123. Every completed send ran `db.record_download()`, which loaded the
+whole `download_counts.json`, added one, dumped it all with sort and indent, fsynced and swapped it in - under
+`runtime.disk_lock`, which every other `db.py` write needs: 82 ms a send at 10k rows, 879 ms at 100k.
+
+- **The counters are a SQLite table** in the file `DOWNLOAD_COUNTS_FILE` names with its extension replaced by `.db`
+  (`data/download_counts.db`; a path already ending in `.db` is the database itself). A send is one upsert under the
+  new `runtime.download_counts_lock`, never `disk_lock`: 13.8 ms at 10k rows, 17.9 ms at 100k. SQLite does the
+  increment, so two transfers finishing together cannot lose each other's count. Needs SQLite 3.24 for the upsert.
+- **The JSON is imported once and never written again.** The first open - a send, the Stats page or the startup
+  migrations - imports every row and a marker saying so in ONE `BEGIN IMMEDIATE` transaction: a kill before the commit
+  leaves neither, and the next start imports from scratch; a second opener re-checks the marker inside the transaction.
+  Rows go in the way the Most downloaded table always read them (name falls back to the key, kind to "file"); a row
+  that is not an object or whose count is not a whole number above zero is left out, as it was never shown. A JSON
+  that will not parse starts the counters empty, as before; one that cannot be opened leaves no marker, counting goes
+  on, and the retry adds to what was counted meanwhile. 2.2 s once at 100k rows. The JSON stays byte for byte as it
+  was, so going back to an older version shows the counts as they were at the upgrade; what that version counts is
+  not carried back by upgrading again.
+- `migrate_download_counts_to_labels()` and `prune_list_artifact_download_counts()` work on the database, and the
+  label migration refuses to run - leaving `.download_counts_labelled` unwritten - until the import has run, so rows
+  imported later are not left unlabelled behind the marker.
+- **Readers take no lock** once the database exists and is imported (WAL), and one that finds nothing creates no
+  database. `top_downloads()` gives the same answer as before: SQLite finds the limit-th count through the
+  `(kind, count)` index and returns only the rows at or above it, and Python orders those by count, `name.lower()` -
+  SQLite's `lower()` folds ASCII only - and key, the order the JSON file was written in. 3.6 ms at 100k rows. #1123's
+  ranking cache is gone with the file it cached.
+- A damaged database is moved aside as `.corrupt-<timestamp>` with its `-wal` and `-shm`, as `transfer_log.py` does,
+  and the fresh one imports the JSON again: the counts as they were at the upgrade.
+- Docs: `DOWNLOAD_COUNTS_FILE`'s help in three languages, the `defaults.py` comment and the sample settings file, and
+  a paragraph in INSTALL.md on where the counts live, what a downgrade keeps, and backing up the `-wal` and `-shm`.
+- Tests: `tests/test_download_counts_move_into_sqlite_without_losing_one.py` (29) - a v1.13.x fixture through import,
+  labels and prune against a reference copy of the old code, with the JSON's bytes and mtime unchanged; a real kill
+  (`os._exit()` mid-transaction, after 150 rows and after every row but before the marker), then exact counts on the
+  next start; concurrent first opens with only `BEGIN IMMEDIATE` to protect them; 8 threads x 25 sends exact, with
+  `disk_lock` never taken; damaged files; 4,000 awkward rows ranked as before; the index used. #1123's tests follow:
+  its cache tests go with the cache.
+
+### ⚡ The Stats and Live Transfers polls do not re-read whole files (#1123)
+
+Performance audit 2026-10-03 P1. `/api/stats` called `db.top_downloads()` twice per poll - each parsing the whole
+`download_counts.json` under `db._disk_lock`, which `record_download()` in the send threads needs too, and sorting every
+row - and `count_rar_album_folders()` counted every row of the RAR list. About 5 s a poll on a big bot (200k counts,
+a 420k-row RAR list), every few seconds; since #1118 it is Live Transfers that polls it, and that page shows neither.
+
+- **Live Transfers asks for its own figures only:** `build_stats_payload(parts)`, and `/api/stats?parts=transfer`
+  (one or more of `transfer,sent,library,top`; anything else is a 400). With no `parts` the payload is as before, for
+  the Stats page and anything else that reads it. app.js gains `loadLive()`/`renderTransfer()`; `state.lastStats` stays
+  the Stats page's.
+- **The ranking once per change of the counts file:** `db._download_counts_ranked()` reads the file under the lock,
+  parses it outside it, ranks every row once and keeps `{kind: rows}`, keyed on its path, mtime, size and file identity
+  (`db._counts_signature`); every save (`db._save_download_counts`, now the only writer) drops it outright, so two
+  saves inside one clock tick are not one. `top_downloads()` answers from it, the same order as before, and returns
+  copies.
+- **The RAR count per list file:** `webserver._rar_counts`, one entry per path, keyed on the file's mtime, size and
+  identity; a rebuild publishes with `os.replace`.
+- Tests: `tests/test_the_stats_poll_is_cheap.py` - the same ranking as before over 3,000 awkward rows, nothing re-read
+  while nothing changed, a send or an outside replace seen at once, a save seen even when the file looks unchanged,
+  the parse outside the lock, copies, the RAR count, the parts and the route, and the Live page's poll.
+
+### 📦 Joins and adverts cost the same each however many there are
+
+- `irc.note_possible_reconnect()` walked every departure of the last 15 seconds on each JOIN, twice. Departures are now
+  kept oldest first, pruned from the front, and indexed by the bare nick a collision variant would be a retry of
+  (`runtime.recent_departure_bases`, kept in step with `recent_departures` and preserved across a rehash).
+- `irc._prune_known_bots()` asked `_bot_confirmed_absent()` about each entry older than a day, and each answer walked
+  every channel member. Who is present is now worked out once per pass, and only if an entry needs it, and an advert
+  lets old entries expire at most once a minute (`KNOWN_BOTS_EXPIRY_INTERVAL_SECONDS`); the size cap still runs on every
+  advert.
+- Counted by `test_a_netsplit_rejoin_is_not_quadratic` and `test_the_advert_scan_is_not_quadratic`.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
@@ -53,6 +126,43 @@ long-path prefix said `\?\` where it meant `\\?\`. None was in the bot's own cod
 
 - `tests/test_no_python_file_has_an_invalid_escape.py` compiles every `.py` file with the warning made an error -
   `SyntaxWarning` from 3.12 on, `DeprecationWarning` on 3.10 and 3.11 - so the next one fails there.
+
+### 📝 Ready for the next release: the changelogs, the upgrade guide, the roadmap, the Python pin
+
+What `docs/PUBLIC-REPO-WORKFLOW.md`'s "Before you extract anything" asks, done ahead of the roll so the release is a
+version number and a date. Checked against all 48 PRs merged since v1.13.2 (`d4f7369`).
+
+- **`docs/UPDATES-PUBLIC.md`'s Unreleased**, from 46 bullets to 37: the transfer record's two bullets made one (the
+  older said "nothing on the dashboard shows these yet"); stopping said once, with the mIRC menu item it left out; two
+  bullets about asking twice made one; fixes to features new in this release folded into the feature (Resend, Clear
+  failed, the request queue), since nobody outside ever met those bugs; #1105's bullet dropped - all three things it
+  fixed were broken only by the unreleased `conf/` move - and its one lasting change, `python src/adminchat.py`,
+  moved into the layout bullet, which said "the commands you use do not change"; the symbol-only nick fix kept to the
+  half that was released (the filter). Added: #1016, which had no entry anywhere although the bug it fixes shipped in
+  v1.13.2's script, and one closing "update `dccore.mrc`" line.
+- **`docs/INSTALL.md`**: a "Coming from v1.13.2 or earlier" section (the move into `conf/`, the password tool's new
+  path, the old module copies an unpack-over-the-top leaves at the top, updating `dccore.mrc`, and the three things
+  now on by default - the log file, the transfer record, the on-connect check); step 4's comparison reads
+  `conf/settings.conf`, which does not exist until the new version has started once, so it says to run step 6
+  first; "#959" in step 2 replaced with the version; "never touched" made true.
+- **`docs/FUTURE.md`**: Implemented gains the transfer record, the OmenServe/KeepTrack history, running without a
+  window, the on-connect check, and the dashboard's and mIRC window's new parts; seven audits, not four.
+- **`README.md`** says where things are now (`src/`, `conf/`); **`docs/WINDOWS.md`** names `src/` paths and says the
+  logon task follows `BOT_WINDOW`.
+- **The Python pin** goes to 3.14.8 (python.org, 2026-09-30): `PY_VERSION`, both SHA-256 lines - matching the hashes
+  python.org publishes, and checked by `DCCORE_VERIFY_PYTHON_PIN=1` against the real installers - and
+  `docs/WINDOWS.md`'s copy.
+- **The `[MIGRATE]` lines** an operator sees at the first start said "(#959)", an issue number in a repository they
+  cannot read; they say what changed instead.
+- The test count in `docs/FUTURE.md` is measured on this tree.
+
+### 🐛 DCCore Chat: the bot's own relayed line is hidden again (#1015, #1016)
+
+Merged after v1.13.2 had been released, with no entry here until now. The #982 peer check in `dccore.mrc`'s
+`on ^*:TEXT:*:#:` hid a `[ServersChat]` line only when its sender was in `dccore.chatpeers`, which never holds the
+bot's own nick - peers are other DCCore bots, and `serverschat.note_who_reply()` leaves the bot itself out of every
+`PEERS` line. So every line the operator's own bot relayed showed raw in the channel window again. The check now also
+accepts the bot the script is paired with. Tests: `tests/test_dccore_chat_in_the_mirc_window.py`.
 
 ### 📦 The @DCCore menu is grouped by what you do (#1112)
 
@@ -544,8 +654,8 @@ only ever to a DCCore peer. Tests: `tests/test_clear_failed_tells_the_other_bot.
 Audit 2026-10-01 L3. #1028 gave fetch requests a lane of their own, and the row that owns one counts it as sent once
 it has left that lane. The disconnect epilogue (`irc.py`) and the queue worker's failed-send branch both emptied the
 whole lane, so every row whose request had not gone out timed out as "no response" - a folder or list row after up
-to `FETCH_FOLDER_OFFER_TIMEOUT`, with no request ever made, and a file row spending one of its `OFFER_ASKS`. Before
-#1028 these lines waited in `send_queue`, which neither exit clears. Now the epilogue leaves the lane alone (the
+to `FETCH_FOLDER_OFFER_TIMEOUT`, with no request ever made, and a file row spending one of its `OFFER_ASKS`.
+Before #1028 these lines waited in `send_queue`, which neither exit clears. Now the epilogue leaves the lane alone (the
 lines go out on the next connection; the row's timer does not run while its line is unsent), a line whose send
 failed goes back to the front, and a line the lane's cap trims hands its row to new `dcc_fetch.requests_not_sent()`,
 which puts it back to pending, as asked, to be asked again. Tests:
