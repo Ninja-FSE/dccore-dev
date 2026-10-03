@@ -49,6 +49,10 @@ keeps the new lines with no JavaScript change.
   With the record off (`TRANSFER_LOG_FILE` empty) the preview leaves them out and says why.
 - **What the preview says:** KeepTrack's start date (`kt_start_date()`, English month names whatever the locale, as
   mIRC writes them), and the file types it counted when that is not `*` - its default list has no .rar and no .flac.
+- **Found in a review before merge:** every sent source offered as a choice is validated as the default one is - only
+  that one was, so KeepTrack's figures could show `-5` in the preview and have the whole import refused when picked,
+  on the page or in `configure.py` - and a received start date whose figure was refused is dropped with it, rather
+  than reaching the apply alone and answering 500 "could not be written" after the rest was.
 
 Tests: `tests/test_keeptrack_totals_are_imported.py` (the parse, the notes, the record, the first-run question, and the
 page's source switch under node).
@@ -62,7 +66,10 @@ parse, no python path quoted inside `FOR /F`. Never on a first run (`BROWSER_SET
 
 - **minimised:** `start "DCCore" /min %PY% oserve.py`.
 - **hidden:** `pythonw` - `pyw -3` from `py -3`, `pythonw` from `python`, the `pythonw.exe` beside a full-path
-  `python.exe` - with `start`.
+  `python.exe` - with `start`. `%PYW%` is chosen where `%PY%` is, in the same line: worked out later by comparing
+  `"%PY%"=="py -3"`, a full path - which keeps its own quotes, and has a space in `Program Files` - made that a syntax
+  error that ended the script, so hidden never started on such a machine (found in review; a test runs the block
+  under `cmd.exe` with such a path).
 - Both ask `oserve.py --running` first (new; exit 0 when a bot holds the folder, through `stopping.running_pid()`),
   since the launcher is not there afterwards to read the "already running" exit; then say how to stop it and close
   after a few seconds with no key to press (`ping`), so the logon task does not wait.
@@ -70,6 +77,11 @@ parse, no python path quoted inside `FOR /F`. Never on a first run (`BROWSER_SET
   `sys.stdout.write()` - Flask's way - raises. `oserve.py` puts a null file in their place before anything else, so
   every write works and reaches the log through the timestamp wrapper; and a windowless bot keeps the default log
   file even when `CONSOLE_LOG_FILE` is empty, since it is the only place it can say anything.
+- **No console windows for its children.** With no console to share, Windows gave every folder pack's `rar`, every
+  list rebuild and that rebuild's `rar` a console window of their own, and closing one killed the job.
+  `platform_compat.no_console_window()` (`CREATE_NO_WINDOW` on Windows, nothing elsewhere) goes on all three calls;
+  each captures its output, so nothing is lost, and a test reads every `subprocess` call in the daemon (as code, with
+  `ast`) so a new one has to join them.
 
 Checked under the real `pythonw.exe`: `oserve.py`'s start-up up to its entry point, with the log turned off, exits 0
 and both a `print()` and a direct write land in `data/logs/dccore.log`. Tests: `tests/test_the_bot_window_setting.py`
@@ -96,8 +108,27 @@ run in the background, cannot offer. Three more, all through the new `src/stoppi
 - **Admin > Stop the bot...** in `dccore.mrc`'s DCCore menu (script 1.10.6), with a yes/no first; it sends
   `shutdown now`.
 
+Found in a review before merge, and fixed:
+
+- **A sleeping bot did not stop.** `_thread.interrupt_main()` only sets a flag the main thread looks at between two
+  lines of Python, so a bot in its reconnect wait (up to five minutes) did not stop until it woke, and
+  `start-dccore stop` gave up after a minute. `stopping.interrupt_main()` sends a real SIGINT -
+  `signal.raise_signal()` on Windows, `signal.pthread_kill()` to the main thread elsewhere - which wakes the sleep.
+- **A bot started with Ctrl-C ignored** (in the background by a script: `nohup python3 oserve.py &`) has no SIGINT
+  handler, so every way to stop it only sent QUIT and it was back ten seconds later. `stopping.restore_interrupt()`
+  puts Python's handler back at the program's entry.
+- **The watcher stopped watching** after the first request; it goes on now, so a second `start-dccore stop` is read
+  if the first did not take.
+- **The stop file is looked for beside the lock this bot holds**, not wherever `DCC_QUEUE_FILE` points now: a
+  settings save reloads it live. (`start-dccore stop` itself reads the setting from the file; moved while the bot
+  runs, it now says to stop that bot from the dashboard or its window once.)
+- **A second interrupt during the shutdown** (Ctrl-C twice; the dashboard and `start-dccore stop` together), or one in
+  the ten-second reconnect wait, escaped as a traceback that skipped the registry flush and exited non-zero, which
+  launchd restarts. `oserve._shut_down()` swallows a repeat and always exits 0; the wait is inside a `try` of its own.
+
 Tests: `tests/test_the_bot_can_be_stopped_without_its_window.py`, including the command against a child process
-holding the lock as the bot does - one that stops when asked, one that does not.
+holding the lock as the bot does - one that stops when asked, one that does not - and a real interrupt in a child
+process, its main thread asleep, with SIGINT as it starts and as a background start leaves it.
 
 ### 🐛 A console-log rotation refused partway changes nothing (#1103)
 
