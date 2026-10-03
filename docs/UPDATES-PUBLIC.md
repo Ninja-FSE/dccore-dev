@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Quieter: the console no longer logs every user who leaves a channel.** A line meant for testing DCCore Chat said so for every ordinary departure, and on a busy channel it pushed the useful lines out of the log. It shows only with debug mode on; a Chat peer leaving is still logged.
+
 ## v1.14.0 — The Bot Keeps a Record
 
 - **Faster: a finished send no longer rewrites the whole download-count file.** Each one rewrote every count the bot had ever kept - most of a second on a bot that has sent many different files, with other saves waiting behind it. The counts move into `data/download_counts.db` on the first start; `data/download_counts.json` is left exactly as it was, so going back to an older version still shows the counts up to the upgrade.
