@@ -386,10 +386,17 @@ LIST_SCAN_THREADS: int = 16  # Folders listed at once while the list is rebuilt
 # limit.
 LIST_AUDIO_INFO_MINUTES: int = 5  # Minutes one rebuild may spend reading new audio files; 0 = no limit
 
-# One row per thing this bot has ever sent, {relative path or archive name ->
-# {name, kind, count}}. Feeds the Stats page's "Most downloaded" table. Not
-# bounded on purpose: a bot can only send what it shares, so the row count is
-# capped by the library itself.
+# One row per thing this bot has ever sent, keyed by its relative path or
+# archive name, with its name, kind and count. Feeds the Stats page's "Most
+# downloaded" table. Not bounded on purpose: a bot can only send what it
+# shares, so the row count is capped by the library itself. The counts live in
+# a SQLite database beside this path, with the extension replaced by .db
+# (data/download_counts.db); a path ending in .db is the database itself
+# (#1133). A download_counts.json from an older version is imported once, on
+# the first start, and then never written again: going back to an older version
+# shows the counts as they were at the upgrade. Counts made while running that
+# older version are not carried over by upgrading again - the import has
+# already run.
 DOWNLOAD_COUNTS_FILE: str = "./data/download_counts.json"
 
 # A row is about 120 bytes, so it is never rotated or trimmed.

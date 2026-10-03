@@ -4,6 +4,66 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
+### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)
+
+Performance audit 2026-10-03 P11, on top of #1123. Every completed send ran `db.record_download()`, which loaded the
+whole `download_counts.json`, added one, dumped it all with sort and indent, fsynced and swapped it in - under
+`runtime.disk_lock`, which every other `db.py` write needs: 82 ms a send at 10k rows, 879 ms at 100k.
+
+- **The counters are a SQLite table** in the file `DOWNLOAD_COUNTS_FILE` names with its extension replaced by `.db`
+  (`data/download_counts.db`; a path already ending in `.db` is the database itself). A send is one upsert under the
+  new `runtime.download_counts_lock`, never `disk_lock`: 13.8 ms at 10k rows, 17.9 ms at 100k. SQLite does the
+  increment, so two transfers finishing together cannot lose each other's count. Needs SQLite 3.24 for the upsert.
+- **The JSON is imported once and never written again.** The first open - a send, the Stats page or the startup
+  migrations - imports every row and a marker saying so in ONE `BEGIN IMMEDIATE` transaction: a kill before the commit
+  leaves neither, and the next start imports from scratch; a second opener re-checks the marker inside the transaction.
+  Rows go in the way the Most downloaded table always read them (name falls back to the key, kind to "file"); a row
+  that is not an object or whose count is not a whole number above zero is left out, as it was never shown. A JSON
+  that will not parse starts the counters empty, as before; one that cannot be opened leaves no marker, counting goes
+  on, and the retry adds to what was counted meanwhile. 2.2 s once at 100k rows. The JSON stays byte for byte as it
+  was, so going back to an older version shows the counts as they were at the upgrade; what that version counts is
+  not carried back by upgrading again.
+- `migrate_download_counts_to_labels()` and `prune_list_artifact_download_counts()` work on the database, and the
+  label migration refuses to run - leaving `.download_counts_labelled` unwritten - until the import has run, so rows
+  imported later are not left unlabelled behind the marker.
+- **Readers take no lock** once the database exists and is imported (WAL), and one that finds nothing creates no
+  database. `top_downloads()` gives the same answer as before: SQLite finds the limit-th count through the
+  `(kind, count)` index and returns only the rows at or above it, and Python orders those by count, `name.lower()` -
+  SQLite's `lower()` folds ASCII only - and key, the order the JSON file was written in. 3.6 ms at 100k rows. #1123's
+  ranking cache is gone with the file it cached.
+- A damaged database is moved aside as `.corrupt-<timestamp>` with its `-wal` and `-shm`, as `transfer_log.py` does,
+  and the fresh one imports the JSON again: the counts as they were at the upgrade.
+- Docs: `DOWNLOAD_COUNTS_FILE`'s help in three languages, the `defaults.py` comment and the sample settings file, and
+  a paragraph in INSTALL.md on where the counts live, what a downgrade keeps, and backing up the `-wal` and `-shm`.
+- Tests: `tests/test_download_counts_move_into_sqlite_without_losing_one.py` (29) - a v1.13.x fixture through import,
+  labels and prune against a reference copy of the old code, with the JSON's bytes and mtime unchanged; a real kill
+  (`os._exit()` mid-transaction, after 150 rows and after every row but before the marker), then exact counts on the
+  next start; concurrent first opens with only `BEGIN IMMEDIATE` to protect them; 8 threads x 25 sends exact, with
+  `disk_lock` never taken; damaged files; 4,000 awkward rows ranked as before; the index used. #1123's tests follow:
+  its cache tests go with the cache.
+
+### ⚡ The Stats and Live Transfers polls do not re-read whole files (#1123)
+
+Performance audit 2026-10-03 P1. `/api/stats` called `db.top_downloads()` twice per poll - each parsing the whole
+`download_counts.json` under `db._disk_lock`, which `record_download()` in the send threads needs too, and sorting every
+row - and `count_rar_album_folders()` counted every row of the RAR list. About 5 s a poll on a big bot (200k counts,
+a 420k-row RAR list), every few seconds; since #1118 it is Live Transfers that polls it, and that page shows neither.
+
+- **Live Transfers asks for its own figures only:** `build_stats_payload(parts)`, and `/api/stats?parts=transfer`
+  (one or more of `transfer,sent,library,top`; anything else is a 400). With no `parts` the payload is as before, for
+  the Stats page and anything else that reads it. app.js gains `loadLive()`/`renderTransfer()`; `state.lastStats` stays
+  the Stats page's.
+- **The ranking once per change of the counts file:** `db._download_counts_ranked()` reads the file under the lock,
+  parses it outside it, ranks every row once and keeps `{kind: rows}`, keyed on its path, mtime, size and file identity
+  (`db._counts_signature`); every save (`db._save_download_counts`, now the only writer) drops it outright, so two
+  saves inside one clock tick are not one. `top_downloads()` answers from it, the same order as before, and returns
+  copies.
+- **The RAR count per list file:** `webserver._rar_counts`, one entry per path, keyed on the file's mtime, size and
+  identity; a rebuild publishes with `os.replace`.
+- Tests: `tests/test_the_stats_poll_is_cheap.py` - the same ranking as before over 3,000 awkward rows, nothing re-read
+  while nothing changed, a send or an outside replace seen at once, a save seen even when the file looks unchanged,
+  the parse outside the lock, copies, the RAR count, the parts and the route, and the Live page's poll.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the

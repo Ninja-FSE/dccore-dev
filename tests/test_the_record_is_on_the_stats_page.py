@@ -473,7 +473,7 @@ class ThePageSource(unittest.TestCase):
         js = read("web/app.js")
         self.assertIn('if (name === "stats") { loadStats(); loadRecord(); }', js)
         poll = js.split("// Only while Live Transfers is the view on screen.", 1)[1].split("}, REFRESH_MS);", 1)[0]
-        self.assertIn("loadStats();", poll)
+        self.assertIn("loadLive();", poll)   # the poll is Live Transfers' own since #1123
         self.assertNotIn("loadRecord", poll)
 
     def test_a_language_switch_redraws_it(self):
