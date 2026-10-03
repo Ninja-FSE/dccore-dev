@@ -504,6 +504,12 @@ def validate_import_values(raw):
             clean["received_since"] = since
         except ValueError:
             errors.append(f"received since: {since!r} is not a date (YYYY-MM-DD).")
+    # A date with no received figure is not a figure to write. Kept when the
+    # figure it dates was refused, it reached the apply on its own, nothing
+    # wrote it, and the import answered 500 "could not be written" although
+    # everything else had been (#1062 review).
+    if not any(name in clean for name in _RECEIVED):
+        clean.pop("received_since", None)
     return clean, errors
 
 
@@ -528,6 +534,17 @@ def build_stats_import_preview(text):
                 clean.pop(name, None)
             notes.append("The received totals are not imported: the transfer record is off "
                          "(Settings > Advanced, TRANSFER_LOG_FILE is empty).")
+    # Every source offered as a choice is checked as the default one is (#1062
+    # review): only `values` was, so the other could show -5 in the preview and
+    # then have the whole import refused when picked, here or in configure.py.
+    # The default's faults are in `errors` already.
+    sources = []
+    for entry in found.get("sent_sources", []):
+        figures = {k: v for k, v in entry.items() if k not in ("name", "label")}
+        good, bad = validate_import_values(figures)
+        sources.append(dict(good, name=entry["name"], label=entry["label"]))
+        if entry["name"] != found.get("sent_source"):
+            errors.extend(f"{entry['label']}: {fault}" for fault in bad)
     return {
         "rows": found.get("rows", []),
         "notes": notes + errors,
@@ -535,7 +552,7 @@ def build_stats_import_preview(text):
         "values": clean,
         # Where the sent totals can come from (#1062); the page offers a
         # choice when there are two, and posts back the one picked.
-        "sent_sources": found.get("sent_sources", []),
+        "sent_sources": sources,
         "sent_source": found.get("sent_source"),
         # OVERWRITTEN, NOT COMBINED, and said where the page can put it in
         # front of the operator rather than buried in prose they will not read
@@ -636,7 +653,10 @@ def _read_ktdata_text(text):
     text = str(text or "")
     if len(text) > MAX_KTDATA_CHARS:
         return None, "That file is far larger than a KTData.txt; nothing was read."
-    return omenserve_import.read_ktdata(text, max_files=MAX_IMPORT_FILES, max_bytes=MAX_IMPORT_BYTES), None
+    # Not MAX_IMPORT_FILES (2**63-1): a nick's figure is summed with its
+    # recorded transfers in SQL, and at that size the sum overflows (#1064
+    # review). read_ktdata()'s own limits, which leave that room.
+    return omenserve_import.read_ktdata(text, max_bytes=MAX_IMPORT_BYTES), None
 
 
 def build_ktdata_preview(text):

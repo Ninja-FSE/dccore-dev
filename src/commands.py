@@ -1835,9 +1835,11 @@ def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0):
     import time
 
     begun = time.time()
+    import platform_compat
     process = subprocess.Popen(argv, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True,
-                               encoding="utf-8", errors="replace")
+                               encoding="utf-8", errors="replace",
+                               **platform_compat.no_console_window())
     while True:
         try:
             # communicate() is the only safe way to wait while draining the

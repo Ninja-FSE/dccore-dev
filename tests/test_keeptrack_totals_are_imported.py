@@ -144,6 +144,36 @@ class IntoTheRecord(Case):
         self.assertEqual(preview["values"]["total_files"], 150, "the sent half still comes across")
         self.assertTrue(any("transfer record is off" in n for n in preview["notes"]))
 
+    def test_a_date_whose_figure_was_refused_is_not_written_alone(self):
+        """#1062 review: an out-of-range %KT.MPX.Gets was dropped and its start
+        date kept; the apply then wrote the sent totals and answered 500 for a
+        date nothing would write."""
+        broken = ["n6=%KT.MPX.Gets 99999999999999999999", "n8=%KT.Start.Date 3rd February 2002"]
+        preview = webserver.build_stats_import_preview(vars_ini(*OMENSERVE, *broken))
+        self.assertNotIn("received_files", preview["values"])
+        self.assertNotIn("received_since", preview["values"])
+        self.assertTrue(any("beyond anything real" in n for n in preview["notes"]), preview["notes"])
+        status, result = webserver.apply_stats_import(preview["values"])
+        self.assertEqual(status, 200, result)
+        self.assertEqual(result.get("failed", []), [])
+        clean, _errors = webserver.validate_import_values({"received_since": "2002-02-03"})
+        self.assertEqual(clean, {})
+
+    def test_the_source_not_shown_first_is_checked_too(self):
+        """#1062 review: only the default source was validated, so KeepTrack's
+        -5 was offered as a choice and refused only when picked."""
+        bad_keeptrack = ["n4=%KT.MPX.Sent 140", "n5=%KT.MPX.Sent.Total -5"]
+        preview = webserver.build_stats_import_preview(vars_ini(*OMENSERVE, *bad_keeptrack))
+        offered = {s["name"]: s for s in preview["sent_sources"]}
+        self.assertEqual(offered["keeptrack"]["total_files"], 140)
+        self.assertNotIn("total_bytes", offered["keeptrack"])
+        self.assertTrue(any(n.startswith("KeepTrack") and "negative" in n for n in preview["notes"]),
+                        preview["notes"])
+        # Picked, what is left of it imports.
+        values = {k: v for k, v in preview["values"].items() if k not in ("total_files", "total_bytes")}
+        values.update({k: offered["keeptrack"][k] for k in ("total_files", "total_bytes") if k in offered["keeptrack"]})
+        self.assertEqual(webserver.apply_stats_import(values)[0], 200)
+
     def test_the_preview_offers_the_sources(self):
         preview = webserver.build_stats_import_preview(vars_ini(*OMENSERVE, *KEEPTRACK))
         self.assertEqual([s["name"] for s in preview["sent_sources"]], ["omenserve", "keeptrack"])

@@ -244,10 +244,16 @@ _NICK_RE = re.compile(r"^[A-Za-z\[\]\\`_^{|}][A-Za-z0-9\[\]\\`_^{|}-]{0,29}$")
 KTDATA_DIRECTIONS = {"sent": "sent", "received": "received"}
 
 
-def read_ktdata(text, max_files=2 ** 63 - 1, max_bytes=1 << 50):
+def read_ktdata(text, max_files=1 << 40, max_bytes=1 << 50):
     """What a KTData.txt offers: {"rows": [(direction, nick, files, bytes)],
     "skipped": {reason: count}, "lines": n}. Rows are one per lower-cased nick
-    and direction, summed; the host column is never in them."""
+    and direction, summed; the host column is never in them.
+
+    The limits hold for each line AND for each nick's sum (#1064 review): two
+    lines for Bob and bob, each in range, summed past what SQLite stores, and
+    the whole import failed; one at 2**63-1 imported, and the next real send to
+    that nick overflowed every SUM over it, emptying the all-time ranking. A
+    trillion files and a petabyte leave room for the record's own rows."""
     sums = {}
     skipped = {}
     lines = 0
@@ -282,7 +288,12 @@ def read_ktdata(text, max_files=2 ** 63 - 1, max_bytes=1 << 50):
         key = (direction, nick.lower())
         held = sums.get(key, (0, 0))
         sums[key] = (held[0] + files, held[1] + size)
-    rows = [(d, n, f, b) for (d, n), (f, b) in sorted(sums.items()) if f or b]
+    rows = []
+    for (d, n), (f, b) in sorted(sums.items()):
+        if f > max_files or b > max_bytes:
+            skip("a count out of range")
+        elif f or b:
+            rows.append((d, n, f, b))
     return {"rows": rows, "skipped": skipped, "lines": lines}
 
 
