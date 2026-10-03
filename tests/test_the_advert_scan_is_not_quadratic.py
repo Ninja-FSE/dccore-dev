@@ -68,5 +68,47 @@ class OnePassOneLook(DCCoreTestCase):
         self.assertEqual(list(runtime.known_bots), ["herebot"])
 
 
+class ExpiryIsOncePerInterval(DCCoreTestCase):
+    def setUp(self):
+        super().setUp()
+        runtime.known_bots.clear()
+        self.addCleanup(runtime.known_bots.clear)
+        runtime.known_bots_flushed_at = T0
+
+    def advert(self, nick, now):
+        irc._capture_channel_advert(
+            nick, "#chan", f"Type: @{nick} For My List Of: 1,234 Files List: Sep 1st", now=now)
+
+    def old_entry(self, nick="gonebot"):
+        config.channel_users["#chan"] = {"newbot", "newerbot"}
+        runtime.known_bots[nick] = {"nick": nick, "last_seen": T0 - DAY - 1}
+
+    def test_the_first_advert_expires_old_entries(self):
+        self.old_entry()
+        self.advert("newbot", T0)
+        self.assertNotIn("gonebot", runtime.known_bots)
+
+    def test_a_second_advert_inside_the_interval_does_not_look_again(self):
+        self.advert("newbot", T0)
+        self.old_entry()
+        self.advert("newerbot", T0 + irc.KNOWN_BOTS_EXPIRY_INTERVAL_SECONDS - 1)
+        self.assertIn("gonebot", runtime.known_bots)
+
+    def test_an_advert_after_the_interval_does(self):
+        self.advert("newbot", T0)
+        self.old_entry()
+        self.advert("newerbot", T0 + irc.KNOWN_BOTS_EXPIRY_INTERVAL_SECONDS)
+        self.assertNotIn("gonebot", runtime.known_bots)
+
+    def test_the_size_cap_is_not_throttled(self):
+        original = irc.KNOWN_BOTS_MAX
+        self.addCleanup(setattr, irc, "KNOWN_BOTS_MAX", original)
+        irc.KNOWN_BOTS_MAX = 2
+        self.advert("one", T0)
+        self.advert("two", T0 + 1)
+        self.advert("three", T0 + 2)
+        self.assertEqual(len(runtime.known_bots), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

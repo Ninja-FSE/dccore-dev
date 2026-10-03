@@ -1609,6 +1609,10 @@ KNOWN_BOTS_FLUSH_SECONDS = 30.0
 # cap is the backstop for a burst that arrives faster than the TTL retires it.
 KNOWN_BOTS_TTL_SECONDS = 7 * 24 * 60 * 60
 KNOWN_BOTS_MAX = 2000
+# How often a recorded advert lets the registry expire old entries. Expiry is
+# a walk of every entry, and nothing is lost by it being a minute late; the
+# size cap is not throttled, it runs on every advert.
+KNOWN_BOTS_EXPIRY_INTERVAL_SECONDS = 60
 
 # The SHORTER TTL for a bot _bot_confirmed_absent() can actually vouch for -
 # not merely quiet, but not in any channel we share right now. A day, not the
@@ -1860,7 +1864,10 @@ def _record_bot(key, user, target, advert, now):
         if field in advert:
             entry[field] = advert[field]
     runtime.known_bots[key] = entry
-    _prune_known_bots(now)
+    expire = not 0 <= now - runtime.known_bots_pruned_at < KNOWN_BOTS_EXPIRY_INTERVAL_SECONDS
+    if expire:
+        runtime.known_bots_pruned_at = now
+    _prune_known_bots(now, expire=expire)
 
 
 def never_breaks_the_read_loop(capture):
@@ -2146,7 +2153,7 @@ def _capture_list_ask(user, msg):
     list_grab.note_someone_else_asked(user, msg)
 
 
-def _prune_known_bots(now):
+def _prune_known_bots(now, expire=True):
     """Forget bots not seen inside the TTL, then cap what is left.
 
     Eviction is by how many adverts the entry is built from, then by
@@ -2178,9 +2185,10 @@ def _prune_known_bots(now):
     # entry is old enough to need it - not once per old entry, which made an
     # advert cost (old entries) x (everybody in every channel).
     present = []
-    for key in [k for k, entry in registry.items()
-                if _known_bot_is_stale(k, entry, now, present)]:
-        del registry[key]
+    if expire:
+        for key in [k for k, entry in registry.items()
+                    if _known_bot_is_stale(k, entry, now, present)]:
+            del registry[key]
 
     if len(registry) > KNOWN_BOTS_MAX:
         # Hand-entered entries are not candidates: with last_seen 0 they

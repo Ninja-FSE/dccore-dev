@@ -331,6 +331,8 @@ update_check_announced    = None   # the release already said in the feed
 # Persisted to data/known_bots.json by irc._flush_known_bots().
 known_bots = {}
 known_bots_flushed_at = 0.0
+# When irc._record_bot() last let _prune_known_bots() expire old entries.
+known_bots_pruned_at = 0.0
 
 # Offers waiting for the receiver to connect ---------------------------------
 # Keyed by (nick_lower, port) -> {"filename", "size", "position"}, one entry

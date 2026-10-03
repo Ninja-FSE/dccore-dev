@@ -266,6 +266,7 @@ def reset_config(**overrides):
         else:
             del canonical[:]
         setattr(config, name, canonical)
+    runtime.known_bots_pruned_at = 0.0
     for name, value in SETTINGS_DEFAULTS.items():
         setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():
