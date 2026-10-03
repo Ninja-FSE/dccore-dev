@@ -1252,7 +1252,7 @@ alias dccore.dl.draw {
 menu @DCCore-Downloads {
   $iif($gettok($dccore.dl.pick,1,58) == w,Cancel this request):dccore.dl.do dlcancel
   $iif($gettok($dccore.dl.pick,2,58) == failed,Download again):dccore.dl.do dlagain
-  Clear the finished ones:dccore.send dlclear
+  Clear the finished ones...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
   -
   Open the dashboard in the browser:dccore.dl.web
   Options...:dccore.options
@@ -1373,7 +1373,7 @@ menu @DCCore {
   .Font size...:dccore.askfont
   .Dashboard address...:dccore weburl
   .Clear window:clear @DCCore
-  Clear finished:dccore.send dlclear
+  Clear finished...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
 }
 
 menu nicklist {

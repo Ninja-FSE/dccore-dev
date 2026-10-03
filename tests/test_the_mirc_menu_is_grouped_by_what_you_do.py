@@ -73,7 +73,7 @@ class TheTopLevel(unittest.TestCase):
         top, _ = parse()
         loose = [label for label, action in top if action is not None]
         self.assertEqual([label for label in loose if not label.startswith("$iif($dccore.sel")],
-                         ["Script Settings", "Console command", "Clear finished"])
+                         ["Script Settings", "Console command", "Clear finished..."])
 
     def test_the_settings_and_the_console_command_come_first(self):
         top, _ = parse()
@@ -83,7 +83,7 @@ class TheTopLevel(unittest.TestCase):
     def test_the_two_tools_are_named_without_dots_and_the_window_is_last_but_one(self):
         top, _ = parse()
         self.assertNotIn("Options...", names(top))
-        self.assertEqual(names(top)[-2:], ["Window", "Clear finished"])
+        self.assertEqual(names(top)[-2:], ["Window", "Clear finished..."])
 
     def test_the_old_top_level_questions_and_the_old_admin_group_are_gone(self):
         top, groups = parse()
@@ -142,6 +142,17 @@ class TheGroups(unittest.TestCase):
         self.assertNotIn("dccore.send shutdown now", "".join(a for l, a in self.groups["Control"] if a and l != "Stop the bot..."))
 
 
+class ClearFinishedAsksFirst(unittest.TestCase):
+
+    def test_the_main_menu_and_the_downloads_window_ask_before_forgetting_the_list(self):
+        with io.open(os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc"), encoding="ascii", newline="") as handle:
+            text = handle.read()
+        asks = "dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted."
+        self.assertIn("\n  Clear finished...:" + asks + "\r\n", text)
+        self.assertIn("\n  Clear the finished ones...:" + asks + "\r\n", text)
+        self.assertNotIn("dccore.send dlclear", text)
+
+
 # Every action the menu had before the regrouping (#1112); each is still in it.
 OLD_ACTIONS = [
     "dccore.send status", "dccore.send slots", "dccore.send queue", "dccore.send bans",
@@ -157,7 +168,7 @@ OLD_ACTIONS = [
     "dccore.confirm rehash Reload the bot's code and settings?", "dccore.askraw",
     "dccore $iif($chat($dccore.bot),disconnect,connect)", "dccore pair $dccore.bot", "dccore unpair",
     "dccore trust", "dccore.options", "dccore panel $iif($dccore.opt(panel),off,on)", "dccore.askfont",
-    "dccore weburl", "clear @DCCore", "dccore chat", "dccore downloads", "dccore.send dlclear", "dccore",
+    "dccore weburl", "clear @DCCore", "dccore chat", "dccore downloads", "dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.", "dccore",
 ]
 
 

@@ -16,7 +16,7 @@ regroups it:
 - **Control** holds the update check, the Daily update check and Console feed toggles (still reading the bot's live
   state), and last, behind a separator, **Reload the bot (rehash)...** and **Stop the bot...**. Both still ask first.
 - **Connection**, then **Window**: DCCore Chat and Downloads window first, then Panel, Font size, Dashboard address
-  and Clear window. **Clear finished** (it was Clear finished downloads) stays last in the main menu.
+  and Clear window. **Clear finished...** (it was Clear finished downloads) stays last in the main menu; it now asks first, and says only the list is cleared and no files are deleted (the Downloads window's menu asks the same).
 - The items for a selected nick sit between Control and Connection, as before. The Admin group is gone; its items
   moved to User control and Control. The menus in the channel and on the nicklist are unchanged.
 - Nothing was removed: `tests/test_the_mirc_menu_is_grouped_by_what_you_do.py` pins the old list of actions and checks
