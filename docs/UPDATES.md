@@ -2,6 +2,20 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🧪 The suite no longer waits out two fixed timers (#1148)
+
+Performance audit 2026-10-03 T3. Two tests sat out real timers: an absent user's freeze countdown slept a fixed ten
+seconds a step, and the dispatch test waited its deadline out twice - twenty seconds for one test - and the transfer
+record's fill helper wrote its rows one transaction at a time. About 50 s of every run.
+
+- `dcc.FREEZE_POLL_SECONDS` (10 s, unchanged) is how long the countdown sleeps between looks, read on every pass, so a
+  test can make it wake quickly and a `!rehash` reaches a countdown already running. The dispatch test shortens it,
+  thaws the user, checks the countdown ends, and asks again once its threads have settled whether anyone was promoted.
+- `fill_many()` builds its rows through `record_sent()` and writes them in one transaction.
+- Tests: `tests/test_the_suite_waits_on_no_fixed_timers.py`.
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)
