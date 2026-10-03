@@ -53,6 +53,16 @@ class EachLauncherLooksInConf(unittest.TestCase):
                 self.assertIn('if not exist "conf\\settings.conf"', line)
                 self.assertIn('if not exist "conf\\admin_config.py"', line)
 
+    def test_the_windows_autostart_installer(self):
+        """#1084: it kept the root-only check after #983, so once the first
+        start had moved the files into conf\\ it refused every install."""
+        lines = [line for line in read("scripts/windows/install-autostart.bat").split("\n")
+                 if not line.lstrip().lower().startswith("rem")
+                 and 'if not exist "settings.conf"' in line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn('if not exist "conf\\settings.conf"', lines[0])
+        self.assertIn('if not exist "conf\\admin_config.py"', lines[0])
+
     def test_the_setup_check(self):
         text = read("scripts/setup_check.py")
         self.assertIn('admin_config_present = any(os.path.exists(os.path.join(REPO, *where, "admin_config.py"))\n'
@@ -106,3 +116,50 @@ class TheShellCheckDecides(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(os.name == "nt", "runs the real batch file under cmd.exe; the source check above runs everywhere")
+class TheWindowsAutostartInstallerForReal(unittest.TestCase):
+    """install-autostart.bat run under cmd.exe in a throwaway tree, with
+    schtasks and powershell replaced by stand-ins on PATH that only note
+    they were called - nothing is scheduled on this machine."""
+
+    def run_it(self, config_where):
+        tree = tempfile.mkdtemp(prefix="dccore-autostart-")
+        self.addCleanup(shutil.rmtree, tree, True)
+        windows = os.path.join(tree, "scripts", "windows")
+        os.makedirs(windows)
+        shutil.copy(os.path.join(REPO_ROOT, "scripts", "windows", "install-autostart.bat"), windows)
+        if config_where is not None:
+            folder = os.path.join(tree, config_where) if config_where else tree
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, "settings.conf"), "w") as handle:
+                handle.write("NICKNAME = SomeBot\n")
+        fakes = os.path.join(tree, "fakes")
+        os.makedirs(fakes)
+        called = os.path.join(tree, "called.txt")
+        for name in ("schtasks", "powershell"):
+            with open(os.path.join(fakes, name + ".bat"), "w") as handle:
+                handle.write("@echo " + name + ">>\"" + called + "\"\r\n@exit /b 0\r\n")
+        env = dict(os.environ, PATH=fakes + os.pathsep + os.environ.get("PATH", ""))
+        done = subprocess.run(["cmd", "/c", os.path.join(windows, "install-autostart.bat")],
+                              input=b"\r\n\r\n", capture_output=True, env=env, timeout=60)
+        made = open(called).read().split() if os.path.exists(called) else []
+        return done.returncode, done.stdout.decode("utf-8", "replace"), made
+
+    def test_config_moved_into_conf_installs_the_task(self):
+        code, said, made = self.run_it("conf")
+        self.assertEqual(code, 0, said)
+        self.assertIn("schtasks", made)
+        self.assertNotIn("not set up yet", said)
+
+    def test_config_still_at_the_root_installs_it_too(self):
+        code, said, made = self.run_it("")
+        self.assertEqual(code, 0, said)
+        self.assertIn("schtasks", made)
+
+    def test_nothing_set_up_is_still_refused(self):
+        code, said, made = self.run_it(None)
+        self.assertEqual(code, 1)
+        self.assertIn("not set up yet", said)
+        self.assertEqual(made, [])

@@ -21,7 +21,7 @@ routes mutating state (queuing an outbound IRC line, dialling an IP:port a
 foreign bot supplies). That changed because WEBUI_HOST is no longer
 guaranteed to stay LAN-only in practice: it shares one password with the DCC
 CHAT admin console (config.ADMIN_PASSWORD_HASH, generated with `python
-adminchat.py`) rather than a second credential to configure and forget about.
+src/adminchat.py`) rather than a second credential to configure and forget about.
 start() now refuses to run at all when that hash is unset - see the check
 near the bottom of this file - so the dashboard is never reachable
 unauthenticated, not even briefly on a fresh install.
@@ -2357,6 +2357,9 @@ def build_fetch_delete_result(request_id, only_states=None):
         asked_for = row.get("requested_filename") or row.get("filename")
         del config.fetch_queue[request_id]
         never_sent = dcc_fetch.take_back_unsent_request(row)
+        if at_the_bot and dcc_fetch.another_row_wants_locked(config.fetch_queue, bot, asked_for):
+            # Another row still waits on the same file there (#1083).
+            at_the_bot = False
 
     removed_at_bot = False
     if at_the_bot and not never_sent:
@@ -2430,6 +2433,10 @@ def build_fetch_clear_result(payload):
             if (row.get("state") == "failed" and row.get("reason") == "no response"
                     and row.get("request_type", "file") == "file" and not never_sent):
                 still_held.append((row.get("bot"), row.get("requested_filename") or row.get("filename")))
+        # Never for a file a newer row still waits on there (#1083): the
+        # remove would take that request's place too.
+        still_held = [(bot, asked_for) for bot, asked_for in still_held
+                      if not dcc_fetch.another_row_wants_locked(queue, bot, asked_for)]
     for bot, asked_for in still_held:
         dcc_fetch.drop_our_request_at(bot, asked_for)
     if doomed:
@@ -3610,8 +3617,15 @@ def build_on_connect_resend_result():
         return 400, {"error": "No on-connect commands are saved."}
     oserve = sys.modules.get("oserve")
     sock = getattr(oserve, "irc_connection", None) if oserve else None
-    if sock is None or not getattr(config, "bot_joined_channel", False):
+    if sock is None:
         return 409, {"error": "The bot is not connected, so nothing was sent."}
+    # Not whether the channel is joined (#1085): a +r channel refuses the bot
+    # exactly when the X login did not take, and sending the login again is
+    # what this button is for. Only that this connection has sent its own,
+    # so a press while it is still registering does not send them twice.
+    if not on_connect.sent_on(getattr(config, "connection_epoch", None)):
+        return 409, {"error": "The bot is still connecting; its on-connect "
+                              "commands are about to go out, so nothing was sent."}
     try:
         sent = on_connect.resend_now(sock, getattr(config, "NICKNAME", ""))
     except Exception as err:
@@ -3904,7 +3918,7 @@ def apply_settings_changes(changes):
 
 def build_password_change_result(new_password, confirm_password):
     """POST /api/settings/password's pure logic: validate the pair, hash the
-    new password the same way `python adminchat.py` does, and write it
+    new password the same way `python src/adminchat.py` does, and write it
     through _save_settings_and_rehash() - the same save-then-dispatch-rehash
     tail apply_settings_changes() uses, without its ADMIN_PASSWORD_HASH
     rejection (see that helper's docstring for why this cannot go through
@@ -5460,7 +5474,7 @@ def start():
         return
     if not adminchat.password_is_configured():
         print("[WEBUI] ADMIN_PASSWORD_HASH is not set; refusing to start the dashboard "
-              "without a login. Generate one with `python adminchat.py` and put the "
+              "without a login. Generate one with `python src/adminchat.py` and put the "
               "result in admin_config.py or settings.conf.")
         return
 

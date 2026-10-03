@@ -357,7 +357,7 @@ def missing_modes(wanted, modes, hidden):
 
 
 _FRESH = {"modes": None, "listings": 0, "hidden": False, "resends": 0,
-          "gave_up": False}
+          "gave_up": False, "sent_epoch": None}
 
 
 def _state():
@@ -496,6 +496,23 @@ def watch(sock, epoch, sleep=None):
             check_once(sock, getattr(config, "NICKNAME", ""), commands, gap, sleep=sleep)
         except Exception as err:
             print(f"[CONNECT] Could not check the on-connect commands: {err}")
+
+
+def mark_sent(epoch):
+    """delayed_join() has sent this connection's on-connect commands, or had
+    none to send (#1085). From here on the dashboard may send them again."""
+    import runtime
+    with runtime.on_connect_lock:
+        _state()["sent_epoch"] = epoch
+
+
+def sent_on(epoch):
+    """True once the connection `epoch` names has sent its on-connect commands.
+    A reconnect takes a new epoch, so the mark of the old link never counts."""
+    import runtime
+    with runtime.on_connect_lock:
+        sent = _state()["sent_epoch"]
+    return sent is not None and sent == epoch
 
 
 def resend_now(sock, nickname):

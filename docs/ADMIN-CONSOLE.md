@@ -85,7 +85,7 @@ the hash by hand instead:
 From the DCCore directory, on either platform:
 
 ```
-python adminchat.py
+python src/adminchat.py
 ```
 
 It prompts twice, then prints a line ready to paste:
