@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Faster: rows pasted from the list are found straight away.** When someone pastes several rows from one album, each after the first is looked for in the folder the first was found in - but the size pasted with the row never matched, so every row searched the whole list instead, seconds each on a big library. It matches now, whichever way the size is written.
+
 ## v1.14.0 — The Bot Keeps a Record
 
 - **Faster: a finished send no longer rewrites the whole download-count file.** Each one rewrote every count the bot had ever kept - most of a second on a bot that has sent many different files, with other saves waiting behind it. The counts move into `data/download_counts.db` on the first start; `data/download_counts.json` is left exactly as it was, so going back to an older version still shows the counts up to the upgrade.

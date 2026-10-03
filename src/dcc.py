@@ -229,21 +229,47 @@ def _note_lookup_hit(key, path):
             del folders[:-LOOKUP_FOLDER_MEMORY]
 
 
+_SIZE_HINT_RE = re.compile(r"^(\d+)(?:\.(\d+))?([KMGTP]?B)$", re.IGNORECASE)
+_SIZE_HINT_POWER = {"B": 0, "KB": 1, "MB": 2, "GB": 3, "TB": 4, "PB": 5}
+
+
+def _size_fits_hint(size, word):
+    """Whether `size` bytes reads as the size `word` says, at the word's own
+    unit and precision - True, False, or None when `word` is not a size.
+
+    Read as a number, not compared as text (#1121): the list writes rows with
+    two decimals ("7.30MB") while update_list.format_size_human() gives one
+    ("7.3MB"), so a text comparison never matched a pasted row, and the #886
+    folder memory sent every one of them to a full list scan. Other bots, and
+    lists written by older versions, carry still other precisions ("6.32Mb",
+    "1.0KB"); each is taken at the precision it was written with."""
+    match = _SIZE_HINT_RE.match(word)
+    if not match:
+        return None
+    whole, decimals, unit = match.group(1), match.group(2) or "", match.group(3).upper()
+    # As the list writer gets it: a float divided by 1024.0 per step. Dividing
+    # by a power of two is exact, so this is the writer's number to the bit
+    # and the rounding at a ".xx5" boundary goes the same way.
+    value = float(size) / (1024.0 ** _SIZE_HINT_POWER[unit])
+    places = len(decimals)
+    return f"{value:.{places}f}" == f"{float(whole + '.' + (decimals or '0')):.{places}f}"
+
+
 def _matches_size_hint(path, size_hint):
     """Whether the file at `path` is the size a pasted `::INFO::` hint says.
 
-    The hint is what the list wrote after the name: the size as
-    update_list.format_size_human() writes it ("7.3MB"), then - with audio
-    info on - its length and quality. Only the first word is a size. No hint
-    matches anything; a file that cannot be read matches nothing."""
+    The hint is what the list wrote after the name: the size ("7.30MB"),
+    then - with audio info on - its length and quality. Only the first word
+    is a size. No hint matches anything; a file that cannot be read, or a
+    first word that is not a size, matches nothing."""
     words = str(size_hint or "").split()
     if not words:
         return True
     try:
-        actual = update_list.format_size_human(os.path.getsize(platform_compat.long_path(path)))
+        size = os.path.getsize(platform_compat.long_path(path))
     except OSError:
         return False
-    return actual.lower() == words[0].lower()
+    return bool(_size_fits_hint(size, words[0]))
 
 
 def _in_a_recent_folder(list_name, file_name, size_hint=""):
