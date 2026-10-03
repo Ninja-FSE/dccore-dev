@@ -86,7 +86,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.10.6 }
+alias dccore.ver { return 1.11 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1252,7 +1252,7 @@ alias dccore.dl.draw {
 menu @DCCore-Downloads {
   $iif($gettok($dccore.dl.pick,1,58) == w,Cancel this request):dccore.dl.do dlcancel
   $iif($gettok($dccore.dl.pick,2,58) == failed,Download again):dccore.dl.do dlagain
-  Clear the finished ones:dccore.send dlclear
+  Clear the finished ones...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
   -
   Open the dashboard in the browser:dccore.dl.web
   Options...:dccore.options
@@ -1325,20 +1325,17 @@ alias dccore.askfont {
 
 ; Every /dccore command, and every console command worth a click, is here.
 menu @DCCore {
-  Status:dccore.send status
-  Slots:dccore.send slots
-  Queue:dccore.send queue
-  Bans:dccore.send bans
-  Uptime:dccore.send uptime
-  Version:dccore.send version
-  Check for a new version:dccore.send checkversion
-  Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
-  Console feed $iif($dccore.st(consolefeed) == on,off,on):dccore.send consolefeed $iif($dccore.st(consolefeed) == on,off,on)
+  Script Settings:dccore.options
+  Console command:dccore.askraw
   -
-  $iif($dccore.selq,Queue of $dccore.selq):dccore.send queue $dccore.selq
-  $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
-  $iif($dccore.sels,Queue of $dccore.sels):dccore.send queue $dccore.sels
-  -
+  Info
+  .Status:dccore.send status
+  .Slots:dccore.send slots
+  .Queue:dccore.send queue
+  .Uptime:dccore.send uptime
+  .Version:dccore.send version
+  .-
+  .Command list:dccore
   Lists
   .Show the lists:dccore lists
   .Fetch the changed lists:dccore fetch
@@ -1346,13 +1343,22 @@ menu @DCCore {
   Library
   .Find duplicate filenames:dccore.send verify
   .Rebuild the list...:dccore.confirm update Rebuild the list? It walks the whole library and can take minutes.
-  .Stop the bot...:if ($input(Stop the bot? It leaves IRC and ends; start it again with start-dccore.,yq,DCCore)) { dccore.send shutdown now }
-  Admin
+  User control
+  .Bans:dccore.send bans
   .Ban...:dccore.ask ban Ban pattern (for example *!*@host.example)
   .Unban...:dccore.ask unban Pattern to remove
   .Clear a queue...:dccore.ask clearqueue Clear the queue of which nick
+  Control
+  .Check for a new version:dccore.send checkversion
+  .Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
+  .Console feed $iif($dccore.st(consolefeed) == on,off,on):dccore.send consolefeed $iif($dccore.st(consolefeed) == on,off,on)
+  .-
   .Reload the bot (rehash)...:dccore.confirm rehash Reload the bot's code and settings?
-  Console command...:dccore.askraw
+  .Stop the bot...:if ($input(Stop the bot? It leaves IRC and ends; start it again with start-dccore.,yq,DCCore)) { dccore.send shutdown now }
+  -
+  $iif($dccore.selq,Queue of $dccore.selq):dccore.send queue $dccore.selq
+  $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
+  $iif($dccore.sels,Queue of $dccore.sels):dccore.send queue $dccore.sels
   -
   Connection
   .$iif($chat($dccore.bot),Disconnect,Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
@@ -1360,15 +1366,14 @@ menu @DCCore {
   .Forget the token (unpair):dccore unpair
   .Trust the bot's host:dccore trust
   Window
-  .Options...:dccore.options
+  .DCCore Chat:dccore chat
+  .Downloads window:dccore downloads
+  .-
   .Panel $iif($dccore.opt(panel),off,on):dccore panel $iif($dccore.opt(panel),off,on)
   .Font size...:dccore.askfont
   .Dashboard address...:dccore weburl
   .Clear window:clear @DCCore
-  DCCore Chat:dccore chat
-  Downloads window:dccore downloads
-  Clear finished downloads:dccore.send dlclear
-  Command list:dccore
+  Clear finished...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
 }
 
 menu nicklist {

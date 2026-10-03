@@ -78,6 +78,9 @@ class TheWindowMenu(unittest.TestCase):
                 continue
             self.assertRegex(self.menu, r"\b" + command + r"\b", f"{command} is in the console but not the menu")
 
+    def test_the_settings_are_one_click_from_the_top(self):
+        self.assertIn("\n  Script Settings:dccore.options\n", self.menu)
+
     def test_the_command_list_is_reachable(self):
         self.assertIn("Command list:dccore\n", self.menu)
 
@@ -88,7 +91,7 @@ class TheWindowMenu(unittest.TestCase):
 
     def test_the_submenus_use_the_dot_form(self):
         for entry in (".Show the lists:", ".Fetch the changed lists:", ".Ask a bot for its list...:", ".Find duplicate filenames:",
-                      ".Ban...:", ".Unban...:", ".Clear a queue...:", ".Options...:", ".Font size...:"):
+                      ".Ban...:", ".Unban...:", ".Clear a queue...:", ".Font size...:", ".DCCore Chat:", ".Downloads window:"):
             self.assertIn(entry, self.menu, entry)
 
     def test_the_things_that_change_or_take_minutes_ask_first(self):
@@ -103,7 +106,7 @@ class TheWindowMenu(unittest.TestCase):
         self.assertIn("dccore.ask clearqueue ", self.menu)
         self.assertIn(".Ask a bot for its list...:dccore.ask fetch ", self.menu)
         self.assertNotRegex(self.menu, r"dccore\.send fetch\b", "a named fetch needs the bot's nick")
-        self.assertIn("Console command...:dccore.askraw", self.menu)
+        self.assertIn("Console command:dccore.askraw", self.menu)
         self.assertNotRegex(self.menu, r"dccore\.send ban\b", "a ban needs a pattern")
         self.assertNotRegex(self.menu, r"dccore\.send unban\b")
 
