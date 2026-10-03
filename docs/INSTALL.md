@@ -382,7 +382,7 @@ Your settings and data are never changed by an upgrade: `settings.conf`, `admin_
 
 **1. Stop the daemon.** A transfer in progress will be cut off, so a quiet moment is kinder than mid-queue.
 
-**2. Back up `data/` and your config.** It holds your stats, ban list, download counts and speed record — none of it recoverable if something goes wrong. Your config is at the top of the folder up to v1.13.2, and in `conf/` from the next release on; the two `cp` lines below copy it from wherever it is.
+**2. Back up `data/` and your config.** It holds your stats, ban list, download counts and speed record — none of it recoverable if something goes wrong. Your config is at the top of the folder up to v1.13.2, and in `conf/` from v1.14.0 on; the two `cp` lines below copy it from wherever it is.
 
 ```bash
 mkdir -p data.backup
