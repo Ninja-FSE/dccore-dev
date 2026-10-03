@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
+
+The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
+queue) and what has happened (totals, most downloaded, the record). It also showed "Most downloaded" twice - the old
+all-time counts and the transfer record's top list - and the Sent figures twice.
+
+- **Live Transfers** (new, between Tools and Stats) holds Transfer (speed now, record, sending, queued, uptime) and the
+  Queue with its table. It refreshes every few seconds while it is open.
+- **Stats** now has one **Period** (24 hours, 7 days, 30 days, All time) that drives the whole page: the **Sent** row
+  (one row of eight: Files sent, Size sent, Lists sent, Top speed, Average speed, Average wait, Files received, Size
+  received), **Most downloaded - files** and **- albums**, and the nick tables. The old Sent cards (Total, Today,
+  Yesterday) are gone.
+- All time is never below the lifetime counter in `stats.txt`, so what the bot sent before the record began (#1069) is
+  still counted, and Most downloaded for All time still reads the count file that holds everything ever sent. A period
+  reads the record. `/api/stats/record` now carries `top_files`, `top_albums` and `albums_enabled`.
+- With `TRANSFER_LOG_FILE` empty (the record off) the period, Sent row and nick tables are hidden and Most downloaded
+  shows the all-time lists.
+
 ### 🧪 No Python file has an invalid escape sequence
 
 Python 3.12 and later warn about an invalid escape in an ordinary string (`"\S"`, `"C:\Program Files"`) every time

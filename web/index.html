@@ -57,6 +57,9 @@
       <button class="nav-item" data-view="tools">
         <span class="nav-icon">&#9881;</span> <span data-i18n="view.tools.title">Tools</span>
       </button>
+      <button class="nav-item" data-view="live">
+        <span class="nav-icon">&#9654;</span> <span data-i18n="view.live.title">Live Transfers</span>
+      </button>
       <button class="nav-item" data-view="stats">
         <span class="nav-icon">&#9673;</span> <span data-i18n="view.stats.title">Stats</span>
       </button>
@@ -613,7 +616,7 @@
       </div>
     </section>
 
-    <section class="view" id="view-stats">
+    <section class="view" id="view-live">
       <div class="stat-group-label" data-i18n="stats.transfer">Transfer</div>
       <div class="stat-row is-wide">
         <div class="stat-card"><div class="stat-value" id="st-speed">&mdash;</div><div class="stat-label" data-i18n="stats.speedNow">Speed now</div></div>
@@ -622,55 +625,6 @@
         <div class="stat-card"><div class="stat-value" id="st-queued">&mdash;</div><div class="stat-label" id="st-queued-label" data-i18n="sidebar.queued">Queued</div></div>
         <div class="stat-card"><div class="stat-value" id="st-uptime">&mdash;</div><div class="stat-label" data-i18n="stats.uptime">Uptime</div></div>
       </div>
-
-      <div class="stat-group-label" data-i18n="stats.sent">Sent</div>
-      <div class="stat-row is-wide">
-        <div class="stat-card"><div class="stat-value" id="st-sent-total">&mdash;</div><div class="stat-label" id="st-sent-total-files" data-i18n="common.total">Total</div></div>
-        <div class="stat-card"><div class="stat-value" id="st-sent-today">&mdash;</div><div class="stat-label" id="st-sent-today-files" data-i18n="common.today">Today</div></div>
-        <div class="stat-card"><div class="stat-value" id="st-sent-yesterday">&mdash;</div><div class="stat-label" id="st-sent-yesterday-files" data-i18n="common.yesterday">Yesterday</div></div>
-      </div>
-
-      <div class="stat-group-label" data-i18n="stats.library">Library</div>
-      <!-- #952: the cards are BUILT by renderLibrary(), because how many there
-           are depends on how many lists this bot serves - the total, one per
-           list when there is more than one, and when the list was built. -->
-      <div class="stat-row is-wide" id="st-library"></div>
-
-
-      <!-- SIDE BY SIDE: two "most downloaded" tables that used to stack full
-           width, one under the other, for no reason beyond being written
-           that way - neither needs the whole row, and stacked they pushed
-           whatever came after them a screen's height down. The long names
-           that would otherwise force one wide are truncated instead (see
-           .stat-top-name), which is what keeps both columns the width they
-           are here rather than each fighting to be as wide as its longest
-           row. -->
-      <div class="stat-top-grid">
-        <div>
-          <div class="stat-group-label" data-i18n="stats.mostDownloadedFiles">Most downloaded &mdash; files</div>
-          <div class="table-wrap">
-            <table class="stat-top-table">
-              <thead><tr><th data-i18n="common.file">File</th><th class="col-num" data-i18n="stats.timesSent">Times sent</th></tr></thead>
-              <tbody id="st-top-files"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div>
-          <div class="stat-group-label" id="st-top-albums-label" data-i18n="stats.mostDownloadedAlbums">Most downloaded &mdash; album folders</div>
-          <div class="table-wrap" id="st-top-albums-wrap">
-            <table class="stat-top-table">
-              <thead><tr><th data-i18n="stats.album">Album</th><th class="col-num" data-i18n="stats.timesSent">Times sent</th></tr></thead>
-              <tbody id="st-top-albums"></tbody>
-            </table>
-          </div>
-          <p class="stat-foot" id="st-top-albums-off" style="display:none;" data-i18n-html="stats.folderPackingOff">
-            Folder packing is off (<code>RAR_ENABLED</code>), so no album can be sent.
-          </p>
-        </div>
-      </div>
-
-      <p class="stat-foot" id="st-foot"></p>
 
       <!-- Queue, folded in from its own tab (#133): "everything the bot
            knows about itself, with the queue table keeping its place in
@@ -707,33 +661,78 @@
           </tbody>
         </table>
       </div>
+    </section>
 
-      <!-- The transfer record (#1102): what transfer_log.py has written for
-           every finished transfer since #1069, for a chosen period, and the
-           way to forget a nick in it. Loaded when Stats opens and when the
-           period changes - not on the page's poll. Every nick and file name
-           is set as text by renderRecord(), never written into this markup. -->
-      <div class="stat-group-label" data-i18n="stats.transferRecord">Transfer record</div>
-      <div class="record-periods" id="record-periods" role="group"
-           data-i18n-aria-label="stats.recordPeriod" aria-label="Period">
-        <button type="button" class="btn btn-small record-period" data-period="day" data-i18n="stats.periodDay">24 hours</button>
-        <button type="button" class="btn btn-small record-period" data-period="week" data-i18n="stats.periodWeek">7 days</button>
-        <button type="button" class="btn btn-small record-period" data-period="month" data-i18n="stats.periodMonth">30 days</button>
-        <button type="button" class="btn btn-small record-period is-active" data-period="all" data-i18n="stats.periodAll">All time</button>
+    <section class="view" id="view-stats">
+      <!-- The Stats page follows ONE period (#1117): the record's figures for
+           it, the most-sent files and albums, and the nicks. The record (#1102)
+           is what transfer_log.py has written for every finished transfer since
+           #1069; All time also counts what the bot sent before that. Loaded
+           when Stats opens and when the period changes - not on the page's
+           poll. Every nick and file name is set as text by renderRecord(),
+           never written into this markup. -->
+      <div id="record-period-box">
+        <div class="stat-group-label" data-i18n="stats.recordPeriod">Period</div>
+        <div class="record-periods" id="record-periods" role="group"
+             data-i18n-aria-label="stats.recordPeriod" aria-label="Period">
+          <button type="button" class="btn btn-small record-period" data-period="day" data-i18n="stats.periodDay">24 hours</button>
+          <button type="button" class="btn btn-small record-period" data-period="week" data-i18n="stats.periodWeek">7 days</button>
+          <button type="button" class="btn btn-small record-period" data-period="month" data-i18n="stats.periodMonth">30 days</button>
+          <button type="button" class="btn btn-small record-period is-active" data-period="all" data-i18n="stats.periodAll">All time</button>
+        </div>
       </div>
       <p class="import-status" id="record-status" hidden></p>
-      <div id="record-body" hidden>
-        <div class="stat-row is-wide" id="record-cards"></div>
-        <div class="record-top-grid">
-          <div>
-            <div class="stat-group-label" data-i18n="stats.recordTopFiles">Sent most</div>
-            <div class="table-wrap">
-              <table class="stat-top-table">
-                <thead><tr><th data-i18n="common.file">File</th><th class="col-num" data-i18n="stats.timesSent">Times sent</th></tr></thead>
-                <tbody id="record-top-files"></tbody>
-              </table>
-            </div>
+
+      <div id="record-sent" hidden>
+        <div class="stat-group-label" data-i18n="stats.sent">Sent</div>
+        <div class="stat-row is-eight" id="record-cards"></div>
+      </div>
+
+      <div class="stat-group-label" data-i18n="stats.library">Library</div>
+      <!-- #952: the cards are BUILT by renderLibrary(), because how many there
+           are depends on how many lists this bot serves - the total, one per
+           list when there is more than one, and when the list was built. -->
+      <div class="stat-row is-wide" id="st-library"></div>
+
+
+      <!-- SIDE BY SIDE: two "most downloaded" tables that used to stack full
+           width, one under the other, for no reason beyond being written
+           that way - neither needs the whole row, and stacked they pushed
+           whatever came after them a screen's height down. The long names
+           that would otherwise force one wide are truncated instead (see
+           .stat-top-name), which is what keeps both columns the width they
+           are here rather than each fighting to be as wide as its longest
+           row. -->
+      <div class="stat-top-grid" id="stat-top-grid">
+        <div>
+          <div class="stat-group-label" data-i18n="stats.mostDownloadedFiles">Most downloaded &mdash; files</div>
+          <div class="table-wrap">
+            <table class="stat-top-table">
+              <thead><tr><th data-i18n="common.file">File</th><th class="col-num" data-i18n="stats.timesSent">Times sent</th></tr></thead>
+              <tbody id="st-top-files"></tbody>
+            </table>
           </div>
+        </div>
+
+        <div>
+          <div class="stat-group-label" id="st-top-albums-label" data-i18n="stats.mostDownloadedAlbums">Most downloaded &mdash; album folders</div>
+          <div class="table-wrap" id="st-top-albums-wrap">
+            <table class="stat-top-table">
+              <thead><tr><th data-i18n="stats.album">Album</th><th class="col-num" data-i18n="stats.timesSent">Times sent</th></tr></thead>
+              <tbody id="st-top-albums"></tbody>
+            </table>
+          </div>
+          <p class="stat-foot" id="st-top-albums-off" style="display:none;" data-i18n-html="stats.folderPackingOff">
+            Folder packing is off (<code>RAR_ENABLED</code>), so no album can be sent.
+          </p>
+        </div>
+      </div>
+
+
+      <p class="stat-foot" id="st-foot"></p>
+
+      <div id="record-body" hidden>
+        <div class="record-top-grid">
           <div>
             <div class="stat-group-label" data-i18n="stats.recordTopSent">Sent to</div>
             <div class="table-wrap">
@@ -753,7 +752,7 @@
             </div>
           </div>
         </div>
-        <p class="stat-foot" id="record-imported" hidden data-i18n="stats.recordIncludesImported">All time includes figures imported from KeepTrack, which have no date. The nick tables add what KeepTrack kept per nick; its sent total is in Sent at the top of this page, not in these cards.</p>
+        <p class="stat-foot" id="record-imported" hidden data-i18n="stats.recordIncludesImported">All time includes figures imported from KeepTrack, which have no date. The nick tables add what KeepTrack kept per nick.</p>
 
         <div class="record-nick">
           <input type="text" class="search-input" id="record-nick-input" maxlength="64" spellcheck="false"

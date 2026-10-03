@@ -51,6 +51,7 @@
     download:  { title: "view.download.title",   sub: "view.download.sub" },
     filelists: { title: "view.filelists.title",  sub: "view.filelists.sub" },
     tools:     { title: "view.tools.title",      sub: "view.tools.sub" },
+    live:      { title: "view.live.title",       sub: "view.live.sub" },
     // Reached from the badge in the status panel, not from the nav rail:
     // it is somewhere you are SENT when something happened, not somewhere
     // you go looking. A permanent nav entry for a page that is empty almost
@@ -221,12 +222,6 @@
     stQueued:              document.getElementById("st-queued"),
     stQueuedLabel:         document.getElementById("st-queued-label"),
     stUptime:              document.getElementById("st-uptime"),
-    stSentTotal:           document.getElementById("st-sent-total"),
-    stSentToday:           document.getElementById("st-sent-today"),
-    stSentYesterday:       document.getElementById("st-sent-yesterday"),
-    stSentTotalFiles:      document.getElementById("st-sent-total-files"),
-    stSentTodayFiles:      document.getElementById("st-sent-today-files"),
-    stSentYesterdayFiles:  document.getElementById("st-sent-yesterday-files"),
     stLibrary:             document.getElementById("st-library"),
     stFoot:                document.getElementById("st-foot"),
     stTopFiles:            document.getElementById("st-top-files"),
@@ -251,7 +246,8 @@
     recordStatus:          document.getElementById("record-status"),
     recordBody:            document.getElementById("record-body"),
     recordCards:           document.getElementById("record-cards"),
-    recordTopFiles:        document.getElementById("record-top-files"),
+    recordPeriodBox:       document.getElementById("record-period-box"),
+    recordSent:            document.getElementById("record-sent"),
     recordTopSent:         document.getElementById("record-top-sent"),
     recordTopReceived:     document.getElementById("record-top-received"),
     recordImported:        document.getElementById("record-imported"),
@@ -380,6 +376,7 @@
       if (!state.filelistsLoaded) { loadFilelists(); }
     }
     if (name === "settings" && !state.settingsLoaded) { loadSettings(); }
+    if (name === "live") { loadStats(); loadQueue(); }
     if (name === "stats") { loadStats(); loadRecord(); }
     if (name === "tools") { loadUpdateListSchedule(); }
     // Loaded here rather than in the badge's own handler, so every way into
@@ -6000,10 +5997,10 @@
     fetchJson("/api/queue").then(function (rows) {
       markConnection(true);
       renderSidebarStatus(rows);
-      // The queue table lives on Stats now (#133). Same rule as before -
-      // refresh the visible table only when it is the one showing, so a
-      // background poll never clobbers what the operator is reading.
-      if (state.active === "stats") {
+      // The queue table lives on Live Transfers (#133, #1117). Same rule as
+      // before - refresh the visible table only when it is the one showing,
+      // so a background poll never clobbers what the operator is reading.
+      if (state.active === "live") {
         renderQueueStats(rows);
         renderQueueTable(rows);
       }
@@ -6015,11 +6012,11 @@
   // reasoning as the sidebar status card above.
   setInterval(loadDownloads, DOWNLOADS_POLL_MS);
 
-  // Only while Stats is the view on screen. Speed now and the queue counters
-  // move second to second; the rest of the page does not, and polling a view
+  // Only while Live Transfers is the view on screen. Speed now and the queue
+  // counters move second to second; Stats does not, and polling a view
   // nobody is looking at is the 401 storm in miniature.
   setInterval(function () {
-    if (state.active === "stats") { loadStats(); }
+    if (state.active === "live") { loadStats(); }
   }, REFRESH_MS);
 
   // A rebuild started elsewhere while Tools is on screen is picked up within
@@ -6090,7 +6087,6 @@
     // Kept, so a language that arrives later can redraw it (#976).
     state.lastStats = data;
     var tr = data.transfer || {};
-    var s = data.sent || {};
     var lib = data.library || {};
 
     // Every figure is rendered server-side by the same helpers the channel
@@ -6108,19 +6104,12 @@
               : ""));
     setStat(el.stUptime, tr.uptime_text || "0 Min");
 
-    setStat(el.stSentTotal, s.total_text || "0B");
-    setStat(el.stSentToday, s.today_text || "0B");
-    setStat(el.stSentYesterday, s.yesterday_text || "0B");
-    setStat(el.stSentTotalFiles, t("stats.labelledFileCount")
-      .replace("{label}", t("common.total")).replace("{count}", (s.total_files || 0).toLocaleString()));
-    setStat(el.stSentTodayFiles, t("stats.labelledFileCount")
-      .replace("{label}", t("common.today")).replace("{count}", (s.today_files || 0).toLocaleString()));
-    setStat(el.stSentYesterdayFiles, t("stats.labelledFileCount")
-      .replace("{label}", t("common.yesterday")).replace("{count}", (s.yesterday_files || 0).toLocaleString()));
-
     renderLibrary(lib);
 
-    renderTopDownloads(data.top);
+    // Once the record has answered, the tables belong to its period; this
+    // payload's all-time lists are only for a bot with the record off, and
+    // for the moment before the record has loaded.
+    if (!recordIsOn()) { renderTopDownloads(data.top); }
     setStat(el.stFoot, data.version || "");
   }
 
@@ -6239,21 +6228,32 @@
     });
   }
 
+  // False until the record has answered, and while it is off: then the
+  // Most downloaded tables show /api/stats' all-time lists instead.
+  function recordIsOn() {
+    return !!(state.lastRecord && state.lastRecord.enabled !== false);
+  }
+
   function renderRecord(data) {
     // Kept, so a language that arrives later can redraw it (#976).
     state.lastRecord = data;
     if (!data || data.enabled === false) {
       el.recordBody.hidden = true;
+      el.recordSent.hidden = true;
+      el.recordPeriodBox.hidden = true;
       recordNote(t("stats.recordOff"), false);
+      if (state.lastStats) { renderTopDownloads(state.lastStats.top); }
       return;
     }
     recordNote("", false);
     el.recordBody.hidden = false;
+    el.recordSent.hidden = false;
+    el.recordPeriodBox.hidden = false;
     var s = data.summary || {};
     var cards = [
       [(s.files_sent || 0).toLocaleString(), "stats.recordFilesSent"],
-      [(s.lists_sent || 0).toLocaleString(), "stats.recordListsSent"],
       [s.bytes_sent_text || "0B", "stats.recordBytesSent"],
+      [(s.lists_sent || 0).toLocaleString(), "stats.recordListsSent"],
       [s.top_speed_text || "0k/s", "stats.recordTopSpeed"],
       [s.average_speed_text || "0k/s", "stats.recordAverageSpeed"],
       [s.queue_wait_text || "—", "stats.recordQueueWait"],
@@ -6279,9 +6279,11 @@
       function (r) { return (r.files || 0).toLocaleString(); },
       function (r) { return r.bytes_text; }
     ];
-    recordTable(el.recordTopFiles, data.top_files,
-                [function (r) { return r.name; }, function (r) { return r.count; }],
-                t("stats.recordEmpty"));
+    renderTopDownloads({
+      files: data.top_files,
+      albums: data.top_albums,
+      albums_enabled: data.albums_enabled
+    });
     recordTable(el.recordTopSent, data.top_sent, nickColumns, t("stats.recordNoNicks"));
     recordTable(el.recordTopReceived, data.top_received, nickColumns, t("stats.recordNoNicks"));
     el.recordImported.hidden = !data.includes_imported;

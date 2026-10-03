@@ -252,17 +252,20 @@ def _one(width, sql, args=()):
     return rows[0] if rows else (None,) * width
 
 
-def top_files(limit=10, since=None):
-    """The most-sent files as [(name, times sent)], most first, ties by name.
+def top_files(limit=10, since=None, kind=None):
+    """The most-sent items as [(name, times sent)], most first, ties by name.
 
     Lists are not files and never appear here; an album (a packed folder)
-    counts as one item, the way the Most downloaded table counts it.
+    counts as one item, the way the Most downloaded table counts it. kind
+    (KIND_FILE or KIND_ALBUM) keeps one of the two, as the Stats page's two
+    tables show them apart (#1117); without it they come mixed.
     """
     rows = _query(
         "SELECT MAX(name), COUNT(*) AS n FROM transfers"
-        " WHERE direction = ? AND kind != ? AND item_key IS NOT NULL AND ended_at >= ?"
+        " WHERE direction = ? AND kind != ? AND (? IS NULL OR kind = ?)"
+        " AND item_key IS NOT NULL AND ended_at >= ?"
         " GROUP BY item_key ORDER BY n DESC, MAX(name) LIMIT ?",
-        (SENT, KIND_LIST, since or 0, max(0, int(limit))))
+        (SENT, KIND_LIST, kind, kind, since or 0, max(0, int(limit))))
     return [(name, count) for name, count in rows]
 
 
