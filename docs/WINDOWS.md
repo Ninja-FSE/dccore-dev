@@ -63,6 +63,25 @@ within a minute it says so and prints the command to end it by force. The
 dashboard's Tools page has **Stop the bot**, and the admin console has
 `shutdown now`; all three stop it the way Ctrl-C does.
 
+### Without the window
+
+Settings > Debug & logging > **The bot's window** (`BOT_WINDOW`) decides how
+`start-dccore.bat` starts the bot, from the next start on:
+
+| Value | The bot |
+|---|---|
+| `normal` | in its own window, as above |
+| `minimised` | in its own window, minimised to the taskbar |
+| `hidden` | with no window at all; what it says is in `data\logs\dccore.log` |
+
+With `minimised` or `hidden` the launcher's window says the bot is running and
+closes after a few seconds. Stop the bot with `start-dccore.bat stop`, the
+dashboard's Tools > Stop the bot, or `shutdown now` in the admin console. The
+very first run always has its window, since the setup needs it, and a hidden
+bot keeps the log file even if it was turned off: it is the only place it
+can say anything. The logon task (`install-autostart.bat`) follows the same
+setting.
+
 The setup page is `http://127.0.0.1:8420/setup` and answers only to this
 PC, only until the form is saved, and only with the one-time code in the
 link the window prints and opens - so nothing else on your PC or in your

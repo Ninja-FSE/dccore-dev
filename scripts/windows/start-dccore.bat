@@ -55,9 +55,14 @@ rem  can exist with no Python behind it. So each candidate is RUN once: only
 rem  one that answers becomes %PY%, and a machine that has only a stub falls
 rem  through to the install offer below. `call`, because a shim (pyenv-win's
 rem  python.bat) is a batch file, and running one without it never comes back.
+rem  %PYW% is the same Python with no window, for BOT_WINDOW = hidden: chosen
+rem  HERE, beside %PY%, because a full path carries its own quotes and a
+rem  later  if "%PY%"=="..."  test on one is a syntax error that ends the
+rem  whole script (#1065 review).
 set "PY="
-where py >nul 2>&1 && call py -3 -c "import sys" >nul 2>&1 && set "PY=py -3"
-if not defined PY where python >nul 2>&1 && call python -c "import sys" >nul 2>&1 && set "PY=python"
+set "PYW="
+where py >nul 2>&1 && call py -3 -c "import sys" >nul 2>&1 && set "PY=py -3" && set "PYW=pyw -3"
+if not defined PY where python >nul 2>&1 && call python -c "import sys" >nul 2>&1 && set "PY=python" && set "PYW=pythonw"
 
 rem  Neither on PATH. The python.org installer puts a per-user install under
 rem  %LOCALAPPDATA%\Programs\Python and an all-users one under %ProgramFiles%,
@@ -66,10 +71,10 @@ rem  finds nothing - the interpreter is there, it just was not announced. The
 rem  value keeps its own quotes because the path has spaces in it on most
 rem  machines ("Program Files") and %PY% is used bare everywhere below.
 if not defined PY for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
-    if exist "%%~D\python.exe" set "PY="%%~D\python.exe""
+    if exist "%%~D\python.exe" set "PY="%%~D\python.exe"" & set "PYW="%%~D\pythonw.exe""
 )
 if not defined PY for /d %%D in ("%ProgramFiles%\Python3*") do (
-    if exist "%%~D\python.exe" set "PY="%%~D\python.exe""
+    if exist "%%~D\python.exe" set "PY="%%~D\python.exe"" & set "PYW="%%~D\pythonw.exe""
 )
 
 if defined PY goto :have_python
@@ -326,6 +331,17 @@ rem  the same offer configure.py makes during setup. Never stops the start.
 
 rem --- go ----------------------------------------------------------------
 :go
+rem  BOT_WINDOW (#1065): normal, minimised or hidden. Never on a first run -
+rem  the setup page and its questions need this window - and read through
+rem  window-mode.py, which answers with an exit code: 20 minimised, 21 hidden.
+set "WINDOW_MODE=0"
+if not "%BROWSER_SETUP%"=="1" (
+    %PY% scripts\windows\window-mode.py >nul 2>&1
+    call set "WINDOW_MODE=%%errorlevel%%"
+)
+if "%WINDOW_MODE%"=="21" goto :go_hidden
+if "%WINDOW_MODE%"=="20" goto :go_minimised
+
 echo.
 echo   Starting DCCore.  Press Ctrl-C in this window to stop it.
 echo   Closing this window stops the bot too - leave it open, or minimise it.
@@ -367,3 +383,42 @@ if "%RC%"=="0" (
 echo.
 pause
 exit /b %RC%
+
+rem --- minimised or hidden (#1065) --------------------------------------------
+rem  This window is not there afterwards to read the "already running" exit
+rem  code, so that is asked first.
+:go_minimised
+call :already_running && exit /b 4
+start "DCCore" /min %PY% oserve.py
+echo.
+echo   DCCore is running, minimised to the taskbar.
+goto :started_elsewhere
+
+:go_hidden
+call :already_running && exit /b 4
+rem  pythonw: the same Python with no window, chosen beside %PY% (see the
+rem  top): "pyw -3", "pythonw", or the pythonw.exe beside a full path.
+start "DCCore" %PYW% oserve.py
+echo.
+echo   DCCore is running in the background, with no window.
+echo   What it says is in data\logs\dccore.log.
+
+:started_elsewhere
+echo   Stop it with:  scripts\windows\start-dccore.bat stop
+echo   (or Tools ^> Stop the bot on the dashboard).
+echo.
+rem  A few seconds to read that, then this window goes; no key to press, so
+rem  the logon task does not wait on it either.
+ping -n 8 127.0.0.1 >nul
+exit /b 0
+
+:already_running
+%PY% oserve.py --running >nul 2>&1
+if errorlevel 1 exit /b 1
+echo.
+echo   DCCore is already running from this folder. Stop it first with
+echo       scripts\windows\start-dccore.bat stop
+echo   if you meant to restart it.
+echo.
+if not defined DCCORE_AUTOSTART pause
+exit /b 0

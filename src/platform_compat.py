@@ -60,6 +60,20 @@ def rar_command(configured=None):
 # ---------------------------------------------------------------------
 # Listening sockets
 # ---------------------------------------------------------------------
+def no_console_window():
+    """Keyword arguments for subprocess that start a console program (rar,
+    a Python child) with no window of its own: {} anywhere but Windows.
+
+    A bot run with no window (BOT_WINDOW = hidden, pythonw, #1065) has no
+    console for a child to share, so Windows gave every pack and every list
+    rebuild a console window of its own - and closing it killed the job.
+    Every caller captures the child's output, so nothing is lost."""
+    if os.name != "nt":
+        return {}
+    import subprocess
+    return {"creationflags": subprocess.CREATE_NO_WINDOW}
+
+
 def prepare_listener(sock):
     """Apply the correct address-reuse option for this platform.
 

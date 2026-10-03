@@ -163,6 +163,17 @@ def _watch():
             print(f"[STOP] Could not look for the stop file: {err}")
 
 
+def running_pid():
+    """(running, pid): whether a bot holds this folder's lock, and its pid if
+    it wrote one. Asked by taking the lock and letting it go at once."""
+    try:
+        platform_compat.take_instance_lock(lock_file())
+    except platform_compat.AlreadyRunning as running:
+        return True, running.pid
+    platform_compat.release_instance_lock()
+    return False, None
+
+
 # ------------------------------------------------ the command (oserve.py --stop)
 
 def stop_from_outside(wait=WAIT_SECONDS, sleep=time.sleep, log=print):

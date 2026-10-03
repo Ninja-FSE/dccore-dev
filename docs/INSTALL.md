@@ -232,7 +232,8 @@ the dashboard's Tools > Stop the bot, or `shutdown now` in the admin console. On
 login; to have it start at boot without anyone logging in, once: `loginctl
 enable-linger $USER`. Its output is in `journalctl --user -u dccore -f` (and on every platform in
 `data/logs/dccore.log`, with the date on each line); on
-macOS in `~/Library/Logs/dccore.log`; on Windows the bot's own window opens
+macOS in `~/Library/Logs/dccore.log`; on Windows the bot's own window opens (or not: `BOT_WINDOW` = `minimised` or `hidden`, see
+[WINDOWS.md](WINDOWS.md#without-the-window))
 at logon, as it does from a double-click.
 
 ## Build the first list

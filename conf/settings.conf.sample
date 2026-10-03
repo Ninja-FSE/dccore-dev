@@ -944,6 +944,21 @@
 # How many old log files are kept
 #CONSOLE_LOG_KEEP = 5
 
+# How the bot runs on Windows when start-dccore.bat starts it: in its window
+# (normal), minimised to the taskbar, or with no window (hidden), its output
+# then in the log file. Stop a hidden bot with start-dccore.bat stop or Tools
+# > Stop the bot. The first run always has its window.
+#
+# How the bot runs on Windows when start-dccore.bat starts it (#1065):
+# normal     in its own window, as always - closing it stops the bot
+# minimised  in its own window, minimised to the taskbar
+# hidden     with no window at all; what it says goes to CONSOLE_LOG_FILE,
+# and start-dccore.bat stop, the dashboard's Tools page or the
+# console's `shutdown now` stops it
+# The first run always has its window: the setup needs it. Linux and macOS
+# run it in the background with their autostart (systemd, launchd) instead.
+#BOT_WINDOW = normal
+
 # Show in the console who asked for which file.
 #
 # THE CONSOLE FEED (#528). An OmenServe operator sees every request, send and

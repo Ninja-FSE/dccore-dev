@@ -2786,7 +2786,8 @@ SETTINGS_CATEGORIES = (
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL",
                                                 "DEBUG_TO_CONSOLE",
                                                 "CONSOLE_TIMESTAMP_FORMAT", "CONSOLE_LOG_FILE",
-                                                "CONSOLE_LOG_MAX_MB", "CONSOLE_LOG_KEEP", "PROJECT_URL"]),
+                                                "CONSOLE_LOG_MAX_MB", "CONSOLE_LOG_KEEP", "BOT_WINDOW",
+                                                "PROJECT_URL"]),
     # LAST, and named so nobody opens it by accident. Set once at install, and
     # a wrong value here loses a queue or a statistics file rather than
     # mis-tuning something. They were interleaved with the settings changed
@@ -2965,6 +2966,7 @@ SETTINGS_LABELS = {
     "CONSOLE_LOG_FILE": "Log file (blank = none)",
     "CONSOLE_LOG_MAX_MB": "Start a new log file at (MB)",
     "CONSOLE_LOG_KEEP": "Old log files to keep",
+    "BOT_WINDOW": "The bot's window on Windows (normal, minimised, hidden)",
     "PROJECT_URL": "Project URL",
 }
 

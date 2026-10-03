@@ -4449,6 +4449,7 @@
     CONSOLE_LOG_FILE: "settings.field.CONSOLE_LOG_FILE",
     CONSOLE_LOG_MAX_MB: "settings.field.CONSOLE_LOG_MAX_MB",
     CONSOLE_LOG_KEEP: "settings.field.CONSOLE_LOG_KEEP",
+    BOT_WINDOW: "settings.field.BOT_WINDOW",
     PROJECT_URL: "settings.field.PROJECT_URL"
   };
 

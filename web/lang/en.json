@@ -570,6 +570,7 @@
   "settings.field.CONSOLE_LOG_FILE": "Log file (blank = none)",
   "settings.field.CONSOLE_LOG_MAX_MB": "Start a new log file at (MB)",
   "settings.field.CONSOLE_LOG_KEEP": "Old log files to keep",
+  "settings.field.BOT_WINDOW": "The bot's window on Windows (normal, minimised, hidden)",
   "settings.field.PROJECT_URL": "Project URL",
   "settings.field.WEBUI_CONSOLE_ENABLED.note": "Not set: on while the dashboard is loopback-only. Currently {state}.",
   "settings.onWord": "ON",
