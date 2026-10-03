@@ -4,6 +4,27 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ hard_bans.txt is parsed once per version of the file, not per message (#1131)
+
+Performance audit 2026-10-03 P9. `security.check_user_status()` runs on every channel message, before anything knows
+whether it is a command, and it opened `hard_bans.txt`, re-escaped and recompiled every pattern each time. Past about
+512 patterns that also overflowed `re`'s own cache, so every pattern compiled from scratch on every line: 0.5 ms a
+message at 20 bans, 64 ms at 600, 270 ms at 2,000 - about four messages a second.
+
+- `security._hard_ban_rules()` keeps the parsed rules in one `(signature, trusted, text, rules)` tuple, replaced in a
+  single assignment and keyed on the file's path, mtime, size and inode. A version is trusted on its key only once its
+  mtime is more than 3 s older than the moment it was stat'ed (git's "racy" rule), so a same-size rewrite in place
+  cannot hide behind an unchanged key; until then every check re-reads the file and re-parses only a changed text.
+- `db.add_hard_ban()` and `db.remove_hard_ban()` drop the parsed copy after every write, failed ones included
+  (`security.forget_hard_ban_rules()`), so `!ban` and `!unban` never depend on the stat key.
+- The decisions are unchanged: the same three pattern shapes, first match in file order, the same fail-open path on a
+  read error, and "does the file exist" decided as `os.path.exists()` decided it. The over-broad-pattern warning now
+  prints once per version of the file instead of once per message.
+- Tests: `tests/test_hard_bans_are_parsed_once_per_version_of_the_file.py` - a verbatim copy of the old scan against 40
+  random files (CRLF, CR and LF endings, metacharacters, NEL), open and parse counts, the same-mtime rewrite, both
+  writers and the fail-open path. `test_bans_and_flood.test_star_only_pattern_is_refused` expects the warning on the
+  first check and not the second.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
