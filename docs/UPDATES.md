@@ -27,6 +27,10 @@ keeps the new lines with no JavaScript change.
   With the record off (`TRANSFER_LOG_FILE` empty) the preview leaves them out and says why.
 - **What the preview says:** KeepTrack's start date (`kt_start_date()`, English month names whatever the locale, as
   mIRC writes them), and the file types it counted when that is not `*` - its default list has no .rar and no .flac.
+- **Found in a review before merge:** every sent source offered as a choice is validated as the default one is - only
+  that one was, so KeepTrack's figures could show `-5` in the preview and have the whole import refused when picked,
+  on the page or in `configure.py` - and a received start date whose figure was refused is dropped with it, rather
+  than reaching the apply alone and answering 500 "could not be written" after the rest was.
 
 Tests: `tests/test_keeptrack_totals_are_imported.py` (the parse, the notes, the record, the first-run question, and the
 page's source switch under node).
