@@ -3320,7 +3320,7 @@ SETTINGS_UNITS = {
 # as the stored choice and gains readable text beside each one.
 CHOICE_LABELS = {
     "DCC_BLOCK_SIZE": {str(1024 * n): f"{n} KB"
-                       for n in (4, 8, 16, 32, 64, 128)},
+                       for n in (4, 8, 16, 32, 64, 128, 256)},
 }
 
 

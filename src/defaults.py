@@ -710,17 +710,30 @@ LIST_PROGRESS_FILE: str = "./data/list_progress.json"
 # thing operators come here looking for is already on; this only exposes the
 # number.
 #
-# RAISING IT FURTHER USUALLY CHANGES NOTHING, and it is worth saying so rather
-# than implying a free win. Past a few tens of kilobytes the limit is TCP's own
-# window and the link, not how much this loop hands the kernel at a time - the
-# bytes are already in flight while the next read happens. Where it can help is
-# a very fast, very high-latency link; where it can hurt is memory, since each
-# concurrent transfer holds one buffer of this size.
+# The SPEED rarely changes with it: past a few tens of kilobytes the limit is
+# TCP's own window and the link, not how much this loop hands the kernel at a
+# time - the bytes are already in flight while the next read happens. What it
+# does change is CPU, because every block costs a read, a send and a check for
+# acks. On loopback (#1139) 256 KB used 30-40% less sender CPU per GB than
+# 64 KB, and 128 KB most of that. That is about 1% of a core at 100 Mbps and
+# close to 10% at a saturated 1 Gbps, so a bigger block is worth it on a fast
+# seedbox. 4-16 KB cost two to three times the CPU of 64 KB.
+#
+# The default stays 64 KB because a bigger block has a price. The live speed -
+# "Speed now" on the dashboard, "Speed:" in the channel advert - is sampled
+# once a second from the bytes sent, and those move one whole block at a time.
+# A transfer slower than about one block a second reads 0 in most samples and
+# a one-block jump in the rest. And a receiver that stops reading altogether
+# is given up on after 60 s at 64 KB and below, and 60 s per 64 KB above that:
+# 240 s at 256 KB, holding its slot all that time. The timeout grows with the
+# block (see dcc._send_timeout) so that a slow receiver that IS still reading
+# survives at any size. Each concurrent transfer also holds one buffer of this
+# size in memory.
 #
 # Clamped to 4 KB - 1 MB when read (see dcc.dcc_block_size), because a value
 # of 0 would busy-loop and a value of 500 MB would hold half a gigabyte per
 # transfer for no gain.
-DCC_BLOCK_SIZE: int = 65536      # 64 KB - one of 4096/8192/16384/32768/65536/131072
+DCC_BLOCK_SIZE: int = 65536      # 64 KB - one of 4096/8192/16384/32768/65536/131072/262144
 
 # The socket send buffer for a DCC transfer, in bytes. 0 leaves it to the OS.
 #

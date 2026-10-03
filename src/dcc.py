@@ -2054,6 +2054,19 @@ def check_queue_and_send(irc_sock, completed_user):
 
 MIN_DCC_BLOCK_SIZE = 4096
 MAX_DCC_BLOCK_SIZE = 1024 * 1024
+# What a missing or unreadable DCC_BLOCK_SIZE falls back to: the shipped
+# default in defaults.py, 64 KB. A test holds the two together.
+DEFAULT_DCC_BLOCK_SIZE = 64 * 1024
+
+# How long one block's sendall() may take before the receiver is given up on,
+# at a 64 KB block. CPython applies a socket timeout to the WHOLE sendall()
+# call, not to each send() inside it, so the slowest link a send survives is
+# block / timeout: 64 KB a minute, about 1.1 KB/s. A bigger block with the same
+# 60 s would quietly raise that floor - 4.4 KB/s at 256 KB - so the timeout
+# grows with the block instead (#1139). A send() loop would not help: on
+# Windows one send() accepts the whole block at once.
+SEND_TIMEOUT_SECONDS = 60.0
+SEND_TIMEOUT_BLOCK = 64 * 1024
 
 
 # What "let the OS decide" is worth, per platform.
@@ -2370,10 +2383,22 @@ def dcc_block_size():
     thing is to use the nearest usable number and get on with the transfer.
     """
     try:
-        wanted = int(getattr(config, "DCC_BLOCK_SIZE", 65536))
+        wanted = int(getattr(config, "DCC_BLOCK_SIZE", DEFAULT_DCC_BLOCK_SIZE))
     except (TypeError, ValueError):
-        return 65536
+        return DEFAULT_DCC_BLOCK_SIZE
     return max(MIN_DCC_BLOCK_SIZE, min(MAX_DCC_BLOCK_SIZE, wanted))
+
+
+def _send_timeout(block):
+    """The data socket's timeout for a transfer sending `block` bytes a pass.
+
+    60 s up to 64 KB, exactly as before #1139, and in proportion above it, so
+    the slowest receiver a send survives stays 64 KB a minute whatever block
+    size is picked. The cost is that a peer which stops reading altogether is
+    noticed later - 240 s at 256 KB - while one that stops acknowledging is
+    still caught by ACK_STALL_SECONDS between blocks.
+    """
+    return SEND_TIMEOUT_SECONDS * max(1.0, block / float(SEND_TIMEOUT_BLOCK))
 
 
 def transfers_are_paused():
@@ -3858,6 +3883,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             # change mid-file, and a getattr in the inner loop of a 4 GB send
             # is a million lookups for one answer.
             block = dcc_block_size()
+            # The timeout covers one whole sendall() of `block` bytes, so it
+            # scales with the block; see SEND_TIMEOUT_SECONDS.
+            conn.settimeout(_send_timeout(block))
             while True:
                 chunk = f.read(block)
                 if not chunk: break
