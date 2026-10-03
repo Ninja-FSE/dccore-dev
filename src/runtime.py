@@ -219,6 +219,14 @@ rehash_lock = threading.Lock()
 # two callers both believe they hold it.
 list_index_lock = threading.Lock()
 
+# The cross-list index's READ connection (#1129). The dashboard's filter
+# queries use a second connection of their own, so a list being indexed no
+# longer holds every keystroke for the whole write; this guards that one.
+# Lock order: list_index_lock first, then this one. A reader never takes
+# list_index_lock while it holds this, or a write closing the reader and a
+# reader opening one would wait on each other for ever.
+list_index_read_lock = threading.Lock()
+
 # transfer_log.py's database (#1068). One writer at a time, so two transfers
 # ending together never meet a locked file; here, not in that module, for the
 # reason every other lock in this file is.

@@ -510,13 +510,16 @@ class WhenTheIndexIsNotThere(IndexCase):
         self.addCleanup(setattr, list_index.sqlite3, "connect", real)
         self.assertEqual(list_index.search(["anything"]), [])
 
-        # Two opens: the one that failed on the damaged file, and the fresh
-        # index started after it was moved aside (#628). The first must be
-        # closed - on Windows the rename that moves it aside fails otherwise.
-        self.assertEqual(len(opened), 2, "the failing path opened nothing")
+        # Three opens: the one that failed on the damaged file, the fresh
+        # index started after it was moved aside (#628), and the readers'
+        # own connection beside it (#1129), opened only once the fresh file
+        # had its schema. The first must be closed - on Windows the rename
+        # that moves it aside fails otherwise.
+        self.assertEqual(len(opened), 3, "the failing path opened nothing")
         with self.assertRaises(sqlite3_mod.ProgrammingError):
             opened[0].execute("SELECT 1")
         self.assertIs(opened[1], list_index._connection)
+        self.assertIs(opened[2], list_index._read_connection)
 
     def test_no_index_does_not_grey_out_every_bot(self):
         """"We cannot tell" is not "nobody has it". Crossing out the whole
@@ -1035,7 +1038,9 @@ class AQueryThatFailedIsNotAListThatIsEmpty(IndexCase):
         self.index("keeper", "Blue Monday.mp3")
         self.index("broken", "Blue Monday.mp3")
 
-        real = list_index._connect
+        # The read connection since #1129: the filter's queries no longer
+        # run on _connect()'s.
+        real = list_index._reader
 
         class OneBotFails(object):
             def __init__(self, conn):
@@ -1049,8 +1054,8 @@ class AQueryThatFailedIsNotAListThatIsEmpty(IndexCase):
             def __getattr__(self, name):
                 return getattr(self.conn, name)
 
-        list_index._connect = lambda: OneBotFails(real())
-        self.addCleanup(setattr, list_index, "_connect", real)
+        list_index._reader = lambda: OneBotFails(real())
+        self.addCleanup(setattr, list_index, "_reader", real)
 
         matched, empty = list_index.bots_with_a_match(["blue"], ["keeper", "broken"])
 
@@ -1058,7 +1063,7 @@ class AQueryThatFailedIsNotAListThatIsEmpty(IndexCase):
         self.assertNotIn("broken", empty)
 
     def test_and_the_operator_is_told_rather_than_shown_nothing(self):
-        real = list_index._connect
+        real = list_index._reader
 
         class AlwaysFails(object):
             def __init__(self, conn):
@@ -1073,8 +1078,8 @@ class AQueryThatFailedIsNotAListThatIsEmpty(IndexCase):
                 return getattr(self.conn, name)
 
         self.index("broken", "Blue Monday.mp3")
-        list_index._connect = lambda: AlwaysFails(real())
-        self.addCleanup(setattr, list_index, "_connect", real)
+        list_index._reader = lambda: AlwaysFails(real())
+        self.addCleanup(setattr, list_index, "_reader", real)
 
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
