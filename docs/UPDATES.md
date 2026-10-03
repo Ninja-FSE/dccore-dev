@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 Source-reading tests parse each text once (#1147)
+
+Performance audit 2026-10-03 T2, on top of #1149. Source-reading tests opened `src/*.py` and ran `ast.parse()` on it
+themselves: one run parsed the same big modules about 29,000 times - `irc.py` 210 times, at 50-150 ms a parse.
+
+- `tests.support.parse_source(text, filename)` parses each distinct text once per process, for texts of 10,000
+  characters or more, keyed on the TEXT itself and never on a path and its mtime, so a file rewritten within one
+  timestamp tick is parsed afresh. The trees are shared, so a test reads them and never changes them.
+- 34 test modules use it. A guard test fails any test module that parses a text read from a file with `ast.parse()`
+  itself, subclasses a `NodeTransformer` or calls a helper that edits a tree - so new source-reading tests must use
+  `parse_source()`; the failure message says so. The 35 touched modules ran in 80.9 s instead of 115.4 s.
+- Tests: `tests/test_source_reading_tests_parse_each_text_once.py`.
+
 ### 🧪 The suite leaves the temp folder as it found it (#1149)
 
 Performance audit 2026-10-03 T4. Every run left about 236 entries in the temp folder. Tests removed their directories
