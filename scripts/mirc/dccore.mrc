@@ -1325,12 +1325,17 @@ alias dccore.askfont {
 
 ; Every /dccore command, and every console command worth a click, is here.
 menu @DCCore {
+  Script Settings:dccore.options
+  Console command:dccore.askraw
+  -
   Info
   .Status:dccore.send status
   .Slots:dccore.send slots
   .Queue:dccore.send queue
   .Uptime:dccore.send uptime
   .Version:dccore.send version
+  .-
+  .Command list:dccore
   Lists
   .Show the lists:dccore lists
   .Fetch the changed lists:dccore fetch
@@ -1355,23 +1360,20 @@ menu @DCCore {
   $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
   $iif($dccore.sels,Queue of $dccore.sels):dccore.send queue $dccore.sels
   -
-  Console command...:dccore.askraw
-  -
   Connection
   .$iif($chat($dccore.bot),Disconnect,Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
   .Pair with the bot:dccore pair $dccore.bot
   .Forget the token (unpair):dccore unpair
   .Trust the bot's host:dccore trust
   Window
-  .Options...:dccore.options
+  .DCCore Chat:dccore chat
+  .Downloads window:dccore downloads
+  .-
   .Panel $iif($dccore.opt(panel),off,on):dccore panel $iif($dccore.opt(panel),off,on)
   .Font size...:dccore.askfont
   .Dashboard address...:dccore weburl
   .Clear window:clear @DCCore
-  DCCore Chat:dccore chat
-  Downloads window:dccore downloads
-  Clear finished downloads:dccore.send dlclear
-  Command list:dccore
+  Clear finished:dccore.send dlclear
 }
 
 menu nicklist {
