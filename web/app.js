@@ -3806,7 +3806,9 @@
       }).join(", "));
     });
     var skipped = payload.skipped || {};
-    var reasons = Object.keys(skipped);
+    // Sorted here (#1143): the server sends dict keys in the order it built
+    // them, and this list read alphabetically only because it used to sort.
+    var reasons = Object.keys(skipped).sort();
     if (reasons.length) {
       ktdataLine(t("stats.ktdataSkipped")
         .replace("{count}", reasons.reduce(function (n, r) { return n + skipped[r]; }, 0))
