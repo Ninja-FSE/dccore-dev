@@ -451,6 +451,10 @@ start scripts and `configure.py` work as before. Three things that do change:
 **Update `dccore.mrc`.** Save this release's `scripts/mirc/dccore.mrc` over yours and type `/reload -rs dccore.mrc`
 in mIRC. An older script keeps working, without the new Downloads window, the rebuild progress and the fixes.
 
+**The download counts move into a database.** The first start copies `data/download_counts.json` into
+`data/download_counts.db` - a few seconds on a bot that has sent a great many different files - and never writes the
+JSON again, so going back to v1.13 still shows the counts as they were at the upgrade.
+
 **Three new things are on by default** - each harmless, each worth knowing:
 
 - **A log file.** Everything the bot's window shows also goes to `data/logs/dccore.log`: at most 5 MB, and five old
