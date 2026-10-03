@@ -2,6 +2,30 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### ⚡ A bigger send block keeps the slow-link floor, and 256 KB is on the menu (#1139)
+
+Performance audit 2026-10-03 P17. Every block of a send costs a read, a `sendall()` and an ack check, so a bigger
+`DCC_BLOCK_SIZE` costs less sender CPU per GB: 30-40% less at 256 KB than at 64 KB on loopback, 4-16 KB two to three
+times more. But CPython's socket timeout covers a WHOLE `sendall()`, so with the fixed 60 s the slowest receiver a send
+survived was block / 60 s: 1.1 KB/s at 64 KB, 2.2 KB/s at the 128 KB the menu already offered, 4.4 KB/s at 256 KB.
+
+- `dcc._send_timeout(block)`: 60 s up to 64 KB, exactly as before, and 60 s per 64 KB above that, applied right after
+  the block is resolved, so the slowest receiver that survives stays 64 KB a minute at any size. It reaches only
+  `sendall()`: `_drain_acks()` and `_wait_for_final_ack()` recv only after `select()` says there is data.
+- 256 KB is on the menu (`settings_file.CHOICES`, `webserver.CHOICE_LABELS`) for a fast seedbox, where it saves up to
+  about 10% of a core at a saturated 1 Gbps.
+- **The default stays 64 KB**, against the audit's proposal. The live speed - Speed now on the dashboard, `Speed:` in
+  the channel advert - is a one-second sample of `bytes_sent`, which moves a whole block at a time, so a transfer
+  slower than about one block a second reads 0 in most samples and a one-block jump in the rest: at 100 KB/s, 0 or
+  256 KB/s with 256 KB blocks, 64 or 128 KB/s with 64 KB. The issue's skeptic measured the CPU saving at real link
+  speeds at about 1% of a core at 100 Mbps, and a receiver that stops reading would hold its slot 240 s instead of
+  60 s. The help (three languages), the `defaults.py` comment, the sample settings file and `FUTURE.md` say all this.
+- Tests: `tests/test_a_bigger_send_block_keeps_the_slow_link_floor.py` - the timeout at every size, the floor, real
+  loopback sends at the default, 128 KB and 256 KB, the menu and its label, the default held to the fallback;
+  `test_rehash_config_window.py` and `test_size_settings_have_units.py` gain 256 KB in the menu.
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)
