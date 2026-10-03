@@ -40,9 +40,9 @@ rem --- the Python this file installs when there is none ------------------
 rem  The release page (python.org/downloads/release/python-<ver>/) prints
 rem  each installer's SHA-256 in four groups of sixteen; these are those,
 rem  joined. Verified against the downloaded files when they were pinned.
-set "PY_VERSION=3.14.7"
-set "PY_SHA256_AMD64=9d9eb2709ef81bf5cd30db3c2096bdbc4ea10087c22e62f27d356b36f6ae9649"
-set "PY_SHA256_ARM64=9a3fe120cc81bc2cb099550f794d8356811f96a86c7f438519243c3485db928d"
+set "PY_VERSION=3.14.8"
+set "PY_SHA256_AMD64=759be887b96e736a3ca886daf8d575f18fcae1a09efab6902f42d59e8999f8ef"
+set "PY_SHA256_ARM64=53ba74b5b4370eb823fe0005eedeab907479f7339cecb11efea0e75ab5f10cfc"
 set "PY_DOWNLOAD_PAGE=https://www.python.org/downloads/windows/"
 set "PY_INSTALL_TRIED="
 
