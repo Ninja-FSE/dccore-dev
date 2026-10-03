@@ -13,7 +13,10 @@ parse, no python path quoted inside `FOR /F`. Never on a first run (`BROWSER_SET
 
 - **minimised:** `start "DCCore" /min %PY% oserve.py`.
 - **hidden:** `pythonw` - `pyw -3` from `py -3`, `pythonw` from `python`, the `pythonw.exe` beside a full-path
-  `python.exe` - with `start`.
+  `python.exe` - with `start`. `%PYW%` is chosen where `%PY%` is, in the same line: worked out later by comparing
+  `"%PY%"=="py -3"`, a full path - which keeps its own quotes, and has a space in `Program Files` - made that a syntax
+  error that ended the script, so hidden never started on such a machine (found in review; a test runs the block
+  under `cmd.exe` with such a path).
 - Both ask `oserve.py --running` first (new; exit 0 when a bot holds the folder, through `stopping.running_pid()`),
   since the launcher is not there afterwards to read the "already running" exit; then say how to stop it and close
   after a few seconds with no key to press (`ping`), so the logon task does not wait.
@@ -21,6 +24,11 @@ parse, no python path quoted inside `FOR /F`. Never on a first run (`BROWSER_SET
   `sys.stdout.write()` - Flask's way - raises. `oserve.py` puts a null file in their place before anything else, so
   every write works and reaches the log through the timestamp wrapper; and a windowless bot keeps the default log
   file even when `CONSOLE_LOG_FILE` is empty, since it is the only place it can say anything.
+- **No console windows for its children.** With no console to share, Windows gave every folder pack's `rar`, every
+  list rebuild and that rebuild's `rar` a console window of their own, and closing one killed the job.
+  `platform_compat.no_console_window()` (`CREATE_NO_WINDOW` on Windows, nothing elsewhere) goes on all three calls;
+  each captures its output, so nothing is lost, and a test reads every `subprocess` call in the daemon (as code, with
+  `ast`) so a new one has to join them.
 
 Checked under the real `pythonw.exe`: `oserve.py`'s start-up up to its entry point, with the log turned off, exits 0
 and both a `print()` and a direct write land in `data/logs/dccore.log`. Tests: `tests/test_the_bot_window_setting.py`

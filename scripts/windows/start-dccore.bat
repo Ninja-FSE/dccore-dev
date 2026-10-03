@@ -55,9 +55,14 @@ rem  can exist with no Python behind it. So each candidate is RUN once: only
 rem  one that answers becomes %PY%, and a machine that has only a stub falls
 rem  through to the install offer below. `call`, because a shim (pyenv-win's
 rem  python.bat) is a batch file, and running one without it never comes back.
+rem  %PYW% is the same Python with no window, for BOT_WINDOW = hidden: chosen
+rem  HERE, beside %PY%, because a full path carries its own quotes and a
+rem  later  if "%PY%"=="..."  test on one is a syntax error that ends the
+rem  whole script (#1065 review).
 set "PY="
-where py >nul 2>&1 && call py -3 -c "import sys" >nul 2>&1 && set "PY=py -3"
-if not defined PY where python >nul 2>&1 && call python -c "import sys" >nul 2>&1 && set "PY=python"
+set "PYW="
+where py >nul 2>&1 && call py -3 -c "import sys" >nul 2>&1 && set "PY=py -3" && set "PYW=pyw -3"
+if not defined PY where python >nul 2>&1 && call python -c "import sys" >nul 2>&1 && set "PY=python" && set "PYW=pythonw"
 
 rem  Neither on PATH. The python.org installer puts a per-user install under
 rem  %LOCALAPPDATA%\Programs\Python and an all-users one under %ProgramFiles%,
@@ -66,10 +71,10 @@ rem  finds nothing - the interpreter is there, it just was not announced. The
 rem  value keeps its own quotes because the path has spaces in it on most
 rem  machines ("Program Files") and %PY% is used bare everywhere below.
 if not defined PY for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
-    if exist "%%~D\python.exe" set "PY="%%~D\python.exe""
+    if exist "%%~D\python.exe" set "PY="%%~D\python.exe"" & set "PYW="%%~D\pythonw.exe""
 )
 if not defined PY for /d %%D in ("%ProgramFiles%\Python3*") do (
-    if exist "%%~D\python.exe" set "PY="%%~D\python.exe""
+    if exist "%%~D\python.exe" set "PY="%%~D\python.exe"" & set "PYW="%%~D\pythonw.exe""
 )
 
 if defined PY goto :have_python
@@ -391,12 +396,8 @@ goto :started_elsewhere
 
 :go_hidden
 call :already_running && exit /b 4
-rem  pythonw: the same Python with no window. From "py -3" it is "pyw -3",
-rem  from "python" it is "pythonw", from a full path python.exe it is the
-rem  pythonw.exe beside it.
-set "PYW=%PY:python.exe=pythonw.exe%"
-if /i "%PY%"=="py -3" set "PYW=pyw -3"
-if /i "%PY%"=="python" set "PYW=pythonw"
+rem  pythonw: the same Python with no window, chosen beside %PY% (see the
+rem  top): "pyw -3", "pythonw", or the pythonw.exe beside a full path.
 start "DCCore" %PYW% oserve.py
 echo.
 echo   DCCore is running in the background, with no window.
