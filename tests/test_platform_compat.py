@@ -20,6 +20,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import platform_compat  # noqa: E402
+from tests.support import remove_tree, parse_source, temp_dir  # noqa: E402
 
 
 class RarCommandTests(unittest.TestCase):
@@ -141,6 +142,9 @@ class LongPathTests(unittest.TestCase):
     def test_a_deep_path_survives_a_round_trip_to_disk(self):
         """The behaviour that matters: open a file whose path is long."""
         root = tempfile.mkdtemp(prefix="dccore-long-")
+        # Removed through the long-path form: below MAX_PATH's reach, a plain
+        # rmtree cannot get at the deepest folders on Windows (#1149).
+        self.addCleanup(remove_tree, platform_compat.long_path(root))
         deep = root
         for i in range(12):
             deep = os.path.join(deep, "Artist Name With A Long Title %02d" % i)
@@ -312,7 +316,7 @@ def _calls_to(module_name, dotted):
     owner, attribute = dotted.split(".")
     path = (next((p for p in (os.path.join(REPO_ROOT, "src", module_name), os.path.join(REPO_ROOT, "conf", module_name), os.path.join(REPO_ROOT, module_name)) if os.path.exists(p)), os.path.join(REPO_ROOT, module_name)))
     with io.open(path, encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
+        tree = parse_source(handle.read())
 
     found = []
     for node in ast.walk(tree):
@@ -409,7 +413,7 @@ class WiringTests(unittest.TestCase):
         for module in ("dcc.py", "adminchat.py", "dcc_fetch.py", "irc.py"):
             with self.subTest(module=module):
                 with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", module), os.path.join(REPO_ROOT, "conf", module), os.path.join(REPO_ROOT, module)) if os.path.exists(p)), os.path.join(REPO_ROOT, module))), encoding="utf-8") as handle:
-                    tree = ast.parse(handle.read())
+                    tree = parse_source(handle.read())
                 offenders = [node.lineno for node in ast.walk(tree)
                              if isinstance(node, ast.Attribute)
                              and node.attr == "SO_REUSEADDR"]
@@ -444,15 +448,18 @@ class WiringTests(unittest.TestCase):
         would pass on a module whose only occurrence is inside a string."""
         import tempfile as tf
 
+        # Written into a temp folder, not the repository root (#1146): the
+        # suite's scanners walk the root, and with the suite split across
+        # processes one of them read this file half-written or saw it
+        # vanish mid-scan.
         with tf.NamedTemporaryFile("w", suffix=".py", delete=False,
-                                   encoding="utf-8", dir=REPO_ROOT) as handle:
+                                   encoding="utf-8", dir=temp_dir(self)) as handle:
             handle.write('x = "platform_compat.prepare_listener"\n'
                          '# platform_compat.prepare_listener(sock)\n')
             path = handle.name
-        self.addCleanup(os.remove, path)
 
-        self.assertEqual(_calls_to(os.path.basename(path),
-                                   "platform_compat.prepare_listener"), [])
+        # An absolute path: _calls_to's lookup hands it back unchanged.
+        self.assertEqual(_calls_to(path, "platform_compat.prepare_listener"), [])
 
     def test_config_supports_a_local_override(self):
         source = open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8").read()

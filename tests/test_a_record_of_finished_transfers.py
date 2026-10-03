@@ -30,6 +30,7 @@ import defaults as config  # noqa: E402
 import runtime  # noqa: E402
 import transfer_log  # noqa: E402
 
+from tests import dcc_ports  # noqa: E402
 from tests.support import DCCoreTestCase, silence_debug  # noqa: E402
 from tests.test_a_failing_bot_is_paused import TcpLike  # noqa: E402
 from tests.test_dcc_resume_end_to_end import RecordingIrcSocket, loopback_is_usable  # noqa: E402
@@ -706,10 +707,12 @@ class ASendIsRecorded(DCCoreTestCase):
         self.served = os.path.join(self.tmp, "Some_Song.mp3")
         with io.open(self.served, "wb") as handle:
             handle.write(CONTENT)
+        # A range of its own: a parallel run moves it into this shard's window (#1146).
+        port_start, port_end = dcc_ports(51320, 51330)
         self.set_config(
             active_transfers=[{"user": USER, "file": "Some_Song.mp3", "bytes_sent": 0,
                                "next_file_obj": "Some_Song.mp3"}],
-            MAX_DCC_SLOTS=3, MY_IP_OR_DOCK="8.8.8.8", DCC_PORT_START=51320, DCC_PORT_END=51330,
+            MAX_DCC_SLOTS=3, MY_IP_OR_DOCK="8.8.8.8", DCC_PORT_START=port_start, DCC_PORT_END=port_end,
             FILE_DIRECTORY=self.tmp)
         runtime.dcc_send_offers.clear()
         self.addCleanup(runtime.dcc_send_offers.clear)

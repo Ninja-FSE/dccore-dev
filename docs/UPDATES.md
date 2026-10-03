@@ -2,6 +2,65 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🧪 The suite runs in four processes (#1146)
+
+Performance audit 2026-10-03 T1, on top of #1147 and #1149. The suite ran in one process: 5-10 minutes, on CI and in
+preflight.
+
+- `scripts/run_tests_in_parallel.py` splits the test modules into up to four shards balanced by
+  `tests/module_durations.json` (longest first; a module not measured yet counts as the median; `--record` remeasures),
+  runs them at once and reports one summary: about 2 minutes instead of 6-10. A shard that fails, errors, never prints
+  its summary or exits non-zero after printing OK fails the run; one still running after 30 minutes is stopped and its
+  output so far printed. A test holds the shards to exactly the modules `unittest discover` finds.
+- EVERY SHARD LISTENS ON PORTS OF ITS OWN. All four would have scanned the same DCC ports, and on Linux two binds can
+  both succeed until one socket listens. The runner gives each shard a `DCCORE_TEST_PORT_SHIFT` (1000, 2000, 3000 or
+  8000); `tests/__init__.py` moves the configured range by it, and again after a reload of `defaults`; and every range a
+  test pins is written as `dcc_ports(start, end)`. A plain run has no shift and nothing changes in it.
+- CI's "Run the regression suite" step runs the parallel runner: the same 3 OS x 3 Python matrix, every module on every
+  job. Test lines no longer stream as they run; they print when the shards finish. Preflight's plain and counting
+  passes go through the runner; the coverage and hidden-tooling passes stay serial.
+- Sharding exposed tests that leaked shared state, now fixed: a dashboard debug sink left registered, the browser-setup
+  tests leaving `SERVER` and other settings changed (`keep_every_setting()` in the base class), two outbound-pace
+  threads racing on `redirect_stdout` and leaving `sys.stdout` swallowed, `test_membership_events` without its own
+  `NICKNAME`, and five tests writing temp files into the repository root.
+- Tests: `tests/test_the_suite_runs_in_balanced_shards.py`, `tests/test_every_shard_listens_on_ports_of_its_own.py`
+  (four real processes through the runner), `tests/test_the_outbound_pace_tests_leave_stdout_alone.py`, and the dev-only
+  `tests/test_preflight_runs_the_suite_in_parallel.py` (on the public strip list). README and PUBLIC-REPO-WORKFLOW.md
+  say how to run it.
+
+### 🧪 Source-reading tests parse each text once (#1147)
+
+Performance audit 2026-10-03 T2, on top of #1149. Source-reading tests opened `src/*.py` and ran `ast.parse()` on it
+themselves: one run parsed the same big modules about 29,000 times - `irc.py` 210 times, at 50-150 ms a parse.
+
+- `tests.support.parse_source(text, filename)` parses each distinct text once per process, for texts of 10,000
+  characters or more, keyed on the TEXT itself and never on a path and its mtime, so a file rewritten within one
+  timestamp tick is parsed afresh. The trees are shared, so a test reads them and never changes them.
+- 34 test modules use it. A guard test fails any test module that parses a text read from a file with `ast.parse()`
+  itself, subclasses a `NodeTransformer` or calls a helper that edits a tree - so new source-reading tests must use
+  `parse_source()`; the failure message says so. The 35 touched modules ran in 80.9 s instead of 115.4 s.
+- Tests: `tests/test_source_reading_tests_parse_each_text_once.py`.
+
+### 🧪 The suite leaves the temp folder as it found it (#1149)
+
+Performance audit 2026-10-03 T4. Every run left about 236 entries in the temp folder. Tests removed their directories
+with `shutil.rmtree(..., ignore_errors=True)`, which on Windows quietly leaves the whole directory behind while one
+file in it is still open - a sqlite connection nobody closed - and `DCCoreTestCase` removed its own in `tearDown()`,
+before a test's `addCleanup()` had closed what it opened there. On one machine 103,000 `dccore-list-index-*` folders
+from `test_crosslist_search`'s `IndexCase` had built up, and a temp folder that size made every child process slow to
+start - the Ctrl-C tests in `test_the_bot_can_be_stopped_without_its_window` timed out on it.
+
+- `tests.support.remove_tree()` removes a directory and means it: if a file is still held it closes the cached index
+  connection, then collects unreferenced connections, and tries again. `temp_dir(test)` and
+  `DCCoreTestCase.make_temp_dir()` hand out a directory that is removed by the LAST cleanup of the test; every test that
+  leaked uses one now, `IndexCase` included.
+- `scripts/preflight.py` runs every pass with TEMP, TMP and TMPDIR pointed at a folder of its own, names what a pass
+  leaves there and fails it. One entry is expected: the fixed sink for a write from a thread that outlived its test.
+- Tests: `tests/test_a_test_leaves_the_temp_folder_as_it_found_it.py`, and the dev-only
+  `tests/test_preflight_names_what_a_pass_leaves_in_temp.py` (on the public strip list).
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)

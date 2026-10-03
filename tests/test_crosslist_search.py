@@ -57,7 +57,7 @@ class IndexCase(DCCoreTestCase):
 
     def setUp(self):
         super().setUp()
-        self.index_dir = tempfile.mkdtemp(prefix="dccore-list-index-")
+        self.index_dir = self.make_temp_dir(prefix="dccore-list-index-")
         self.set_config(LIST_INDEX_FILE=os.path.join(self.index_dir, "idx.db"))
         list_index.reset_for_tests()
         self.addCleanup(list_index.reset_for_tests)
