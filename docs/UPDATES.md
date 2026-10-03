@@ -4,6 +4,27 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ Installing a fetched list streams its rows into the index (#1134)
+
+Performance audit 2026-10-03 P12, on top of #1136 and #1126 (the same scan) and #1122 (the same `backfill_missing()`).
+Installing a fetched list parsed it with `find_matching_entries()` into a dict per row, raw line included, turned that
+into a second dict per row with `entries_to_filelist_rows()`, kept both lists alive for the whole index write - and
+only ever used them to count the rows and write them to the index: +412 MB peak for a 378k-row list.
+
+- One generator, `list._matching_lines()`, is the scan; `find_matching_entries()` collects it into its capped list as
+  before, and the new `list.iter_filelist_rows()` hands the same rows on one at a time. `list.CountedRows` counts them
+  as the index takes them; its `total()` drains whatever the index did not take, so the count is the whole list even
+  when the index is unavailable or stops part-way (the skeptic's hole), and re-raises a parse error, so a list that
+  cannot be read still fails at the count as it did at the up-front parse. No `__len__`, on purpose: `list()` would
+  drain it before handing over the first row. `index_bot_list()` returns the rows it inserted instead of `len(rows)`.
+- Used in `list_fetch._install_fetched_list()`, `_measure_extra_list()` and `list_index.backfill_missing()`: +144 MB
+  peak instead of +412 MB, about 10% faster, the index content identical.
+- The parse now runs inside the index write lock, so this lands after #1129, which moves the filter bar's readers off
+  that lock. A list that cannot be read now also prints `index_bot_list()`'s "Could not index" line before the
+  rollback; the end state is unchanged.
+- Tests: `tests/test_installing_a_fetched_list_streams_its_rows.py`; `TheIndexIsWrittenByTheFetch` in
+  `test_crosslist_search.py` anchors on the `CountedRows` line.
+
 ### ⚡ The list parser skips two per-row costs no row needs (#1136)
 
 Performance audit 2026-10-03 P14, on top of #1126, which already made the third change (the rule check). Two more
