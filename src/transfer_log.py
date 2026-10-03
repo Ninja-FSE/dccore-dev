@@ -407,6 +407,48 @@ def nick_summary(nick, since=None):
     return figures
 
 
+def has_imported():
+    """True when anything from before the record began is in it: a source's
+    totals or a nick's figures (#1102)."""
+    return bool(_query("SELECT 1 FROM imported LIMIT 1"))
+
+
+EXPORT_COLUMNS = ("ended_at", "direction", "nick", "kind", "name", "size", "bytes",
+                  "seconds", "speed", "waited")
+EXPORT_CHUNK = 1000
+
+
+def iter_rows(since=None):
+    """Every row of the record from a Unix time on (all of them with none),
+    in the order written - which is the order they ended - as tuples in
+    EXPORT_COLUMNS order, for the CSV export (#1102). The imported totals are
+    not rows and are not here.
+
+    Read EXPORT_CHUNK rows at a time on a connection of its own, closed before
+    the rows are handed on. One cursor held open for the whole export kept a
+    read snapshot as long as the download ran - for ever, with a client that
+    stopped reading - and while it did, a forget could not empty the WAL and
+    the forgotten nick stayed readable there (#1102 review)."""
+    path = _path()
+    if not path or not os.path.exists(path):
+        return
+    after = 0
+    while True:
+        conn = _connect(path, READ_TIMEOUT)
+        try:
+            rows = conn.execute(
+                f"SELECT id, {', '.join(EXPORT_COLUMNS)} FROM transfers"
+                " WHERE id > ? AND ended_at >= ? ORDER BY id LIMIT ?",
+                (after, since or 0, EXPORT_CHUNK)).fetchall()
+        finally:
+            conn.close()
+        for row in rows:
+            yield row[1:]
+        if len(rows) < EXPORT_CHUNK:
+            return
+        after = rows[-1][0]
+
+
 def imported_nicks(source):
     """How many nicks a source imported per direction, as {direction: count} (#1064)."""
     return {direction: int(count or 0) for direction, count in _query(

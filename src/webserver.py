@@ -80,7 +80,7 @@ import runtime
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
 
 try:
-    from flask import (Flask, g, jsonify, redirect, request, send_file,
+    from flask import (Flask, Response, g, jsonify, redirect, request, send_file,
                        send_from_directory, session)
     HAVE_FLASK = True
 except ImportError:
@@ -701,6 +701,158 @@ def apply_ktdata_import(text):
     if written is None:
         return 500, {"error": "The per-nick history could not be written. Check the daemon log."}
     return 200, {"imported": written, "nicks": transfer_log.imported_nicks("keeptrack")}
+
+
+# THE TRANSFER RECORD ON THE STATS PAGE (#1102). The record (#1068) has been
+# written since #1069, but nothing read it. A period is one of these; "all"
+# is the only one the imported KeepTrack figures count in, as everywhere in
+# transfer_log.
+RECORD_PERIODS = {"day": 86400, "week": 7 * 86400, "month": 30 * 86400, "all": None}
+
+
+def _record_since(period):
+    """(since, error) for a period name: a Unix time, or None for all of it."""
+    if period not in RECORD_PERIODS:
+        return None, f"Unknown period {str(period)[:20]!r}: use day, week, month or all."
+    seconds = RECORD_PERIODS[period]
+    return (int(time.time()) - seconds if seconds else None), None
+
+
+def _record_off():
+    import transfer_log
+    if transfer_log._path():
+        return None
+    return {"enabled": False,
+            "error": "The transfer record is off (Settings > Advanced, TRANSFER_LOG_FILE is empty)."}
+
+
+def _wait_text(seconds):
+    """A queue wait as the page shows it: format_uptime() reads anything under
+    a minute as "0 Min", which for a wait is the wrong answer."""
+    if seconds is None:
+        return ""
+    import adminchat
+    return f"{int(seconds)} Sec" if seconds < 60 else adminchat.format_uptime(seconds)
+
+
+def _nick_rows(rows):
+    import stats_mgr
+    return [{"nick": nick, "files": files, "bytes": size, "bytes_text": stats_mgr.format_size_human(size)}
+            for nick, files, size in rows]
+
+
+def build_record_payload(period="all"):
+    """GET /api/stats/record?period=: the record's figures for a period - the
+    totals, the most-sent files and the nicks sent to and received from most.
+    Every figure comes raw and as the page shows it, as in build_stats_payload."""
+    import stats_mgr
+    import transfer_log
+    since, error = _record_since(period)
+    if error:
+        return 400, {"error": error}
+    off = _record_off()
+    if off:
+        return 200, dict(off, period=period)
+    figures = transfer_log.summary(since)
+    figures.update(
+        bytes_sent_text=stats_mgr.format_size_human(figures["bytes_sent"]),
+        bytes_received_text=stats_mgr.format_size_human(figures["bytes_received"]),
+        top_speed_text=stats_mgr.format_speed(figures["top_speed"]),
+        average_speed_text=stats_mgr.format_speed(figures["average_speed"]),
+        queue_wait_text=_wait_text(figures["queue_wait_seconds"]))
+    return 200, {
+        "enabled": True,
+        "period": period,
+        "since": since,
+        "summary": figures,
+        "top_files": [{"name": name, "count": count} for name, count in transfer_log.top_files(10, since)],
+        "top_sent": _nick_rows(transfer_log.top_nicks(transfer_log.SENT, 10, since)),
+        "top_received": _nick_rows(transfer_log.top_nicks(transfer_log.RECEIVED, 10, since)),
+        # Said on the page: all time holds figures from before the record began -
+        # the bot's own totals, a nick's, or both (#1102 review: a per-nick import
+        # alone left the note hidden while the tables counted it).
+        "includes_imported": since is None and transfer_log.has_imported(),
+    }
+
+
+def build_record_nick_payload(nick, period="all"):
+    """GET /api/stats/record/nick?nick=&period=: what one nick has had from
+    this bot and what this bot has had from it."""
+    import stats_mgr
+    import transfer_log
+    since, error = _record_since(period)
+    if error:
+        return 400, {"error": error}
+    off = _record_off()
+    if off:
+        return 409, off
+    wanted = transfer_log._nick(nick)
+    if wanted is None:
+        return 400, {"error": "Type a nick to look up."}
+    figures = transfer_log.nick_summary(wanted, since)
+    figures.update(bytes_sent_text=stats_mgr.format_size_human(figures["bytes_sent"]),
+                   bytes_received_text=stats_mgr.format_size_human(figures["bytes_received"]))
+    return 200, {"nick": wanted, "period": period, "figures": figures,
+                 "found": any(figures[key] for key in ("files_sent", "lists_sent", "files_received"))}
+
+
+def apply_record_forget(body):
+    """POST /api/stats/record/forget: {"nick": "..."} takes one nick out of
+    the record, imported figures included; {"everyone": true} empties it.
+    Two separate words rather than an empty nick meaning everything, so a
+    blank box can never wipe the record."""
+    import transfer_log
+    off = _record_off()
+    if off:
+        return 409, off
+    try:
+        if body.get("everyone") is True:
+            removed = transfer_log.forget_all()
+            print(f"[TRANSFER-LOG] The record was emptied from the dashboard ({removed} row(s)).")
+            return 200, {"removed": removed, "everyone": True}
+        nick = transfer_log._nick(body.get("nick"))
+        if nick is None:
+            return 400, {"error": "Say which nick to forget."}
+        removed = transfer_log.forget_nick(nick)
+    except Exception as err:
+        return 500, {"error": f"The record could not be changed: {err}"}
+    # The nick is not printed: the log would keep what the record just let go.
+    print(f"[TRANSFER-LOG] A nick was forgotten from the dashboard ({removed} row(s)).")
+    return 200, {"removed": removed, "nick": nick}
+
+
+# A cell a spreadsheet would read as a formula. A nick or a file name is
+# somebody else's text, and "=HYPERLINK(...)" in one runs when the export is
+# opened; a leading apostrophe makes it text again.
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_cell(value):
+    if value is None:
+        return ""
+    text = str(value)
+    return "'" + text if text.startswith(_FORMULA_START) else text
+
+
+def record_csv_lines(since=None):
+    """The CSV export, one line at a time (#1102): a header, then every row
+    from `since` on. The time is local and readable; the rest as stored."""
+    import csv
+    import io
+    import transfer_log
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\r\n")
+
+    def line(cells):
+        buffer.seek(0)
+        buffer.truncate()
+        writer.writerow(cells)
+        return buffer.getvalue()
+
+    yield line(("time",) + transfer_log.EXPORT_COLUMNS[1:])
+    for row in transfer_log.iter_rows(since):
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row[0]))
+        yield line([stamp] + [_csv_cell(value) for value in row[1:]])
 
 
 def build_stats_payload():
@@ -4619,6 +4771,39 @@ if HAVE_FLASK:
         @app.route("/api/stats")
         def api_stats():
             return jsonify(build_stats_payload())
+
+        @app.route("/api/stats/record")
+        def api_stats_record():
+            # The transfer record (#1102). Asked for when Stats is opened and
+            # when the period changes, never on the page's few-second poll:
+            # these are queries over every row.
+            status, result = build_record_payload(request.args.get("period", "all"))
+            return jsonify(result), status
+
+        @app.route("/api/stats/record/nick")
+        def api_stats_record_nick():
+            status, result = build_record_nick_payload(request.args.get("nick", ""),
+                                                       request.args.get("period", "all"))
+            return jsonify(result), status
+
+        @app.route("/api/stats/record/forget", methods=["POST"])
+        def api_stats_record_forget():
+            status, result = apply_record_forget(json_object(request.get_json(silent=True)))
+            return jsonify(result), status
+
+        @app.route("/api/stats/record.csv")
+        def api_stats_record_csv():
+            period = request.args.get("period", "all")
+            since, error = _record_since(period)
+            if error:
+                return jsonify({"error": error}), 400
+            off = _record_off()
+            if off:
+                return jsonify(off), 409
+            # Streamed: a record of years is written out a row at a time.
+            return Response(record_csv_lines(since), mimetype="text/csv",
+                            headers={"Content-Disposition":
+                                     f'attachment; filename="dccore-transfers-{period}.csv"'})
 
         @app.route("/api/search")
         def api_search():

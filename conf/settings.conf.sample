@@ -583,7 +583,8 @@
 
 # Where a record of every finished transfer is kept: what it was, its size,
 # its speed, how long it waited in the queue, and the nick it went to or came
-# from (no host, no channel). Empty turns it off.
+# from (no host, no channel). Shown on the Stats page, where a nick can be
+# forgotten. Empty turns it off.
 #
 # A row is about 120 bytes, so it is never rotated or trimmed.
 #TRANSFER_LOG_FILE = ./data/transfers.db
