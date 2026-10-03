@@ -48,13 +48,14 @@ import re
 class Field(object):
     """One variable worth reading out of vars.ini."""
 
-    __slots__ = ("variable", "target", "label", "unit")
+    __slots__ = ("variable", "target", "label", "unit", "source")
 
-    def __init__(self, variable, target, label, unit=""):
+    def __init__(self, variable, target, label, unit="", source="omenserve"):
         self.variable = variable
         self.target = target        # None = shown to the operator, not imported
         self.label = label
         self.unit = unit
+        self.source = source        # whose counter: OmenServe's add-ons, or KeepTrack (#1062)
 
 
 # Everything the dashboard reads. `target` names where it lands in DCCore, or
@@ -91,12 +92,34 @@ FIELDS = (
     Field("%mx.rarysent", None, "Bytes yesterday", "bytes"),
     Field("%os.totalsize", None, "Library size", "bytes"),
     Field("%sdlistsent", None, "Lists sent", "lists"),
+
+    # KEEPTRACK (#1062), ^OmeN^'s own send/receive counter, in the same file.
+    # Its SENT totals counted the very sends the OmenServe add-ons above
+    # counted, so the two are never added together: read_install() keeps them
+    # apart by `source` and the operator picks one. Its RECEIVED totals have
+    # nothing to clash with and go into the transfer record (#1068).
+    Field("%KT.MPX.Sent", "total_files", "Files sent (KeepTrack)", "files", source="keeptrack"),
+    Field("%KT.MPX.Sent.Total", "total_bytes", "Bytes sent (KeepTrack)", "bytes", source="keeptrack"),
+    Field("%KT.MPX.Gets", "received_files", "Files received (KeepTrack)", "files", source="keeptrack"),
+    Field("%KT.MPX.Gets.Total", "received_bytes", "Bytes received (KeepTrack)", "bytes", source="keeptrack"),
 )
+
+# Read for what they say about the figures, not imported as figures: when
+# KeepTrack began counting (or was last reset), and which file types it counted
+# at all - its default list has no *.rar and no *.flac.
+KT_START_DATE = "%KT.Start.Date"
+KT_FILE_TYPES = "%KT.Files"
+TEXT_VARIABLES = (KT_START_DATE, KT_FILE_TYPES)
+
+SENT_TARGETS = ("total_files", "total_bytes")
+SOURCE_LABELS = {"omenserve": "OmenServe add-ons", "keeptrack": "KeepTrack"}
+KT_DEFAULT_FILE_TYPES = "*.mp3,*.mpg,*.mpeg,*.avi,*.mov,*.exe,*.gif,*.jpg,*.zip"
 
 
 # mIRC variable names are case-insensitive, and a real vars.ini is inconsistent
 # about it in practice (%OS.* and %os.* both appear in the same file).
 _BY_NAME = {field.variable.lower(): field for field in FIELDS}
+_TEXT_BY_NAME = {name.lower(): name for name in TEXT_VARIABLES}
 
 # `n12=%Name value`. The number after "n" is mIRC's own ordering and means
 # nothing to us.
@@ -110,7 +133,7 @@ def variable_names():
     parser cannot drift: a field added below is filtered through without the
     JavaScript changing at all.
     """
-    return tuple(field.variable for field in FIELDS)
+    return tuple(field.variable for field in FIELDS) + TEXT_VARIABLES
 
 
 def parse_vars(text):
@@ -132,7 +155,31 @@ def parse_vars(text):
         field = _BY_NAME.get(match.group(1).lower())
         if field is not None:
             found[field.variable] = match.group(2)
+        elif match.group(1).lower() in _TEXT_BY_NAME:
+            found[_TEXT_BY_NAME[match.group(1).lower()]] = match.group(2)
     return found
+
+
+_MONTHS = ("january", "february", "march", "april", "may", "june", "july",
+           "august", "september", "october", "november", "december")
+_START_DATE_RE = re.compile(r"^\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})\s*$", re.IGNORECASE)
+
+
+def kt_start_date(raw):
+    """%KT.Start.Date - mIRC's $date(doo mmmm yyyy), "3rd February 2002" -
+    as "2002-02-03", or None. English month names whatever the locale: that is
+    what mIRC writes, and strptime's %B would follow the machine's language."""
+    match = _START_DATE_RE.match(str(raw or ""))
+    if not match:
+        return None
+    day, month_name, year = int(match.group(1)), match.group(2).lower(), int(match.group(3))
+    import datetime
+    try:
+        # An unknown month name is a ValueError from index() - the same answer
+        # as the 31st of February.
+        return datetime.date(year, _MONTHS.index(month_name) + 1, day).isoformat()
+    except ValueError:
+        return None
 
 
 def _as_int(raw):
@@ -195,6 +242,7 @@ def read_install(text):
     found = parse_vars(text)
 
     values = {}
+    by_source = {}   # source -> {target: number}, so two sources never mix
     rows = []
     notes = []
 
@@ -216,6 +264,8 @@ def read_install(text):
             # imported, because the operator can see it in their own file and
             # a row that quietly vanished would read as a parse failure.
             "imported": bool(field.target) and bool(number),
+            "target": field.target,
+            "source": field.source,
         })
 
         # A PRESENT ZERO IS NOT A FIGURE TO IMPORT. `number is not None` let
@@ -234,23 +284,60 @@ def read_install(text):
         # running both add-ons has both as genuinely separate real counts -
         # the second one found must not overwrite the first.
         if field.target and number:
-            values[field.target] = values.get(field.target, 0) + number
+            totals = by_source.setdefault(field.source, {})
+            totals[field.target] = totals.get(field.target, 0) + number
         elif field.target and number == 0:
             notes.append(f"{field.variable} is present but zero - skipped, "
                          f"so your own {field.label.lower()} is left alone.")
 
+    # WHICH SENT TOTALS (#1062). Within one source the fields add up (#414);
+    # across sources they never do - KeepTrack counted the same sends the
+    # OmenServe add-ons did. The page offers the sources it found and posts
+    # back the one picked; OmenServe's stays the default, as before KeepTrack
+    # was read at all.
+    sent_sources = []
+    for source in ("omenserve", "keeptrack"):
+        sent = {t: by_source.get(source, {})[t] for t in SENT_TARGETS if t in by_source.get(source, {})}
+        if sent:
+            sent_sources.append(dict(sent, name=source, label=SOURCE_LABELS[source]))
+    chosen = sent_sources[0]["name"] if sent_sources else None
+    for source_figures in sent_sources[:1]:
+        values.update({t: source_figures[t] for t in SENT_TARGETS if t in source_figures})
+    for source, totals in by_source.items():
+        values.update({t: n for t, n in totals.items() if t not in SENT_TARGETS})
+    if len(sent_sources) > 1:
+        notes.append("Both the OmenServe add-ons and KeepTrack counted your sends - the same "
+                     "sends, twice. Choose which totals to keep; they are never added together.")
+
+    if "received_files" in values or "received_bytes" in values:
+        since = kt_start_date(found.get(KT_START_DATE))
+        if since:
+            values["received_since"] = since
+        elif found.get(KT_START_DATE):
+            notes.append(f"KeepTrack's start date ({found.get(KT_START_DATE)!r}) could not "
+                         f"be read; the received totals come across without it.")
+    if found.get(KT_START_DATE) and kt_start_date(found.get(KT_START_DATE)):
+        year, month, day = (int(p) for p in kt_start_date(found.get(KT_START_DATE)).split("-"))
+        notes.append(f"KeepTrack has counted since {day} {_MONTHS[month - 1].title()} {year}.")
+    file_types = str(found.get(KT_FILE_TYPES) or "").strip()
+    if "keeptrack" in by_source and file_types and file_types != "*":
+        notes.append(f"KeepTrack only counted these file types: {file_types}. Anything else you "
+                     f"sent or received is not in its totals"
+                     + (" - its default list has no .rar and no .flac." if file_types.lower()
+                        == KT_DEFAULT_FILE_TYPES else "."))
+
     if not values:
         notes.append("Nothing recognisable was found. This reads mIRC's "
                      "scripts/vars.ini - the counters come from the OmenServe "
-                     "add-ons (mxrarserver, OS-Limits), so an install without "
-                     "them has no history to bring across.")
+                     "add-ons (mxrarserver, OS-Limits) or KeepTrack, so an install "
+                     "without them has no history to bring across.")
 
     # Permanent, not conditional on a mismatch: OmenServe itself keeps no byte
     # total for plain sends at all, so %mx.rartsent - packed sends only - is
     # the only bytes counter there is to import, ever. An operator running
     # both add-ons would otherwise read total_bytes as a full match for
     # total_files (which DOES cover both kinds) and never learn it does not.
-    if "total_bytes" in values:
+    if "total_bytes" in by_source.get("omenserve", {}):
         notes.append("Bytes sent covers packed (RAR) sends only - OmenServe "
                      "keeps no byte total for plain sends, so this number "
                      "will not include them.")
@@ -266,4 +353,5 @@ def read_install(text):
         notes.append("Bytes sent was found but the file count was not. The "
                      "file total will stay as it is.")
 
-    return {"values": values, "rows": rows, "notes": notes}
+    return {"values": values, "rows": rows, "notes": notes,
+            "sent_sources": sent_sources, "sent_source": chosen}

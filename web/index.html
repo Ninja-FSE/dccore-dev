@@ -715,10 +715,10 @@
            The file is read IN THE PAGE and only the recognised lines are
            sent, so an operator's other ~268 variables - their nicks,
            channels, paths and passwords - never cross the network. -->
-      <div class="stat-group-label" data-i18n="stats.comingFromOmenServe">Coming from OmenServe</div>
+      <div class="stat-group-label" data-i18n="stats.comingFromOmenServe">Coming from OmenServe or KeepTrack</div>
       <div class="import-panel">
         <p class="import-intro" data-i18n-html="stats.importIntro">
-          Bring your totals across from OmenServe. Your counters live in
+          Bring your totals across from OmenServe or KeepTrack. Your counters live in
           mIRC's <code>scripts/vars.ini</code> &mdash; choose it below and you
           will see exactly what would change before anything is written.
           Only the counter lines are sent; the rest of the file stays on your
@@ -738,6 +738,7 @@
 
         <p class="import-status" id="import-status" hidden></p>
 
+        <div class="import-source" id="import-source" hidden></div>
         <div class="table-wrap" id="import-preview-wrap" hidden>
           <table class="data-table">
             <thead>

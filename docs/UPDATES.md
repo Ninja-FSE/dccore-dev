@@ -4,6 +4,37 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 KeepTrack's lifetime totals come in with the OmenServe import (#1062)
+
+An operator ran KeepTrack 6.2 (^OmeN^'s send/receive counter) for years. Its totals are mIRC variables in the same
+`vars.ini` the Stats page's import reads, so `omenserve_import.FIELDS` gains `%KT.MPX.Sent`, `%KT.MPX.Sent.Total`,
+`%KT.MPX.Gets` and `%KT.MPX.Gets.Total` (each `Field` now carries its `source`), and `TEXT_VARIABLES` reads
+`%KT.Start.Date` and `%KT.Files` for what they say. `variable_names()` serves both, so the page's in-browser filter
+keeps the new lines with no JavaScript change.
+
+- **Sent: pick a source, never add them.** KeepTrack counted the very sends `%sdmpxsent` and `%mx.rarsent` counted.
+  `read_install()` sums within a source (#414) and keeps sources apart, returning `sent_sources` and the default
+  `sent_source` (OmenServe, as before). The Stats page shows a choice when both are there (`renderImportSourceChoice`,
+  `chooseImportSource`, which drops the other source's figures rather than leaving one behind); the first-run import
+  in `configure.py` asks the same. The chosen totals land in `stats.txt` as before.
+- **Received: into the transfer record.** `transfer_log` gains an `imported` table (source, direction, nick - NULL for
+  the bot's own totals, a nick for #1064 - files, bytes, since) and `import_totals()`, which replaces a source's rows
+  and empties the WAL. They name no nick, so it does not rebuild the file the way forgetting does since #1099.
+  `summary()` adds the imported totals to every all-time figure and leaves them out of a period; `forget_all()` and
+  `forget_nick()` clear them too, in the same transaction as the record's own rows, so a forget rebuilds the file once
+  (`_delete()` takes several statements). `apply_stats_import()` writes
+  `received_files`/`received_bytes`/`received_since` there; `current_importable_stats()` shows an earlier import's.
+  With the record off (`TRANSFER_LOG_FILE` empty) the preview leaves them out and says why.
+- **What the preview says:** KeepTrack's start date (`kt_start_date()`, English month names whatever the locale, as
+  mIRC writes them), and the file types it counted when that is not `*` - its default list has no .rar and no .flac.
+- **Found in a review before merge:** every sent source offered as a choice is validated as the default one is - only
+  that one was, so KeepTrack's figures could show `-5` in the preview and have the whole import refused when picked,
+  on the page or in `configure.py` - and a received start date whose figure was refused is dropped with it, rather
+  than reaching the apply alone and answering 500 "could not be written" after the rest was.
+
+Tests: `tests/test_keeptrack_totals_are_imported.py` (the parse, the notes, the record, the first-run question, and the
+page's source switch under node).
+
 ### 📦 The bot can run minimised or with no window (#1065, part 3)
 
 `BOT_WINDOW` (Debug & logging; `normal`, `minimised`, `hidden`, validated through `settings_file.CHOICES`) decides how

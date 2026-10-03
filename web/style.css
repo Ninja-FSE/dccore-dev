@@ -1916,6 +1916,17 @@ mark.filter-hit {
   color: var(--danger);
 }
 
+/* Which sent totals to keep, when both OmenServe and KeepTrack counted them (#1062). */
+.import-source {
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.import-source-option {
+  display: block;
+  margin: 4px 0;
+}
+
 .tool-status.is-error {
   color: var(--danger);
 }

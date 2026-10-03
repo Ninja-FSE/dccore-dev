@@ -57,7 +57,26 @@ CREATE TABLE IF NOT EXISTS transfers (
 CREATE INDEX IF NOT EXISTS transfers_by_direction_and_time ON transfers (direction, ended_at);
 CREATE INDEX IF NOT EXISTS transfers_by_item ON transfers (direction, kind, item_key);
 CREATE INDEX IF NOT EXISTS transfers_by_nick ON transfers (nick, direction);
+CREATE TABLE IF NOT EXISTS imported (
+    source       TEXT    NOT NULL,
+    direction    TEXT    NOT NULL,
+    nick         TEXT,
+    files        INTEGER NOT NULL,
+    bytes        INTEGER NOT NULL,
+    since        TEXT,
+    imported_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS imported_by_nick ON imported (nick, direction);
 """
+
+# IMPORTED FIGURES (#1062, #1064). Totals from before this record began -
+# KeepTrack's, so far - cannot be rows of `transfers`: they have no time, no
+# file and no speed. They sit in `imported`, one row per source, direction and
+# (for #1064) nick; nick NULL is the bot's own lifetime total. Every all-time
+# figure below adds them in; a figure "since" a time leaves them out, since an
+# imported total has no date beyond "before". A re-import of a source replaces
+# its rows, never adds to them, and forgetting a nick or everything takes
+# them too.
 
 
 def _path():
@@ -273,16 +292,72 @@ def summary(since=None):
         " FROM transfers WHERE direction = ? AND ended_at >= ?",
         (KIND_LIST, KIND_LIST, RECEIVED, since))
     seconds = speed[2] or 0
+    # All time includes the imported totals (#1062); a period does not.
+    before = {SENT: (0, 0), RECEIVED: (0, 0)} if since else _imported_totals()
     return {
-        "files_sent": int(sent[0] or 0),
+        "files_sent": int(sent[0] or 0) + before[SENT][0],
         "lists_sent": int(sent[1] or 0),
-        "bytes_sent": int(sent[2] or 0),
+        "bytes_sent": int(sent[2] or 0) + before[SENT][1],
         "top_speed": int(speed[0] or 0),
         "average_speed": int((speed[1] or 0) / seconds) if seconds > 0 else 0,
         "queue_wait_seconds": float(waited[0]) if waited[0] is not None else None,
-        "files_received": int(received[0] or 0),
-        "bytes_received": int(received[1] or 0),
+        "files_received": int(received[0] or 0) + before[RECEIVED][0],
+        "bytes_received": int(received[1] or 0) + before[RECEIVED][1],
     }
+
+
+def _imported_totals():
+    """{direction: (files, bytes)} of the bot's own imported totals."""
+    totals = {SENT: (0, 0), RECEIVED: (0, 0)}
+    for direction, files, size in _query(
+            "SELECT direction, SUM(files), SUM(bytes) FROM imported WHERE nick IS NULL GROUP BY direction"):
+        if direction in totals:
+            totals[direction] = (int(files or 0), int(size or 0))
+    return totals
+
+
+def imported_totals(source=None):
+    """The bot's imported lifetime totals as {direction: {"files", "bytes", "since"}},
+    for one source or all of them. For the import's before-and-after."""
+    sql = "SELECT direction, SUM(files), SUM(bytes), MIN(since) FROM imported WHERE nick IS NULL"
+    args = ()
+    if source:
+        sql += " AND source = ?"
+        args = (source,)
+    figures = {}
+    for direction, files, size, since in _query(sql + " GROUP BY direction", args):
+        figures[direction] = {"files": int(files or 0), "bytes": int(size or 0), "since": since}
+    return figures
+
+
+def import_totals(source, direction, files, size, since=None):
+    """Write a source's lifetime total for one direction (#1062), replacing
+    whatever that source imported before for it. Returns True when it is in
+    the file. Like _record(): a failure is printed and never raises."""
+    path = _path()
+    if not path or direction not in (SENT, RECEIVED):
+        return False
+    try:
+        with runtime.transfer_log_lock:
+            conn = _connect(path, WRITE_TIMEOUT, repair=True)
+            try:
+                # No rebuild (_rebuild(), #1082) here: these rows are the
+                # bot's own totals and name no nick, so nothing a deleted
+                # copy of one could leave in the file needs wiping. Every
+                # connection zeroes what it frees anyway (_open()).
+                with conn:
+                    conn.execute("DELETE FROM imported WHERE source = ? AND direction = ? AND nick IS NULL",
+                                 (source, direction))
+                    conn.execute("INSERT INTO imported (source, direction, nick, files, bytes, since, imported_at)"
+                                 " VALUES (?,?,NULL,?,?,?,?)",
+                                 (source, direction, _whole(files), _whole(size), since or None, int(time.time())))
+                _empty_the_wal(conn, path)
+            finally:
+                conn.close()
+        return True
+    except Exception as err:
+        print(f"[TRANSFER-LOG ERROR] Could not import the {direction} totals: {err}")
+        return False
 
 
 def top_nicks(direction=SENT, limit=10, since=None):
@@ -319,7 +394,10 @@ def nick_summary(nick, since=None):
     return figures
 
 
-def _delete(sql, args=()):
+def _delete(*statements):
+    """Run each (sql, args) delete in one transaction, then rebuild the file
+    once. One forget takes rows from more than one table (#1064), and a
+    rebuild per table rewrote the whole file twice."""
     path = _path()
     if not path or not os.path.exists(path):
         return 0
@@ -327,7 +405,7 @@ def _delete(sql, args=()):
         conn = _connect(path, READ_TIMEOUT, repair=True)
         try:
             with conn:
-                removed = conn.execute(sql, args).rowcount
+                removed = sum(conn.execute(sql, args).rowcount for sql, args in statements)
             # The delete zeroes the cells it frees, but not the key copies in
             # an index's interior pages, nor bytes that writes made before
             # secure_delete was set left in the free space of live pages. A
@@ -375,9 +453,13 @@ def _empty_the_wal(conn, path):
 def forget_nick(nick):
     """Take one nick out of the record. The rows go; the figures that do not name a nick go with them."""
     nick = _nick(nick)
-    return 0 if nick is None else _delete("DELETE FROM transfers WHERE nick = ?", (nick,))
+    if nick is None:
+        return 0
+    # Its imported figures too (#1064): forgetting a nick forgets all of it.
+    return _delete(("DELETE FROM transfers WHERE nick = ?", (nick,)),
+                   ("DELETE FROM imported WHERE nick = ?", (nick,)))
 
 
 def forget_all():
-    """Empty the record. Returns how many rows were removed."""
-    return _delete("DELETE FROM transfers")
+    """Empty the record, imported figures included. Returns how many rows were removed."""
+    return _delete(("DELETE FROM transfers", ()), ("DELETE FROM imported", ()))

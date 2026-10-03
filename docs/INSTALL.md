@@ -113,7 +113,7 @@ On Windows that command is **`py configure.py`**. A python.org install gives you
 7. **Music directory** - optional here (see below); if the folder does not exist it offers to create it.
 8. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.
 
-Then two offers, either of which you can decline: **generate the file list now** (when a music directory was given; a first start does it anyway), and **import your OmenServe totals** from its `vars.ini` if you are coming from there. The answers are written to `settings.conf`, with the password hash (and nothing else) in `admin_config.py`.
+Then two offers, either of which you can decline: **generate the file list now** (when a music directory was given; a first start does it anyway), and **import your OmenServe or KeepTrack totals** from mIRC's `vars.ini` (in mIRC's folder, or `scripts\vars.ini` on older installs) if you are coming from there. When both counted your sends you pick which totals to keep - they counted the same sends, so they are never added together. The answers are written to `settings.conf`, with the password hash (and nothing else) in `admin_config.py`.
 
 The music directory is optional here. It is usually easier to browse and confirm it from the dashboard's Settings page once the bot is running than to type a path blind. Everything else stays changeable afterwards.
 

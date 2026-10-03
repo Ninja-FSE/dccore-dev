@@ -45,7 +45,7 @@ FOLLOW_UPS = [
     ('input("  Reachable from other devices on your LAN', "LAN"),
     ('input("  Install it now (pip install -r requirements-web.txt)?', "install it now"),
     ('input("Generate it now? [Y/n]: ")', "generate the file list now"),
-    ('ask("Import them now? [y/N]: ")', "import your OmenServe totals"),
+    ('ask("Import them now? [y/N]: ")', "import your OmenServe or KeepTrack totals"),
 ]
 
 

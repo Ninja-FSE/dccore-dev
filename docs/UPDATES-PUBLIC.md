@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **New: KeepTrack's totals can be imported too.** The Stats page's import reads KeepTrack's files and bytes sent and received from the same mIRC `vars.ini` as OmenServe's. If both counted your sends - the same sends twice - you choose which totals to keep. KeepTrack's received totals go into the new transfer record, and the preview says when KeepTrack began counting and which file types it counted (its default list leaves out .rar and .flac).
 - **New: on Windows the bot can run minimised, or with no window at all.** Settings > Debug & logging > The bot's window: `normal` (as before), `minimised` (in the taskbar) or `hidden` (no window; what it says goes to `data\logs\dccore.log`). Stop it with `start-dccore.bat stop`, Tools > Stop the bot, or `shutdown now`. The first run always has its window, for the setup.
 - **New: ways to stop the bot without its window.** `start-dccore stop` (on Windows `scripts\windows\start-dccore.bat stop`) asks the bot to stop and waits until it has; the dashboard's Tools page has **Stop the bot**; and the admin console has `shutdown now`. All of them stop it the way Ctrl-C in its window does.
 - **Fixed: a list from a bot whose nick is only symbols (such as `^_^`) was read again on every start, and the list filter showed it as holding no match.** Both find it now.

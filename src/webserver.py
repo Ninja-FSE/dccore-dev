@@ -418,7 +418,11 @@ _IMPORT_LIMITS = {
     "total_files": (MAX_IMPORT_FILES, "files sent"),
     "total_bytes": (MAX_IMPORT_BYTES, "bytes sent"),
     "speed_record": (MAX_IMPORT_SPEED, "speed record"),
+    # KeepTrack's (#1062), into the transfer record's imported totals.
+    "received_files": (MAX_IMPORT_FILES, "files received"),
+    "received_bytes": (MAX_IMPORT_BYTES, "bytes received"),
 }
+_RECEIVED = ("received_files", "received_bytes")
 
 
 def current_importable_stats():
@@ -442,8 +446,18 @@ def current_importable_stats():
         record = int(db.get_speed_record() or 0)
     except (TypeError, ValueError):
         record = 0
+    # What an earlier KeepTrack import put in the record (#1062) - the figure
+    # a new one replaces, so before and after compare like with like.
+    received = {}
+    try:
+        import transfer_log
+        received = transfer_log.imported_totals("keeptrack").get(transfer_log.RECEIVED) or {}
+    except Exception as err:
+        print(f"[STATS IMPORT] The imported received totals are unavailable: {err}")
     return {"total_files": total_files, "total_bytes": total_bytes,
-            "speed_record": record}
+            "speed_record": record,
+            "received_files": int(received.get("files") or 0),
+            "received_bytes": int(received.get("bytes") or 0)}
 
 
 def validate_import_values(raw):
@@ -480,6 +494,22 @@ def validate_import_values(raw):
                           f"hand-edited file looks exactly like this.")
             continue
         clean[name] = number
+    # When KeepTrack began counting, as the import found it (#1062). A date
+    # or nothing: it is written into the record as it stands.
+    if (raw or {}).get("received_since") not in (None, ""):
+        since = str(raw["received_since"]).strip()
+        import datetime
+        try:
+            datetime.date.fromisoformat(since)
+            clean["received_since"] = since
+        except ValueError:
+            errors.append(f"received since: {since!r} is not a date (YYYY-MM-DD).")
+    # A date with no received figure is not a figure to write. Kept when the
+    # figure it dates was refused, it reached the apply on its own, nothing
+    # wrote it, and the import answered 500 "could not be written" although
+    # everything else had been (#1062 review).
+    if not any(name in clean for name in _RECEIVED):
+        clean.pop("received_since", None)
     return clean, errors
 
 
@@ -495,11 +525,35 @@ def build_stats_import_preview(text):
 
     found = omenserve_import.read_install(text)
     clean, errors = validate_import_values(found.get("values") or {})
+    notes = list(found.get("notes", []))
+    if any(name in clean for name in _RECEIVED):
+        import transfer_log
+        if not transfer_log._path():
+            # Nowhere to put them: the record is turned off (#1068).
+            for name in _RECEIVED + ("received_since",):
+                clean.pop(name, None)
+            notes.append("The received totals are not imported: the transfer record is off "
+                         "(Settings > Advanced, TRANSFER_LOG_FILE is empty).")
+    # Every source offered as a choice is checked as the default one is (#1062
+    # review): only `values` was, so the other could show -5 in the preview and
+    # then have the whole import refused when picked, here or in configure.py.
+    # The default's faults are in `errors` already.
+    sources = []
+    for entry in found.get("sent_sources", []):
+        figures = {k: v for k, v in entry.items() if k not in ("name", "label")}
+        good, bad = validate_import_values(figures)
+        sources.append(dict(good, name=entry["name"], label=entry["label"]))
+        if entry["name"] != found.get("sent_source"):
+            errors.extend(f"{entry['label']}: {fault}" for fault in bad)
     return {
         "rows": found.get("rows", []),
-        "notes": list(found.get("notes", [])) + errors,
+        "notes": notes + errors,
         "current": current_importable_stats(),
         "values": clean,
+        # Where the sent totals can come from (#1062); the page offers a
+        # choice when there are two, and posts back the one picked.
+        "sent_sources": sources,
+        "sent_source": found.get("sent_source"),
         # OVERWRITTEN, NOT COMBINED, and said where the page can put it in
         # front of the operator rather than buried in prose they will not read
         # on a fresh install and cannot miss on a used one.
@@ -541,6 +595,18 @@ def apply_stats_import(raw):
     if "speed_record" in clean:
         db.save_speed_record(clean["speed_record"])
 
+    # KeepTrack's received totals (#1062): into the transfer record's imported
+    # totals, replacing an earlier KeepTrack import's. A half given keeps the
+    # other half as it is.
+    received_written = None
+    if any(name in clean for name in _RECEIVED):
+        import transfer_log
+        received_written = transfer_log.import_totals(
+            "keeptrack", transfer_log.RECEIVED,
+            clean.get("received_files", before["received_files"]),
+            clean.get("received_bytes", before["received_bytes"]),
+            since=clean.get("received_since"))
+
     # WHAT ACTUALLY LANDED, compared against what was asked for. Both writers
     # swallow their own errors and return None - correct for them, since a
     # failed stats write must not take the daemon down - which meant this
@@ -557,6 +623,8 @@ def apply_stats_import(raw):
             return written is not None and written[0] == clean[name]
         if name == "total_bytes":
             return written is not None and written[1] == clean[name]
+        if name == "received_since":
+            return bool(received_written)
         return after.get(name) == clean[name]
 
     landed = [name for name in sorted(clean) if landed_as_asked(name)]
