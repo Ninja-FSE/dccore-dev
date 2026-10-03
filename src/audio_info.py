@@ -455,6 +455,11 @@ class Cache:
         self.read_count = done
         self.left_count = total - done
         self.read_seconds = time.perf_counter() - began
+        # Read, or left for the next rebuild: either way nothing needs the
+        # list now, and on a cold first run it is every audio file in the
+        # library (#1137). This line used to sit after rate()'s return, where
+        # it never ran.
+        self.pending = []
 
     def rate(self):
         """Files read per second of reading, or None when nothing was read.
@@ -463,7 +468,6 @@ class Cache:
         if not self.read_count or self.read_seconds <= 0:
             return None
         return self.read_count / self.read_seconds
-        self.pending = []
 
     def suffix(self, key):
         return self.seen.get(key, "")
@@ -474,11 +478,26 @@ class Cache:
             ((self.scope, key, size, suffix) for key, (size, suffix) in rows))
 
     def publish(self):
-        """This rebuild published: keep what it saw, forget the rest."""
+        """This rebuild published: keep what it saw, forget the rest.
+
+        ONLY WHAT CHANGED IS WRITTEN (#1137). Deleting the whole scope and
+        inserting every row again rewrote a million rows on an unchanged
+        library - the ordinary weekly rebuild - while searches were still
+        held. Dropped: every stored row this rebuild did not see (a file
+        removed from the library), and every row whose read failed with an
+        I/O error (#973) - its OLD row must go too, or a file that returns to
+        its old size would be served the stale suffix without a read. Written:
+        every seen and read row that differs from what is stored. The table
+        ends up exactly as before; only the legacy mtime and run columns of
+        an untouched row keep their old value, and nothing reads them."""
+        known = self.known
         with self.conn:
-            self.conn.execute("DELETE FROM audio WHERE scope = ?", (self.scope,))
+            self.conn.executemany(
+                "DELETE FROM audio WHERE scope = ? AND key = ?",
+                ((self.scope, key) for key in known
+                 if key not in self.seen or key in self.unread))
             self._save((key, (self.sizes[key], suffix)) for key, suffix in self.seen.items()
-                       if key not in self.unread)
+                       if key not in self.unread and known.get(key) != (self.sizes[key], suffix))
         self.published = True
 
     def close(self):
