@@ -326,7 +326,7 @@ class TheConsole(VersionCase):
 
     def test_the_mirc_menu_offers_it(self):
         with io.open(os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc"), encoding="ascii", newline="") as handle:
-            self.assertIn("  Check for a new version:dccore.send checkversion\r\n", handle.read())
+            self.assertIn("  .Check for a new version:dccore.send checkversion\r\n", handle.read())
 
 
 class TheSetupPage(VersionCase):

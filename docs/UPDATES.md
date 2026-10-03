@@ -40,6 +40,24 @@ Merged after v1.13.2 had been released, with no entry here until now. The #982 p
 bot's own nick - peers are other DCCore bots, and `serverschat.note_who_reply()` leaves the bot itself out of every
 `PEERS` line. So every line the operator's own bot relayed showed raw in the channel window again. The check now also
 accepts the bot the script is paired with. Tests: `tests/test_dccore_chat_in_the_mirc_window.py`.
+### 📦 The @DCCore menu is grouped by what you do (#1112)
+
+The right-click menu had grown without a plan: Stop the bot sat under Library (#1074), Reload under Admin, Console
+command stood alone, Options was inside Window and nine queries and toggles filled the top level. `dccore.mrc` 1.11
+regroups it:
+
+- **Script Settings** (the old Options..., which opens the same dialog) and **Console command** come first, then
+  **Info** (Status, Slots, Queue, Uptime, Version, and the Command list after a separator), **Lists**, **Library**
+  (find duplicates, rebuild), **User control** (Bans, Ban, Unban, Clear a queue) and **Control**.
+- **Control** holds the update check, the Daily update check and Console feed toggles (still reading the bot's live
+  state), and last, behind a separator, **Reload the bot (rehash)...** and **Stop the bot...**. Both still ask first.
+- **Connection**, then **Window**: DCCore Chat and Downloads window first, then Panel, Font size, Dashboard address
+  and Clear window. **Clear finished...** (it was Clear finished downloads) stays last in the main menu; it now asks first, and says only the list is cleared and no files are deleted (the Downloads window's menu asks the same).
+- The items for a selected nick sit between Control and Connection, as before. The Admin group is gone; its items
+  moved to User control and Control. The menus in the channel and on the nicklist are unchanged.
+- Nothing was removed: `tests/test_the_mirc_menu_is_grouped_by_what_you_do.py` pins the old list of actions and checks
+  each is in the menu once, and that Stop and Reload are in Control only.
+- Script version 1.11 (a new menu layout is a feature).
 
 ### 📦 The transfer record on the Stats page, and forgetting a nick (#1102)
 
