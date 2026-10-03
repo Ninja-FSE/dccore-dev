@@ -47,7 +47,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from tests.support import DCCoreTestCase, RecordingSocket  # noqa: E402
+from tests.support import DCCoreTestCase, RecordingSocket, parse_source  # noqa: E402
 
 
 def thread_calls():
@@ -64,7 +64,7 @@ def thread_calls():
             # FileNotFoundError naming a file neither of them ships.
             continue
         with io.open(path, encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
+            tree = parse_source(handle.read())
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -149,7 +149,7 @@ class EveryStartedThreadIsADaemon(unittest.TestCase):
         """Named because they are the ones that were wrong, and because a
         future reader should be able to find the case from the test."""
         with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
+            tree = parse_source(handle.read())
 
         targets = []
         for node in ast.walk(tree):

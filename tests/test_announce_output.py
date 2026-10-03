@@ -33,6 +33,7 @@ import unittest
 from tests.support import DCCoreTestCase, RecordingSocket, silence_debug
 
 import announce
+from tests.support import parse_source  # noqa: E402
 
 # announce.send_debug is a module global that other test modules replace with a
 # capture. Remember the genuine implementation at import time so the cases that
@@ -625,7 +626,7 @@ class TheAdvertNeverPublishesTheNoListSentinel(unittest.TestCase):
     def _sentinel_if_node(self):
         import ast
 
-        tree = ast.parse(self._source())
+        tree = parse_source(self._source())
         for node in ast.walk(tree):
             if not isinstance(node, ast.If):
                 continue

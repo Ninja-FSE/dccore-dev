@@ -20,6 +20,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import platform_compat  # noqa: E402
+from tests.support import remove_tree, parse_source  # noqa: E402
 
 
 class RarCommandTests(unittest.TestCase):
@@ -141,6 +142,9 @@ class LongPathTests(unittest.TestCase):
     def test_a_deep_path_survives_a_round_trip_to_disk(self):
         """The behaviour that matters: open a file whose path is long."""
         root = tempfile.mkdtemp(prefix="dccore-long-")
+        # Removed through the long-path form: below MAX_PATH's reach, a plain
+        # rmtree cannot get at the deepest folders on Windows (#1149).
+        self.addCleanup(remove_tree, platform_compat.long_path(root))
         deep = root
         for i in range(12):
             deep = os.path.join(deep, "Artist Name With A Long Title %02d" % i)
@@ -312,7 +316,7 @@ def _calls_to(module_name, dotted):
     owner, attribute = dotted.split(".")
     path = (next((p for p in (os.path.join(REPO_ROOT, "src", module_name), os.path.join(REPO_ROOT, "conf", module_name), os.path.join(REPO_ROOT, module_name)) if os.path.exists(p)), os.path.join(REPO_ROOT, module_name)))
     with io.open(path, encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
+        tree = parse_source(handle.read())
 
     found = []
     for node in ast.walk(tree):
@@ -409,7 +413,7 @@ class WiringTests(unittest.TestCase):
         for module in ("dcc.py", "adminchat.py", "dcc_fetch.py", "irc.py"):
             with self.subTest(module=module):
                 with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", module), os.path.join(REPO_ROOT, "conf", module), os.path.join(REPO_ROOT, module)) if os.path.exists(p)), os.path.join(REPO_ROOT, module))), encoding="utf-8") as handle:
-                    tree = ast.parse(handle.read())
+                    tree = parse_source(handle.read())
                 offenders = [node.lineno for node in ast.walk(tree)
                              if isinstance(node, ast.Attribute)
                              and node.attr == "SO_REUSEADDR"]

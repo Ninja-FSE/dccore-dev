@@ -2,6 +2,39 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🧪 Source-reading tests parse each text once (#1147)
+
+Performance audit 2026-10-03 T2, on top of #1149. Source-reading tests opened `src/*.py` and ran `ast.parse()` on it
+themselves: one run parsed the same big modules about 29,000 times - `irc.py` 210 times, at 50-150 ms a parse.
+
+- `tests.support.parse_source(text, filename)` parses each distinct text once per process, for texts of 10,000
+  characters or more, keyed on the TEXT itself and never on a path and its mtime, so a file rewritten within one
+  timestamp tick is parsed afresh. The trees are shared, so a test reads them and never changes them.
+- 34 test modules use it. A guard test fails any test module that parses a text read from a file with `ast.parse()`
+  itself, subclasses a `NodeTransformer` or calls a helper that edits a tree - so new source-reading tests must use
+  `parse_source()`; the failure message says so. The 35 touched modules ran in 80.9 s instead of 115.4 s.
+- Tests: `tests/test_source_reading_tests_parse_each_text_once.py`.
+
+### 🧪 The suite leaves the temp folder as it found it (#1149)
+
+Performance audit 2026-10-03 T4. Every run left about 236 entries in the temp folder. Tests removed their directories
+with `shutil.rmtree(..., ignore_errors=True)`, which on Windows quietly leaves the whole directory behind while one
+file in it is still open - a sqlite connection nobody closed - and `DCCoreTestCase` removed its own in `tearDown()`,
+before a test's `addCleanup()` had closed what it opened there. On one machine 103,000 `dccore-list-index-*` folders
+from `test_crosslist_search`'s `IndexCase` had built up, and a temp folder that size made every child process slow to
+start - the Ctrl-C tests in `test_the_bot_can_be_stopped_without_its_window` timed out on it.
+
+- `tests.support.remove_tree()` removes a directory and means it: if a file is still held it closes the cached index
+  connection, then collects unreferenced connections, and tries again. `temp_dir(test)` and
+  `DCCoreTestCase.make_temp_dir()` hand out a directory that is removed by the LAST cleanup of the test; every test that
+  leaked uses one now, `IndexCase` included.
+- `scripts/preflight.py` runs every pass with TEMP, TMP and TMPDIR pointed at a folder of its own, names what a pass
+  leaves there and fails it. One entry is expected: the fixed sink for a write from a thread that outlived its test.
+- Tests: `tests/test_a_test_leaves_the_temp_folder_as_it_found_it.py`, and the dev-only
+  `tests/test_preflight_names_what_a_pass_leaves_in_temp.py` (on the public strip list).
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)

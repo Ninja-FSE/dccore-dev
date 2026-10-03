@@ -152,6 +152,7 @@ the omissions surface, because it is the last point at which they are cheap.
    **Also strip the tests that exist only to cover `scripts/preflight.py`:**
    `tests/test_preflight_checks_every_pass_for_state_writes.py`,
    `tests/test_preflight_counts_what_was_skipped.py`,
+   `tests/test_preflight_names_what_a_pass_leaves_in_temp.py`,
    `tests/test_preflight_reads_its_children_in_utf8.py`,
    `tests/test_preflights_note_names_the_pass_that_failed.py`. Removing the
    script and not these left four test files importing a module that no
