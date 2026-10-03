@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ Views that are not on screen are not polled (#1142)
+
+Performance audit 2026-10-03 P20. Every open dashboard tab fetched `/api/fetch/status` every 4 s and
+`/api/filelists/bots` every 4 s, whatever view was showing and even with the browser tab hidden. Only the Downloads
+view draws the first - with 2,000 pending rows about 1 MB a poll - and only the List Browser draws the second.
+
+- Both intervals now poll only while their view is the active one and `document.hidden` is false.
+  `activateView("download")` and `activateView("filelists")` already fetch on the way in, so a transfer that finished
+  or a list fetched meanwhile is there the moment the view opens.
+- The always-visible status card and connection dot are fed by the `/api/queue` tick, which is unchanged; so is the
+  console log poll, which keeps running on every view on purpose.
+- Tests: `tests/test_views_off_screen_are_not_polled.py`.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
