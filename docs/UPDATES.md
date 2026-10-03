@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ The dashboard's JSON keeps its keys in built order (#1143)
+
+Performance audit 2026-10-03 P21. `create_app()` left Flask's JSON provider at `sort_keys=True`, so every dict in
+every answer was sorted key by key - most of what `/api/fetch/status` cost to serialise (86 ms against 57 ms on a
+2,500-row queue), polled every 4 s.
+
+- `webserver._keep_json_key_order(app)` turns sorting off: `app.json.sort_keys` on Flask 2.2 and later,
+  `app.config["JSON_SORT_KEYS"]` on 2.0 and 2.1, the floor `requirements-web.txt` allows.
+- `ensure_ascii` stays on, against the audit's optional half: off, a filename `os.listdir()` returned as a lone
+  surrogate goes out raw, Werkzeug cannot encode the body, and the whole route answers 500.
+- The one place app.js lists a payload's keys - the KeepTrack preview's skipped reasons - sorts them itself, so it reads
+  as before. Everything else looks fields up by name.
+- Tests: `tests/test_the_dashboard_json_keeps_its_keys_in_built_order.py`, including the surrogate filename and both
+  Flask generations.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
