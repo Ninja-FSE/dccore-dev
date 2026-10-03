@@ -3,9 +3,9 @@
 ## Unreleased
 
 - **Lighter: installing a fetched list uses about a third of the memory.** Every row of the list was held twice while it was added to the search index, only to be counted; it is streamed in now.
-- **Fixed: after the cross-list search index was rebuilt, a bot's RAR list showed as having no match in the List Browser's filter.** Only each bot's main list was put back into the index. Every list it holds is now.
 - **Faster: reading a list - a search, or a fetched bot's list in the List Browser - takes about a third less time.** Two checks ran on every row that only a few rows need.
 - **Faster: a search of the bot's own list is about three times faster on a big list.** Every line of the list cost more work than it needed; the answers are exactly the same.
+- **Fixed: after the cross-list search index was rebuilt, a bot's RAR list showed as having no match in the List Browser's filter.** Only each bot's main list was put back into the index. Every list it holds is now.
 
 ## v1.14.0 — The Bot Keeps a Record
 

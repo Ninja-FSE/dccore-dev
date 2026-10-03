@@ -25,21 +25,6 @@ only ever used them to count the rows and write them to the index: +412 MB peak 
 - Tests: `tests/test_installing_a_fetched_list_streams_its_rows.py`; `TheIndexIsWrittenByTheFetch` in
   `test_crosslist_search.py` anchors on the `CountedRows` line.
 
-### 🐛 Backfill indexes every list a held archive has (#1122)
-
-Performance audit 2026-10-03 B2, its bug half. A fetched archive can hold several lists, and a fetch indexes each under
-its own name: the bare nick for the main list, `<nick>/<marker>` for the rest (`list_fetch.index_key`). When the index
-was emptied (an upgrade, a deleted file) or repaired (a damaged one moved aside), `list_index.backfill_missing()` went
-through each bot's main list alone, so its other lists - a RAR list - were never indexed again, and the filter bar
-showed a list that does match as holding nothing.
-
-- `list_index._held_lists()` gives every list of a held entry with the name it is indexed under, and
-  `backfill_missing()` checks and indexes each one on its own. An entry written before archives could hold more than
-  one list still has its main list done; a list whose file is gone is skipped and the rest go on.
-- The other half of #1122 - running the rebuild in the background instead of inside `startup()` - stays open: it
-  needs `list_fetch`'s locking and two pinned tests changed.
-- Tests: `tests/test_backfill_indexes_every_held_list.py`.
-
 ### ⚡ The list parser skips two per-row costs no row needs (#1136)
 
 Performance audit 2026-10-03 P14, on top of #1126, which already made the third change (the rule check). Two more
@@ -67,6 +52,21 @@ word and phrase through `all()` over a fresh generator on every line. On a 2M-ro
 - Tests: `tests/test_the_list_scan_answers_the_same_with_cheaper_line_checks.py` - the old function, copied into the
   test, against the new on an adversarial list over 20 searches and 8 limits, and call counts showing the scan makes
   no `set()` or `all()` call.
+
+### 🐛 Backfill indexes every list a held archive has (#1122)
+
+Performance audit 2026-10-03 B2, its bug half. A fetched archive can hold several lists, and a fetch indexes each under
+its own name: the bare nick for the main list, `<nick>/<marker>` for the rest (`list_fetch.index_key`). When the index
+was emptied (an upgrade, a deleted file) or repaired (a damaged one moved aside), `list_index.backfill_missing()` went
+through each bot's main list alone, so its other lists - a RAR list - were never indexed again, and the filter bar
+showed a list that does match as holding nothing.
+
+- `list_index._held_lists()` gives every list of a held entry with the name it is indexed under, and
+  `backfill_missing()` checks and indexes each one on its own. An entry written before archives could hold more than
+  one list still has its main list done; a list whose file is gone is skipped and the rest go on.
+- The other half of #1122 - running the rebuild in the background instead of inside `startup()` - stays open: it
+  needs `list_fetch`'s locking and two pinned tests changed.
+- Tests: `tests/test_backfill_indexes_every_held_list.py`.
 
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
