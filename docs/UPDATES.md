@@ -4,6 +4,43 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 Ready for the next release: the changelogs, the upgrade guide, the roadmap, the Python pin
+
+What `docs/PUBLIC-REPO-WORKFLOW.md`'s "Before you extract anything" asks, done ahead of the roll so the release is a
+version number and a date. Checked against all 48 PRs merged since v1.13.2 (`d4f7369`).
+
+- **`docs/UPDATES-PUBLIC.md`'s Unreleased**, from 46 bullets to 37: the transfer record's two bullets made one (the
+  older said "nothing on the dashboard shows these yet"); stopping said once, with the mIRC menu item it left out; two
+  bullets about asking twice made one; fixes to features new in this release folded into the feature (Resend, Clear
+  failed, the request queue), since nobody outside ever met those bugs; #1105's bullet dropped - all three things it
+  fixed were broken only by the unreleased `conf/` move - and its one lasting change, `python src/adminchat.py`,
+  moved into the layout bullet, which said "the commands you use do not change"; the symbol-only nick fix kept to the
+  half that was released (the filter). Added: #1016, which had no entry anywhere although the bug it fixes shipped in
+  v1.13.2's script, and one closing "update `dccore.mrc`" line.
+- **`docs/INSTALL.md`**: a "Coming from v1.13.2 or earlier" section (the move into `conf/`, the password tool's new
+  path, the old module copies an unpack-over-the-top leaves at the top, updating `dccore.mrc`, and the three things
+  now on by default - the log file, the transfer record, the on-connect check); step 4's comparison reads
+  `conf/settings.conf`, which does not exist until the new version has started once, so it says to run step 6
+  first; "#959" in step 2 replaced with the version; "never touched" made true.
+- **`docs/FUTURE.md`**: Implemented gains the transfer record, the OmenServe/KeepTrack history, running without a
+  window, the on-connect check, and the dashboard's and mIRC window's new parts; seven audits, not four.
+- **`README.md`** says where things are now (`src/`, `conf/`); **`docs/WINDOWS.md`** names `src/` paths and says the
+  logon task follows `BOT_WINDOW`.
+- **The Python pin** goes to 3.14.8 (python.org, 2026-09-30): `PY_VERSION`, both SHA-256 lines - matching the hashes
+  python.org publishes, and checked by `DCCORE_VERIFY_PYTHON_PIN=1` against the real installers - and
+  `docs/WINDOWS.md`'s copy.
+- **The `[MIGRATE]` lines** an operator sees at the first start said "(#959)", an issue number in a repository they
+  cannot read; they say what changed instead.
+- The test count in `docs/FUTURE.md` is measured on this tree.
+
+### 🐛 DCCore Chat: the bot's own relayed line is hidden again (#1015, #1016)
+
+Merged after v1.13.2 had been released, with no entry here until now. The #982 peer check in `dccore.mrc`'s
+`on ^*:TEXT:*:#:` hid a `[ServersChat]` line only when its sender was in `dccore.chatpeers`, which never holds the
+bot's own nick - peers are other DCCore bots, and `serverschat.note_who_reply()` leaves the bot itself out of every
+`PEERS` line. So every line the operator's own bot relayed showed raw in the channel window again. The check now also
+accepts the bot the script is paired with. Tests: `tests/test_dccore_chat_in_the_mirc_window.py`.
+
 ### 📦 The transfer record on the Stats page, and forgetting a nick (#1102)
 
 The record (#1068) has been written since #1069, but nothing read it and nothing called `forget_nick()`. The Stats
@@ -475,8 +512,8 @@ only ever to a DCCore peer. Tests: `tests/test_clear_failed_tells_the_other_bot.
 Audit 2026-10-01 L3. #1028 gave fetch requests a lane of their own, and the row that owns one counts it as sent once
 it has left that lane. The disconnect epilogue (`irc.py`) and the queue worker's failed-send branch both emptied the
 whole lane, so every row whose request had not gone out timed out as "no response" - a folder or list row after up
-to `FETCH_FOLDER_OFFER_TIMEOUT`, with no request ever made, and a file row spending one of its `OFFER_ASKS`. Before
-#1028 these lines waited in `send_queue`, which neither exit clears. Now the epilogue leaves the lane alone (the
+to `FETCH_FOLDER_OFFER_TIMEOUT`, with no request ever made, and a file row spending one of its `OFFER_ASKS`.
+Before #1028 these lines waited in `send_queue`, which neither exit clears. Now the epilogue leaves the lane alone (the
 lines go out on the next connection; the row's timer does not run while its line is unsent), a line whose send
 failed goes back to the front, and a line the lane's cap trims hands its row to new `dcc_fetch.requests_not_sent()`,
 which puts it back to pending, as asked, to be asked again. Tests:

@@ -1405,8 +1405,9 @@ def _migrate_admin_config_into_conf_dir(repo_root=None, log=print):
             f"Move it yourself: conf/admin_config.py is where it is read from now.")
         return False
 
-    log("[MIGRATE] Moved admin_config.py into conf/ - the repository's layout "
-        "changed (#959); nothing in it changed.")
+    log("[MIGRATE] Moved admin_config.py into conf/ - the program's layout "
+        "changed (its modules are in src/, your own files in conf/); nothing "
+        "in it changed.")
     return True
 
 
