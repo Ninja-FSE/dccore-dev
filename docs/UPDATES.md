@@ -2,6 +2,72 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### ⚡ Installing a fetched list streams its rows into the index (#1134)
+
+Performance audit 2026-10-03 P12, on top of #1136 and #1126 (the same scan) and #1122 (the same `backfill_missing()`).
+Installing a fetched list parsed it with `find_matching_entries()` into a dict per row, raw line included, turned that
+into a second dict per row with `entries_to_filelist_rows()`, kept both lists alive for the whole index write - and
+only ever used them to count the rows and write them to the index: +412 MB peak for a 378k-row list.
+
+- One generator, `list._matching_lines()`, is the scan; `find_matching_entries()` collects it into its capped list as
+  before, and the new `list.iter_filelist_rows()` hands the same rows on one at a time. `list.CountedRows` counts them
+  as the index takes them; its `total()` drains whatever the index did not take, so the count is the whole list even
+  when the index is unavailable or stops part-way (the skeptic's hole), and re-raises a parse error, so a list that
+  cannot be read still fails at the count as it did at the up-front parse. No `__len__`, on purpose: `list()` would
+  drain it before handing over the first row. `index_bot_list()` returns the rows it inserted instead of `len(rows)`.
+- Used in `list_fetch._install_fetched_list()`, `_measure_extra_list()` and `list_index.backfill_missing()`: +144 MB
+  peak instead of +412 MB, about 10% faster, the index content identical.
+- The parse now runs inside the index write lock, so this lands after #1129, which moves the filter bar's readers off
+  that lock. A list that cannot be read now also prints `index_bot_list()`'s "Could not index" line before the
+  rollback; the end state is unchanged.
+- Tests: `tests/test_installing_a_fetched_list_streams_its_rows.py`; `TheIndexIsWrittenByTheFetch` in
+  `test_crosslist_search.py` anchors on the `CountedRows` line.
+
+### ⚡ The list parser skips two per-row costs no row needs (#1136)
+
+Performance audit 2026-10-03 P14, on top of #1126, which already made the third change (the rule check). Two more
+per-row costs in the parser every list read goes through, fetched lists included:
+
+- `strip_info_suffix()` split each row on `\s*::INFO::\s*`, whose leading `\s*` made `re.split()` retry at every position
+  of the row. It now searches for the bare marker (still case-insensitive) and slices around it; both halves were
+  already stripped, and `str.strip()` removes exactly the characters `\s` matches, so the split lands in the same place.
+- `entries_to_filelist_rows()` ran `rar_folder_of()`'s regex on every row; only a title starting with `!` can match its
+  anchored `^!rar`, so nothing else asks.
+- The skeptic measured the whole parse of a 378k-row list at 6.1 s -> 4.3 s with all three changes, rows identical.
+- Tests: `tests/test_the_list_parser_skips_work_no_row_needs.py` - over every code point, that `\s` and `str.strip()`
+  agree on whitespace; the old functions against the new on marker rows, `!rar` titles and a whole adversarial list.
+
+### ⚡ The list scan checks rules and words without per-line objects (#1126)
+
+Performance audit 2026-10-03 P4. `list.find_matching_entries()` - every search of the bot's own list, and the parse of
+every fetched one - built a set of each line's characters to ask whether it was a `====` rule, and ran each search
+word and phrase through `all()` over a fresh generator on every line. On a 2M-row list a search took 9-15 s.
+
+- The rule check is `not line_strip.strip("=")` - the same answer, since the line is not empty there, at about a tenth
+  of the cost - and the word and phrase tests are plain loops with the same order and the same early stop. The skeptic
+  measured the scan at about 3x faster with both (2M rows: 9.1 s -> 2.8 s for "love"); the loop change alone was
+  0.45 s -> 0.29 s on 200k rows here. The audit's third change, a NUL guard, measured as noise and is left out.
+- Tests: `tests/test_the_list_scan_answers_the_same_with_cheaper_line_checks.py` - the old function, copied into the
+  test, against the new on an adversarial list over 20 searches and 8 limits, and call counts showing the scan makes
+  no `set()` or `all()` call.
+
+### 🐛 Backfill indexes every list a held archive has (#1122)
+
+Performance audit 2026-10-03 B2, its bug half. A fetched archive can hold several lists, and a fetch indexes each under
+its own name: the bare nick for the main list, `<nick>/<marker>` for the rest (`list_fetch.index_key`). When the index
+was emptied (an upgrade, a deleted file) or repaired (a damaged one moved aside), `list_index.backfill_missing()` went
+through each bot's main list alone, so its other lists - a RAR list - were never indexed again, and the filter bar
+showed a list that does match as holding nothing.
+
+- `list_index._held_lists()` gives every list of a held entry with the name it is indexed under, and
+  `backfill_missing()` checks and indexes each one on its own. An entry written before archives could hold more than
+  one list still has its main list done; a list whose file is gone is skipped and the rest go on.
+- The other half of #1122 - running the rebuild in the background instead of inside `startup()` - stays open: it
+  needs `list_fetch`'s locking and two pinned tests changed.
+- Tests: `tests/test_backfill_indexes_every_held_list.py`.
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)

@@ -494,7 +494,12 @@ def all_list_paths(name=None):
     return paths
 
 
-_INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
+# The marker alone, without the r'\s*' either side it used to carry (#1136).
+# The leading one made re.split() retry the whitespace at every position of a
+# row before giving up, on every row of every list; strip_info_suffix() strips
+# both halves anyway, and str.strip() removes exactly the characters \s
+# matches, so the split lands in the same place.
+_INFO_MARKER_RE = re.compile('::INFO::', re.IGNORECASE)
 
 # The other family of size suffix seen in production, from bots that do not
 # use "::INFO::" at all: "SDFind v3.91 by SDSailor" writes
@@ -506,7 +511,7 @@ _INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
 # to actually look like a size (digits, an optional decimal point, an
 # optional K/M/G/T, then B) - unlike "::INFO::", "----" is not a string that
 # only ever appears as this one bot's deliberate marker, so matching it
-# ANYWHERE (the way the marker split above safely can) would risk cutting a
+# ANYWHERE (the way the marker search above safely can) would risk cutting a
 # real filename that happens to contain a run of hyphens. Requiring a
 # size-shaped tail at the very end is what keeps this from firing on one.
 _DASH_SIZE_SUFFIX_RE = re.compile(
@@ -548,9 +553,9 @@ def strip_info_suffix(rest):
     trailing tag for part of the filename when it later requests that exact
     name back with `!<nick> <filename>`.
     """
-    parts = _INFO_MARKER_RE.split(rest, maxsplit=1)
-    if len(parts) == 2:
-        filename, size = parts
+    marker = _INFO_MARKER_RE.search(rest)
+    if marker:
+        filename, size = rest[:marker.start()], rest[marker.end():]
     else:
         dash_match = _DASH_SIZE_SUFFIX_RE.search(rest)
         if dash_match:
@@ -691,7 +696,28 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
 
     entries = []
     total_matches = 0
+    for line_strip, folder in _matching_lines(search_words, list_path):
+        total_matches += 1
+        if limit is None or len(entries) < limit:
+            filename, size = _split_entry_line(line_strip)
+            entries.append({
+                "line": line_strip,
+                "folder": folder,
+                "filename": filename,
+                "size": size,
+            })
+    return entries, total_matches
 
+
+def _matching_lines(search_words, list_path):
+    """Every "!" line of one list that matches, as (line, folder heading).
+
+    The scan itself, one row at a time (#1134): find_matching_entries()
+    collects it into a capped list, and iter_filelist_rows() hands it on
+    without collecting anything, so installing a fetched list no longer
+    holds every row of it in memory twice. One scan, so the two cannot
+    drift apart. Nothing for a missing file.
+    """
     # A tuple in the list is a quoted phrase (#774), compiled once per list
     # rather than once per line; a string is a word, matched as it always was.
     plain_words = [item for item in search_words if not isinstance(item, tuple)]
@@ -700,7 +726,7 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
 
     current_list_path = list_path
     if not current_list_path or not os.path.exists(current_list_path):
-        return entries, total_matches
+        return
 
     current_folder = None
     # "none" -> saw the opening rule line, now expecting the folder line ("open")
@@ -713,7 +739,12 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
             if not line_strip:
                 continue
 
-            is_rule = set(line_strip) == {"="}
+            # "Every character is =", asked without building a set of the
+            # line's characters (#1126). line_strip is not empty here, so
+            # stripping the "=" away leaves nothing exactly when that is all
+            # it held. The set cost about ten times as much and ran on every
+            # line of every list: most of the scan's time at two million rows.
+            is_rule = not line_strip.strip("=")
             if state == "none":
                 if is_rule:
                     state = "open"
@@ -754,22 +785,23 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
                 continue
 
             line_lower = line_strip.lower()
-            if plain_words and not all(word in line_lower for word in plain_words):
-                continue
-            if phrase_patterns and not all(pattern.search(line_lower) for pattern in phrase_patterns):
+            # Plain loops, not all() over a generator (#1126): the generator
+            # was built afresh for every file line, and cost more than the
+            # substring tests it ran. Same order, same early stop.
+            matched = True
+            for word in plain_words:
+                if word not in line_lower:
+                    matched = False
+                    break
+            if matched:
+                for pattern in phrase_patterns:
+                    if not pattern.search(line_lower):
+                        matched = False
+                        break
+            if not matched:
                 continue
 
-            total_matches += 1
-            if limit is None or len(entries) < limit:
-                filename, size = _split_entry_line(line_strip)
-                entries.append({
-                    "line": line_strip,
-                    "folder": current_folder,
-                    "filename": filename,
-                    "size": size,
-                })
-
-    return entries, total_matches
+            yield line_strip, current_folder
 
 
 # Every folder heading in the master list starts with this, whatever the
@@ -1063,8 +1095,112 @@ def entries_to_filelist_rows(entries, source):
     bot's nick) so the two surfaces can never drift in what a "row" looks
     like on the dashboard.
     """
+    return list(_filelist_rows(entries, source))
+
+
+def iter_filelist_rows(list_path, source):
+    """entries_to_filelist_rows() over the whole of one list, a row at a time.
+
+    For a caller that only counts the rows and writes them to the search
+    index (#1134): installing a fetched list, an extra list in its archive,
+    a backfill. find_matching_entries() with no limit built a dict per row,
+    raw line included, and entries_to_filelist_rows() a second, and both
+    lists stayed alive for the whole write - about 412 MB at 378k rows,
+    against 143 MB streamed. Same scan, same split, same dedup: only the
+    collecting is gone. Wrap it in CountedRows to know how many there were.
+    """
+    def entries():
+        for line_strip, folder in _matching_lines([], list_path):
+            filename, size = _split_entry_line(line_strip)
+            yield {"folder": folder, "filename": filename, "size": size}
+
+    return _filelist_rows(entries(), source)
+
+
+class CountedRows(object):
+    """Rows for list_index.index_bot_list() that count themselves as they pass.
+
+    One pass only, like the generator inside it. total() is the number of
+    rows in the whole list, not the number the index happened to take: it
+    drains whatever is left first. That matters because index_bot_list()
+    returns 0 WITHOUT iterating when the index is unavailable, and stops
+    part-way on an error, and a count of what it consumed would then be 0 or
+    partial - and list_fetch would store that as the list's size, or throw
+    away a good extra list as having "no entries" (#1134).
+
+    An error from the list itself is kept and raised again by total(), so a
+    list that cannot be read fails at the count as it did when it was parsed
+    up front - and not as a short count.
+
+    No __len__, on purpose: list() and other consumers ask an object with
+    one for its length before iterating, and here that would drain every
+    row before the first was handed over. bool() peeks at one row and keeps
+    it for the next pass.
+    """
+
+    def __init__(self, rows):
+        self._rows = iter(rows)
+        self._peeked = []
+        self._count = 0
+        self._done = False
+        self.error = None
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._peeked:
+            self._count += 1
+            return self._peeked.pop()
+        if self._done:
+            raise StopIteration
+        try:
+            row = next(self._rows)
+        except StopIteration:
+            self._done = True
+            raise
+        except Exception as err:
+            self._done = True
+            self.error = err
+            raise
+        self._count += 1
+        return row
+
+    def any_rows(self):
+        """True if there is at least one row, without consuming it."""
+        if self._peeked:
+            return True
+        if self._done:
+            return False
+        try:
+            self._peeked.append(next(self._rows))
+        except StopIteration:
+            self._done = True
+            return False
+        except Exception as err:
+            self._done = True
+            self.error = err
+            raise
+        return True
+
+    __bool__ = any_rows
+
+    def total(self):
+        """How many rows the list has, draining any not yet consumed."""
+        if not self._done or self._peeked:
+            try:
+                for _row in self:
+                    pass
+            except Exception:
+                pass
+        if self.error is not None:
+            raise self.error
+        return self._count
+
+
+def _filelist_rows(entries, source):
+    """The rows entries_to_filelist_rows() returns, one at a time."""
     seen = set()
-    rows = []
     for entry in entries:
         filename = entry.get("filename", "?")
         size = entry.get("size", "")
@@ -1083,7 +1219,7 @@ def entries_to_filelist_rows(entries, source):
             continue
         seen.add(key)
         ext = os.path.splitext(filename)[1].lstrip(".").upper()
-        rows.append({
+        yield {
             "title": filename,
             "size": size,
             "format": ext,
@@ -1106,7 +1242,12 @@ def entries_to_filelist_rows(entries, source):
             # meant to be copied verbatim - that is what the header of every
             # such list tells the reader to do - so this adds a field beside
             # it rather than reformatting it.
-            "rar_folder": rar_folder_of(filename),
+            #
+            # Asked only of a title that starts with "!" (#1136): nothing
+            # else can match rar_folder_of()'s anchored "^!rar", and running
+            # the regex on every row of every list cost more than the answer.
+            "rar_folder": (rar_folder_of(filename)
+                           if filename.lstrip().startswith("!") else ""),
             # What we have already asked this bot for: "requested",
             # "received", or "" for neither. Declared HERE, empty, rather
             # than added by whichever payload happens to know - both this
@@ -1119,8 +1260,7 @@ def entries_to_filelist_rows(entries, source):
             # webserver.mark_rows_with_fetch_state() fills it in for the two
             # payloads where the question means something.
             "mark": "",
-        })
-    return rows
+        }
 
 
 def group_rows_by_folder(rows):

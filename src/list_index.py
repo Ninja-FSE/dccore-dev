@@ -400,6 +400,10 @@ def index_bot_list(bot, rows):
     nothing in production. The tests missed it by building their own rows with
     a "filename" key instead of calling the producer.
 
+    `rows` may also be a one-pass stream of the same dicts - list.CountedRows
+    over list.iter_filelist_rows(), which is how a fetch hands them over
+    (#1134) - so they are counted as they go in rather than by len().
+
     Returns the number indexed, or 0 if the index is unavailable.
     """
     # NORMALISED, and the same normalisation on both sides of the delete.
@@ -415,6 +419,7 @@ def index_bot_list(bot, rows):
     name = str(bot or "").strip().lower()
     if not name:
         return 0
+    indexed = [0]
 
     with _conn_lock:
         conn = _connect()
@@ -447,14 +452,12 @@ def index_bot_list(bot, rows):
                 # of the list in memory first - at the four million rows this
                 # index is measured against, hundreds of megabytes of tuples
                 # held for the length of the write and for no reason.
-                ((name,
-                  str(row.get("title") or row.get("filename") or ""),
-                  str(row.get("folder") or ""),
-                  str(row.get("size") or ""))
-                 for row in rows))
+                _counted_values(name, rows, indexed))
             conn.commit()
             _checkpoint_locked(conn)
-            return len(rows)
+            # Counted as they went in, not len(rows): `rows` may be a stream
+            # with no length (#1134), and for a list the two are the same.
+            return indexed[0]
         except Exception as err:
             try:
                 conn.rollback()
@@ -463,6 +466,16 @@ def index_bot_list(bot, rows):
             print(f"[LIST-INDEX] Could not index {name}'s list ({err}); the "
                   f"cross-list filter will not see it. Browsing it still works.")
             return 0
+
+
+def _counted_values(name, rows, indexed):
+    """index_bot_list()'s INSERT parameters, counting each into indexed[0]."""
+    for row in rows:
+        indexed[0] += 1
+        yield (name,
+               str(row.get("title") or row.get("filename") or ""),
+               str(row.get("folder") or ""),
+               str(row.get("size") or ""))
 
 
 def drop_bot(bot):
@@ -704,6 +717,28 @@ def _holds_rows_for(conn, bot):
     return row is not None
 
 
+def _held_lists(bot, entry):
+    """[(index name, list path)] for every list a held archive has.
+
+    The main list under the bare nick and the others as "<nick>/<marker>",
+    the names list_fetch indexes them under at fetch time (#1122): backfill
+    went through the main list alone, so after an index was emptied or
+    repaired a bot's RAR list was never indexed again, and the filter bar
+    showed a list that does match as holding nothing. An entry written before
+    an archive could hold more than one list has no "lists", only its main
+    list's "list_path"."""
+    import list_fetch
+    out = []
+    lists = entry.get("lists")
+    if isinstance(lists, dict):
+        for marker, info in lists.items():
+            if isinstance(info, dict) and info.get("list_path"):
+                out.append((list_fetch.index_key(bot, marker), info["list_path"]))
+    if not any(name == bot for name, _path in out) and entry.get("list_path"):
+        out.insert(0, (bot, entry["list_path"]))
+    return out
+
+
 def backfill_missing(held, log=print):
     """Index any held list that is not in the index yet. Returns how many.
 
@@ -737,32 +772,37 @@ def backfill_missing(held, log=print):
         bot = str(entry.get("bot") or key).strip()
         if not bot:
             continue
-        # One question per held bot, answered from the index (#1071) - not a
-        # read of the whole table to list every bot first.
-        with _conn_lock:
-            conn = _connect()
-            if conn is None:
-                return done
-            try:
-                if _holds_rows_for(conn, bot):
+        for name, path in _held_lists(bot, entry):
+            # One question per held list, answered from the index (#1071) -
+            # not a read of the whole table to list every bot first.
+            with _conn_lock:
+                conn = _connect()
+                if conn is None:
+                    return done
+                try:
+                    if _holds_rows_for(conn, name):
+                        continue
+                except Exception as err:
+                    log(f"[LIST-INDEX] Could not check whether {name}'s list is "
+                        f"indexed ({err}); leaving it as it is.")
                     continue
-            except Exception as err:
-                log(f"[LIST-INDEX] Could not check whether {bot}'s list is "
-                    f"indexed ({err}); leaving it as it is.")
+            if not path or not os.path.exists(platform_compat.long_path(path)):
                 continue
-        path = entry.get("list_path")
-        if not path or not os.path.exists(platform_compat.long_path(path)):
-            continue
-        try:
-            entries, _total = list_mod.find_matching_entries(
-                [], limit=None, list_path=platform_compat.long_path(path))
-            rows = list_mod.entries_to_filelist_rows(entries, bot)
-        except Exception as err:
-            log(f"[LIST-INDEX] Could not re-read {bot}'s list to index it "
-                f"({err}); the filter will not see it until the next fetch.")
-            continue
-        if index_bot_list(bot, rows):
-            done += 1
+            # Streamed into the index, not built in memory first (#1134). A
+            # list that cannot be read fails inside the write, which rolls
+            # back, and CountedRows keeps the error to be reported here as it
+            # always was. Rows carry the bot's nick, as a fetch writes them;
+            # the list is told apart by the name it is indexed under (#1122).
+            rows = list_mod.CountedRows(list_mod.iter_filelist_rows(
+                platform_compat.long_path(path), bot))
+            indexed = index_bot_list(name, rows)
+            if rows.error is not None:
+                log(f"[LIST-INDEX] Could not re-read {name}'s list to index it "
+                    f"({rows.error}); the filter will not see it until the next "
+                    f"fetch.")
+                continue
+            if indexed:
+                done += 1
     if done:
         log(f"[LIST-INDEX] Indexed {done} held list(s) the search index did "
             f"not have.")

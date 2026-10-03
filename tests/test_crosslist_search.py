@@ -1005,18 +1005,24 @@ class TheIndexIsWrittenByTheFetch(unittest.TestCase):
         # list too - and the block then ran across both, so the assertion
         # below read a call that was never the one it is about.
         code = self.source().split("def _install_fetched_list(", 1)[1]
-        block = code.split("rows = list_mod.entries_to_filelist_rows(", 1)[1]
+        # The rows are streamed into the index since #1134: the parse is
+        # the CountedRows the write consumes.
+        block = code.split("rows = list_mod.CountedRows(list_mod.iter_filelist_rows(", 1)[1]
         block = block.split("store = _ensure_fetched_bot_lists()", 1)[0]
 
         self.assertIn("list_index.index_bot_list(", block)
         self.assertNotIn("find_matching_entries(", block,
+                         "the index is built from a second parse of its own")
+        self.assertNotIn("iter_filelist_rows(", block,
                          "the index is built from a second parse of its own")
 
     def test_the_slice_above_is_looking_at_the_right_function(self):
         """Guard on the guard: an anchor that matched somewhere else would
         make the assertion vacuous rather than failing."""
         code = self.source().split("def _install_fetched_list(", 1)[1]
-        block = code.split("rows = list_mod.entries_to_filelist_rows(", 1)[1]
+        # The rows are streamed into the index since #1134: the parse is
+        # the CountedRows the write consumes.
+        block = code.split("rows = list_mod.CountedRows(list_mod.iter_filelist_rows(", 1)[1]
         block = block.split("store = _ensure_fetched_bot_lists()", 1)[0]
 
         self.assertIn("index_bot_list", block)
