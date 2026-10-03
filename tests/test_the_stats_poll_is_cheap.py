@@ -9,6 +9,11 @@ a page that shows neither.
 Now Live Transfers asks for ?parts=transfer only; the ranking is built once per
 change of the counts file, parsed outside the lock; and the RAR count is kept
 per list file until that file changes.
+
+#1133 then moved the counts into SQLite, where the ranking is an indexed query
+and a send is one row, so the ranking cache and its file signature went: the
+tests of what a caller sees stay, and the two that pinned the cache's
+invalidation now pin that the JSON is read once, at the import.
 """
 
 import io
@@ -34,12 +39,13 @@ class CountsCase(support.DCCoreTestCase):
         patch = mock.patch.object(db, "DOWNLOAD_COUNTS_FILE", self.path)
         patch.start()
         self.addCleanup(patch.stop)
-        db._ranked_counts.clear()
-        self.addCleanup(db._ranked_counts.clear)
 
     def write(self, counts):
+        """Sorted by key, as the JSON version always wrote the file: rows equal
+        in count and in name.lower() came out in file order, which is key order,
+        and the database keeps exactly that."""
         with io.open(self.path, "w", encoding="utf-8") as handle:
-            json.dump(counts, handle)
+            json.dump(counts, handle, sort_keys=True)
 
     def reference(self, counts, kind, limit):
         """The ranking as top_downloads() computed it before #1123."""
@@ -71,6 +77,8 @@ class TheRanking(CountsCase):
                                "count": rng.choice([0, 1, 1, 2, 3, 5, 8, -1, "7", "x"])}
         counts["broken"] = "not a row"
         self.write(counts)
+        with io.open(self.path, encoding="utf-8") as handle:
+            counts = json.load(handle)      # in the order the old code read them: the file's
         for kind in (None, "file", "album"):
             for limit in (0, 1, 10, 50, "x"):
                 with self.subTest(kind=kind, limit=limit):
@@ -92,23 +100,17 @@ class TheRanking(CountsCase):
         db.record_download("b", "B", "file")
         self.assertEqual([r["name"] for r in db.top_downloads(kind="file")], ["A", "B"])
 
-    def test_a_save_is_seen_even_when_the_file_looks_unchanged(self):
-        """Two saves inside one clock tick, on a filesystem without file ids,
-        look like one file: every save drops the ranking itself."""
-        self.write({"a": {"name": "A", "kind": "file", "count": 3}})
-        with mock.patch.object(db, "_counts_signature", return_value=("same",)):
-            self.assertEqual(db.top_downloads()[0]["count"], 3)
-            db.record_download("a", "A", "file")
-            self.assertEqual(db.top_downloads()[0]["count"], 4)
-
-    def test_a_file_replaced_from_outside_is_seen(self):
+    def test_a_file_replaced_after_the_import_is_not_read_again(self):
+        """Since #1133 the JSON is imported once and the database answers from
+        then on, so a JSON put back later - by a downgrade and a re-upgrade,
+        say - is not read again. The settings help says so."""
         self.write({"a": {"name": "A", "kind": "file", "count": 3}})
         db.top_downloads()
         replacement = self.path + ".new"
         with io.open(replacement, "w", encoding="utf-8") as handle:
             json.dump({"z": {"name": "Z", "kind": "file", "count": 9}}, handle)
         os.replace(replacement, self.path)
-        self.assertEqual(db.top_downloads()[0]["name"], "Z")
+        self.assertEqual([r["name"] for r in db.top_downloads()], ["A"])
 
     def test_the_parse_runs_outside_the_disk_lock(self):
         self.write({"a": {"name": "A", "kind": "file", "count": 3}})
@@ -161,7 +163,12 @@ class TheRarCount(support.DCCoreTestCase):
         self.assertIsNone(webserver.count_rar_album_folders())
 
 
-class ThePayloadInParts(unittest.TestCase):
+class ThePayloadInParts(support.DCCoreTestCase):
+    """In the redirected sandbox: the whole payload reads the download
+    counts, whose first read imports a download_counts.json it finds into a
+    new database beside it (#1133) - which on a checkout run outside the
+    sandbox is the developer's own data/."""
+
     def test_transfer_alone_reads_no_file(self):
         with mock.patch.object(db, "top_downloads", side_effect=AssertionError("ranked")), \
                 mock.patch.object(webserver, "build_library_payload", side_effect=AssertionError("counted")), \

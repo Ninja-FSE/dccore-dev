@@ -224,6 +224,14 @@ list_index_lock = threading.Lock()
 # reason every other lock in this file is.
 transfer_log_lock = threading.Lock()
 
+# db.py's download counters database (#1133). One writer at a time - the
+# sends, the startup migrations and an import of the old JSON - so two
+# transfers ending together never meet a busy file, and a damaged file is only
+# moved aside while nothing here is writing it. Deliberately not disk_lock: a
+# send's count must not wait behind every other file db.py writes. Here, not
+# in db.py, because !rehash reloads db.py.
+download_counts_lock = threading.Lock()
+
 # list.count_request_lines()'s cache. Same reason as every other lock here:
 # list.py is reloaded by !rehash, and a lock constructed there would be a new
 # object after every reload while a counter mid-read still held the old one -
