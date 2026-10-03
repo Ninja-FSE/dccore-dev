@@ -294,7 +294,7 @@ PLAIN_HELP = {
     'LIST_AUDIO_INFO_CACHE': 'Where the length and quality read from your audio files are kept between rebuilds. Safe to delete; the next rebuild reads every file again.',
     'LIST_INDEX_FILE': 'The search index over every list you have fetched from other bots. Can be large; safe to delete, it is rebuilt at the next fetch.',
     'FETCH_HISTORY_FILE': 'Where finished downloads from other bots are recorded for the Downloads page.',
-    'DOWNLOAD_COUNTS_FILE': 'Where the count of how often each file was sent is kept, for the Most downloaded table.',
+    'DOWNLOAD_COUNTS_FILE': 'Where the count of how often each file was sent is kept, for the Most downloaded table: a database beside it ending in .db. An older download_counts.json is imported once and left as it was, so an older version still shows the counts up to the upgrade; what it counts is not brought back by upgrading again.',
     'TRANSFER_LOG_FILE': 'Where a record of every finished transfer is kept: what it was, its size, its speed, how long it waited in the queue, and the nick it went to or came from (no host, no channel). Shown on the Stats page, where a nick can be forgotten. Empty turns it off.',
     'LIST_SIZE_FILE': "The name of the small file written beside your list holding the library's total size, as shown in the advert.",
     'LIST_RAWBYTES_FILE': 'The name of the small file beside your list holding the exact byte total.',
