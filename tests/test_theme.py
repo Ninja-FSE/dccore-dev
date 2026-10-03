@@ -39,7 +39,7 @@ import list as list_mod  # noqa: E402
 import theme  # noqa: E402
 
 from tests._golden_palette import GOLDEN  # noqa: E402
-from tests.support import DCCoreTestCase  # noqa: E402
+from tests.support import DCCoreTestCase, parse_source  # noqa: E402
 
 # The three block codes as they have always been. Modules spell them as the
 # ESCAPE TEXT "\\x0304,05", not as the character it stands for, so a scan that
@@ -183,7 +183,7 @@ class TheLookDidNotChange(ThemedPathCase):
 
         readers = 0
         for name in ("announce.py", "list.py"):
-            tree = ast.parse(io.open((next((p for p in (os.path.join(REPO_ROOT, "src", name), os.path.join(REPO_ROOT, "conf", name), os.path.join(REPO_ROOT, name)) if os.path.exists(p)), os.path.join(REPO_ROOT, name))),
+            tree = parse_source(io.open((next((p for p in (os.path.join(REPO_ROOT, "src", name), os.path.join(REPO_ROOT, "conf", name), os.path.join(REPO_ROOT, name)) if os.path.exists(p)), os.path.join(REPO_ROOT, name))),
                                      encoding="utf-8").read())
             for node in ast.walk(tree):
                 if (isinstance(node, ast.Call)

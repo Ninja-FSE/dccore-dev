@@ -46,6 +46,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import commands  # noqa: E402
+from tests.support import parse_source  # noqa: E402
 
 LOCK_FACTORIES = {"Lock", "RLock", "Condition", "Semaphore", "BoundedSemaphore"}
 
@@ -78,7 +79,7 @@ def module_level_locks():
         if not filename.endswith(".py"):
             continue
         with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", filename), os.path.join(REPO_ROOT, "conf", filename), os.path.join(REPO_ROOT, filename)) if os.path.exists(p)), os.path.join(REPO_ROOT, filename))), encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
+            tree = parse_source(handle.read())
 
         # tree.body only - a lock built inside a function is a local, is not
         # rebound by a reload, and is none of this test's business.

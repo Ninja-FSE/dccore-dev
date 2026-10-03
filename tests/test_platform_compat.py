@@ -20,7 +20,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import platform_compat  # noqa: E402
-from tests.support import remove_tree  # noqa: E402
+from tests.support import remove_tree, parse_source  # noqa: E402
 
 
 class RarCommandTests(unittest.TestCase):
@@ -316,7 +316,7 @@ def _calls_to(module_name, dotted):
     owner, attribute = dotted.split(".")
     path = (next((p for p in (os.path.join(REPO_ROOT, "src", module_name), os.path.join(REPO_ROOT, "conf", module_name), os.path.join(REPO_ROOT, module_name)) if os.path.exists(p)), os.path.join(REPO_ROOT, module_name)))
     with io.open(path, encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
+        tree = parse_source(handle.read())
 
     found = []
     for node in ast.walk(tree):
@@ -413,7 +413,7 @@ class WiringTests(unittest.TestCase):
         for module in ("dcc.py", "adminchat.py", "dcc_fetch.py", "irc.py"):
             with self.subTest(module=module):
                 with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", module), os.path.join(REPO_ROOT, "conf", module), os.path.join(REPO_ROOT, module)) if os.path.exists(p)), os.path.join(REPO_ROOT, module))), encoding="utf-8") as handle:
-                    tree = ast.parse(handle.read())
+                    tree = parse_source(handle.read())
                 offenders = [node.lineno for node in ast.walk(tree)
                              if isinstance(node, ast.Attribute)
                              and node.attr == "SO_REUSEADDR"]

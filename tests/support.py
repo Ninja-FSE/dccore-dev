@@ -10,6 +10,7 @@ minimal LXC, so the tests must run there too - and on Windows, where the port is
 headed - with nothing more than a Python install.
 """
 
+import ast
 import gc
 import os
 import shutil
@@ -50,6 +51,39 @@ _PRISTINE = [
     (dcc, "start_dcc_send", dcc.start_dcc_send),
     (dcc, "check_queue_and_send", dcc.check_queue_and_send),
 ]
+
+
+# Parsed source, shared by every source-reading test in the process (#1147).
+# Those tests re-parsed the same big modules thousands of times a run - irc.py
+# was opened 210 times, and one parse of it costs 50 to 150 ms - when each
+# distinct text needs parsing once.
+#
+# KEYED ON THE TEXT ITSELF, never on a path and its mtime: several tests
+# write a file and scan it again, and a rewrite inside one timestamp tick
+# would hand back the old tree - the same trap as a stale __pycache__.
+# Reading the text again is cheap; parsing it is what costs.
+#
+# The trees are SHARED: a test must read them and never change them.
+# tests/test_source_reading_tests_parse_each_text_once.py holds the suite to
+# that. Texts under _PARSE_CACHE_MIN_CHARS parse in well under a
+# millisecond and are not kept.
+_PARSED_SOURCES = {}
+_PARSE_CACHE_MIN_CHARS = 10000
+
+
+def parse_source(text, filename="<unknown>"):
+    """ast.parse(text, filename), parsed once per process for the same text.
+
+    The tree returned may be the one another test was given: read it, walk
+    it, never change it.
+    """
+    if len(text) < _PARSE_CACHE_MIN_CHARS:
+        return ast.parse(text, filename=filename)
+    key = (filename, text)
+    tree = _PARSED_SOURCES.get(key)
+    if tree is None:
+        tree = _PARSED_SOURCES[key] = ast.parse(text, filename=filename)
+    return tree
 
 
 def restore_daemon_functions():

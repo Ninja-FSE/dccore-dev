@@ -34,7 +34,7 @@ import list as list_mod  # noqa: E402
 import settings_file  # noqa: E402
 import webserver  # noqa: E402
 
-from tests.support import DCCoreTestCase, queue_row, silence_debug  # noqa: E402
+from tests.support import DCCoreTestCase, queue_row, silence_debug, parse_source  # noqa: E402
 
 WEBUI_TEST_PASSWORD = "test-password"
 
@@ -3001,7 +3001,7 @@ class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
     def shipped_defaults(self):
         path = os.path.join(REPO_ROOT, "src", "defaults.py")
         with io.open(path, encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
+            tree = parse_source(handle.read())
         shipped = {}
         for node in tree.body:
             target = value = None
@@ -3024,7 +3024,7 @@ class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
             path = (next((p for p in (os.path.join(REPO_ROOT, "src", filename), os.path.join(REPO_ROOT, "conf", filename), os.path.join(REPO_ROOT, filename)) if os.path.exists(p)), os.path.join(REPO_ROOT, filename)))
             with io.open(path, encoding="utf-8") as handle:
                 source = handle.read()
-            for node in ast.walk(ast.parse(source)):
+            for node in ast.walk(parse_source(source)):
                 if not isinstance(node, ast.Call):
                     continue
                 if not (isinstance(node.func, ast.Name) and node.func.id == "getattr"):

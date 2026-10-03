@@ -19,6 +19,7 @@ import textwrap
 import unittest
 
 from tests import support  # noqa: F401  (path setup)
+from tests.support import parse_source  # noqa: E402
 
 REPO_ROOT = support.REPO_ROOT
 WINDOW_MODE = os.path.join(REPO_ROOT, "scripts", "windows", "window-mode.py")
@@ -251,7 +252,7 @@ class ChildrenGetNoWindowOfTheirOwn(unittest.TestCase):
                                                    sorted(os.listdir(os.path.join(REPO_ROOT, "src")))
                                                    if name.endswith(".py")]
         for path in paths:
-            for node in ast.walk(ast.parse(read(path))):
+            for node in ast.walk(parse_source(read(path))):
                 if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                         and isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess"
                         and node.func.attr in ("run", "Popen", "call", "check_call", "check_output")):
