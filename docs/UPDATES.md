@@ -2,6 +2,28 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### ⚡ The rebuild's scan lower-cases each name once and slices each folder's path (#1138)
+
+Performance audit 2026-10-03 P16. For every file the scan called `is_listed_file()`, `is_packable_file()`,
+`belongs_in_video_list()` and `audio_info.is_audio()`, each lower-casing the name again and rebuilding its tuple of
+extensions; every folder went through `os.path.relpath()` (22.7 us a folder on Windows); and every audio file's path was
+joined whether it would be read or not. 9.9 s for a million files in 71,429 folders.
+
+- Each name is lower-cased once and checked against the extension tuples resolved once per scan - the helpers' own
+  checks, which stay for every other caller - and a folder is marked packable once, after its files. 5.0 s.
+- `update_list.relative_folder()` cuts the relative path off the walk's root string and asks `relpath()` whenever the
+  answer could differ: a root not under the scan root, an empty, `.` or `..` component, and on Windows a `/`, a `:`, or
+  a name ending in a dot or a space (which `relpath()` strips, even under `\\?\`).
+- Audio files go to `Cache.note()` as `(folder, name)`, joined only for a file that is actually read; on an unchanged
+  library that is almost none.
+- SORT-1, the global sort, is left out: the skeptic re-rated it small, and it changes the data the writer reads.
+- Tests: `tests/test_the_scan_lowercases_each_name_once.py` - the old loop against the new under seven settings (the
+  split on and off, each extension list empty, string-form settings): the same rows, packable folders, totals and audio
+  paths read; `relative_folder()` against `relpath()` under both ntpath and posixpath rules.
+  `test_what_the_scan_does_to_every_file.py` now pins the `relative_folder()` call.
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)
