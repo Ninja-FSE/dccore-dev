@@ -74,6 +74,12 @@ _conn_lock = getattr(runtime, "list_index_lock", None)
 if _conn_lock is None:  # pragma: no cover - runtime always defines it
     _conn_lock = threading.Lock()
 
+# The readers' own lock, for their own connection (#1129). Always taken AFTER
+# _conn_lock when both are needed, never the other way round: see runtime.py.
+_read_lock = getattr(runtime, "list_index_read_lock", None)
+if _read_lock is None:  # pragma: no cover - runtime always defines it
+    _read_lock = threading.Lock()
+
 INDEX_FILE = getattr(config, "LIST_INDEX_FILE",
                      os.path.join("data", "list_index.db"))
 
@@ -89,6 +95,14 @@ _SCHEMA_VERSION = 1
 # cheapest thing here to get wrong.
 _connection = None
 _connection_path = None
+# And one for the dashboard's readers, also reused (#1129). The writer above
+# held _conn_lock for the whole of a list being indexed, about nine seconds at
+# a realistic size, and every filter-bar keystroke waited behind it on the
+# same lock and connection. A second connection to the same WAL database,
+# under its own lock, answers from the last committed state instead. Only ever
+# opened after _connect() has made the schema, and closed with the writer.
+_read_connection = None
+_read_connection_path = None
 # Set by _connect() after it replaced a damaged file; consumed by the readers
 # through _prepare_to_read(). A flag and not a lock, so it lives here.
 _rebuild_pending = False
@@ -104,7 +118,10 @@ def _index_path():
 
 
 def _connect():
-    """The shared connection, opening and creating the schema if needed.
+    """The writers' connection, opening and creating the schema if needed.
+
+    The dashboard's readers have one of their own (#1129), opened only after
+    this one by _open_reader(). Caller holds _conn_lock.
 
     Returns None when the database cannot be opened at all - a read-only
     directory, a disk that is full, sqlite3 built without FTS5. The caller
@@ -175,8 +192,8 @@ def _open(path):
     """
     conn = None
     try:
-        # check_same_thread=False: the dashboard answers on Flask's threads
-        # while a fetch completing writes from the transfer thread, and every
+        # check_same_thread=False: a fetch completing writes from the
+        # transfer thread and the startup backfill from its own, and every
         # caller here holds _conn_lock for the whole operation anyway.
         conn = sqlite3.connect(path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
@@ -257,31 +274,120 @@ def _prepare_to_read():
     """Open the index for a reader and run the rebuild a repair has flagged.
 
     Returns False when there is no index to read. Called by the dashboard's
-    readers BEFORE they take _conn_lock for their own query, because the
-    rebuild cannot run from inside _connect(): backfill_missing() takes the
-    lock per list itself. And it is the readers that must not answer from the
+    readers BEFORE they take _read_lock for their own query, because the
+    rebuild cannot run from inside _connect(): backfill_missing() takes
+    _conn_lock per list itself, so it runs here with neither lock held. And
+    it is the readers that must not answer from the
     fresh, empty index - bots_with_a_match() would report every held list as
     empty, which is the false claim its "no index" branch exists to avoid. A
     fetch completing does not need this; writing into an empty index is fine.
 
-    The connection this opens is the cached one the reader's own _connect()
-    then finds, so an unavailable index is still reported once per call, not
-    twice. Same cost as the startup backfill, paid once, on the first filter
-    query after the repair; the flag is cleared under the lock so two
-    dashboard threads do not both pay it.
+    Same cost as the startup backfill, paid once, on the first filter query
+    after the repair; the flag is cleared under the lock so two dashboard
+    threads do not both pay it.
+
+    THE ORDINARY KEYSTROKE TAKES NO WRITE LOCK (#1129). This took _conn_lock
+    on every call, so even with a read connection of its own every keystroke
+    still waited for a list being indexed to finish. _open_reader() only
+    takes it when the read connection is not open yet, and a repair always
+    closes that, so the flag can only be set when this goes the slow way.
     """
     global _rebuild_pending
-    with _conn_lock:
-        available = _connect() is not None
-        pending = _rebuild_pending
-        _rebuild_pending = False
+    available = _open_reader()
+    pending = False
+    if _rebuild_pending:
+        with _conn_lock:
+            pending = _rebuild_pending
+            _rebuild_pending = False
     if pending:
         backfill_missing(dict(getattr(config, "fetched_bot_lists", None) or {}))
     return available
 
 
+def _open_reader():
+    """Make sure the read connection is open for the configured path.
+
+    Returns False when there is no index to read. Called with neither lock
+    held. The usual answer comes from two module globals and costs nothing;
+    otherwise the writer's _connect() goes first, under _conn_lock, because it
+    is what creates the schema and repairs a damaged file - a reader opened
+    before it would create an empty database file of its own, and one opened
+    on a damaged file would hold it open where the move-aside must rename it.
+    Then the read connection is opened beside it, under _read_lock taken
+    inside _conn_lock: the lock order runtime.py states.
+    """
+    if _read_connection is not None and _read_connection_path == _index_path():
+        return True
+    with _conn_lock:
+        if _connect() is None:
+            return False
+        with _read_lock:
+            return _open_reader_locked()
+
+
+def _open_reader_locked():
+    """Open the read connection on the writer's file. Caller holds both locks.
+
+    query_only, because nothing on this connection should ever write: a
+    write here would contend with index_bot_list() for the database's own
+    write lock, which is the wait this connection exists to avoid.
+    """
+    global _read_connection, _read_connection_path
+    path = _connection_path
+    if _read_connection is not None and _read_connection_path == path:
+        return True
+    _close_reader_locked()
+    conn = None
+    try:
+        conn = sqlite3.connect(path, check_same_thread=False)
+        conn.execute("PRAGMA query_only = ON")
+    except Exception as err:
+        # Closed before the error leaves, for the reason _open() gives.
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        print(f"[LIST-INDEX] Unavailable for reading ({err}); the cross-list "
+              f"filter is off until it can be opened. Browsing and @find are "
+              f"unaffected.")
+        return False
+    _read_connection = conn
+    _read_connection_path = path
+    return True
+
+
+def _reader():
+    """The read connection, or None if it was closed after _open_reader().
+    Caller holds _read_lock. A seam the tests replace, as they do _connect()."""
+    return _read_connection
+
+
+def _close_reader_locked():
+    global _read_connection, _read_connection_path
+    if _read_connection is not None:
+        try:
+            _read_connection.close()
+        except Exception:
+            pass
+    _read_connection = None
+    _read_connection_path = None
+
+
 def _close_locked():
+    """Close both connections. Caller holds _conn_lock.
+
+    The reader goes too, and FIRST, under its own lock - which waits for a
+    query in flight rather than closing the connection under it. Every path
+    that drops the writer comes through here: close(), a moved
+    LIST_INDEX_FILE and the repair in _connect(), which renames the file
+    straight after. On Windows a rename fails with a sharing violation while
+    any handle on the file is open, so a reader left open would turn every
+    repair into "could not be moved aside" (#1129).
+    """
     global _connection, _connection_path
+    with _read_lock:
+        _close_reader_locked()
     if _connection is not None:
         try:
             _connection.close()
@@ -292,7 +398,7 @@ def _close_locked():
 
 
 def close():
-    """Drop the cached connection. For tests, and for a rehash moving the file."""
+    """Drop the cached connections. For tests, and for a rehash moving the file."""
     with _conn_lock:
         _close_locked()
 
@@ -421,14 +527,17 @@ def index_bot_list(bot, rows):
         if conn is None:
             return 0
         try:
-            # THE LOCK IS HELD FOR THE WHOLE WRITE, deliberately. It is the
-            # transaction boundary as well as the connection guard: releasing
-            # it between the delete and the insert would let a search on
-            # Flask's thread read a list that had been emptied and not yet
-            # refilled, and report that bot as holding no match - the same
-            # false "empty" bots_with_a_match() takes care to avoid. A fetch
-            # completing is rare and a search is cheap; blocking one for the
-            # length of one write is the right side of that trade.
+            # A SEARCH NEVER SEES THE GAP between the delete and the insert:
+            # it would read a list emptied and not yet refilled, and report
+            # that bot as holding no match - the same false "empty"
+            # bots_with_a_match() takes care to avoid. That used to be
+            # guaranteed by readers waiting on this lock for the whole write,
+            # which held every filter-bar keystroke for as long as a list
+            # took to index (#1129). They now read on a connection of their
+            # own, and WAL gives each of their queries a snapshot of the last
+            # COMMITTED state: the old list until the commit below, the new
+            # one after it, never the half-replaced one in between. This lock
+            # still makes writers take turns on this connection.
             #
             # Delete first, in the same transaction as the insert: a refetch
             # that replaced a list must not leave the old rows searchable
@@ -504,6 +613,12 @@ def _checkpoint_locked(conn):
     empty rather than leaving it at whatever size the last checkpoint grew
     it to (the default PASSIVE mode's own behaviour even when it succeeds).
 
+    The filter bar's queries run on their own connection (#1129), so one may
+    be in flight at this moment. TRUNCATE then waits for it, within the
+    connection's busy timeout - a query takes milliseconds - and if it is
+    still there, the checkpoint reports busy and returns rather than raising.
+    Either way the paragraph below holds.
+
     Never raises, and never rolled back into by the caller: the row change
     just committed is safe either way (in the main file or still in the
     WAL), so a checkpoint that fails costs disk space, not correctness - the
@@ -520,8 +635,10 @@ def _checkpoint_locked(conn):
 
 def indexed_bots():
     """Every bot with rows in the index, lower-cased for comparison."""
-    with _conn_lock:
-        conn = _connect()
+    if not _open_reader():
+        return set()
+    with _read_lock:
+        conn = _reader()
         if conn is None:
             return set()
         try:
@@ -559,8 +676,10 @@ def bots_with_a_match(terms, bots):
     # a different route: one sqlite error and a list that DOES match is shown
     # to the operator as one that does not.
     unknown = set()
-    with _conn_lock:
-        conn = _connect()
+    # The read connection under its own lock, never _conn_lock: a list being
+    # indexed holds that for the whole write (#1129).
+    with _read_lock:
+        conn = _reader()
         if conn is None:
             # No index is not "no bot matches": claiming every list is empty
             # would grey out the whole sidebar and read as a broken filter.
@@ -653,8 +772,9 @@ def search(terms, limit=None, bots=None):
 
     if not _prepare_to_read():
         return []
-    with _conn_lock:
-        conn = _connect()
+    # The read connection, as in bots_with_a_match() (#1129).
+    with _read_lock:
+        conn = _reader()
         if conn is None:
             return []
         try:

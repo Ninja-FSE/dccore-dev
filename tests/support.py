@@ -755,14 +755,15 @@ class DCCoreTestCase(unittest.TestCase):
 
     def tearDown(self):
         restore_daemon_functions()
-        # The cross-list index caches ONE sqlite connection at module level and
-        # keeps it for the life of the process, which is right for the daemon
-        # and wrong for a test run: a test that opens one indirectly - through
-        # a fetch completing, or a dashboard route - leaves it open, pointing
-        # at a temp directory this teardown is about to delete. On Windows that
-        # is a locked file in a directory being removed, and the connection
-        # survives to interpreter shutdown, where it surfaces as a
-        # ResourceWarning with no test name attached to it.
+        # The cross-list index caches its sqlite connections at module level -
+        # the writers' one, and the dashboard readers' own since #1129, which
+        # close() closes with it - and keeps them for the life of the process,
+        # which is right for the daemon and wrong for a test run: a test that
+        # opens one indirectly - through a fetch completing, or a dashboard
+        # route - leaves it open, pointing at a temp directory this teardown
+        # is about to delete. On Windows that is a locked file in a directory
+        # being removed, and the connection survives to interpreter shutdown,
+        # where it surfaces as a ResourceWarning with no test name attached.
         import list_index
         list_index.close()
 

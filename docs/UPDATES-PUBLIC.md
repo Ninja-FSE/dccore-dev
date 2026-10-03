@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed: the List Browser's filter no longer freezes while a fetched list is being indexed.** Each keystroke waited until the new list was written - several seconds, or most of a minute for a very big list. It answers at once now, from the lists as they were until the new one is in.
+
 ## v1.14.0 — The Bot Keeps a Record
 
 - **Faster: a finished send no longer rewrites the whole download-count file.** Each one rewrote every count the bot had ever kept - most of a second on a bot that has sent many different files, with other saves waiting behind it. The counts move into `data/download_counts.db` on the first start; `data/download_counts.json` is left exactly as it was, so going back to an older version still shows the counts up to the upgrade.
