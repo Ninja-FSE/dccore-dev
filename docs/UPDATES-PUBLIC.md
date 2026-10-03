@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.14.0 — The Bot Keeps a Record
 
 - **Changed: Live Transfers is its own page, and the Stats page follows one period.** Speed, slots and the queue moved from Stats to a new **Live Transfers** page. On Stats, pick 24 hours, 7 days, 30 days or all time and the whole page answers for it: one row of Sent figures (files, size, lists, top and average speed, average wait, files and size received), Most downloaded files and albums, and the nicks. The two Most downloaded tables are one now, and the old Total/Today/Yesterday Sent cards are gone. All time still counts everything the bot sent before the record began.
 - **New: the bot keeps a record of every finished transfer, and the Stats page shows it.** One row per transfer goes into `data/transfers.db`: what it was (a file, a packed folder or a list), its size, its speed, how long it waited in the queue and the nick it went to or came from (in lower case; no host and no channel is stored). On the Stats page, pick 24 hours, 7 days, 30 days or all time to see what was sent and received, the speeds, the average wait in the queue, the files sent most and the nicks you sent to and received from most. Look up one nick, **Forget** it when somebody asks (every row with that nick is wiped from the file), or **Forget everyone**; both ask first. **Export CSV** saves the period as a spreadsheet. `TRANSFER_LOG_FILE` sets where the record is kept; empty turns it off.

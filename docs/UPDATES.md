@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟨 Unreleased
+## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
