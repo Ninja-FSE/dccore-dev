@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 A pasted size hint matches the list's own rows (#1121)
+
+Performance audit 2026-10-03 B1. The list writes every row's size with two decimals (`::INFO:: 7.30MB`, the
+`format_total_size` nested in `generate_master_list`), but `dcc._matches_size_hint()` - the check behind the #886 folder
+memory - formatted the file's size with `update_list.format_size_human()`, which gives one (`7.3MB`), and compared the
+two as text. They never matched, so the folder memory never answered a pasted row: every one went to the full list
+scan, about three seconds a row on a million-row list, for every track of an album pasted in one go.
+
+- `dcc._size_fits_hint()` reads the hint as a number at its own unit and precision, and compares the file's size
+  rounded the same way, the float computed as the list writer computes it (a float divided by 1024.0 per step, exact,
+  so the rounding at a `.xx5` boundary goes the same way). So `7.30MB`, `7.3MB`, `7MB`, `1.0kb`, `6.32Mb` and lists from
+  older versions and other bots all match their file, and a different size does not. A first word that is not a size
+  matches nothing, as before.
+- Tests: `tests/test_a_pasted_size_hint_matches_the_list.py` builds a real list with `generate_master_list()` over files
+  of awkward sizes and checks every row's own hint against its file, and the #886 folder memory end to end; plus the
+  other formats. The seven size formatters in the code base are left as they are - one owner for them is a separate
+  tidy-up.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
