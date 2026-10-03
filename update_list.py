@@ -203,6 +203,13 @@ def walk_with_sizes(top, onerror=None, workers=None):
     the order directories come back in changes, and the caller sorts before
     writing anything (#443). onerror is called here, on the caller's thread,
     never from a worker. One worker is the walk as it always was.
+
+    Finished directories are collected through a queue (#1124): each one's
+    future puts itself on it when done, and the caller takes them off one at
+    a time. Waiting with concurrent.futures.wait() on every outstanding
+    directory instead rescanned - and locked - all of them on each
+    completion, which made the walk quadratic in the number of directories:
+    41 s against 3 s on 137k files, and 16 workers slower than one.
     """
     if workers is None:
         workers = scan_workers()
@@ -270,23 +277,36 @@ def walk_with_sizes(top, onerror=None, workers=None):
                 yield current, files
         return
 
-    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+    import queue
+    from concurrent.futures import ThreadPoolExecutor
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="list-scan")
+    # Each directory's future puts (directory, future) here when it is done,
+    # so taking the next finished one costs the same however many are still
+    # outstanding (#1124). SimpleQueue does its own locking.
+    finished = queue.SimpleQueue()
+
+    def submit(directory):
+        future = pool.submit(list_one, directory)
+        future.add_done_callback(lambda done, path=directory: finished.put((path, done)))
+
     try:
-        running = {pool.submit(list_one, top): top}
-        while running:
-            finished, _ = wait(running, return_when=FIRST_COMPLETED)
-            for future in finished:
-                current = running.pop(future)
-                files, subdirs, errors = future.result()
-                report(errors)
-                for subdir in subdirs:
-                    running[pool.submit(list_one, subdir)] = subdir
-                if files is not None:
-                    yield current, files
+        submit(top)
+        outstanding = 1
+        while outstanding:
+            current, future = finished.get()
+            outstanding -= 1
+            files, subdirs, errors = future.result()
+            report(errors)
+            for subdir in subdirs:
+                submit(subdir)
+            outstanding += len(subdirs)
+            if files is not None:
+                yield current, files
     finally:
         # A caller that stops early - an exception mid-scan - must not leave
-        # workers listing a library nobody is reading any more.
+        # workers listing a library nobody is reading any more. The futures
+        # this cancels still run their done-callback and land in `finished`,
+        # which nobody reads any more; that is harmless.
         pool.shutdown(wait=True, cancel_futures=True)
 
 
