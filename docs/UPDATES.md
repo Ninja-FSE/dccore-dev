@@ -2,6 +2,24 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### ⚡ The read loop's line patterns are compiled once, not per question (#1144)
+
+Performance audit 2026-10-03 P22, the skeptic's smaller fix only. The read loop asks `is_server_numeric()` and
+`is_user_event()` about eighteen times for every server line, and each call built its pattern string again and looked
+it up in `re`'s cache; `parse_privmsg()`, `parse_kick()` and `parse_notice()` ran their anchored regex on every line.
+
+- The two helpers keep their compiled pattern per code - the very same pattern, so the #433 and #513 anchoring is
+  untouched - and the three parsers return None first when their bare command word is not in the line: the anchored
+  regex needs that word, so this can only skip lines it would reject anyway. The read loop itself is untouched, so the
+  source-reading dispatch tests are too.
+- The skeptic measured the helper calls at 34.9 -> 22.7 us a line; across the whole loop that is within noise, and it
+  matters only in a burst, such as a netjoin. The full restructure the audit proposed rewrites the security-sensitive
+  dispatch and is not done.
+- Tests: `tests/test_reading_a_server_line_does_not_rebuild_its_patterns.py` - the old helpers against the new on real
+  lines, forged ones (user events forged inside a message body) and 4,000 generated lines with tab separators.
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)
