@@ -2,6 +2,21 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### ⚡ The List Browser's filter highlight groups the bots once per call (#1141)
+
+Performance audit 2026-10-03 P19. While a filter was active, `applyFilterHighlight()` called `entriesForNick()` for
+every sidebar row, and each call walked every key of `state.filelistsBots`, lowercasing each nick - rows times bots,
+again on every 4 s sidebar poll and every filter answer. About a second a pass with 1,300 bot rows.
+
+- `entriesByNick()` builds a nick-to-rows map (null prototype, so a nick like `constructor` is just a nick) once per
+  call, from the same `state.filelistsBots` the sidebar was drawn from; `entriesForNick(nick, byNick)` looks a nick up
+  in it and returns a copy. Built per call, never kept, so it cannot disagree with what the sidebar last rendered.
+- The rows, their order and the classes the filter puts on them are unchanged.
+- Tests: `tests/test_the_filter_highlight_groups_the_bots_once_per_call.py`; two pinned source tests follow the new
+  statement.
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)

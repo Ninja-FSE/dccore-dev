@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Faster: the List Browser's filter no longer slows down with many bots.** With a filter active, the sidebar was checked bot against bot every few seconds - about a second each time with a thousand-odd bots. It is worked out once per pass now.
+
 ## v1.14.0 — The Bot Keeps a Record
 
 - **Faster: a finished send no longer rewrites the whole download-count file.** Each one rewrote every count the bot had ever kept - most of a second on a bot that has sent many different files, with other saves waiting behind it. The counts move into `data/download_counts.db` on the first start; `data/download_counts.json` is left exactly as it was, so going back to an older version still shows the counts up to the upgrade.
