@@ -683,7 +683,9 @@ class DCCoreTestCase(unittest.TestCase):
         # time a test drove a transfer all the way to completion, because
         # db.record_download() is only reached on the success path and
         # nothing had ever taken one. A module-level constant like the two
-        # above, so it is rebound here and restored in tearDown.
+        # above, so it is rebound here and restored in tearDown. Since #1133
+        # the counts live in a database derived from this path (its extension
+        # replaced by .db), so moving the path moves the database with it.
         self._real_download_counts_file = db.DOWNLOAD_COUNTS_FILE
         db.DOWNLOAD_COUNTS_FILE = os.path.join(self._fetch_history_dir,
                                                "download_counts.json")
