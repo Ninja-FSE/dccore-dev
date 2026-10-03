@@ -7,8 +7,9 @@ does, so the file can answer "who got what" and rank the nicks.
 
 The nick is kept in lower case as the IRC server showed it. It is not followed
 across a nick change, and no user@host and no channel is stored. forget_nick()
-and forget_all() remove it again, and zero what they free in the file, so a removed nick
-cannot be read back out of it afterwards.
+and forget_all() remove it again and then rebuild the file (VACUUM), so a removed nick cannot be
+read back out of it afterwards. Deleting alone does not do that: once the record outgrows one page the
+nick is also in the index's interior pages and in the free space of pages an earlier write split.
 
 Only completed transfers are written, as with stats.txt. A write that fails is
 printed and dropped, and never reaches the transfer that called it.
@@ -89,6 +90,9 @@ READ_TIMEOUT = 10
 def _open(path, timeout):
     conn = sqlite3.connect(path, timeout=timeout)
     try:
+        # Zero what a write frees on every connection, so a page split or a
+        # delete does not leave cell bytes behind in the free space of a page.
+        conn.execute("PRAGMA secure_delete = ON")
         # With the default rollback journal a reader's shared lock stops a
         # write, so a dashboard query still reading when a transfer ends cost
         # that transfer its row. In WAL mode readers and the writer do not
@@ -131,12 +135,25 @@ def _connect(path, timeout, repair=False):
     try:
         return _open(path, timeout)
     except Exception as err:
-        if not (repair and type(err) is sqlite3.DatabaseError and os.path.isfile(path)):
+        if not (repair and _is_damage(err) and os.path.isfile(path)):
             raise
-        aside = _move_aside(path)
-        print(f"[TRANSFER-LOG] {path} is damaged ({err}); it was moved to {aside} and a new record "
-              f"was started. The old file is kept and still holds its nicks.")
+        _start_afresh(path, err)
         return _open(path, timeout)
+
+
+def _is_damage(err):
+    """True for a bare DatabaseError: the file's content is wrong. A locked file or a full disk is a subclass."""
+    return type(err) is sqlite3.DatabaseError
+
+
+def _start_afresh(path, err):
+    aside = _move_aside(path)
+    print(f"[TRANSFER-LOG] {path} is damaged ({err}); it was moved to {aside} and a new record "
+          f"was started. The old file is kept and still holds its nicks.")
+
+
+_INSERT = ("INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name,"
+           " size, bytes, seconds, speed, waited) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
 
 
 def _record(row):
@@ -147,10 +164,21 @@ def _record(row):
         with runtime.transfer_log_lock:
             conn = _connect(path, WRITE_TIMEOUT, repair=True)
             try:
-                with conn:
-                    conn.execute(
-                        "INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name,"
-                        " size, bytes, seconds, speed, waited) VALUES (?,?,?,?,?,?,?,?,?,?,?)", row)
+                try:
+                    with conn:
+                        conn.execute(_INSERT, row)
+                except sqlite3.DatabaseError as err:
+                    # Opening reads only the header and the schema, so a file
+                    # damaged further in opens fine and fails here, on every
+                    # write from then on (#1087). Same remedy as at open: move
+                    # it aside, start a new one, and write this row once more.
+                    if not _is_damage(err):
+                        raise
+                    conn.close()
+                    _start_afresh(path, err)
+                    conn = _open(path, WRITE_TIMEOUT)
+                    with conn:
+                        conn.execute(_INSERT, row)
             finally:
                 conn.close()
         return True
@@ -372,15 +400,27 @@ def _delete(sql, args=()):
     with runtime.transfer_log_lock:
         conn = _connect(path, READ_TIMEOUT, repair=True)
         try:
-            # Without this a deleted row's bytes stay in the file until the
-            # page is reused, so a forgotten nick could still be read from it.
-            conn.execute("PRAGMA secure_delete = ON")
             with conn:
                 removed = conn.execute(sql, args).rowcount
+            # The delete zeroes the cells it frees, but not the key copies in
+            # an index's interior pages, nor bytes that writes made before
+            # secure_delete was set left in the free space of live pages. A
+            # rebuild leaves neither. The file is written through the WAL, so
+            # the checkpoint after it is what puts the rebuilt pages in place.
+            _rebuild(conn, path)
             _empty_the_wal(conn, path)
             return removed
         finally:
             conn.close()
+
+
+def _rebuild(conn, path):
+    """Rewrite the file so nothing deleted is left in it. A failure is told, never raised."""
+    try:
+        conn.execute("VACUUM")
+    except sqlite3.Error as err:
+        print(f"[TRANSFER-LOG] The rows are removed from the record, but {path} could not be rebuilt "
+              f"({err}); a forgotten nick may still be readable in the file.")
 
 
 def _empty_the_wal(conn, path):
@@ -392,7 +432,9 @@ def _empty_the_wal(conn, path):
     A reader that is still open can hold that up; it is waited for briefly
     (WRITE_TIMEOUT, so this never holds the lock longer than a send would
     wait), and if it does not finish the operator is told, because the rows
-    are then still in the file until the next checkpoint.
+    are then still in the file until a later checkpoint empties the log (a
+    checkpoint that is not a TRUNCATE reuses the log from its start and leaves
+    the frames past the new writes as they were).
     """
     try:
         conn.execute(f"PRAGMA busy_timeout = {int(WRITE_TIMEOUT * 1000)}")

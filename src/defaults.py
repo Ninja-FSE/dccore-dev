@@ -550,7 +550,7 @@ DEBUG_MSG_DELAY: float  = 0.0    # Wait between debug-channel lines; the larger 
 #
 # Put the real values in admin_config.py, which is gitignored, NOT here.
 ADMIN_HOSTMASKS: list = []
-# Generated with:  python adminchat.py
+# Generated with:  python src/adminchat.py
 ADMIN_PASSWORD_HASH: str = ""
 
 # How the DCC CHAT connection gets made:

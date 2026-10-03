@@ -533,7 +533,7 @@ def main(platform):
         # just off. Blocking the whole daemon over an optional feature that is
         # safely inert only teaches people to skip the check.
         warn(f"ADMIN_HOSTMASKS is set but ADMIN_PASSWORD_HASH is empty - the console "
-             f"will refuse every connection until you run: {platform.python} adminchat.py")
+             f"will refuse every connection until you run: {platform.python} src/adminchat.py")
     else:
         ok(f"enabled for {len(patterns)} host pattern(s)")
         # Accepted, but far wider than one operator (#669): a wildcard where

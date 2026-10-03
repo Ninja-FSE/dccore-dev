@@ -308,6 +308,109 @@ class ForgettingReallyRemoves(Case):
         transfer_log.forget_all()
         self.assertNotIn(b"uniquenickone", self.raw())
 
+    VICTIM = b"secretvictim"
+
+    def fill_many(self, victims=30, others=600):
+        """Enough rows for the table and its indexes to be several pages deep (#1082)."""
+        for n in range(others):
+            self.sent(f"Some Album/Track {n}.flac", nick=f"nick{n % 40}")
+            if n % (others // victims) == 0:
+                self.sent(f"Private/Secret {n}.flac", nick="SecretVictim")
+
+    def test_a_forgotten_nick_is_gone_from_a_record_that_is_many_pages_deep(self):
+        self.fill_many()
+        self.assertGreater(self.raw().count(self.VICTIM), 0)
+
+        removed = transfer_log.forget_nick("SecretVictim")
+
+        self.assertEqual(removed, 30)
+        self.assertEqual(self.raw().count(self.VICTIM), 0)
+        self.assertIn(b"nick7", self.raw())
+        self.assertEqual(transfer_log.nick_summary("secretvictim")["files_sent"], 0)
+        self.assertEqual(len(self.rows()), 600)
+
+    def test_bytes_an_earlier_write_left_in_the_free_space_are_cleaned_too(self):
+        """A record written by an older version, or by a SQLite build that does
+        not zero by default, holds stale cell copies in the free space of pages
+        that still have live rows. The delete only zeroes what it frees itself;
+        the rebuild after it is what removes the rest (#1082)."""
+        conn = sqlite3.connect(config.TRANSFER_LOG_FILE)
+        conn.execute("PRAGMA secure_delete = OFF")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(transfer_log._SCHEMA)
+        with conn:
+            for n in range(1500):
+                nick = "secretvictim" if n % 25 == 0 else f"nick{n % 40}"
+                conn.execute("INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name, size,"
+                             " bytes, seconds, speed, waited) VALUES ('sent', ?, 'file', ?, ?, ?, 1000, 1000, 1, 1000, NULL)",
+                             (nick, n, f"k{n}", f"Name {n}.flac"))
+        with conn:
+            conn.execute("DELETE FROM transfers WHERE nick = 'secretvictim' AND id % 2 = 1")
+        conn.close()
+        self.assertGreater(self.raw().count(self.VICTIM), 60)
+
+        transfer_log.forget_nick("SecretVictim")
+
+        self.assertEqual(self.raw().count(self.VICTIM), 0)
+        self.assertEqual(len(self.rows()), 1440)
+
+    def test_forgetting_everything_from_a_deep_record_leaves_nothing(self):
+        self.fill_many()
+        transfer_log.forget_all()
+        raw = self.raw()
+        for what in (self.VICTIM, b"nick7", b"Some Album", b"Private/Secret"):
+            self.assertNotIn(what, raw)
+
+    def test_the_file_is_rebuilt_after_the_delete_and_before_the_log_is_emptied(self):
+        statements = []
+
+        class Recording(sqlite3.Connection):
+            def execute(self, sql, *args):
+                statements.append(sql)
+                return super().execute(sql, *args)
+
+        real = sqlite3.connect
+        self.fill()
+        with mock.patch.object(sqlite3, "connect",
+                               lambda path, **kw: real(path, factory=Recording, **kw)):
+            transfer_log.forget_nick("UniqueNickOne")
+        order = [sql for sql in statements if sql.startswith(("DELETE", "VACUUM", "PRAGMA wal_checkpoint"))]
+        self.assertEqual(order, ["DELETE FROM transfers WHERE nick = ?", "VACUUM", "PRAGMA wal_checkpoint(TRUNCATE)"])
+
+    def test_every_connection_zeroes_what_it_frees(self):
+        statements = []
+
+        class Recording(sqlite3.Connection):
+            def execute(self, sql, *args):
+                statements.append(sql)
+                return super().execute(sql, *args)
+
+        real = sqlite3.connect
+        with mock.patch.object(sqlite3, "connect",
+                               lambda path, **kw: real(path, factory=Recording, **kw)):
+            self.sent("A.mp3", nick="nicka")
+            transfer_log.top_nicks()
+        self.assertEqual(statements.count("PRAGMA secure_delete = ON"), 2)
+        self.assertEqual(statements[0], "PRAGMA secure_delete = ON")
+
+    def test_a_rebuild_that_fails_is_told_and_the_rows_are_still_removed(self):
+        self.fill()
+        real = sqlite3.connect
+
+        class Failing(sqlite3.Connection):
+            def execute(self, sql, *args):
+                if sql == "VACUUM":
+                    raise sqlite3.OperationalError("database or disk is full")
+                return super().execute(sql, *args)
+
+        out = io.StringIO()
+        with mock.patch.object(sqlite3, "connect", lambda path, **kw: real(path, factory=Failing, **kw)), \
+                contextlib.redirect_stdout(out):
+            removed = transfer_log.forget_nick("UniqueNickOne")
+        self.assertEqual(removed, 31)
+        self.assertIn("could not be rebuilt (database or disk is full)", out.getvalue())
+        self.assertEqual(transfer_log.nick_summary("UniqueNickOne")["files_sent"], 0)
+
     def test_a_nick_that_was_also_a_bot_loses_its_received_rows_too(self):
         self.sent("A.mp3", nick="samenick")
         transfer_log.record_received("file", 10, nick="samenick")
@@ -450,6 +553,75 @@ class ADamagedFile(Case):
         self.assertEqual(transfer_log.summary()["files_sent"], 0)
         self.assertEqual(transfer_log.top_nicks(), [])
         self.assertEqual(self.aside(), [], "a read leaves the repair to the next write")
+
+    def damage_past_the_first_page(self):
+        """What a bad sector or a torn copy does: the header and the schema
+        are intact, so the file opens, and the data pages are not (#1087)."""
+        conn = transfer_log._open(config.TRANSFER_LOG_FILE, 5)
+        with conn:
+            for n in range(600):
+                conn.execute("INSERT INTO transfers (direction, nick, kind, ended_at, item_key, name, size,"
+                             " bytes, seconds, speed, waited) VALUES ('sent', ?, 'file', ?, ?, ?, 1000, 1000, 1, 1000, NULL)",
+                             (f"nick{n % 20}", n, f"k{n}", f"Track {n}.mp3"))
+        conn.close()
+        with io.open(config.TRANSFER_LOG_FILE, "r+b") as handle:
+            handle.seek(4 * 4096)
+            size = os.path.getsize(config.TRANSFER_LOG_FILE)
+            handle.write(os.urandom(size - 4 * 4096))
+
+    def test_a_file_damaged_past_its_first_page_is_moved_aside_by_the_write_that_hits_it(self):
+        self.damage_past_the_first_page()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            written = self.sent("After.mp3", nick="nicka")
+
+        self.assertTrue(written)
+        self.assertEqual(len(self.aside()), 1)
+        self.assertIn("is damaged", out.getvalue())
+        self.assertEqual(transfer_log.top_files(), [("After.mp3", 1)])
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_every_write_after_it_goes_into_the_new_file(self):
+        self.damage_past_the_first_page()
+        for name in ("A.mp3", "B.mp3", "C.mp3"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(self.sent(name))
+
+        self.assertEqual(len(self.aside()), 1)
+        self.assertEqual(sorted(name for name, _ in transfer_log.top_files()), ["A.mp3", "B.mp3", "C.mp3"])
+
+    def test_the_damaged_file_is_kept_whole(self):
+        self.damage_past_the_first_page()
+        before = os.path.getsize(config.TRANSFER_LOG_FILE)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.sent("After.mp3")
+        folder = os.path.dirname(config.TRANSFER_LOG_FILE)
+        self.assertEqual(os.path.getsize(os.path.join(folder, self.aside()[0])), before)
+
+    def test_a_full_disk_on_the_write_does_not_move_a_good_file(self):
+        self.sent("Kept.mp3")
+        real = sqlite3.connect
+
+        class Full(sqlite3.Connection):
+            def execute(self, sql, *args):
+                if sql.startswith("INSERT"):
+                    raise sqlite3.OperationalError("database or disk is full")
+                return super().execute(sql, *args)
+
+        with mock.patch.object(sqlite3, "connect", lambda path, **kw: real(path, factory=Full, **kw)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(self.sent("Lost.mp3"))
+
+        self.assertEqual(self.aside(), [])
+        self.assertEqual(transfer_log.top_files(), [("Kept.mp3", 1)])
+
+    def test_a_file_that_cannot_be_started_afresh_is_told_and_does_not_raise(self):
+        self.damage_past_the_first_page()
+        out = io.StringIO()
+        with mock.patch.object(transfer_log, "_move_aside", side_effect=OSError("read-only")), \
+                contextlib.redirect_stdout(out):
+            self.assertFalse(self.sent("After.mp3"))
+        self.assertIn("Could not record the transfer", out.getvalue())
 
     def test_a_file_that_is_only_busy_is_not_moved(self):
         self.sent()
