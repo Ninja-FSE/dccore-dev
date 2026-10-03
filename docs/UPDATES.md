@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ The list rows are written without a per-character pass (#1125)
+
+Performance audit 2026-10-03 P3. `update_list._one_line()` round-tripped every name through UTF-8 and rebuilt it a
+character at a time, the nick was looked up per row, and every row was its own `write()`: 26.8 s to write the music and
+`!rar` lists of a million rows, 15.2 s of it in `_one_line()`.
+
+- `_one_line()` first runs one search for exactly the characters its slow path changes - a control character, DEL or a
+  lone surrogate - and returns any other name untouched. The nick is looked up once per list, and each folder's
+  heading and rows go out in one `write()`, in the music list and the film list. 6.1 s for the same write, the output
+  byte-identical.
+- Tests: `tests/test_the_list_rows_are_written_without_per_character_work.py` - the old `_one_line()` kept word for
+  word and compared on every code point below U+3000, every surrogate and a sample of the rest; whole rebuilds of a fake
+  library (accents, emoji, NUL, tab, DEL, a newline, lone surrogates, case-twin folders) byte-identical to rebuilds with
+  the old function, for the music, `!rar` and film lists; and nick lookups and `write()` calls that do not grow with
+  the rows.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
