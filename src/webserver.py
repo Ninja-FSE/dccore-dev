@@ -741,6 +741,37 @@ def _nick_rows(rows):
             for nick, files, size in rows]
 
 
+def _lifetime_sent():
+    """(files, bytes) the bot has sent over its life, from stats.txt."""
+    import db
+    try:
+        row = db.load_advanced_stats_rolled()
+        return int(str(row[0]).strip()), int(str(row[1]).strip())
+    except Exception:
+        return 0, 0
+
+
+def _record_tops(since):
+    """The most-sent files and the most-sent album folders for a period, each as
+    [{name, count}]. A period comes from the record. All time comes from the
+    count file, which holds everything the bot has ever sent (the record only
+    began with #1069); the record answers only when that file has nothing."""
+    import db
+    import transfer_log
+    out = []
+    for kind in (transfer_log.KIND_FILE, transfer_log.KIND_ALBUM):
+        rows = []
+        if since is None:
+            try:
+                rows = [{"name": row["name"], "count": row["count"]} for row in db.top_downloads(limit=10, kind=kind)]
+            except Exception:
+                rows = []
+        if not rows:
+            rows = [{"name": name, "count": count} for name, count in transfer_log.top_files(10, since, kind)]
+        out.append(rows)
+    return out[0], out[1]
+
+
 def build_record_payload(period="all"):
     """GET /api/stats/record?period=: the record's figures for a period - the
     totals, the most-sent files and the nicks sent to and received from most.
@@ -754,6 +785,13 @@ def build_record_payload(period="all"):
     if off:
         return 200, dict(off, period=period)
     figures = transfer_log.summary(since)
+    top_files, top_albums = _record_tops(since)
+    if since is None:
+        # All time is never less than the lifetime counter: the record only
+        # began with #1069, and what the bot sent before is in stats.txt only.
+        files, size = _lifetime_sent()
+        figures["files_sent"] = max(figures["files_sent"], files)
+        figures["bytes_sent"] = max(figures["bytes_sent"], size)
     figures.update(
         bytes_sent_text=stats_mgr.format_size_human(figures["bytes_sent"]),
         bytes_received_text=stats_mgr.format_size_human(figures["bytes_received"]),
@@ -765,7 +803,9 @@ def build_record_payload(period="all"):
         "period": period,
         "since": since,
         "summary": figures,
-        "top_files": [{"name": name, "count": count} for name, count in transfer_log.top_files(10, since)],
+        "top_files": top_files,
+        "top_albums": top_albums,
+        "albums_enabled": bool(getattr(config, "RAR_ENABLED", True)),
         "top_sent": _nick_rows(transfer_log.top_nicks(transfer_log.SENT, 10, since)),
         "top_received": _nick_rows(transfer_log.top_nicks(transfer_log.RECEIVED, 10, since)),
         # Said on the page: all time holds figures from before the record began -

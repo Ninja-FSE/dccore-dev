@@ -99,6 +99,43 @@ class ThePayload(Case):
         self.assertEqual(webserver._wait_text(None), "")
 
 
+class TheStatsPageFollowsOnePeriod(Case):
+    """#1117: the Sent cards, Most downloaded files and Most downloaded albums
+    all answer for the period chosen."""
+
+    def test_a_period_gives_files_and_albums_apart(self):
+        row(transfer_log.SENT, "listener", "Some Album", 50000, kind=transfer_log.KIND_ALBUM)
+        row(transfer_log.SENT, "listener", "Some Album", 50000, kind=transfer_log.KIND_ALBUM, age_days=1)
+        _status, data = webserver.build_record_payload("week")
+        self.assertEqual([r["name"] for r in data["top_files"]], ["Song One.flac", "Song Two.flac"])
+        self.assertEqual(data["top_albums"], [{"name": "Some Album", "count": 2}])
+        self.assertTrue(data["albums_enabled"])
+
+    def test_top_files_can_keep_one_kind(self):
+        row(transfer_log.SENT, "listener", "Some Album", 50000, kind=transfer_log.KIND_ALBUM)
+        self.assertEqual(transfer_log.top_files(10, None, transfer_log.KIND_ALBUM), [("Some Album", 1)])
+        self.assertNotIn(("Some Album", 1), transfer_log.top_files(10, None, transfer_log.KIND_FILE))
+        mixed = [name for name, _ in transfer_log.top_files(10)]
+        self.assertIn("Some Album", mixed)
+
+    def test_all_time_most_downloaded_is_the_count_file_when_it_has_rows(self):
+        import db
+        db.record_download("old/Old Song.flac", "Old Song.flac", "file")
+        _status, everything = webserver.build_record_payload("all")
+        self.assertEqual(everything["top_files"], [{"name": "Old Song.flac", "count": 1}])
+        _status, week = webserver.build_record_payload("week")
+        self.assertEqual(week["top_files"][0]["name"], "Song One.flac")
+
+    def test_all_time_sent_is_never_below_the_lifetime_counter(self):
+        import db
+        db.set_lifetime_totals(total_files=500, total_bytes=10 ** 9)
+        _status, everything = webserver.build_record_payload("all")
+        self.assertEqual(everything["summary"]["files_sent"], 500)
+        self.assertEqual(everything["summary"]["bytes_sent"], 10 ** 9)
+        _status, week = webserver.build_record_payload("week")
+        self.assertEqual(week["summary"]["files_sent"], 3)
+
+
 class OneNick(Case):
     def test_its_figures_any_case(self):
         status, data = webserver.build_record_nick_payload("  LISTENER ", "all")
@@ -274,15 +311,20 @@ function node(tag) {
 }
 const document = { createElement: node };
 const el = {};
-["recordStatus", "recordBody", "recordCards", "recordTopFiles", "recordTopSent",
+["recordStatus", "recordBody", "recordSent", "recordPeriodBox", "recordCards", "recordTopSent",
  "recordTopReceived", "recordImported"].forEach(function (k) { el[k] = node("div"); });
 const state = {};
 const t = function (key) { return key; };
+// The Most downloaded tables are drawn by renderTopDownloads(), which escapes
+// through renderTopTable(); here it only records what it was asked to draw.
+const drawn = [];
+const renderTopDownloads = function (top) { drawn.push(top); };
 
-const make = new Function("document", "el", "state", "t",
+const make = new Function("document", "el", "state", "t", "renderTopDownloads",
   fn("function recordNote(") + "\n" + fn("function recordCell(") + "\n" +
-  fn("function recordTable(") + "\n" + fn("function renderRecord(") + "\nreturn renderRecord;");
-const renderRecord = make(document, el, state, t);
+  fn("function recordTable(") + "\n" + fn("function recordIsOn(") + "\n" +
+  fn("function renderRecord(") + "\nreturn renderRecord;");
+const renderRecord = make(document, el, state, t, renderTopDownloads);
 
 const evil = "<img src=x onerror=alert(1)>";
 renderRecord({
@@ -291,21 +333,28 @@ renderRecord({
              average_speed_text: "1.00MB/s", queue_wait_text: "30 Sec", files_received: 0,
              bytes_received_text: "0B" },
   top_files: [{ name: evil, count: 3 }],
+  top_albums: [{ name: "An Album", count: 2 }], albums_enabled: true,
   top_sent: [{ nick: evil, files: 2, bytes_text: "8.0KB" }],
   top_received: []
 });
 const out = {
   cards: el.recordCards.children.length,
   firstCard: el.recordCards.children[0].textContent,
-  file: el.recordTopFiles.children[0].children[0].textContent,
-  fileTitle: el.recordTopFiles.children[0].children[0].title,
+  drawn: drawn.slice(),
+  sentShown: !el.recordSent.hidden,
+  periodShown: !el.recordPeriodBox.hidden,
+  cardLabels: el.recordCards.children.map(function (c) { return c.children[1].textContent; }),
   nickRow: el.recordTopSent.children[0].children.map(function (c) { return c.textContent; }),
   emptyReceived: el.recordTopReceived.children[0].className + "|" + el.recordTopReceived.children[0].textContent,
   importedShown: !el.recordImported.hidden,
   bodyShown: !el.recordBody.hidden,
   kept: state.lastRecord !== undefined
 };
+state.lastStats = { top: { files: [{ name: "all time", count: 9 }], albums: [] } };
 renderRecord({ enabled: false });
+out.offDrawn = drawn[drawn.length - 1];
+out.offSentHidden = el.recordSent.hidden;
+out.offPeriodHidden = el.recordPeriodBox.hidden;
 out.offNote = el.recordStatus.textContent;
 out.offBodyHidden = el.recordBody.hidden;
 console.log(JSON.stringify(out));
@@ -329,11 +378,25 @@ class ThePage(unittest.TestCase):
         self.assertEqual(got["cards"], 8)
         # toLocaleString(): the separator is the machine's ("1,234", "1.234", "1 234").
         self.assertRegex(got["firstCard"], r"^1\D?234stats\.recordFilesSent$")
-        self.assertEqual((got["file"], got["fileTitle"]), (evil, evil))
+        # One row, in the order agreed with the operator (#1117).
+        self.assertEqual(got["cardLabels"], [
+            "stats.recordFilesSent", "stats.recordBytesSent", "stats.recordListsSent",
+            "stats.recordTopSpeed", "stats.recordAverageSpeed", "stats.recordQueueWait",
+            "stats.recordFilesReceived", "stats.recordBytesReceived"])
+        # The period's own most-sent files and albums go to the page's two
+        # Most downloaded tables, which write names as text.
+        self.assertEqual(got["drawn"], [{"files": [{"name": evil, "count": 3}],
+                                         "albums": [{"name": "An Album", "count": 2}],
+                                         "albums_enabled": True}])
+        self.assertTrue(got["sentShown"] and got["periodShown"])
         self.assertEqual(got["nickRow"], [evil, "2", "8.0KB"])
         self.assertEqual(got["emptyReceived"], "empty-row|stats.recordNoNicks")
         self.assertTrue(got["importedShown"] and got["bodyShown"] and got["kept"])
         self.assertEqual((got["offNote"], got["offBodyHidden"]), ("stats.recordOff", True))
+        # Record off: Sent and Period go, and Most downloaded falls back to
+        # the all-time lists /api/stats carries.
+        self.assertTrue(got["offSentHidden"] and got["offPeriodHidden"])
+        self.assertEqual(got["offDrawn"], {"files": [{"name": "all time", "count": 9}], "albums": []})
 
 
 REVIEW_HARNESS = r"""
@@ -409,7 +472,7 @@ class ThePageSource(unittest.TestCase):
     def test_it_is_loaded_on_opening_stats_and_never_on_the_poll(self):
         js = read("web/app.js")
         self.assertIn('if (name === "stats") { loadStats(); loadRecord(); }', js)
-        poll = js.split("// Only while Stats is the view on screen.", 1)[1].split("}, REFRESH_MS);", 1)[0]
+        poll = js.split("// Only while Live Transfers is the view on screen.", 1)[1].split("}, REFRESH_MS);", 1)[0]
         self.assertIn("loadStats();", poll)
         self.assertNotIn("loadRecord", poll)
 
@@ -425,6 +488,7 @@ class ThePageSource(unittest.TestCase):
         html = read("web/index.html")
         stats = html.split('id="view-stats"', 1)[1].split("</section>", 1)[0]
         for marker in ('id="record-periods"', 'id="record-cards"', 'id="record-top-sent"',
+                       'id="st-top-files"', 'id="st-top-albums"',
                        'id="record-forget-all"', 'href="/api/stats/record.csv?period=all"'):
             with self.subTest(marker=marker):
                 self.assertIn(marker, stats)
