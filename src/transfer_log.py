@@ -366,11 +366,15 @@ def top_nicks(direction=SENT, limit=10, since=None):
     Ties go to the larger total and then to the nick. A list is not a file, so
     it counts for neither figure, and a row without a nick is not ranked.
     """
+    # All time adds each nick's imported figures (#1064); a period does not.
     rows = _query(
-        "SELECT nick, SUM(kind != ?), SUM(CASE WHEN kind != ? THEN bytes ELSE 0 END) FROM transfers"
-        " WHERE direction = ? AND nick IS NOT NULL AND ended_at >= ?"
-        " GROUP BY nick HAVING SUM(kind != ?) > 0 ORDER BY 2 DESC, 3 DESC, nick LIMIT ?",
-        (KIND_LIST, KIND_LIST, direction, since or 0, KIND_LIST, max(0, int(limit))))
+        "SELECT nick, SUM(files), SUM(bytes) FROM ("
+        " SELECT nick, (kind != ?) AS files, CASE WHEN kind != ? THEN bytes ELSE 0 END AS bytes"
+        " FROM transfers WHERE direction = ? AND nick IS NOT NULL AND ended_at >= ?"
+        " UNION ALL"
+        " SELECT nick, files, bytes FROM imported WHERE direction = ? AND nick IS NOT NULL AND ? = 0"
+        ") GROUP BY nick HAVING SUM(files) > 0 ORDER BY 2 DESC, 3 DESC, nick LIMIT ?",
+        (KIND_LIST, KIND_LIST, direction, since or 0, direction, 1 if since else 0, max(0, int(limit))))
     return [(nick, int(files), int(size)) for nick, files, size in rows]
 
 
@@ -391,7 +395,58 @@ def nick_summary(nick, since=None):
         (KIND_LIST, KIND_LIST, RECEIVED, nick, since))
     figures.update(files_sent=int(sent[0] or 0), lists_sent=int(sent[1] or 0), bytes_sent=int(sent[2] or 0),
                    files_received=int(received[0] or 0), bytes_received=int(received[1] or 0))
+    if not since:
+        # Its imported figures (#1064): all time only, as everywhere.
+        for direction, files, size in _query(
+                "SELECT direction, SUM(files), SUM(bytes) FROM imported WHERE nick = ? GROUP BY direction",
+                (nick,)):
+            key = "sent" if direction == SENT else "received" if direction == RECEIVED else None
+            if key:
+                figures[f"files_{key}"] += int(files or 0)
+                figures[f"bytes_{key}"] += int(size or 0)
     return figures
+
+
+def imported_nicks(source):
+    """How many nicks a source imported per direction, as {direction: count} (#1064)."""
+    return {direction: int(count or 0) for direction, count in _query(
+        "SELECT direction, COUNT(*) FROM imported WHERE source = ? AND nick IS NOT NULL GROUP BY direction",
+        (source,))}
+
+
+def import_nicks(source, rows, since=None):
+    """Write a source's per-nick totals (#1064): `rows` is [(direction, nick,
+    files, bytes)], one per nick and direction. Replaces everything that
+    source imported per nick before - a second import never adds to the
+    first. The rows replaced name nicks, so the file is rebuilt after, as a
+    forget does (#1099), and the WAL emptied. Returns how many rows were
+    written, or None when it could not be written; never raises."""
+    path = _path()
+    if not path:
+        return None
+    clean = [(d, _nick(n), _whole(f), _whole(b)) for d, n, f, b in rows
+             if d in (SENT, RECEIVED) and _nick(n)]
+    try:
+        with runtime.transfer_log_lock:
+            conn = _connect(path, WRITE_TIMEOUT, repair=True)
+            try:
+                now = int(time.time())
+                with conn:
+                    conn.execute("DELETE FROM imported WHERE source = ? AND nick IS NOT NULL", (source,))
+                    conn.executemany(
+                        "INSERT INTO imported (source, direction, nick, files, bytes, since, imported_at)"
+                        " VALUES (?,?,?,?,?,?,?)",
+                        [(source, d, n, f, b, since or None, now) for d, n, f, b in clean])
+                # A nick in the earlier import and not in this one would
+                # otherwise stay readable in the file (#1082).
+                _rebuild(conn, path)
+                _empty_the_wal(conn, path)
+            finally:
+                conn.close()
+        return len(clean)
+    except Exception as err:
+        print(f"[TRANSFER-LOG ERROR] Could not import the per-nick totals: {err}")
+        return None
 
 
 def _delete(*statements):

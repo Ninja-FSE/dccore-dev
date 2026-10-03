@@ -752,6 +752,24 @@
           <button type="button" class="btn btn-accent btn-small" id="import-apply" data-i18n="stats.importTheseFigures">Import these figures</button>
           <button type="button" class="btn btn-small" id="import-cancel" data-i18n="common.cancel">Cancel</button>
         </div>
+
+        <!-- KeepTrack's per-nick history (#1064): KTData.txt, read on the
+             server; the host column in it is never kept. -->
+        <p class="import-intro" data-i18n="stats.ktdataIntro">
+          KeepTrack also kept what each nick had from you and you from it, in
+          KTData.txt in mIRC's folder. Bring that across too: nicks and their
+          totals only - the hosts in the file are not kept.
+        </p>
+        <div class="import-actions">
+          <label class="btn btn-small" for="ktdata-file" data-i18n="stats.chooseKTData">Choose KTData.txt&hellip;</label>
+          <input type="file" id="ktdata-file" accept=".txt,text/plain" hidden>
+        </div>
+        <p class="import-status" id="ktdata-status" hidden></p>
+        <div class="import-ktdata-preview" id="ktdata-preview" hidden></div>
+        <div class="import-confirm" id="ktdata-confirm" hidden>
+          <button type="button" class="btn btn-accent btn-small" id="ktdata-apply" data-i18n="stats.importKTData">Import the per-nick history</button>
+          <button type="button" class="btn btn-small" id="ktdata-cancel" data-i18n="common.cancel">Cancel</button>
+        </div>
       </div>
     </section>
 

@@ -641,6 +641,68 @@ def apply_stats_import(raw):
     return 200, {"before": before, "after": after, "imported": landed}
 
 
+# KeepTrack's per-nick history (#1064). A KTData.txt of a long-running bot is
+# a few hundred KB. The app already refuses a body over 8 MB
+# (MAX_CONTENT_LENGTH); this says the same about the text itself.
+MAX_KTDATA_CHARS = 8 * 1024 * 1024
+
+
+def _read_ktdata_text(text):
+    """(parsed, error) for an uploaded KTData.txt's text."""
+    import omenserve_import
+    text = str(text or "")
+    if len(text) > MAX_KTDATA_CHARS:
+        return None, "That file is far larger than a KTData.txt; nothing was read."
+    # Not MAX_IMPORT_FILES (2**63-1): a nick's figure is summed with its
+    # recorded transfers in SQL, and at that size the sum overflows (#1064
+    # review). read_ktdata()'s own limits, which leave that room.
+    return omenserve_import.read_ktdata(text, max_bytes=MAX_IMPORT_BYTES), None
+
+
+def build_ktdata_preview(text):
+    """POST /api/stats/import-ktdata/preview: what a KTData.txt would add,
+    writing nothing - the nicks per direction, their totals, the top ten, the
+    lines skipped and why, and whether an earlier import would be replaced."""
+    import transfer_log
+    parsed, error = _read_ktdata_text(text)
+    if error:
+        return 400, {"error": error}
+    if not transfer_log._path():
+        return 409, {"error": "The transfer record is off (Settings > Advanced, TRANSFER_LOG_FILE "
+                              "is empty), so there is nowhere to put the per-nick history."}
+    rows = parsed["rows"]
+    figures = {}
+    for direction in (transfer_log.SENT, transfer_log.RECEIVED):
+        mine = [r for r in rows if r[0] == direction]
+        top = sorted(mine, key=lambda r: (-r[2], -r[3], r[1]))[:10]
+        figures[direction] = {
+            "nicks": len(mine),
+            "files": sum(r[2] for r in mine),
+            "bytes": sum(r[3] for r in mine),
+            "top": [{"nick": r[1], "files": r[2], "bytes": r[3]} for r in top],
+        }
+    return 200, {"lines": parsed["lines"], "skipped": parsed["skipped"], "figures": figures,
+                 "replaces": transfer_log.imported_nicks("keeptrack")}
+
+
+def apply_ktdata_import(text):
+    """POST /api/stats/import-ktdata: read the file again - the preview's
+    answer is not trusted back - and write its per-nick totals into the
+    transfer record, replacing an earlier KeepTrack per-nick import."""
+    import transfer_log
+    status, preview = build_ktdata_preview(text)
+    if status != 200:
+        return status, preview
+    parsed, _error = _read_ktdata_text(text)
+    if not parsed["rows"]:
+        return 400, {"error": "Nothing in that file could be imported."}
+    since = (transfer_log.imported_totals("keeptrack").get(transfer_log.RECEIVED) or {}).get("since")
+    written = transfer_log.import_nicks("keeptrack", parsed["rows"], since=since)
+    if written is None:
+        return 500, {"error": "The per-nick history could not be written. Check the daemon log."}
+    return 200, {"imported": written, "nicks": transfer_log.imported_nicks("keeptrack")}
+
+
 def build_stats_payload():
     """Everything the Stats view shows, in one request.
 
@@ -4534,6 +4596,19 @@ if HAVE_FLASK:
             # not an identifier.
             body = json_object(request.get_json(silent=True))
             return jsonify(build_stats_import_preview(body.get("text", "")))
+
+        @app.route("/api/stats/import-ktdata/preview", methods=["POST"])
+        def api_stats_import_ktdata_preview():
+            # KeepTrack's per-nick history (#1064). Reads and writes nothing.
+            body = json_object(request.get_json(silent=True))
+            status, result = build_ktdata_preview(body.get("text", ""))
+            return jsonify(result), status
+
+        @app.route("/api/stats/import-ktdata", methods=["POST"])
+        def api_stats_import_ktdata():
+            body = json_object(request.get_json(silent=True))
+            status, result = apply_ktdata_import(body.get("text", ""))
+            return jsonify(result), status
 
         @app.route("/api/stats/import", methods=["POST"])
         def api_stats_import():
