@@ -45,7 +45,7 @@ this bot, and there is nothing in its config for an attacker to steal.
 
 > **The ident is deliberately ignored.**
 > In `nick!ident@host` the ident half is supplied by your client — anyone can set
-> theirs to `flac`. Only the host is issued by the server. DCCore discards the
+> theirs to `alex`. Only the host is issued by the server. DCCore discards the
 > nick and ident parts of any configured mask on purpose: constraining them would
 > grant no security while breaking the moment your client's ident setting changes.
 
