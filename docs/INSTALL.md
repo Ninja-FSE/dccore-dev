@@ -380,11 +380,11 @@ nothing about your bot - and says so in the dashboard's sidebar (with a **Check 
 says why instead. It is on by default and says so at every start: untick *Tell me when a new version is out* on the
 Settings page, or set `CHECK_FOR_UPDATES = false`, on a machine that should not go out.
 
-Your settings and data are never touched by an upgrade: `settings.conf`, `admin_config.py` and everything under `data/` are gitignored, so updating the code cannot overwrite them. That is also the one thing to watch — see step 4.
+Your settings and data are never changed by an upgrade: `settings.conf`, `admin_config.py` and everything under `data/` are gitignored, so updating the code cannot overwrite them. (The first start after v1.13.2 moves the two config files into `conf/`, unchanged - see [Coming from v1.13.2 or earlier](#coming-from-v1132-or-earlier).) That is also the one thing to watch — see step 4.
 
 **1. Stop the daemon.** A transfer in progress will be cut off, so a quiet moment is kinder than mid-queue.
 
-**2. Back up `data/` and your config.** It holds your stats, ban list, download counts and speed record — none of it recoverable if something goes wrong. Your config is at the top of the folder until the upgrade that moved it into `conf/` (#959), and in `conf/` from then on; the two `cp` lines below copy it from wherever it is.
+**2. Back up `data/` and your config.** It holds your stats, ban list, download counts and speed record — none of it recoverable if something goes wrong. Your config is at the top of the folder up to v1.13.2, and in `conf/` from v1.14.0 on; the two `cp` lines below copy it from wherever it is.
 
 ```bash
 mkdir -p data.backup
@@ -408,7 +408,9 @@ comm -23 <(grep -oE '^#?[A-Z_]+ *=' conf/settings.conf.sample | tr -d '# =' | so
          <(grep -oE '^[A-Z_]+ *=' conf/settings.conf | tr -d ' =' | sort)
 ```
 
-That lists every setting the sample knows about and your file does not. Most of them will be settings you were happy to leave at their defaults, so read it as "what exists", not as a to-do list.
+That lists every setting the sample knows about and your file does not. **Coming from v1.13.2 or earlier, run step 6 first:** your `settings.conf` is still at the top of the folder until the new version has started once, and `check` is what moves it into `conf/`.
+
+Most of them will be settings you were happy to leave at their defaults, so read it as "what exists", not as a to-do list.
 
 Nothing breaks if you skip this — every setting has a working default and the daemon runs fine without any of them being present. You simply will not know what became available. The changelog is the readable version of the same information.
 
@@ -431,6 +433,39 @@ This checks the configuration without connecting to IRC, so a mistake surfaces b
 ```
 
 The master list is only regenerated when you ask. If a release changes what the list contains, the file you are serving keeps its old content until the next `!update` — which looks like the upgrade did nothing.
+
+### Coming from v1.13.2 or earlier
+
+**Your config moves into `conf/`, by itself.** The program's modules are now in `src/`, and your `settings.conf` and
+`admin_config.py` in `conf/`. The first start - or `start-dccore check` - moves the two files there and says so with a
+`[MIGRATE]` line; nothing in them changes. `oserve.py`, `configure.py` and `update_list.py` stay at the top, so the
+start scripts and `configure.py` work as before. Three things that do change:
+
+- The admin console's password hash is made with `python src/adminchat.py`; the tool used to be at the top of the folder.
+- A script or guide of yours that opens `settings.conf` by its path should open `conf/settings.conf`.
+- **If you unpacked the release over the old folder**, the old copies of the modules are still at the top: every
+  `.py` file there except `oserve.py`, `configure.py` and `update_list.py`, and the two `.sample` files. The bot no
+  longer reads them, but the old `adminchat.py` there would still run old code - delete them. (Or unpack the release into
+  a new folder and copy `data/` and your two config files across.)
+
+**Update `dccore.mrc`.** Save this release's `scripts/mirc/dccore.mrc` over yours and type `/reload -rs dccore.mrc`
+in mIRC. An older script keeps working, without the new Downloads window, the rebuild progress and the fixes.
+
+**The download counts move into a database.** The first start copies `data/download_counts.json` into
+`data/download_counts.db` - a few seconds on a bot that has sent a great many different files - and never writes the
+JSON again, so going back to v1.13 still shows the counts as they were at the upgrade.
+
+**Three new things are on by default** - each harmless, each worth knowing:
+
+- **A log file.** Everything the bot's window shows also goes to `data/logs/dccore.log`: at most 5 MB, and five old
+  ones kept (about 30 MB in all). `CONSOLE_LOG_FILE`, `CONSOLE_LOG_MAX_MB` and `CONSOLE_LOG_KEEP` change that; an
+  empty file name turns it off.
+- **A record of finished transfers**, with the nick each went to or came from, in `data/transfers.db`. It is what
+  the Stats page's new section reads; a nick can be forgotten there. An empty `TRANSFER_LOG_FILE` turns it off.
+- **The on-connect check.** If your on-connect commands set a user mode such as `+x`, the bot checks that it took
+  and sends them again if not, up to six times per connection. `ON_CONNECT_CHECK_MINUTES = 0` turns it off.
+
+No list rebuild is needed: nothing changed what the list contains.
 
 ### Coming from v1.10.0 or earlier
 

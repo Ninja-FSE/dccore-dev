@@ -108,8 +108,9 @@ def _migrate_settings_conf_into_conf_dir(repo_root=None, log=print):
             f"Move it yourself: conf/settings.conf is where it is read from now.")
         return False
 
-    log("[MIGRATE] Moved settings.conf into conf/ - the repository's layout "
-        "changed (#959); nothing in it changed.")
+    log("[MIGRATE] Moved settings.conf into conf/ - the program's layout "
+        "changed (its modules are in src/, your own files in conf/); nothing "
+        "in it changed.")
     return True
 
 

@@ -331,6 +331,8 @@ update_check_announced    = None   # the release already said in the feed
 # Persisted to data/known_bots.json by irc._flush_known_bots().
 known_bots = {}
 known_bots_flushed_at = 0.0
+# When irc._record_bot() last let _prune_known_bots() expire old entries.
+known_bots_pruned_at = 0.0
 
 # Offers waiting for the receiver to connect ---------------------------------
 # Keyed by (nick_lower, port) -> {"filename", "size", "position"}, one entry
@@ -445,6 +447,11 @@ dcc_send_offers_lock = threading.Lock()
 # irc.py) - the inference is only trustworthy for seconds, not minutes.
 recent_departures = {}
 recent_departures_lock = threading.Lock()
+# recent_departure_bases: bare nick -> {departed nick.lower(): None}, for the
+# departures in recent_departures whose nick is a bare nick plus a collision
+# suffix. Kept beside it, under the same lock, so a JOIN looks up the few
+# nicks it could be a retry of instead of walking every departure.
+recent_departure_bases = {}
 
 # nick_aliases: alias_nick.lower() -> primary_nick, REAL case, written only when
 # note_possible_reconnect() decides a join matches the shape above. DISPLAY

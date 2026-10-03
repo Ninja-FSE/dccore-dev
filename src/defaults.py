@@ -22,7 +22,7 @@ import runtime
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE: bool    = False        # Print every raw line the bot sends to the server in its own window; noisy, for chasing a protocol problem
-SCRIPT_VERSION: str = "DCCore v1.13.2"
+SCRIPT_VERSION: str = "DCCore v1.14.0"
 
 # Where this bot came from. Defined once because two things say it: the CTCP
 # VERSION reply, and the header of every generated list. Before this there was
@@ -1151,6 +1151,7 @@ feed_counts = runtime.feed_counts          # FAIL and SEARCH events since the pr
 # download counter. Bound from runtime.py for the same reason as everything
 # above it.
 recent_departures = runtime.recent_departures
+recent_departure_bases = runtime.recent_departure_bases
 # #926: who else asked which bot for its list - list_grab.py.
 list_grab_others_asked = runtime.list_grab_others_asked
 nick_aliases = runtime.nick_aliases
@@ -1412,8 +1413,9 @@ def _migrate_admin_config_into_conf_dir(repo_root=None, log=print):
             f"Move it yourself: conf/admin_config.py is where it is read from now.")
         return False
 
-    log("[MIGRATE] Moved admin_config.py into conf/ - the repository's layout "
-        "changed (#959); nothing in it changed.")
+    log("[MIGRATE] Moved admin_config.py into conf/ - the program's layout "
+        "changed (its modules are in src/, your own files in conf/); nothing "
+        "in it changed.")
     return True
 
 
