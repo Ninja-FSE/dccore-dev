@@ -40,6 +40,7 @@ Merged after v1.13.2 had been released, with no entry here until now. The #982 p
 bot's own nick - peers are other DCCore bots, and `serverschat.note_who_reply()` leaves the bot itself out of every
 `PEERS` line. So every line the operator's own bot relayed showed raw in the channel window again. The check now also
 accepts the bot the script is paired with. Tests: `tests/test_dccore_chat_in_the_mirc_window.py`.
+
 ### 📦 The @DCCore menu is grouped by what you do (#1112)
 
 The right-click menu had grown without a plan: Stop the bot sat under Library (#1074), Reload under Admin, Console
