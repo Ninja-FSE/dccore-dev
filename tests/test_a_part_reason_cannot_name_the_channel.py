@@ -1,4 +1,4 @@
-"""The greedy PART regex took the LAST " PART " in the line, so a part
+r"""The greedy PART regex took the LAST " PART " in the line, so a part
 reason containing " PART " mis-attributed the channel (audit L29, #693).
 
 `^:([^!]+)!.* PART (\S+)` with re.search: the `.*` is greedy, so the

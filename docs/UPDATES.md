@@ -22,6 +22,18 @@ all-time counts and the transfer record's top list - and the Sent figures twice.
 - With `TRANSFER_LOG_FILE` empty (the record off) the period, Sent row and nick tables are hidden and Most downloaded
   shows the all-time lists.
 
+### 🧪 No Python file has an invalid escape sequence
+
+Python 3.12 and later warn about an invalid escape in an ordinary string (`"\S"`, `"C:\Program Files"`) every time
+the file is compiled, and a later Python makes it a SyntaxError - a test file that no longer compiles is a whole set of
+tests that silently stop running. Five sat in test docstrings quoting a regex or a Windows path
+(`test_a_part_reason_cannot_name_the_channel.py`, `test_fetched_name_length.py`,
+`test_python_missing_help_do_not_fail.py`); they are raw strings now, which also makes one read right - the
+long-path prefix said `\?\` where it meant `\\?\`. None was in the bot's own code.
+
+- `tests/test_no_python_file_has_an_invalid_escape.py` compiles every `.py` file with the warning made an error -
+  `SyntaxWarning` from 3.12 on, `DeprecationWarning` on 3.10 and 3.11 - so the next one fails there.
+
 ### 📦 The @DCCore menu is grouped by what you do (#1112)
 
 The right-click menu had grown without a plan: Stop the bot sat under Library (#1074), Reload under Admin, Console
