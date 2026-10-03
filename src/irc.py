@@ -1011,6 +1011,26 @@ def _is_collision_variant(a, b):
                 (stripped_b and stripped_b == a))
 
 
+def _collision_base(key):
+    """The nick with its trailing collision suffix removed, or "" when it has
+    none (or is nothing but suffix) - a nick that is not a retry of another."""
+    base = _COLLISION_SUFFIX_RE.sub("", key)
+    return base if base and base != key else ""
+
+
+def _forget_departure(key):
+    """Drop `key` from recent_departures and its base index. Caller holds
+    recent_departures_lock."""
+    runtime.recent_departures.pop(key, None)
+    base = _collision_base(key)
+    if base:
+        group = runtime.recent_departure_bases.get(base)
+        if group is not None:
+            group.pop(key, None)
+            if not group:
+                del runtime.recent_departure_bases[base]
+
+
 def note_observed_departure(nick, channel, now=None):
     """Record that `nick` was just seen leaving `channel`, for
     note_possible_reconnect() to match against a moment later.
@@ -1027,6 +1047,9 @@ def note_observed_departure(nick, channel, now=None):
     if not key:
         return
     with runtime.recent_departures_lock:
+        # Put back at the end, so the registry stays oldest first and
+        # _prune_recent_departures() can stop at the first one still fresh.
+        _forget_departure(key)
         runtime.recent_departures[key] = {
             # Real case kept alongside the lowercased key, because it is what
             # ends up shown as the merged row's label if this turns into an
@@ -1036,6 +1059,9 @@ def note_observed_departure(nick, channel, now=None):
             "channel": str(channel or "").strip().lower(),
             "at": time.time() if now is None else now,
         }
+        base = _collision_base(key)
+        if base:
+            runtime.recent_departure_bases.setdefault(base, {})[key] = None
     # #376 option B: an observed departure of a BOT whose ident we hold -
     # the only kind webserver._ident_merges() will merge from.
     with runtime.bot_idents_lock:
@@ -1044,12 +1070,16 @@ def note_observed_departure(nick, channel, now=None):
 
 
 def _prune_recent_departures(now):
+    """Oldest first, stopping at the first fresh one: a JOIN costs what it
+    drops, not the size of the registry (a netsplit's rejoin is thousands of
+    JOINs, each of which used to walk every recent departure)."""
     with runtime.recent_departures_lock:
-        stale = [key for key, dep in runtime.recent_departures.items()
-                 if now - float((dep or {}).get("at") or 0)
-                 > ALT_NICK_RECONNECT_WINDOW_SECONDS]
-        for key in stale:
-            del runtime.recent_departures[key]
+        while runtime.recent_departures:
+            oldest = next(iter(runtime.recent_departures))
+            dep = runtime.recent_departures[oldest]
+            if now - float((dep or {}).get("at") or 0) <= ALT_NICK_RECONNECT_WINDOW_SECONDS:
+                break
+            _forget_departure(oldest)
 
 
 def note_possible_reconnect(new_nick, now=None):
@@ -1087,17 +1117,26 @@ def note_possible_reconnect(new_nick, now=None):
         return None
 
     with runtime.recent_departures_lock:
-        # Back under its own name: no alt-nick story, and popping it here
+        # Back under its own name: no alt-nick story, and dropping it here
         # keeps a stale record from matching some unrelated nick much later.
-        own_departure = runtime.recent_departures.pop(key, None)
+        own_departure = runtime.recent_departures.get(key)
+        if own_departure is not None:
+            _forget_departure(key)
     if own_departure is not None:
         return None
 
+    # Only a departure that could pass _is_collision_variant() is looked at:
+    # the bare nick this one is a retry of, or the retries of this one when it
+    # is the bare nick. Everything else in the registry cannot match.
     with runtime.recent_departures_lock:
-        # dict.copy(), not list(...) - this module already shadows the
-        # builtin with its own `import list` (list.py, the file-list code).
-        candidates = runtime.recent_departures.copy().items()
+        candidates = []
+        bare = _collision_base(key)
+        if bare and bare in runtime.recent_departures:
+            candidates.append((bare, runtime.recent_departures[bare]))
+        for departed_key in runtime.recent_departure_bases.get(key, ()):
+            candidates.append((departed_key, runtime.recent_departures[departed_key]))
 
+    candidates.sort(key=lambda pair: float((pair[1] or {}).get("at") or 0))
     for departed_key, dep in candidates:
         # Belt and braces with the prune above, which already removed
         # anything this old using the same `now` - kept so this loop's own
@@ -1113,7 +1152,7 @@ def note_possible_reconnect(new_nick, now=None):
         with runtime.nick_aliases_lock:
             runtime.nick_aliases[key] = departed_nick
         with runtime.recent_departures_lock:
-            runtime.recent_departures.pop(departed_key, None)
+            _forget_departure(departed_key)
         print(f"[ALT-NICK] {new_nick} looks like {departed_nick} reconnecting "
               f"- merging its List Browser row for display.")
         return departed_nick
@@ -2135,8 +2174,12 @@ def _prune_known_bots(now):
     bots sit there for most of a week regardless.
     """
     registry = runtime.known_bots
+    # Who is in a channel is looked at at most once per pass, and only if an
+    # entry is old enough to need it - not once per old entry, which made an
+    # advert cost (old entries) x (everybody in every channel).
+    present = []
     for key in [k for k, entry in registry.items()
-                if _known_bot_is_stale(k, entry, now)]:
+                if _known_bot_is_stale(k, entry, now, present)]:
         del registry[key]
 
     if len(registry) > KNOWN_BOTS_MAX:
@@ -2150,12 +2193,14 @@ def _prune_known_bots(now):
             del registry[key]
 
 
-def _known_bot_is_stale(key, entry, now):
+def _known_bot_is_stale(key, entry, now, present=None):
     """Whether _prune_known_bots() should drop this entry.
 
     `key` is already the lower-cased registry key - see _capture_channel_
     advert()'s own `key = user.lower()` - so it compares directly against
     the lower-cased nicks _bot_confirmed_absent() reads from channel_users.
+    `present` is an empty list a caller checking many entries passes in, so
+    that who is present is worked out once for all of them.
     """
     # Named by the operator, not seen advertising (#376): it has no adverts
     # to age on, so age says nothing about it. It stays until the operator
@@ -2165,10 +2210,20 @@ def _known_bot_is_stale(key, entry, now):
     age = now - float((entry or {}).get("last_seen") or 0)
     if age > KNOWN_BOTS_TTL_SECONDS:
         return True
-    return age > KNOWN_BOTS_ABSENT_TTL_SECONDS and _bot_confirmed_absent(key)
+    return age > KNOWN_BOTS_ABSENT_TTL_SECONDS and _bot_confirmed_absent(key, present)
 
 
-def _bot_confirmed_absent(key):
+def _lowercase_present_nicks():
+    """Every nick in a channel we share, lower-cased - or None while nothing
+    is known yet (see _bot_confirmed_absent())."""
+    with runtime.channel_users_lock():
+        channels = getattr(config, "channel_users", None) or {}
+        if not any(users for users in channels.values()):
+            return None
+        return {str(nick).lower() for users in channels.values() for nick in users}
+
+
+def _bot_confirmed_absent(key, present=None):
     """True only once we actually know `key` is gone - not merely that
     nothing has proven it is still there.
 
@@ -2182,12 +2237,13 @@ def _bot_confirmed_absent(key):
     identical reason - that function just answers it for the whole set at
     once, where this only ever needs one name.
     """
-    with runtime.channel_users_lock():
-        channels = getattr(config, "channel_users", None) or {}
-        if not any(users for users in channels.values()):
-            return False
-        return not any(str(nick).lower() == key
-                       for users in channels.values() for nick in users)
+    if present is None:
+        nicks = _lowercase_present_nicks()
+    else:
+        if not present:
+            present.append(_lowercase_present_nicks())
+        nicks = present[0]
+    return nicks is not None and key not in nicks
 
 
 def _prune_advert_tails(now):

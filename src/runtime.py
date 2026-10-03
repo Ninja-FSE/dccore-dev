@@ -445,6 +445,11 @@ dcc_send_offers_lock = threading.Lock()
 # irc.py) - the inference is only trustworthy for seconds, not minutes.
 recent_departures = {}
 recent_departures_lock = threading.Lock()
+# recent_departure_bases: bare nick -> {departed nick.lower(): None}, for the
+# departures in recent_departures whose nick is a bare nick plus a collision
+# suffix. Kept beside it, under the same lock, so a JOIN looks up the few
+# nicks it could be a retry of instead of walking every departure.
+recent_departure_bases = {}
 
 # nick_aliases: alias_nick.lower() -> primary_nick, REAL case, written only when
 # note_possible_reconnect() decides a join matches the shape above. DISPLAY

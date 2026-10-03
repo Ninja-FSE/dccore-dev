@@ -1151,6 +1151,7 @@ feed_counts = runtime.feed_counts          # FAIL and SEARCH events since the pr
 # download counter. Bound from runtime.py for the same reason as everything
 # above it.
 recent_departures = runtime.recent_departures
+recent_departure_bases = runtime.recent_departure_bases
 # #926: who else asked which bot for its list - list_grab.py.
 list_grab_others_asked = runtime.list_grab_others_asked
 nick_aliases = runtime.nick_aliases

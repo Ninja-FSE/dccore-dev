@@ -110,6 +110,7 @@ RUNTIME_CONTAINERS = {
     # later, unrelated test's nick could match a timestamp this test left
     # behind and get merged with it in the List Browser.
     "recent_departures": dict,
+    "recent_departure_bases": dict,
     "nick_aliases": dict,
     # #376 option B: a leftover ident or departure is a merge the next test
     # never set up.

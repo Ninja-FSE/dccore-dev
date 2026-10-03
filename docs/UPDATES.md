@@ -64,6 +64,15 @@ a 420k-row RAR list), every few seconds; since #1118 it is Live Transfers that p
   while nothing changed, a send or an outside replace seen at once, a save seen even when the file looks unchanged,
   the parse outside the lock, copies, the RAR count, the parts and the route, and the Live page's poll.
 
+### 📦 Joins and adverts cost the same each however many there are
+
+- `irc.note_possible_reconnect()` walked every departure of the last 15 seconds on each JOIN, twice. Departures are now
+  kept oldest first, pruned from the front, and indexed by the bare nick a collision variant would be a retry of
+  (`runtime.recent_departure_bases`, kept in step with `recent_departures` and preserved across a rehash).
+- `irc._prune_known_bots()` asked `_bot_confirmed_absent()` about each entry older than a day, and each answer walked
+  every channel member. Who is present is now worked out once per pass, and only if an entry needs it.
+- Counted by `test_a_netsplit_rejoin_is_not_quadratic` and `test_the_advert_scan_is_not_quadratic`.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
