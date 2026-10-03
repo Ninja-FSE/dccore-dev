@@ -748,8 +748,10 @@ def build_record_payload(period="all"):
         "top_files": [{"name": name, "count": count} for name, count in transfer_log.top_files(10, since)],
         "top_sent": _nick_rows(transfer_log.top_nicks(transfer_log.SENT, 10, since)),
         "top_received": _nick_rows(transfer_log.top_nicks(transfer_log.RECEIVED, 10, since)),
-        # Said on the page: the all-time figures hold totals from before the record began.
-        "includes_imported": since is None and bool(transfer_log.imported_totals()),
+        # Said on the page: all time holds figures from before the record began -
+        # the bot's own totals, a nick's, or both (#1102 review: a per-nick import
+        # alone left the note hidden while the tables counted it).
+        "includes_imported": since is None and transfer_log.has_imported(),
     }
 
 

@@ -6195,6 +6195,15 @@
 
   var record = { period: "all" };
 
+  // Every {name} filled in ONE pass. A chain of .replace() calls read a nick
+  // put in by an earlier one as a placeholder: "{sent}" is a legal nick, and
+  // looked up it came back as "5: {sent} file(s)...".
+  function fillIn(template, values) {
+    return template.replace(/\{(\w+)\}/g, function (whole, name) {
+      return Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : whole;
+    });
+  }
+
   function recordNote(text, isError) {
     el.recordStatus.hidden = !text;
     el.recordStatus.textContent = text || "";
@@ -6279,8 +6288,12 @@
   }
 
   function loadRecord() {
-    return fetchJsonAllowingError("/api/stats/record?period=" + encodeURIComponent(record.period))
+    var asked = record.period;
+    return fetchJsonAllowingError("/api/stats/record?period=" + encodeURIComponent(asked))
       .then(function (res) {
+        // A slow "All time" answering after "24 hours" was chosen would be
+        // drawn under the wrong button.
+        if (asked !== record.period) { return; }
         if (!res.ok) {
           recordNote(t("stats.recordCouldNotLoad").replace("{error}",
             (res.data && res.data.error) || ("HTTP " + res.status)), true);
@@ -6310,20 +6323,22 @@
     var line = document.createElement("p");
     line.className = "import-status";
     line.textContent = data.found
-      ? t("stats.recordNickLine").replace("{nick}", data.nick)
-          .replace("{sent}", (f.files_sent || 0).toLocaleString())
-          .replace("{sentSize}", f.bytes_sent_text || "0B")
-          .replace("{lists}", (f.lists_sent || 0).toLocaleString())
-          .replace("{received}", (f.files_received || 0).toLocaleString())
-          .replace("{receivedSize}", f.bytes_received_text || "0B")
-      : t("stats.recordNickUnknown").replace("{nick}", data.nick);
+      ? fillIn(t("stats.recordNickLine"), {
+          nick: data.nick,
+          sent: (f.files_sent || 0).toLocaleString(),
+          sentSize: f.bytes_sent_text || "0B",
+          lists: (f.lists_sent || 0).toLocaleString(),
+          received: (f.files_received || 0).toLocaleString(),
+          receivedSize: f.bytes_received_text || "0B"
+        })
+      : fillIn(t("stats.recordNickUnknown"), { nick: data.nick });
     box.appendChild(line);
     // Offered whether or not this period holds the nick: forgetting is for
     // all of it, and another period may.
     var forget = document.createElement("button");
     forget.type = "button";
     forget.className = "btn btn-small btn-danger record-forget-nick";
-    forget.textContent = t("stats.forgetNick").replace("{nick}", data.nick);
+    forget.textContent = fillIn(t("stats.forgetNick"), { nick: data.nick });
     forget.addEventListener("click", function () { forgetRecord({ nick: data.nick }); });
     box.appendChild(forget);
     box.hidden = false;
@@ -6332,15 +6347,20 @@
   function lookUpRecordNick() {
     var nick = el.recordNickInput.value.trim();
     if (!nick) { return; }
+    var asked = record.period;
     fetchJsonAllowingError("/api/stats/record/nick?nick=" + encodeURIComponent(nick) +
-                           "&period=" + encodeURIComponent(record.period))
+                           "&period=" + encodeURIComponent(asked))
       .then(function (res) {
+        if (asked !== record.period) { return; }
         if (!res.ok) {
           recordNote((res.data && res.data.error) || ("HTTP " + res.status), true);
           return;
         }
         recordNote("", false);
         renderRecordNick(res.data);
+      })
+      .catch(function (err) {
+        recordNote(fillIn(t("stats.recordCouldNotLoad"), { error: err.message }), true);
       });
   }
 
@@ -6348,7 +6368,7 @@
   function forgetRecord(what) {
     var question = what.everyone
       ? t("stats.confirmForgetEveryone")
-      : t("stats.confirmForgetNick").replace("{nick}", what.nick);
+      : fillIn(t("stats.confirmForgetNick"), { nick: what.nick });
     if (!window.confirm(question)) { return; }
     return postJson("/api/stats/record/forget", what).then(function (res) {
       if (!res.ok) {
@@ -6357,9 +6377,10 @@
       }
       el.recordNickResult.hidden = true;
       return loadRecord().then(function () {
-        recordNote((what.everyone ? t("stats.forgotEveryone") : t("stats.forgotNick"))
-          .replace("{nick}", res.data.nick || "")
-          .replace("{count}", (res.data.removed || 0).toLocaleString()), false);
+        recordNote(fillIn(what.everyone ? t("stats.forgotEveryone") : t("stats.forgotNick"), {
+          nick: res.data.nick || "",
+          count: (res.data.removed || 0).toLocaleString()
+        }), false);
       });
     });
   }

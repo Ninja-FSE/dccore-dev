@@ -75,6 +75,15 @@ class ThePayload(Case):
         self.assertEqual(status, 400)
         self.assertIn("day, week, month or all", data["error"])
 
+    def test_a_per_nick_import_alone_is_said_too(self):
+        """#1102 review: the note looked for the bot's own totals only, while
+        the nick tables already counted a per-nick import."""
+        transfer_log.import_nicks("keeptrack", [("sent", "keptnick", 5000, 10 ** 9)])
+        _status, data = webserver.build_record_payload("all")
+        self.assertEqual(data["top_sent"][0]["nick"], "keptnick")
+        self.assertTrue(data["includes_imported"])
+        self.assertFalse(webserver.build_record_payload("day")[1]["includes_imported"])
+
     def test_imported_totals_count_for_all_time_only_and_it_is_said(self):
         transfer_log.import_totals("keeptrack", transfer_log.SENT, 10, 1000)
         _status, everything = webserver.build_record_payload("all")
@@ -138,13 +147,35 @@ class TheExport(Case):
     def read(self, since=None):
         return list(csv.reader(io.StringIO("".join(webserver.record_csv_lines(since)))))
 
-    def test_a_header_and_every_row_oldest_first(self):
+    def test_a_header_and_every_row_in_the_order_written(self):
         rows = self.read()
         self.assertEqual(rows[0], ["time", "direction", "nick", "kind", "name", "size", "bytes",
                                    "seconds", "speed", "waited"])
         self.assertEqual(len(rows), 7)
-        self.assertEqual(rows[1][2], "otherone", "forty days ago comes first")
+        self.assertEqual([r[2] for r in rows[1:]],
+                         ["listener", "listener", "listener", "otherone", "otherone", "peerbot"])
         self.assertRegex(rows[1][0], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+    def test_it_is_read_in_chunks_and_holds_no_reader_between_them(self):
+        """#1102 review: one cursor open for the whole export kept a snapshot
+        as long as the download ran, and a forget could not empty the WAL."""
+        import sqlite3
+        from unittest import mock
+        with mock.patch.object(transfer_log, "EXPORT_CHUNK", 2):
+            rows = transfer_log.iter_rows()
+            first = next(rows)
+            # Mid-export, as a stalled download would leave it: nothing reads now.
+            with contextlib.redirect_stdout(io.StringIO()):
+                transfer_log.forget_nick("otherone")
+            conn = sqlite3.connect(config.TRANSFER_LOG_FILE)
+            try:
+                busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            finally:
+                conn.close()
+            rest = list(rows)
+        self.assertEqual(busy, 0)
+        self.assertEqual(first[2], "listener")
+        self.assertEqual([r[2] for r in rest], ["listener", "listener", "peerbot"])
 
     def test_since_leaves_out_what_is_older(self):
         self.assertEqual(len(self.read(int(time.time()) - DAY)), 4)
@@ -303,6 +334,75 @@ class ThePage(unittest.TestCase):
         self.assertEqual(got["emptyReceived"], "empty-row|stats.recordNoNicks")
         self.assertTrue(got["importedShown"] and got["bodyShown"] and got["kept"])
         self.assertEqual((got["offNote"], got["offBodyHidden"]), ("stats.recordOff", True))
+
+
+REVIEW_HARNESS = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[2], "utf8");
+function fn(signature) {
+  const start = src.indexOf(signature);
+  if (start < 0) { throw new Error("missing: " + signature); }
+  let depth = 0, i = src.indexOf("{", start);
+  for (; i < src.length; i++) {
+    if (src[i] === "{") { depth++; }
+    else if (src[i] === "}") { depth--; if (depth === 0) { break; } }
+  }
+  return src.slice(start, i + 1);
+}
+const out = {};
+const fillIn = new Function(fn("function fillIn(") + "\nreturn fillIn;")();
+// "{sent}" and "{count}" are legal nicks.
+out.line = fillIn("{nick}: {sent} file(s), {lists} list(s)", { nick: "{sent}", sent: "5", lists: "0" });
+out.forgot = fillIn("{nick} is forgotten ({count} row(s) removed).", { nick: "{count}", count: "3" });
+out.unknownKept = fillIn("{nick} {other}", { nick: "a" });
+
+// Two periods asked one after the other, answered in the other order.
+const record = { period: "all" };
+const pending = [];
+const drawn = [];
+const loadRecord = new Function("record", "fetchJsonAllowingError", "renderRecord", "recordNote", "t",
+  fn("function loadRecord(") + "\nreturn loadRecord;")(
+  record,
+  function () { return new Promise(function (resolve) { pending.push(resolve); }); },
+  function (data) { drawn.push(data.period); },
+  function () {}, function (key) { return key; });
+const first = loadRecord();          // "all" - slow
+record.period = "day";
+const second = loadRecord();         // "day" - fast
+pending[1]({ ok: true, status: 200, data: { period: "day" } });
+pending[0]({ ok: true, status: 200, data: { period: "all" } });
+Promise.all([first, second]).then(function () {
+  out.drawn = drawn;
+  console.log(JSON.stringify(out));
+});
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed; CI's runners have it")
+class WhatTheReviewFound(unittest.TestCase):
+    """#1102 review: a nick that is a placeholder, and answers out of order."""
+
+    def test_nicks_are_never_read_as_placeholders_and_a_stale_answer_is_dropped(self):
+        handle, path = tempfile.mkstemp(suffix=".js")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(REVIEW_HARNESS)
+            done = subprocess.run(["node", path, os.path.join(REPO_ROOT, "web", "app.js")],
+                                  capture_output=True, timeout=60)
+        finally:
+            os.unlink(path)
+        self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+        got = json.loads(done.stdout.decode("utf-8"))
+        self.assertEqual(got["line"], "{sent}: 5 file(s), 0 list(s)")
+        self.assertEqual(got["forgot"], "{count} is forgotten (3 row(s) removed).")
+        self.assertEqual(got["unknownKept"], "a {other}")
+        self.assertEqual(got["drawn"], ["day"])
+
+    def test_every_nick_message_goes_through_it(self):
+        js = read("web/app.js")
+        block = js.split("// ------------------------------------------------------ Transfer record", 1)[1]
+        block = block.split("el.recordPeriods.addEventListener", 1)[0]
+        self.assertNotIn('.replace("{nick}"', block)
 
 
 class ThePageSource(unittest.TestCase):

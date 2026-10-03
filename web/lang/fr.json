@@ -380,7 +380,7 @@
   "stats.recordTopReceived": "Reçu de",
   "stats.nick": "Pseudo",
   "stats.files": "Fichiers",
-  "stats.recordIncludesImported": "« Depuis le début » inclut les totaux importés de KeepTrack, qui n'ont pas de date.",
+  "stats.recordIncludesImported": "« Depuis le début » inclut des chiffres importés de KeepTrack, qui n'ont pas de date. Les tableaux de pseudos ajoutent ce que KeepTrack gardait par pseudo ; son total envoyé est dans « Envoyé », en haut de cette page, pas dans ces cartes.",
   "stats.recordNickPlaceholder": "Un pseudo",
   "stats.lookUp": "Rechercher",
   "stats.exportCsv": "Exporter en CSV",

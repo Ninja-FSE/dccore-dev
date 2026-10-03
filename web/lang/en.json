@@ -380,7 +380,7 @@
   "stats.recordTopReceived": "Received from",
   "stats.nick": "Nick",
   "stats.files": "Files",
-  "stats.recordIncludesImported": "All time includes the totals imported from KeepTrack, which have no date.",
+  "stats.recordIncludesImported": "All time includes figures imported from KeepTrack, which have no date. The nick tables add what KeepTrack kept per nick; its sent total is in Sent at the top of this page, not in these cards.",
   "stats.recordNickPlaceholder": "A nick",
   "stats.lookUp": "Look up",
   "stats.exportCsv": "Export CSV",
