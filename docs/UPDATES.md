@@ -4,6 +4,28 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ The Stats and Live Transfers polls do not re-read whole files (#1123)
+
+Performance audit 2026-10-03 P1. `/api/stats` called `db.top_downloads()` twice per poll - each parsing the whole
+`download_counts.json` under `db._disk_lock`, which `record_download()` in the send threads needs too, and sorting every
+row - and `count_rar_album_folders()` counted every row of the RAR list. About 5 s a poll on a big bot (200k counts,
+a 420k-row RAR list), every few seconds; since #1118 it is Live Transfers that polls it, and that page shows neither.
+
+- **Live Transfers asks for its own figures only:** `build_stats_payload(parts)`, and `/api/stats?parts=transfer`
+  (one or more of `transfer,sent,library,top`; anything else is a 400). With no `parts` the payload is as before, for
+  the Stats page and anything else that reads it. app.js gains `loadLive()`/`renderTransfer()`; `state.lastStats` stays
+  the Stats page's.
+- **The ranking once per change of the counts file:** `db._download_counts_ranked()` reads the file under the lock,
+  parses it outside it, ranks every row once and keeps `{kind: rows}`, keyed on its path, mtime, size and file identity
+  (`db._counts_signature`); every save (`db._save_download_counts`, now the only writer) drops it outright, so two
+  saves inside one clock tick are not one. `top_downloads()` answers from it, the same order as before, and returns
+  copies.
+- **The RAR count per list file:** `webserver._rar_counts`, one entry per path, keyed on the file's mtime, size and
+  identity; a rebuild publishes with `os.replace`.
+- Tests: `tests/test_the_stats_poll_is_cheap.py` - the same ranking as before over 3,000 awkward rows, nothing re-read
+  while nothing changed, a send or an outside replace seen at once, a save seen even when the file looks unchanged,
+  the parse outside the lock, copies, the RAR count, the parts and the route, and the Live page's poll.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
