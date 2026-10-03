@@ -42,8 +42,9 @@ class CountsCase(DCCoreTestCase):
         self.addCleanup(setattr, db, "DOWNLOAD_COUNTS_FILE", previous)
 
     def counts(self):
-        with io.open(self.path, encoding="utf-8") as handle:
-            return json.load(handle)
+        """The stored rows. They were this test's JSON file until #1133 moved
+        them into the database beside it, which only reads that file once."""
+        return db.load_download_counts()
 
 
 class CountingASend(CountsCase):

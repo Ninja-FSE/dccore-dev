@@ -316,8 +316,11 @@ def startup(setup_page=None):
     # And drop what the master list left in those counters before it stopped
     # being counted - one row per rebuild, sitting at the top of a table meant
     # for files. Runs every boot rather than once: it is a no-op the moment
-    # there is nothing to remove, and an operator restoring an old
-    # download_counts.json should not get the rows back for good.
+    # there is nothing to remove, and an operator restoring an old data
+    # directory should not get the rows back for good. Both this and the
+    # migration above work on download_counts.db, and whichever reaches it
+    # first imports an older download_counts.json into it (#1133), so the
+    # import comes first and these two see every row it brought.
     db.prune_list_artifact_download_counts()
 
     # Before find_latest_list() below: defaults.py's LIST_BASE_NAME derivation
