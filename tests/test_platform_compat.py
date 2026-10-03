@@ -20,6 +20,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import platform_compat  # noqa: E402
+from tests.support import remove_tree  # noqa: E402
 
 
 class RarCommandTests(unittest.TestCase):
@@ -141,6 +142,9 @@ class LongPathTests(unittest.TestCase):
     def test_a_deep_path_survives_a_round_trip_to_disk(self):
         """The behaviour that matters: open a file whose path is long."""
         root = tempfile.mkdtemp(prefix="dccore-long-")
+        # Removed through the long-path form: below MAX_PATH's reach, a plain
+        # rmtree cannot get at the deepest folders on Windows (#1149).
+        self.addCleanup(remove_tree, platform_compat.long_path(root))
         deep = root
         for i in range(12):
             deep = os.path.join(deep, "Artist Name With A Long Title %02d" % i)
