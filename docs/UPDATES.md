@@ -2,6 +2,23 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🐛 Backfill indexes every list a held archive has (#1122)
+
+Performance audit 2026-10-03 B2, its bug half. A fetched archive can hold several lists, and a fetch indexes each under
+its own name: the bare nick for the main list, `<nick>/<marker>` for the rest (`list_fetch.index_key`). When the index
+was emptied (an upgrade, a deleted file) or repaired (a damaged one moved aside), `list_index.backfill_missing()` went
+through each bot's main list alone, so its other lists - a RAR list - were never indexed again, and the filter bar
+showed a list that does match as holding nothing.
+
+- `list_index._held_lists()` gives every list of a held entry with the name it is indexed under, and
+  `backfill_missing()` checks and indexes each one on its own. An entry written before archives could hold more than
+  one list still has its main list done; a list whose file is gone is skipped and the rest go on.
+- The other half of #1122 - running the rebuild in the background instead of inside `startup()` - stays open: it
+  needs `list_fetch`'s locking and two pinned tests changed.
+- Tests: `tests/test_backfill_indexes_every_held_list.py`.
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)
