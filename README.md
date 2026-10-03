@@ -64,6 +64,8 @@ The optional dashboard is `webserver.py` and `web/`, and disables itself cleanly
 python3 -m unittest discover -s tests -t .
 ```
 
+Or, in four processes at once and in a third of the time, the way CI runs it: `python3 scripts/run_tests_in_parallel.py`.
+
 Thousands of them - the count is kept in [docs/FUTURE.md](docs/FUTURE.md) - stdlib-only, on Linux, Windows and macOS, Python 3.10, 3.12 and 3.14 in CI.
 
 ## Responsible use

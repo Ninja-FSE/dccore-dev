@@ -22,6 +22,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
 import adminchat  # noqa: E402
+from tests import dcc_ports  # noqa: E402
 import defaults as config  # noqa: E402
 import irc  # noqa: E402
 
@@ -674,8 +675,9 @@ class ListenerUsesTheConfiguredRange(unittest.TestCase):
         #
         # A hundred ports of its own, away from 55000-55010, removes the
         # competition rather than hoping to win it.
-        config.DCC_PORT_START = 55100
-        config.DCC_PORT_END = 55199
+        # Through dcc_ports(), so a parallel run's shards each get a hundred
+        # of their own (#1146).
+        config.DCC_PORT_START, config.DCC_PORT_END = dcc_ports(55100, 55199)
 
     def test_the_listener_binds_inside_the_range(self):
         sock, port = adminchat._open_chat_listener()

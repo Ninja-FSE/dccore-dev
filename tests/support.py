@@ -953,6 +953,21 @@ class DCCoreTestCase(unittest.TestCase):
             else:
                 self.addCleanup(delattr, config, name)
 
+    def keep_every_setting(self):
+        """Put every setting back when this test ends, whichever of them it
+        changed - for a test that applies a whole settings file to the live
+        config, as the browser setup page does.
+
+        Those tests put back the names they set themselves and nothing else,
+        and apply_setup() also changes SERVER, CHANNEL and the rest: the next
+        module to read SERVER's default got the form's example host. A plain
+        run hid it, because the module that ran next in alphabetical order
+        reloads defaults; a parallel run (#1146) put that module in another
+        shard.
+        """
+        names = list(getattr(config, "SHIPPED_VALUES", {})) + ["ADMIN_PASSWORD_HASH"]
+        self.set_config(**{name: getattr(config, name) for name in names if hasattr(config, name)})
+
     def make_tree(self, **kwargs):
         tree = TempTree(**kwargs)
         self._trees.append(tree)

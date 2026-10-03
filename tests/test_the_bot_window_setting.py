@@ -109,10 +109,16 @@ class WithNoWindow(Case):
             'sys.stderr.write("and one to stderr" + chr(10))',
         ))
         stub = src[:entry_start] + body + src[entry_end:]
-        handle_fd, stub_path = tempfile.mkstemp(suffix=".py", prefix="_oserve_windowless_", dir=REPO_ROOT)
+        # In this test's own folder, not the repository root (#1146): the
+        # suite's scanners walk the root, and with the suite split across
+        # processes one of them could read this copy half-written or see it
+        # vanish. oserve.py finds src/ beside its own file, so the copy is
+        # told where the repository is.
+        self.assertEqual(stub.count("os.path.dirname(os.path.abspath(__file__))"), 1)
+        stub = stub.replace("os.path.dirname(os.path.abspath(__file__))", repr(REPO_ROOT))
+        handle_fd, stub_path = tempfile.mkstemp(suffix=".py", prefix="_oserve_windowless_", dir=self.dir)
         with os.fdopen(handle_fd, "w", encoding="utf-8") as handle:
             handle.write(stub)
-        self.addCleanup(os.remove, stub_path)
         runner_fd, runner = tempfile.mkstemp(suffix=".py", dir=self.dir)
         with os.fdopen(runner_fd, "w", encoding="utf-8") as handle:
             handle.write(textwrap.dedent(f"""

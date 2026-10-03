@@ -20,7 +20,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import platform_compat  # noqa: E402
-from tests.support import remove_tree, parse_source  # noqa: E402
+from tests.support import remove_tree, parse_source, temp_dir  # noqa: E402
 
 
 class RarCommandTests(unittest.TestCase):
@@ -448,15 +448,18 @@ class WiringTests(unittest.TestCase):
         would pass on a module whose only occurrence is inside a string."""
         import tempfile as tf
 
+        # Written into a temp folder, not the repository root (#1146): the
+        # suite's scanners walk the root, and with the suite split across
+        # processes one of them read this file half-written or saw it
+        # vanish mid-scan.
         with tf.NamedTemporaryFile("w", suffix=".py", delete=False,
-                                   encoding="utf-8", dir=REPO_ROOT) as handle:
+                                   encoding="utf-8", dir=temp_dir(self)) as handle:
             handle.write('x = "platform_compat.prepare_listener"\n'
                          '# platform_compat.prepare_listener(sock)\n')
             path = handle.name
-        self.addCleanup(os.remove, path)
 
-        self.assertEqual(_calls_to(os.path.basename(path),
-                                   "platform_compat.prepare_listener"), [])
+        # An absolute path: _calls_to's lookup hands it back unchanged.
+        self.assertEqual(_calls_to(path, "platform_compat.prepare_listener"), [])
 
     def test_config_supports_a_local_override(self):
         source = open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8").read()

@@ -16,6 +16,13 @@ So this runs the suite twice: once as-is, and once in a deliberately hostile
 environment with host-provided tools hidden. A test that passes in the first
 pass and fails in the second is depending on something incidental to the machine
 it runs on.
+
+The plain pass and the counting pass run the suite in four processes at once
+through scripts/run_tests_in_parallel.py, as CI does (#1146): about two
+minutes instead of six to ten each. The coverage pass and the hidden-tooling
+pass stay in one process - the profiler has to see every call in one place,
+and the hidden pass is the one that still proves the suite passes in the
+serial order a plain `python -m unittest discover` gives.
 """
 
 import atexit
@@ -27,6 +34,7 @@ import sys
 import tempfile
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PARALLEL_RUNNER = os.path.join(REPO_ROOT, "scripts", "run_tests_in_parallel.py")
 
 # Environment variables that let the code discover optional host tooling. Blanking
 # them simulates a bare runner. Add to this list whenever a new optional
@@ -265,7 +273,8 @@ def main():
          [py, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "check_imports.py")]),
         ("compile every source file", [py, "-m", "compileall", "-q", "."]),
-        ("full suite", [py, "-m", "unittest", "discover", "-s", "tests", "-t", "."]),
+        # In four processes, the way CI runs it (#1146).
+        ("full suite", [py, PARALLEL_RUNNER]),
         # The audit's first critical: a public daemon function nothing calls has
         # no regression protection at all, and the suite reports it as covered
         # anyway. This runs the suite a second time under a profiler, which
@@ -297,7 +306,9 @@ def main():
     # a skipped test is one that ran nothing, and until this nothing parsed
     # "skipped=N" - a pass that skipped a hundred tests printed PASS.
     MIN_TESTS = 165
-    counted = capture([py, "-m", "unittest", "discover", "-v", "-s", "tests", "-t", "."])
+    # In four processes too: the runner's report has one "Ran N tests" line
+    # and one summary, with every shard's per-test lines above them.
+    counted = capture([py, PARALLEL_RUNNER, "-v"])
     output = (counted.stderr or "") + (counted.stdout or "")
     match = re.search(r"Ran (\d+) tests", output)
     total = int(match.group(1)) if match else 0
