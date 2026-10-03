@@ -22,7 +22,7 @@ import runtime
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE: bool    = False        # Print every raw line the bot sends to the server in its own window; noisy, for chasing a protocol problem
-SCRIPT_VERSION: str = "DCCore v1.13.2"
+SCRIPT_VERSION: str = "DCCore v1.14.0"
 
 # Where this bot came from. Defined once because two things say it: the CTCP
 # VERSION reply, and the header of every generated list. Before this there was
@@ -386,10 +386,17 @@ LIST_SCAN_THREADS: int = 16  # Folders listed at once while the list is rebuilt
 # limit.
 LIST_AUDIO_INFO_MINUTES: int = 5  # Minutes one rebuild may spend reading new audio files; 0 = no limit
 
-# One row per thing this bot has ever sent, {relative path or archive name ->
-# {name, kind, count}}. Feeds the Stats page's "Most downloaded" table. Not
-# bounded on purpose: a bot can only send what it shares, so the row count is
-# capped by the library itself.
+# One row per thing this bot has ever sent, keyed by its relative path or
+# archive name, with its name, kind and count. Feeds the Stats page's "Most
+# downloaded" table. Not bounded on purpose: a bot can only send what it
+# shares, so the row count is capped by the library itself. The counts live in
+# a SQLite database beside this path, with the extension replaced by .db
+# (data/download_counts.db); a path ending in .db is the database itself
+# (#1133). A download_counts.json from an older version is imported once, on
+# the first start, and then never written again: going back to an older version
+# shows the counts as they were at the upgrade. Counts made while running that
+# older version are not carried over by upgrading again - the import has
+# already run.
 DOWNLOAD_COUNTS_FILE: str = "./data/download_counts.json"
 
 # A row is about 120 bytes, so it is never rotated or trimmed.
@@ -1144,6 +1151,7 @@ feed_counts = runtime.feed_counts          # FAIL and SEARCH events since the pr
 # download counter. Bound from runtime.py for the same reason as everything
 # above it.
 recent_departures = runtime.recent_departures
+recent_departure_bases = runtime.recent_departure_bases
 # #926: who else asked which bot for its list - list_grab.py.
 list_grab_others_asked = runtime.list_grab_others_asked
 nick_aliases = runtime.nick_aliases
@@ -1405,8 +1413,9 @@ def _migrate_admin_config_into_conf_dir(repo_root=None, log=print):
             f"Move it yourself: conf/admin_config.py is where it is read from now.")
         return False
 
-    log("[MIGRATE] Moved admin_config.py into conf/ - the repository's layout "
-        "changed (#959); nothing in it changed.")
+    log("[MIGRATE] Moved admin_config.py into conf/ - the program's layout "
+        "changed (its modules are in src/, your own files in conf/); nothing "
+        "in it changed.")
     return True
 
 

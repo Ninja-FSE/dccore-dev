@@ -110,6 +110,7 @@ RUNTIME_CONTAINERS = {
     # later, unrelated test's nick could match a timestamp this test left
     # behind and get merged with it in the List Browser.
     "recent_departures": dict,
+    "recent_departure_bases": dict,
     "nick_aliases": dict,
     # #376 option B: a leftover ident or departure is a merge the next test
     # never set up.
@@ -265,6 +266,7 @@ def reset_config(**overrides):
         else:
             del canonical[:]
         setattr(config, name, canonical)
+    runtime.known_bots_pruned_at = 0.0
     for name, value in SETTINGS_DEFAULTS.items():
         setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():
@@ -683,7 +685,9 @@ class DCCoreTestCase(unittest.TestCase):
         # time a test drove a transfer all the way to completion, because
         # db.record_download() is only reached on the success path and
         # nothing had ever taken one. A module-level constant like the two
-        # above, so it is rebound here and restored in tearDown.
+        # above, so it is rebound here and restored in tearDown. Since #1133
+        # the counts live in a database derived from this path (its extension
+        # replaced by .db), so moving the path moves the database with it.
         self._real_download_counts_file = db.DOWNLOAD_COUNTS_FILE
         db.DOWNLOAD_COUNTS_FILE = os.path.join(self._fetch_history_dir,
                                                "download_counts.json")
