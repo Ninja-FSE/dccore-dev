@@ -86,7 +86,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.10.6 }
+alias dccore.ver { return 1.11 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1325,20 +1325,12 @@ alias dccore.askfont {
 
 ; Every /dccore command, and every console command worth a click, is here.
 menu @DCCore {
-  Status:dccore.send status
-  Slots:dccore.send slots
-  Queue:dccore.send queue
-  Bans:dccore.send bans
-  Uptime:dccore.send uptime
-  Version:dccore.send version
-  Check for a new version:dccore.send checkversion
-  Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
-  Console feed $iif($dccore.st(consolefeed) == on,off,on):dccore.send consolefeed $iif($dccore.st(consolefeed) == on,off,on)
-  -
-  $iif($dccore.selq,Queue of $dccore.selq):dccore.send queue $dccore.selq
-  $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
-  $iif($dccore.sels,Queue of $dccore.sels):dccore.send queue $dccore.sels
-  -
+  Info
+  .Status:dccore.send status
+  .Slots:dccore.send slots
+  .Queue:dccore.send queue
+  .Uptime:dccore.send uptime
+  .Version:dccore.send version
   Lists
   .Show the lists:dccore lists
   .Fetch the changed lists:dccore fetch
@@ -1346,12 +1338,23 @@ menu @DCCore {
   Library
   .Find duplicate filenames:dccore.send verify
   .Rebuild the list...:dccore.confirm update Rebuild the list? It walks the whole library and can take minutes.
-  .Stop the bot...:if ($input(Stop the bot? It leaves IRC and ends; start it again with start-dccore.,yq,DCCore)) { dccore.send shutdown now }
-  Admin
+  User control
+  .Bans:dccore.send bans
   .Ban...:dccore.ask ban Ban pattern (for example *!*@host.example)
   .Unban...:dccore.ask unban Pattern to remove
   .Clear a queue...:dccore.ask clearqueue Clear the queue of which nick
+  Control
+  .Check for a new version:dccore.send checkversion
+  .Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
+  .Console feed $iif($dccore.st(consolefeed) == on,off,on):dccore.send consolefeed $iif($dccore.st(consolefeed) == on,off,on)
+  .-
   .Reload the bot (rehash)...:dccore.confirm rehash Reload the bot's code and settings?
+  .Stop the bot...:if ($input(Stop the bot? It leaves IRC and ends; start it again with start-dccore.,yq,DCCore)) { dccore.send shutdown now }
+  -
+  $iif($dccore.selq,Queue of $dccore.selq):dccore.send queue $dccore.selq
+  $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
+  $iif($dccore.sels,Queue of $dccore.sels):dccore.send queue $dccore.sels
+  -
   Console command...:dccore.askraw
   -
   Connection

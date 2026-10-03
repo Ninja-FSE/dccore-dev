@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The @DCCore menu is grouped by what you do (#1112)
+
+The right-click menu had grown without a plan: Stop the bot sat under Library (#1074), Reload under Admin, Console
+command stood alone and nine queries and toggles filled the top level. `dccore.mrc` 1.11 regroups it:
+
+- **Info** (Status, Slots, Queue, Uptime, Version), **Lists**, **Library** (find duplicates, rebuild),
+  **User control** (Bans, Ban, Unban, Clear a queue) and **Control**.
+- **Control** holds the update check, the Daily update check and Console feed toggles (still reading the bot's live
+  state), and last, behind a separator, **Reload the bot (rehash)...** and **Stop the bot...**. Both still ask first.
+- The items for a selected nick, **Console command...**, Connection, Window and the rest of the old top level keep
+  their place and their commands. The Admin group is gone; its items moved to User control and Control.
+- Nothing was removed: `tests/test_the_mirc_menu_is_grouped_by_what_you_do.py` pins the old list of actions and checks
+  each is in the menu once, and that Stop and Reload are in Control only.
+- Script version 1.11 (a new menu layout is a feature). The menus in the channel and on the nicklist are unchanged.
+
 ### 📦 The transfer record on the Stats page, and forgetting a nick (#1102)
 
 The record (#1068) has been written since #1069, but nothing read it and nothing called `forget_nick()`. The Stats
