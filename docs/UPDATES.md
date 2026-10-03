@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ The list rebuild's threaded walk takes each finished folder in constant time (#1124)
+
+Performance audit 2026-10-03 P2. `update_list.walk_with_sizes()` waited with `concurrent.futures.wait()` on every
+folder still outstanding, which rescans - and locks - all of them on each completion: quadratic in the number of
+folders. 40.9 s with 16 workers on 136,800 files in 19,811 folders, against 9.5 s with one worker; eight times the
+folders took 47 times as long.
+
+- Each folder's future puts `(folder, future)` on a `queue.SimpleQueue` from its done-callback, and the caller counts
+  the folders still outstanding: 3.0 s on the same library. `list_one()`, errors reported on the caller's thread, the
+  worker count and `shutdown(cancel_futures=True)` are unchanged; a cancelled future's callback lands in a queue nobody
+  reads any more, which is harmless.
+- Tests: `tests/test_the_walk_schedules_directories_in_linear_time.py` - lock acquisitions per finished folder stay
+  constant with 300 outstanding (the old `wait()` took tens of thousands), the result matches `workers=1`, and stopping
+  early leaves no worker running.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
