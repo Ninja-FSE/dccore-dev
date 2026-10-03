@@ -130,7 +130,7 @@ There is a fourth, and it stops the dashboard rather than the daemon:
 [WEBUI] ADMIN_PASSWORD_HASH is not set; refusing to start the dashboard
 ```
 
-Run `python adminchat.py` to set one.
+Run `python src/adminchat.py` to set one.
 
 **The IRC side is separate** and reports itself separately - look for the
 `[JOIN]` line naming how many channels it asked for. A daemon that is serving
@@ -281,7 +281,7 @@ instead (copy `conf/settings.conf.sample` to `conf/settings.conf`) — no Python
 and it's what the web dashboard's Settings page writes to as well. The setup
 check in step 2 accepts either file; `admin_config.py` still owns
 `ADMIN_HOSTMASKS`/`ADMIN_PASSWORD_HASH` most naturally, since those come from
-running `python adminchat.py`, but they work in `settings.conf` too.
+running `python src/adminchat.py`, but they work in `settings.conf` too.
 
 ### 2. Check the setup
 
@@ -433,7 +433,7 @@ other.
 Generate the password hash with:
 
 ```
-python adminchat.py
+python src/adminchat.py
 ```
 
 Run that yourself. The password never needs to leave this machine.

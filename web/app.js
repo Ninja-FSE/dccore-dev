@@ -89,7 +89,7 @@
     folders: null, foldersSource: "", foldersDraft: null, foldersNote: null,
     downloads: [],
     lists: null, listsSource: "", listsDraft: null, listsNote: null,
-    onConnect: null, onConnectNote: null,
+    onConnect: null, onConnectNote: null, onConnectDraft: null,
     // The folder picker (#164 step 5). `browse` is null when the panel is
     // closed; open, it carries the row it will write back into.
     foldersBrowserEnabled: false, browse: null,
@@ -4750,14 +4750,26 @@
       "</div>" + note + "</div>";
   }
 
+  // What is typed in the box outlives a re-render until a save succeeds
+  // (#1090). The panel is rebuilt for every note - Resend's "save first",
+  // a refused save - and filling the box from the SAVED set then threw the
+  // typing away, right beside the advice to save it.
   function attachOnConnectRows() {
     var data = state.onConnect || { commands: [], delay_seconds: 2 };
     var box = el.settingsFields.querySelector(".on-connect-commands");
     var delay = el.settingsFields.querySelector(".on-connect-delay-input");
     if (!box || !delay) { return; }
 
-    box.value = (data.commands || []).join("\n");
-    delay.value = data.delay_seconds === undefined ? 2 : data.delay_seconds;
+    var draft = state.onConnectDraft;
+    box.value = draft ? draft.commands : (data.commands || []).join("\n");
+    delay.value = draft ? draft.delay
+      : (data.delay_seconds === undefined ? 2 : data.delay_seconds);
+
+    function keepDraft() {
+      state.onConnectDraft = { commands: box.value, delay: delay.value };
+    }
+    box.addEventListener("input", keepDraft);
+    delay.addEventListener("input", keepDraft);
   }
 
   function loadOnConnect() {
@@ -4787,6 +4799,7 @@
           delay_seconds: res.data.delay_seconds,
           max_delay_seconds: (state.onConnect || {}).max_delay_seconds
         };
+        state.onConnectDraft = null;
         state.onConnectNote = { ok: true, text: res.data.message || t("settings.saved") };
       } else {
         // Every fault at once, newline separated, the same way the folder and

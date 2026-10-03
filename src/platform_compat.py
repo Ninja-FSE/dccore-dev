@@ -375,7 +375,9 @@ class _ConsoleLog:
         the rename, and shifting before it meant every later line shifted the
         old files once more until all but one had fallen off the end. Refused,
         nothing has moved, and the next try waits for another max_bytes, so a
-        file held open is not retried on every line."""
+        file held open is not retried on every line. An OLD file held open
+        undoes the shifts already made (#1103): a refused rotation changes
+        nothing at all."""
         self._close_locked()
         keep = max(1, int(keep or 1))
         aside = f"{path}.rotating"
@@ -385,16 +387,31 @@ class _ConsoleLog:
             self._open_locked(path)
             self._hold_until = self._handle.tell() + max_bytes
             return
+        # The oldest is only REMOVED once every shift has worked: a shift
+        # refused partway is undone, and the shifts above it would otherwise
+        # have overwritten it - one old file lost per retry (#1103).
+        oldest = f"{path}.{keep}"
+        dropped = f"{path}.dropping"
+        moved = []
         try:
-            # Shifted down from the oldest end: os.replace() overwrites, so
-            # .keep is replaced by .keep-1 and the oldest is gone.
+            if os.path.exists(oldest):
+                os.replace(oldest, dropped)
+                moved.append((dropped, oldest))
+            # Shifted down from the oldest end, each into a free name.
             for number in range(keep - 1, 0, -1):
                 if os.path.exists(f"{path}.{number}"):
                     os.replace(f"{path}.{number}", f"{path}.{number + 1}")
+                    moved.append((f"{path}.{number + 1}", f"{path}.{number}"))
             os.replace(aside, f"{path}.1")
         except OSError:
-            # An old file held open instead: the current one goes back where
-            # it was, and .1 is never overwritten by it.
+            # An old file held open instead: every shift made is undone, newest
+            # first, and the current file goes back where it was - a refused
+            # rotation changes nothing at all.
+            for now_at, was_at in reversed(moved):
+                try:
+                    os.replace(now_at, was_at)
+                except OSError:
+                    pass
             try:
                 os.replace(aside, path)
             except OSError:
@@ -402,6 +419,11 @@ class _ConsoleLog:
             self._open_locked(path)
             self._hold_until = self._handle.tell() + max_bytes
             return
+        try:
+            if os.path.exists(dropped):
+                os.remove(dropped)
+        except OSError:
+            pass   # held open; the next rotation replaces it
         # A KEEP lowered since the last rotation leaves files past it.
         number = keep + 1
         while os.path.exists(f"{path}.{number}"):
