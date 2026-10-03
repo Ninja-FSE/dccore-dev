@@ -376,7 +376,7 @@
       if (!state.filelistsLoaded) { loadFilelists(); }
     }
     if (name === "settings" && !state.settingsLoaded) { loadSettings(); }
-    if (name === "live") { loadStats(); loadQueue(); }
+    if (name === "live") { loadLive(); loadQueue(); }
     if (name === "stats") { loadStats(); loadRecord(); }
     if (name === "tools") { loadUpdateListSchedule(); }
     // Loaded here rather than in the badge's own handler, so every way into
@@ -6031,7 +6031,7 @@
   // counters move second to second; Stats does not, and polling a view
   // nobody is looking at is the 401 storm in miniature.
   setInterval(function () {
-    if (state.active === "live") { loadStats(); }
+    if (state.active === "live") { loadLive(); }
   }, REFRESH_MS);
 
   // A rebuild started elsewhere while Tools is on screen is picked up within
@@ -6101,13 +6101,21 @@
   function renderStats(data) {
     // Kept, so a language that arrives later can redraw it (#976).
     state.lastStats = data;
-    var tr = data.transfer || {};
-    var lib = data.library || {};
+    renderTransfer(data.transfer);
+    renderLibrary(data.library || {});
 
-    // Every figure is rendered server-side by the same helpers the channel
-    // advert and the admin console use, so the page cannot disagree with the
-    // advert about how the same number reads. The raw values are in the
-    // payload too, for anything that is not this page.
+    // Once the record has answered, the tables belong to its period; this
+    // payload's all-time lists are only for a bot with the record off, and
+    // for the moment before the record has loaded.
+    if (!recordIsOn()) { renderTopDownloads(data.top); }
+    setStat(el.stFoot, data.version || "");
+  }
+
+  // The Live Transfers figures. Every one is rendered server-side by the same
+  // helpers the channel advert and the admin console use, so the page cannot
+  // disagree with the advert about how the same number reads.
+  function renderTransfer(tr) {
+    tr = tr || {};
     setStat(el.stSpeed, tr.speed_now_text || "0k/s");
     setStat(el.stRecord, tr.record_text || "0k/s");
     setStat(el.stSending, (tr.sending || 0) + " / " + (tr.slots || 0));
@@ -6118,14 +6126,6 @@
                   .replace("{count}", tr.queued_users)
               : ""));
     setStat(el.stUptime, tr.uptime_text || "0 Min");
-
-    renderLibrary(lib);
-
-    // Once the record has answered, the tables belong to its period; this
-    // payload's all-time lists are only for a bot with the record off, and
-    // for the moment before the record has loaded.
-    if (!recordIsOn()) { renderTopDownloads(data.top); }
-    setStat(el.stFoot, data.version || "");
   }
 
   // #952: the Library cards, built rather than fixed because how many there are
@@ -6187,6 +6187,17 @@
     fetchJson("/api/stats").then(function (data) {
       markConnection(true);
       renderStats(data);
+    }).catch(function () { markConnection(false); });
+  }
+
+  // What Live Transfers polls (#1123): its own figures only. The whole
+  // payload also ranked the download counts and counted the RAR list on
+  // every poll - seconds on a big bot - for tables this page does not show.
+  // state.lastStats is left alone: it is the Stats page's.
+  function loadLive() {
+    fetchJson("/api/stats?parts=transfer").then(function (data) {
+      markConnection(true);
+      renderTransfer(data.transfer);
     }).catch(function () { markConnection(false); });
   }
 
