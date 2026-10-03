@@ -644,6 +644,79 @@ def _load_download_counts_unlocked():
         return {}
 
 
+def _save_download_counts(counts):
+    """Write the counts. Caller holds _disk_lock. The ranking cached for the
+    Stats page is dropped with it (#1123), whatever the file's timestamps say:
+    two saves inside one clock tick would otherwise look like one."""
+    try:
+        _atomic_write(DOWNLOAD_COUNTS_FILE,
+                      json.dumps(counts, indent=1, sort_keys=True, ensure_ascii=False))
+    finally:
+        _ranked_counts.clear()
+
+
+# THE RANKING, ONCE PER CHANGE OF THE FILE (#1123). The Stats page asked for
+# the most-sent files and albums on every poll, and each answer parsed the
+# whole file under _disk_lock and sorted every row - about 1.5 s a call at
+# 200k rows, twice a poll, with the send threads' record_download() waiting
+# on the same lock. Now the file is read under the lock, parsed outside it,
+# ranked once, and kept until the file changes: keyed on its path (tests and
+# Settings move it), its mtime, size and identity (os.replace gives every
+# save a new one), and dropped outright by every save above. {kind: rows},
+# with None for every kind together. A !rehash reload of db starts it empty.
+_ranked_counts = {}
+
+
+def _counts_signature(path):
+    """What says the counts file is still the one ranked: its path, mtime, size
+    and identity."""
+    try:
+        st = os.stat(path)
+        return (path, st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError:
+        return (path, None, None, None)
+
+
+def _download_counts_ranked():
+    path = os.path.abspath(DOWNLOAD_COUNTS_FILE)
+    key = _counts_signature(path)
+    cached = _ranked_counts.get("entry")
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    with _disk_lock:
+        try:
+            with io.open(path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+        except OSError:
+            text = None
+    counts = {}
+    if text is not None:
+        try:
+            loaded = json.loads(text)
+            counts = loaded if isinstance(loaded, dict) else {}
+        except Exception as err:
+            print(f"[DB ERROR] Could not read the download counts, starting empty: {err}")
+    rows = []
+    for row_key, row in counts.items():
+        if not isinstance(row, dict):
+            continue
+        try:
+            count = int(row.get("count", 0))
+        except (TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        rows.append({"name": str(row.get("name") or row_key),
+                     "kind": str(row.get("kind") or "file"),
+                     "count": count})
+    rows.sort(key=lambda entry: (-entry["count"], entry["name"].lower()))
+    ranked = {None: rows}
+    for row in rows:
+        ranked.setdefault(row["kind"], []).append(row)
+    _ranked_counts["entry"] = (key, ranked)
+    return ranked
+
+
 def load_download_counts():
     """Every {key: {name, kind, count}} row from disk, or {} if there is none.
 
@@ -791,9 +864,7 @@ def _migrate_download_counts_to_labels():
                 counts[new_key] = row
 
         try:
-            _atomic_write(DOWNLOAD_COUNTS_FILE,
-                          json.dumps(counts, indent=1, sort_keys=True,
-                                     ensure_ascii=False))
+            _save_download_counts(counts)
         except Exception as err:
             print(f"[DB ERROR] Could not save the migrated download counts: {err}")
             return 0
@@ -844,8 +915,7 @@ def record_download(key, name, kind):
             row["count"] = 1
         counts[key] = row
         try:
-            _atomic_write(DOWNLOAD_COUNTS_FILE,
-                          json.dumps(counts, indent=1, sort_keys=True, ensure_ascii=False))
+            _save_download_counts(counts)
         except Exception as err:
             print(f"[DB ERROR] Could not save the download counts: {err}")
         return row["count"]
@@ -903,9 +973,7 @@ def prune_list_artifact_download_counts():
                 return 0
             for key in doomed:
                 del counts[key]
-            _atomic_write(DOWNLOAD_COUNTS_FILE,
-                          json.dumps(counts, indent=1, sort_keys=True,
-                                     ensure_ascii=False))
+            _save_download_counts(counts)
         print(f"[DB] Removed {len(doomed)} master-list row(s) from the "
               f"download counters; the list is not a download.")
         return len(doomed)
@@ -928,28 +996,13 @@ def top_downloads(limit=10, kind=None):
     reshuffles equal rows on every poll looks like it is changing when it is
     not.
     """
-    rows = []
-    for key, row in load_download_counts().items():
-        if not isinstance(row, dict):
-            continue
-        try:
-            count = int(row.get("count", 0))
-        except (TypeError, ValueError):
-            continue
-        if count <= 0:
-            continue
-        row_kind = str(row.get("kind") or "file")
-        if kind is not None and row_kind != kind:
-            continue
-        rows.append({"name": str(row.get("name") or key),
-                     "kind": row_kind,
-                     "count": count})
-    rows.sort(key=lambda entry: (-entry["count"], entry["name"].lower()))
     try:
         limit = max(0, int(limit))
     except (TypeError, ValueError):
         limit = 10
-    return rows[:limit]
+    rows = _download_counts_ranked().get(kind, [])
+    # Copies: a caller that edits a row must not edit the cached ranking.
+    return [dict(row) for row in rows[:limit]]
 
 
 def load_known_bots():
