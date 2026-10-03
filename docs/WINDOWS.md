@@ -3,7 +3,7 @@
 This covers the Windows packaging — a launcher and a setup check, in
 `scripts/windows/`, alongside their Linux counterparts in `scripts/linux/`.
 Nothing here changes how the daemon behaves; the platform differences that do
-exist live in `platform_compat.py` and are covered by CI on both operating
+exist live in `src/platform_compat.py` and are covered by CI on both operating
 systems.
 
 The daemon itself already runs on Windows. Its whole boot sequence was verified
@@ -29,7 +29,7 @@ round-tripped, DCC listener bound, WinRAR found at its install path.
 ```
   Python was not found.
 
-  DCCore can download Python 3.14.7 from python.org and install it
+  DCCore can download Python 3.14.8 from python.org and install it
   for you: about 32 MB, for your user only (no administrator prompt),
   with "Add python.exe to PATH" and "py launcher" both ticked. The
   download is checked against a fingerprint before it is run.
@@ -330,7 +330,7 @@ dashboard came up, and which of them means Flask was never installed.
 
 ## Why there is a launcher at all
 
-Every data path in `defaults.py` is relative — `./data/bans.txt`, `./lists` — so
+Every data path in `src/defaults.py` is relative — `./data/bans.txt`, `./lists` — so
 they resolve against the **working directory**, not the code. Started from
 anywhere other than the repository folder, the daemon quietly creates an empty
 `data` folder wherever it happened to start and boots with no bans, no queue and
@@ -431,7 +431,8 @@ scripts\windows\install-autostart.bat
 
 That creates a Task Scheduler entry, "DCCore", that runs `start-dccore.bat`
 when you log on - the launcher, so the working directory is right, and so the
-bot's window opens as usual (closing it still stops the bot). For your user
+bot starts the way `BOT_WINDOW` says: in its window by default (closing it
+still stops the bot), or minimised, or with no window at all. For your user
 only: no administrator, no stored password. `remove-autostart.bat` deletes
 the entry. It refuses a tree that has never been set up, since the setup
 questions need someone at the keyboard - run the launcher once first.
