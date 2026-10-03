@@ -46,6 +46,14 @@ def stop_file():
     return os.path.join(_data_dir(), STOP_FILE_NAME)
 
 
+def _held_stop_file():
+    """The stop file beside the lock THIS bot holds - not beside wherever
+    DCC_QUEUE_FILE points now: a settings save reloads it live, and the
+    watcher then looked in a folder the lock was never in (#1065 review)."""
+    held = getattr(platform_compat, "_instance_lock", {}).get("path")
+    return os.path.join(os.path.dirname(held), STOP_FILE_NAME) if held else stop_file()
+
+
 def lock_file():
     return os.path.join(_data_dir(), "dccore.lock")
 
@@ -60,7 +68,39 @@ def request_stop(reason, interrupt=None):
             sock.sendall(f"QUIT :{QUIT_MESSAGE}\r\n".encode("utf-8", errors="ignore"))
         except Exception:
             pass   # the connection is going anyway
-    (interrupt or _thread.interrupt_main)()
+    (interrupt or interrupt_main)()
+
+
+def interrupt_main():
+    """Ctrl-C, from any thread.
+
+    A real SIGINT, not _thread.interrupt_main(): that only sets a flag the main
+    thread looks at between two lines of Python, and a main thread asleep - the
+    reconnect wait, up to five minutes - did not look until it woke, so
+    `start-dccore stop` gave up after a minute (#1065 review). A real signal
+    wakes the sleep at once. interrupt_main() is still there if one cannot be
+    sent."""
+    import signal
+    try:
+        if os.name == "nt":
+            signal.raise_signal(signal.SIGINT)
+        else:
+            signal.pthread_kill(threading.main_thread().ident, signal.SIGINT)
+    except (AttributeError, OSError, ValueError):
+        _thread.interrupt_main()
+
+
+def restore_interrupt():
+    """At the program's start: Ctrl-C works however the bot was started.
+
+    A bot started in the background by a script (`nohup python3 oserve.py &`)
+    inherits SIGINT as ignored, and Python then installs no handler: every way
+    to stop it here did nothing but send QUIT, and the bot reconnected ten
+    seconds later (#1065 review). The program's own entry only - never a test
+    runner's process."""
+    import signal
+    if signal.getsignal(signal.SIGINT) is signal.SIG_IGN:
+        signal.signal(signal.SIGINT, signal.default_int_handler)
 
 
 def request_stop_soon(reason, delay=1.0):
@@ -77,14 +117,14 @@ def request_stop_soon(reason, delay=1.0):
 def clear_stale_stop_file():
     """At startup: a stop file left from before is not a request to this bot."""
     try:
-        os.remove(stop_file())
+        os.remove(_held_stop_file())
     except OSError:
         pass
 
 
 def check_stop_file(stop=request_stop):
     """One look. Returns True if a stop was asked for (and the file is gone)."""
-    path = stop_file()
+    path = _held_stop_file()
     if not os.path.exists(path):
         return False
     try:
@@ -112,11 +152,13 @@ def runtime_watcher_alive():
 
 
 def _watch():
+    # Watching on after a stop was asked for (#1065 review): if that one did
+    # not take, the next `start-dccore stop` is still read. The file is gone
+    # once read, so one request is acted on once.
     while True:
         time.sleep(POLL_SECONDS)
         try:
-            if check_stop_file():
-                return
+            check_stop_file()
         except Exception as err:
             print(f"[STOP] Could not look for the stop file: {err}")
 
@@ -137,7 +179,8 @@ def stop_from_outside(wait=WAIT_SECONDS, sleep=time.sleep, log=print):
         pid = running.pid
     else:
         platform_compat.release_instance_lock()
-        log("DCCore is not running from this folder - nothing to stop.")
+        log("DCCore is not running from this folder - nothing to stop. (If DCC_QUEUE_FILE was "
+            "moved while it runs, stop it from the dashboard or its window this once.)")
         return 0
 
     try:

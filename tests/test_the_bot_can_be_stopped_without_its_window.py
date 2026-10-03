@@ -7,6 +7,7 @@ asks through a file, data/dccore.stop, and the instance lock says when the bot
 has really gone - no kill, which on Windows would skip the shutdown.
 """
 
+import contextlib
 import io
 import os
 import shutil
@@ -96,6 +97,137 @@ class TheStopFile(Case):
         self.assertTrue(first.is_alive())
 
 
+    def test_the_watcher_goes_on_after_a_stop(self):
+        """#1065 review: it returned after the first stop, so if that one did
+        not take, no later `start-dccore stop` was ever read."""
+        looks = []
+
+        def sleep(_seconds):
+            if len(looks) == 3:
+                raise SystemExit   # out of the endless loop, for the test
+        with mock.patch.object(stopping.time, "sleep", sleep), \
+                mock.patch.object(stopping, "check_stop_file", lambda: looks.append(1) or True):
+            with self.assertRaises(SystemExit):
+                stopping._watch()
+        self.assertEqual(len(looks), 3)
+
+    def test_the_file_is_looked_for_beside_the_lock_held(self):
+        """#1065 review: a settings save reloads DCC_QUEUE_FILE live, and the
+        watcher then looked in a folder the lock was never in."""
+        held = os.path.join(self.dir, "held")
+        os.makedirs(held)
+        self.addCleanup(platform_compat._instance_lock.update, dict(platform_compat._instance_lock))
+        platform_compat._instance_lock["path"] = os.path.join(held, "dccore.lock")
+        self.set_config(DCC_QUEUE_FILE=os.path.join(self.dir, "moved", "dcc_queue.txt"))
+        with open(os.path.join(held, stopping.STOP_FILE_NAME), "w") as handle:
+            handle.write("stop\n")
+        asked = []
+        self.assertTrue(stopping.check_stop_file(stop=asked.append))
+        self.assertEqual(len(asked), 1)
+        self.assertFalse(os.path.exists(os.path.join(held, stopping.STOP_FILE_NAME)))
+
+
+# A real interrupt, in a child of its own so the signal never reaches the test
+# runner: the main thread sleeps, a thread asks it to stop after half a second.
+SLEEPER = textwrap.dedent("""
+    import signal, sys, threading, time
+    sys.path.insert(0, sys.argv[1])
+    import stopping
+    if sys.argv[2] == "ignored":
+        signal.signal(signal.SIGINT, signal.SIG_IGN)   # as a background start leaves it
+        stopping.restore_interrupt()
+    threading.Timer(0.5, stopping.interrupt_main).start()
+    begun = time.time()
+    try:
+        time.sleep(20)
+        print("slept", round(time.time() - begun, 1))
+    except KeyboardInterrupt:
+        print("interrupted", round(time.time() - begun, 1))
+""")
+
+
+class TheInterrupt(unittest.TestCase):
+    def run_child(self, mode):
+        handle, path = tempfile.mkstemp(suffix=".py")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(SLEEPER)
+            done = subprocess.run([sys.executable, path, os.path.join(support.REPO_ROOT, "src"), mode],
+                                  capture_output=True, text=True, timeout=60)
+        finally:
+            os.unlink(path)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        word, seconds = done.stdout.split()
+        return word, float(seconds)
+
+    def test_a_sleeping_main_thread_wakes_at_once(self):
+        """#1065 review: _thread.interrupt_main() only set a flag, and the
+        reconnect wait (up to five minutes) did not look at it until it woke."""
+        word, seconds = self.run_child("normal")
+        self.assertEqual(word, "interrupted")
+        self.assertLess(seconds, 5)
+
+    def test_one_started_with_ctrl_c_ignored_can_still_be_stopped(self):
+        """#1065 review: a background start inherits SIGINT ignored, and then
+        nothing but QUIT happened - the bot was back ten seconds later."""
+        word, seconds = self.run_child("ignored")
+        self.assertEqual(word, "interrupted")
+        self.assertLess(seconds, 5)
+
+
+class TheShutdown(support.DCCoreTestCase):
+    """#1065 review: a second interrupt during the shutdown, or one in the
+    reconnect wait, escaped as a traceback that skipped the flush and exited
+    non-zero - which launchd restarts."""
+
+    def setUp(self):
+        super().setUp()
+        # The real module: the test case puts a stub in sys.modules["oserve"].
+        from tests.test_startup import real_oserve
+        self.oserve = real_oserve()
+        self.flushed = []
+
+    def escaping_is_a_failure(self, call):
+        """An interrupt that escapes would end the test runner itself."""
+        try:
+            call()
+        except KeyboardInterrupt:
+            self.fail("a KeyboardInterrupt escaped the shutdown")
+
+    def test_asked_twice_it_still_flushes_what_it_can_and_exits_0(self):
+        import irc
+
+        def flush(force=False):
+            self.flushed.append(force)
+            raise KeyboardInterrupt   # the second Ctrl-C, mid-flush
+        with mock.patch.object(irc, "_flush_known_bots", flush), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as stopped:
+                self.escaping_is_a_failure(self.oserve._shut_down)
+        self.assertEqual(stopped.exception.code, 0)
+        self.assertEqual(self.flushed, [True])
+
+    def test_a_stop_in_the_reconnect_wait_shuts_down_too(self):
+        import announce
+        import irc
+
+        def sleep(_seconds):
+            raise KeyboardInterrupt
+        with mock.patch.object(irc, "irc_loop", lambda: None), \
+                mock.patch.object(irc, "_flush_known_bots", lambda force=False: self.flushed.append(force)), \
+                mock.patch.object(self.oserve.time, "sleep", sleep), \
+                mock.patch.object(announce, "is_ready", announce.is_ready), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as stopped:
+                self.escaping_is_a_failure(self.oserve.run_forever)
+        self.assertEqual(stopped.exception.code, 0)
+        self.assertEqual(self.flushed, [True])
+
+    def test_ctrl_c_works_however_the_program_was_started(self):
+        entry = read("oserve.py").rsplit('\nif __name__ == "__main__":', 1)[1]
+        self.assertLess(entry.index("    stopping.restore_interrupt()"), entry.index("    run_forever()"))
+
+
 # A stand-in for the bot: holds the instance lock the way oserve.startup()
 # does, and lets it go when the stop file appears - or, told to, never does.
 CHILD = textwrap.dedent("""
@@ -134,7 +266,8 @@ class TheStopCommand(Case):
     def test_not_running_says_so_and_asks_nothing(self):
         said = []
         self.assertEqual(stopping.stop_from_outside(log=said.append), 0)
-        self.assertEqual(said, ["DCCore is not running from this folder - nothing to stop."])
+        self.assertEqual(len(said), 1)
+        self.assertTrue(said[0].startswith("DCCore is not running from this folder - nothing to stop."), said)
         self.assertFalse(os.path.exists(stopping.stop_file()))
         # Let go again: a stop command that kept the lock would itself be the
         # "running bot" the next start is refused for.
