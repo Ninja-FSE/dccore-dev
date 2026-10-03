@@ -1742,7 +1742,8 @@ def check_queue_and_send(irc_sock, completed_user):
                         process = subprocess.run(cmd, capture_output=True,
                                                  text=True, encoding="utf-8",
                                                  errors="replace",
-                                                 timeout=rar_timeout)
+                                                 timeout=rar_timeout,
+                                                 **platform_compat.no_console_window())
                     except subprocess.TimeoutExpired:
                         # rar was killed mid-write: whatever it wrote sits at
                         # the target path, and nothing else ever names that

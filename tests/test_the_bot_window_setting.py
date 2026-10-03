@@ -22,6 +22,7 @@ from tests import support  # noqa: F401  (path setup)
 
 REPO_ROOT = support.REPO_ROOT
 WINDOW_MODE = os.path.join(REPO_ROOT, "scripts", "windows", "window-mode.py")
+BS = chr(92)
 
 
 def read(path):
@@ -151,13 +152,27 @@ class TheLauncher(unittest.TestCase):
             body = self.bat.split("\n" + label + "\n", 1)[1]
             self.assertTrue(body.startswith("call :already_running && exit /b 4\n"), label)
 
+    def hidden(self):
+        return self.bat.split("\n:go_hidden\n", 1)[1].split("\n:started_elsewhere\n", 1)[0]
+
     def test_hidden_is_pythonw_and_minimised_is_start_min(self):
-        hidden = self.bat.split("\n:go_hidden\n", 1)[1].split("\n:started_elsewhere\n", 1)[0]
-        self.assertIn('set "PYW=%PY:python.exe=pythonw.exe%"', hidden)
-        self.assertIn('if /i "%PY%"=="py -3" set "PYW=pyw -3"', hidden)
-        self.assertIn('start "DCCore" %PYW% oserve.py', hidden)
+        self.assertIn('start "DCCore" %PYW% oserve.py', self.hidden())
         minimised = self.bat.split("\n:go_minimised\n", 1)[1].split("\n:go_hidden\n", 1)[0]
         self.assertIn('start "DCCore" /min %PY% oserve.py', minimised)
+
+    def test_every_python_chosen_comes_with_its_windowless_twin(self):
+        """#1065 review: PYW was worked out in :go_hidden by comparing %PY% in
+        quotes, and a full path keeps its own quotes, so with a space in it
+        the comparison was a syntax error and hidden mode never started."""
+        chooses = [line.strip() for line in self.bat.split("\n")
+                   if 'set "PY=' in line and line.strip() != 'set "PY="']
+        self.assertEqual(len(chooses), 4, chooses)
+        for line in chooses:
+            with self.subTest(line=line):
+                self.assertIn('set "PYW=', line)
+        self.assertIn('set "PY="\nset "PYW="\n', self.bat)
+        self.assertNotIn('%PY%"==', self.hidden())
+        self.assertNotIn("%PY:", self.hidden())
 
     def test_nothing_waits_for_a_key_after_it_started_elsewhere(self):
         """The logon task has nobody at the keyboard."""
@@ -165,6 +180,83 @@ class TheLauncher(unittest.TestCase):
         self.assertNotIn("pause", tail)
         self.assertIn("ping -n 8 127.0.0.1 >nul", tail)
 
+
+
+@unittest.skipUnless(os.name == "nt" and shutil.which("cmd"), "cmd.exe runs only on Windows")
+class HiddenModeUnderCmd(unittest.TestCase):
+    """The hidden block run by cmd.exe itself, with %PY% and %PYW% as the
+    full-path fallback sets them: quoted, with a space. Before the fix cmd
+    stopped there with a syntax error and the bot never started."""
+
+    def test_a_path_with_a_space_reaches_pythonw(self):
+        bat = read("scripts/windows/start-dccore.bat").replace("\r\n", "\n")
+        hidden = bat.split("\n:go_hidden\n", 1)[1].split("\n:started_elsewhere\n", 1)[0]
+        hidden = hidden.replace("call :already_running && exit /b 4", "rem the probe is not under test")
+        hidden = hidden.replace('start "DCCore" %PYW% oserve.py', "echo STARTS [%PYW%]")
+        python = "C:" + BS + "Program Files" + BS + "Python314" + BS
+        script = "\r\n".join([
+            "@echo off",
+            'set "PY="' + python + 'python.exe""',
+            'set "PYW="' + python + 'pythonw.exe""',
+            hidden.replace("\n", "\r\n"),
+            "exit /b 0",
+            ""])
+        handle, path = tempfile.mkstemp(suffix=".bat")
+        try:
+            with os.fdopen(handle, "w", encoding="ascii", newline="") as out:
+                out.write(script)
+            done = subprocess.run(["cmd", "/c", path], capture_output=True, timeout=60)
+        finally:
+            os.unlink(path)
+        text = done.stdout.decode("ascii", "replace") + done.stderr.decode("ascii", "replace")
+        self.assertEqual(done.returncode, 0, text)
+        self.assertIn('STARTS ["' + python + 'pythonw.exe"]', text)
+
+
+
+class ChildrenGetNoWindowOfTheirOwn(unittest.TestCase):
+    """#1065 review: with no window (pythonw) there is no console to share, so
+    Windows gave each folder pack's rar, each list rebuild and its rar a
+    console window of their own - and closing one killed the job."""
+
+    def test_the_flag_on_windows_and_nothing_elsewhere(self):
+        import subprocess
+        from unittest import mock
+        import platform_compat
+        with mock.patch.object(platform_compat.os, "name", "posix"):
+            self.assertEqual(platform_compat.no_console_window(), {})
+        if os.name == "nt":
+            self.assertEqual(platform_compat.no_console_window(),
+                             {"creationflags": subprocess.CREATE_NO_WINDOW})
+
+    def test_every_console_child_the_daemon_starts_asks_for_it(self):
+        sites = {
+            "src/dcc.py": "process = subprocess.run(cmd, capture_output=True,",
+            "src/commands.py": "process = subprocess.Popen(argv, stdout=subprocess.PIPE,",
+            "update_list.py": "result = subprocess.run(cmd, capture_output=True, text=True,",
+        }
+        for path, call in sites.items():
+            with self.subTest(path=path):
+                code = read(path)
+                self.assertEqual(code.count(call), 1)
+                statement = code.split(call, 1)[1].split(")\n", 1)[0]
+                self.assertIn("**platform_compat.no_console_window()", statement)
+
+    def test_no_other_child_is_started(self):
+        """A new subprocess call joins the list above, or this fails. Read as
+        code (ast), not text: commands.py names subprocess.run() in prose."""
+        import ast
+        found = []
+        paths = ["oserve.py", "update_list.py"] + ["src/" + name for name in
+                                                   sorted(os.listdir(os.path.join(REPO_ROOT, "src")))
+                                                   if name.endswith(".py")]
+        for path in paths:
+            for node in ast.walk(ast.parse(read(path))):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess"
+                        and node.func.attr in ("run", "Popen", "call", "check_call", "check_output")):
+                    found.append(path)
+        self.assertEqual(sorted(found), ["src/commands.py", "src/dcc.py", "update_list.py"])
 
 if __name__ == "__main__":
     unittest.main()
