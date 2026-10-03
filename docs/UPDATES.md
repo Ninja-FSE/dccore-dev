@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ A netjoin does not sort the chat rate table per JOIN or log every departure (#1145)
+
+Performance audit 2026-10-03 P23. Two costs on JOIN, PART and QUIT in `serverschat.py`:
+
+- `_prune()` trimmed the chat rate table back to exactly `_TRACK_MAX` (200), so during a netjoin - hundreds of
+  strangers inside one window - every following JOIN filtered and sorted all 200 entries under `chat_lock` to drop one:
+  132.6 us a JOIN. It now trims to `_TRACK_KEEP`, three quarters of the cap, so the next 50 JOINs do neither: 6.5 us.
+  Forgetting a nick's count early only ever lets it through; the all-senders cap and the JOIN-WHO cap still hold.
+- `note_gone()` printed "was not a known DCCore Chat peer - nothing to remove" for every PART and QUIT of an ordinary
+  user. The #982 follow-up added it for live testing, but nearly every departure is not a peer, so it became most of the
+  console log: at a few departures a second it rotated half a day's diagnostics away. It now prints only under
+  `DEBUG_MODE`; a known peer's departure is said as before.
+- Tests: `tests/test_a_netjoin_does_not_sort_per_join_or_log_every_departure.py`.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
