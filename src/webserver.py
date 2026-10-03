@@ -299,12 +299,28 @@ def count_rar_album_folders(name=None):
     if not names:
         return None
 
+    path = os.path.abspath(os.path.join(directory, names[-1]))
     try:
-        with io.open(os.path.join(directory, names[-1]), encoding="utf-8",
-                     errors="ignore") as handle:
-            return sum(1 for line in handle if line.startswith("!"))
+        st = os.stat(path)
+        key = (st.st_mtime_ns, st.st_size, st.st_ino)
+        cached = _rar_counts.get(path)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        with io.open(path, encoding="utf-8", errors="ignore") as handle:
+            count = sum(1 for line in handle if line.startswith("!"))
     except OSError:
         return None
+    _rar_counts[path] = (key, count)
+    return count
+
+
+# The RAR list's row count by its path (#1123): it changes only when the list is
+# rebuilt, and the Stats page counted every row of it on every poll - a quarter
+# of a second at 420k rows, per served list. Keyed per path, one entry each, so
+# a bot serving several lists keeps them all rather than recounting whichever
+# was not asked last. A rebuild publishes with os.replace, which changes the
+# key. webserver.py is not reloaded by !rehash.
+_rar_counts = {}
 
 
 def _format_library_size(raw_bytes):
@@ -895,8 +911,14 @@ def record_csv_lines(since=None):
         yield line([stamp] + [_csv_cell(value) for value in row[1:]])
 
 
-def build_stats_payload():
-    """Everything the Stats view shows, in one request.
+STATS_PARTS = ("transfer", "sent", "library", "top")
+
+
+def build_stats_payload(parts=None):
+    """Everything the Stats view shows, in one request - or, with `parts`,
+    only those (#1123): Live Transfers polls this every few seconds and shows
+    the transfer figures alone, while "top" and "library" read and rank whole
+    files. None is every part.
 
     Every figure comes twice: the raw number, and the daemon's own rendering of
     it. The raw one is for anything that is not this page - a script, a future
@@ -923,6 +945,7 @@ def build_stats_payload():
     import db
     import stats_mgr
 
+    wanted = set(STATS_PARTS if parts is None else parts)
     active = list(getattr(config, "active_transfers", []))
     queue = dict(getattr(config, "dcc_queue", {}))
 
@@ -949,6 +972,8 @@ def build_stats_payload():
     sent = {"total_files": 0, "total_bytes": 0, "today_files": 0,
             "today_bytes": 0, "yesterday_files": 0, "yesterday_bytes": 0}
     try:
+        if "sent" not in wanted:
+            raise LookupError("not asked for")
         row = db.load_advanced_stats_rolled()
         names = ("total_files", "total_bytes", "yesterday_files",
                  "yesterday_bytes", "today_files", "today_bytes")
@@ -962,6 +987,8 @@ def build_stats_payload():
 
     # Every served list, not the primary alone (#952) - see the function.
     try:
+        if "library" not in wanted:
+            raise LookupError("not asked for")
         library = build_library_payload()
     except Exception:
         library = {"files": 0, "size": None, "raw_bytes": 0, "list_date": None,
@@ -981,13 +1008,14 @@ def build_stats_payload():
     # deciding they never happened would be the wrong kind of tidy.
     top = {"files": [], "albums": [],
            "albums_enabled": bool(getattr(config, "RAR_ENABLED", True))}
-    try:
-        top["files"] = db.top_downloads(limit=10, kind="file")
-        top["albums"] = db.top_downloads(limit=10, kind="album")
-    except Exception:
-        pass
+    if "top" in wanted:
+        try:
+            top["files"] = db.top_downloads(limit=10, kind="file")
+            top["albums"] = db.top_downloads(limit=10, kind="album")
+        except Exception:
+            pass
 
-    return {
+    payload = {
         "top": top,
         "transfer": {
             "speed_now": speed_now,
@@ -1005,6 +1033,10 @@ def build_stats_payload():
         "library": library,
         "version": str(getattr(config, "SCRIPT_VERSION", "")),
     }
+    for part in STATS_PARTS:
+        if part not in wanted:
+            del payload[part]
+    return payload
 
 
 def build_queue_payload(user=None):
@@ -4834,7 +4866,16 @@ if HAVE_FLASK:
 
         @app.route("/api/stats")
         def api_stats():
-            return jsonify(build_stats_payload())
+            # ?parts=transfer is what Live Transfers polls (#1123): the
+            # figures it shows, not the files only Stats reads.
+            asked = request.args.get("parts")
+            if asked is None:
+                return jsonify(build_stats_payload())
+            parts = [part for part in asked.split(",") if part]
+            unknown = sorted(set(parts) - set(STATS_PARTS))
+            if unknown or not parts:
+                return jsonify({"error": "parts: one or more of " + ", ".join(STATS_PARTS)}), 400
+            return jsonify(build_stats_payload(parts))
 
         @app.route("/api/stats/record")
         def api_stats_record():
