@@ -653,7 +653,10 @@ def _read_ktdata_text(text):
     text = str(text or "")
     if len(text) > MAX_KTDATA_CHARS:
         return None, "That file is far larger than a KTData.txt; nothing was read."
-    return omenserve_import.read_ktdata(text, max_files=MAX_IMPORT_FILES, max_bytes=MAX_IMPORT_BYTES), None
+    # Not MAX_IMPORT_FILES (2**63-1): a nick's figure is summed with its
+    # recorded transfers in SQL, and at that size the sum overflows (#1064
+    # review). read_ktdata()'s own limits, which leave that room.
+    return omenserve_import.read_ktdata(text, max_bytes=MAX_IMPORT_BYTES), None
 
 
 def build_ktdata_preview(text):

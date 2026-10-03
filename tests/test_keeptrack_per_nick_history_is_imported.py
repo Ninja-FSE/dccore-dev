@@ -59,6 +59,21 @@ class TheFile(unittest.TestCase):
         parsed = omenserve_import.read_ktdata(line("Sent", "h", "Nick", -1, 5), max_files=10, max_bytes=10)
         self.assertEqual(parsed["skipped"], {"a count out of range": 1})
 
+    def test_a_nick_whose_lines_sum_past_the_limit_is_skipped(self):
+        """#1064 review: each line was checked, their sum per nick was not."""
+        text = "\n".join([line("Sent", "h", "Bob", 6, 1), line("Sent", "h", "bob", 6, 1),
+                          line("Sent", "h", "Amy", 3, 1)])
+        parsed = omenserve_import.read_ktdata(text, max_files=10, max_bytes=10)
+        self.assertEqual(parsed["rows"], [("sent", "amy", 3, 1)])
+        self.assertEqual(parsed["skipped"], {"a count out of range": 1})
+
+    def test_the_limits_leave_room_for_the_records_own_rows(self):
+        """A nick at the limit, summed in SQL with its recorded sends, must not
+        overflow: that emptied the all-time ranking (#1064 review)."""
+        parsed = omenserve_import.read_ktdata(line("Sent", "h", "Bob", 2 ** 63 - 1, 1))
+        self.assertEqual(parsed["rows"], [])
+        self.assertLessEqual(1 << 40, 2 ** 63 // 1000)   # a thousand such nicks still fit one SUM
+
 
 class Case(support.DCCoreTestCase):
     def setUp(self):
@@ -109,6 +124,13 @@ class TheImport(Case):
 
         self.assertEqual(self.raw().count(b"droppedonreimport"), 0)
         self.assertIn(b"regular1499", self.raw())
+
+    def test_a_nick_at_the_limit_still_ranks_beside_its_own_sends(self):
+        biggest = (1 << 40, 1 << 50)
+        status, result = webserver.apply_ktdata_import(line("Sent", "h", "Bob", *biggest))
+        self.assertEqual(status, 200, result)
+        transfer_log.record_sent("file", "k", "A.flac", 10, 10, 1.0, 10, 1.0, nick="Bob")
+        self.assertEqual(transfer_log.top_nicks(), [("bob", (1 << 40) + 1, (1 << 50) + 10)])
 
     def test_the_preview_says_what_would_come_across_and_writes_nothing(self):
         status, preview = webserver.build_ktdata_preview(KTDATA)

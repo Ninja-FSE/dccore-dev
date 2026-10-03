@@ -10,7 +10,10 @@ KeepTrack's `KTData.txt` keeps one line per nick and direction: `Sent|Received`,
 `omenserve_import.read_ktdata()` reads it into one row per lower-cased nick and direction - summed, since KeepTrack
 matched a line by nick *or* host and so could give one nick several - and counts every line it cannot use by why (not
 five fields, neither Sent nor Received, not a nick, not a number, out of range). **The host column is read past and
-never kept**: the record stores nicks, not hosts.
+never kept**: the record stores nicks, not hosts. The limits - a trillion files, a petabyte - hold for each line and
+for each nick's sum (found in review: two lines for one nick summed past what SQLite stores and failed the import,
+and one at 2**63-1 overflowed every later SUM over that nick, emptying the all-time ranking); they leave room for
+the record's own rows.
 
 - `transfer_log.import_nicks()` writes the rows into #1062's `imported` table, replacing an earlier KeepTrack per-nick
   import, with KeepTrack's start date when the totals import brought one. The rows it replaces name nicks, so the
