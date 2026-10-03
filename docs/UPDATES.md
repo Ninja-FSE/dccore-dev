@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ The list parser skips two per-row costs no row needs (#1136)
+
+Performance audit 2026-10-03 P14, on top of #1126, which already made the third change (the rule check). Two more
+per-row costs in the parser every list read goes through, fetched lists included:
+
+- `strip_info_suffix()` split each row on `\s*::INFO::\s*`, whose leading `\s*` made `re.split()` retry at every position
+  of the row. It now searches for the bare marker (still case-insensitive) and slices around it; both halves were
+  already stripped, and `str.strip()` removes exactly the characters `\s` matches, so the split lands in the same place.
+- `entries_to_filelist_rows()` ran `rar_folder_of()`'s regex on every row; only a title starting with `!` can match its
+  anchored `^!rar`, so nothing else asks.
+- The skeptic measured the whole parse of a 378k-row list at 6.1 s -> 4.3 s with all three changes, rows identical.
+- Tests: `tests/test_the_list_parser_skips_work_no_row_needs.py` - over every code point, that `\s` and `str.strip()`
+  agree on whitespace; the old functions against the new on marker rows, `!rar` titles and a whole adversarial list.
+
 ### ⚡ The list scan checks rules and words without per-line objects (#1126)
 
 Performance audit 2026-10-03 P4. `list.find_matching_entries()` - every search of the bot's own list, and the parse of
