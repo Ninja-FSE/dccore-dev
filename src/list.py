@@ -696,7 +696,28 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
 
     entries = []
     total_matches = 0
+    for line_strip, folder in _matching_lines(search_words, list_path):
+        total_matches += 1
+        if limit is None or len(entries) < limit:
+            filename, size = _split_entry_line(line_strip)
+            entries.append({
+                "line": line_strip,
+                "folder": folder,
+                "filename": filename,
+                "size": size,
+            })
+    return entries, total_matches
 
+
+def _matching_lines(search_words, list_path):
+    """Every "!" line of one list that matches, as (line, folder heading).
+
+    The scan itself, one row at a time (#1134): find_matching_entries()
+    collects it into a capped list, and iter_filelist_rows() hands it on
+    without collecting anything, so installing a fetched list no longer
+    holds every row of it in memory twice. One scan, so the two cannot
+    drift apart. Nothing for a missing file.
+    """
     # A tuple in the list is a quoted phrase (#774), compiled once per list
     # rather than once per line; a string is a word, matched as it always was.
     plain_words = [item for item in search_words if not isinstance(item, tuple)]
@@ -705,7 +726,7 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
 
     current_list_path = list_path
     if not current_list_path or not os.path.exists(current_list_path):
-        return entries, total_matches
+        return
 
     current_folder = None
     # "none" -> saw the opening rule line, now expecting the folder line ("open")
@@ -780,17 +801,7 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
             if not matched:
                 continue
 
-            total_matches += 1
-            if limit is None or len(entries) < limit:
-                filename, size = _split_entry_line(line_strip)
-                entries.append({
-                    "line": line_strip,
-                    "folder": current_folder,
-                    "filename": filename,
-                    "size": size,
-                })
-
-    return entries, total_matches
+            yield line_strip, current_folder
 
 
 # Every folder heading in the master list starts with this, whatever the
@@ -1084,8 +1095,112 @@ def entries_to_filelist_rows(entries, source):
     bot's nick) so the two surfaces can never drift in what a "row" looks
     like on the dashboard.
     """
+    return list(_filelist_rows(entries, source))
+
+
+def iter_filelist_rows(list_path, source):
+    """entries_to_filelist_rows() over the whole of one list, a row at a time.
+
+    For a caller that only counts the rows and writes them to the search
+    index (#1134): installing a fetched list, an extra list in its archive,
+    a backfill. find_matching_entries() with no limit built a dict per row,
+    raw line included, and entries_to_filelist_rows() a second, and both
+    lists stayed alive for the whole write - about 412 MB at 378k rows,
+    against 143 MB streamed. Same scan, same split, same dedup: only the
+    collecting is gone. Wrap it in CountedRows to know how many there were.
+    """
+    def entries():
+        for line_strip, folder in _matching_lines([], list_path):
+            filename, size = _split_entry_line(line_strip)
+            yield {"folder": folder, "filename": filename, "size": size}
+
+    return _filelist_rows(entries(), source)
+
+
+class CountedRows(object):
+    """Rows for list_index.index_bot_list() that count themselves as they pass.
+
+    One pass only, like the generator inside it. total() is the number of
+    rows in the whole list, not the number the index happened to take: it
+    drains whatever is left first. That matters because index_bot_list()
+    returns 0 WITHOUT iterating when the index is unavailable, and stops
+    part-way on an error, and a count of what it consumed would then be 0 or
+    partial - and list_fetch would store that as the list's size, or throw
+    away a good extra list as having "no entries" (#1134).
+
+    An error from the list itself is kept and raised again by total(), so a
+    list that cannot be read fails at the count as it did when it was parsed
+    up front - and not as a short count.
+
+    No __len__, on purpose: list() and other consumers ask an object with
+    one for its length before iterating, and here that would drain every
+    row before the first was handed over. bool() peeks at one row and keeps
+    it for the next pass.
+    """
+
+    def __init__(self, rows):
+        self._rows = iter(rows)
+        self._peeked = []
+        self._count = 0
+        self._done = False
+        self.error = None
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._peeked:
+            self._count += 1
+            return self._peeked.pop()
+        if self._done:
+            raise StopIteration
+        try:
+            row = next(self._rows)
+        except StopIteration:
+            self._done = True
+            raise
+        except Exception as err:
+            self._done = True
+            self.error = err
+            raise
+        self._count += 1
+        return row
+
+    def any_rows(self):
+        """True if there is at least one row, without consuming it."""
+        if self._peeked:
+            return True
+        if self._done:
+            return False
+        try:
+            self._peeked.append(next(self._rows))
+        except StopIteration:
+            self._done = True
+            return False
+        except Exception as err:
+            self._done = True
+            self.error = err
+            raise
+        return True
+
+    __bool__ = any_rows
+
+    def total(self):
+        """How many rows the list has, draining any not yet consumed."""
+        if not self._done or self._peeked:
+            try:
+                for _row in self:
+                    pass
+            except Exception:
+                pass
+        if self.error is not None:
+            raise self.error
+        return self._count
+
+
+def _filelist_rows(entries, source):
+    """The rows entries_to_filelist_rows() returns, one at a time."""
     seen = set()
-    rows = []
     for entry in entries:
         filename = entry.get("filename", "?")
         size = entry.get("size", "")
@@ -1104,7 +1219,7 @@ def entries_to_filelist_rows(entries, source):
             continue
         seen.add(key)
         ext = os.path.splitext(filename)[1].lstrip(".").upper()
-        rows.append({
+        yield {
             "title": filename,
             "size": size,
             "format": ext,
@@ -1145,8 +1260,7 @@ def entries_to_filelist_rows(entries, source):
             # webserver.mark_rows_with_fetch_state() fills it in for the two
             # payloads where the question means something.
             "mark": "",
-        })
-    return rows
+        }
 
 
 def group_rows_by_folder(rows):
