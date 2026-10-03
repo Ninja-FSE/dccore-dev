@@ -26,6 +26,7 @@ run in the background, cannot offer. Three more, all through the new `src/stoppi
 
 Tests: `tests/test_the_bot_can_be_stopped_without_its_window.py`, including the command against a child process
 holding the lock as the bot does - one that stops when asked, one that does not.
+
 ### 🐛 A console-log rotation refused partway changes nothing (#1103)
 
 Found in the re-review of #1073. The current file was already moved aside first, but if a shift of the OLD files was
