@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ The day's statistics rollover is checked once a day, not once a message (#1132)
+
+Performance audit 2026-10-03 P10. Every channel line reached `db.check_and_rotate_day()`, which takes
+`runtime.disk_lock` and reads `stats.txt` just to compare a date. `disk_lock` is the lock behind every `db.py` write, so
+a slow `record_download()` holding it stalled the IRC read thread on the next line of plain chatter: 747 ms with a
+100k-row `download_counts.json`.
+
+- `irc._day_rotated_for` holds the local date the last successful rollover ran for; the rest of that day's lines return
+  before the lock (196 us a line before, 1.4 us after), and the first line after local midnight checks again. The date
+  is read BEFORE the rollover runs, so a check that crosses midnight is recorded for the old day and the new day still
+  rolls over. A failure never sets it, so #592's single report and 60 s retry are unchanged. Kept across a `!rehash`
+  reload like `_day_rotation_failed_at`.
+- As the issue said: an unreadable `stats.txt` in the middle of a day is no longer reported from the read loop;
+  transfers still report it, and they run their own rollover under the lock as before.
+- Tests: `tests/test_the_day_rollover_is_checked_once_a_day_not_once_a_message.py`;
+  `test_a_failed_midnight_rotation_does_not_stop_every_command.test_recovery_clears_the_failure` now pins one check for
+  the rest of that day.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
