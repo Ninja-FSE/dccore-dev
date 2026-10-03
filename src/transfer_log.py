@@ -341,9 +341,10 @@ def import_totals(source, direction, files, size, since=None):
         with runtime.transfer_log_lock:
             conn = _connect(path, WRITE_TIMEOUT, repair=True)
             try:
-                # The rows replaced are wiped, not just unlinked: the same
-                # rule as forgetting.
-                conn.execute("PRAGMA secure_delete = ON")
+                # No rebuild (_rebuild(), #1082) here: these rows are the
+                # bot's own totals and name no nick, so nothing a deleted
+                # copy of one could leave in the file needs wiping. Every
+                # connection zeroes what it frees anyway (_open()).
                 with conn:
                     conn.execute("DELETE FROM imported WHERE source = ? AND direction = ? AND nick IS NULL",
                                  (source, direction))
@@ -393,7 +394,10 @@ def nick_summary(nick, since=None):
     return figures
 
 
-def _delete(sql, args=()):
+def _delete(*statements):
+    """Run each (sql, args) delete in one transaction, then rebuild the file
+    once. One forget takes rows from more than one table (#1064), and a
+    rebuild per table rewrote the whole file twice."""
     path = _path()
     if not path or not os.path.exists(path):
         return 0
@@ -401,7 +405,7 @@ def _delete(sql, args=()):
         conn = _connect(path, READ_TIMEOUT, repair=True)
         try:
             with conn:
-                removed = conn.execute(sql, args).rowcount
+                removed = sum(conn.execute(sql, args).rowcount for sql, args in statements)
             # The delete zeroes the cells it frees, but not the key copies in
             # an index's interior pages, nor bytes that writes made before
             # secure_delete was set left in the free space of live pages. A
@@ -452,10 +456,10 @@ def forget_nick(nick):
     if nick is None:
         return 0
     # Its imported figures too (#1064): forgetting a nick forgets all of it.
-    return (_delete("DELETE FROM transfers WHERE nick = ?", (nick,))
-            + _delete("DELETE FROM imported WHERE nick = ?", (nick,)))
+    return _delete(("DELETE FROM transfers WHERE nick = ?", (nick,)),
+                   ("DELETE FROM imported WHERE nick = ?", (nick,)))
 
 
 def forget_all():
     """Empty the record, imported figures included. Returns how many rows were removed."""
-    return _delete("DELETE FROM transfers") + _delete("DELETE FROM imported")
+    return _delete(("DELETE FROM transfers", ()), ("DELETE FROM imported", ()))

@@ -19,8 +19,10 @@ keeps the new lines with no JavaScript change.
   in `configure.py` asks the same. The chosen totals land in `stats.txt` as before.
 - **Received: into the transfer record.** `transfer_log` gains an `imported` table (source, direction, nick - NULL for
   the bot's own totals, a nick for #1064 - files, bytes, since) and `import_totals()`, which replaces a source's rows
-  under `secure_delete` and empties the WAL. `summary()` adds the imported totals to every all-time figure and leaves
-  them out of a period; `forget_all()` and `forget_nick()` clear them too. `apply_stats_import()` writes
+  and empties the WAL. They name no nick, so it does not rebuild the file the way forgetting does since #1099.
+  `summary()` adds the imported totals to every all-time figure and leaves them out of a period; `forget_all()` and
+  `forget_nick()` clear them too, in the same transaction as the record's own rows, so a forget rebuilds the file once
+  (`_delete()` takes several statements). `apply_stats_import()` writes
   `received_files`/`received_bytes`/`received_since` there; `current_importable_stats()` shows an earlier import's.
   With the record off (`TRANSFER_LOG_FILE` empty) the preview leaves them out and says why.
 - **What the preview says:** KeepTrack's start date (`kt_start_date()`, English month names whatever the locale, as

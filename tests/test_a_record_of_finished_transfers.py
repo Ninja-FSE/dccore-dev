@@ -275,10 +275,11 @@ class ForgettingReallyRemoves(Case):
             transfer_log.forget_all()
         deletes = [i for i, sql in enumerate(statements) if sql.startswith("DELETE")]
         pragmas = [i for i, sql in enumerate(statements) if sql == "PRAGMA secure_delete = ON"]
-        # Two per forget since #1062: the record's rows and the imported ones.
+        # Two deletes per forget since #1062, the record's rows and the imported
+        # ones, in one transaction on one connection: its pragma comes before both.
         self.assertEqual(len(deletes), 4)
-        self.assertEqual(len(pragmas), 4)
-        self.assertTrue(all(p < d for p, d in zip(pragmas, deletes)))
+        self.assertEqual(len(pragmas), 2)
+        self.assertTrue(pragmas[0] < deletes[0] < deletes[1] < pragmas[1] < deletes[2] < deletes[3])
 
     def test_forgetting_leaves_nothing_in_the_log_beside_the_file_while_the_bot_runs(self):
         """A connection held open for the whole run keeps the WAL from being
@@ -375,7 +376,9 @@ class ForgettingReallyRemoves(Case):
                                lambda path, **kw: real(path, factory=Recording, **kw)):
             transfer_log.forget_nick("UniqueNickOne")
         order = [sql for sql in statements if sql.startswith(("DELETE", "VACUUM", "PRAGMA wal_checkpoint"))]
-        self.assertEqual(order, ["DELETE FROM transfers WHERE nick = ?", "VACUUM", "PRAGMA wal_checkpoint(TRUNCATE)"])
+        # Its imported figures go in the same transaction (#1064), and the file is rebuilt once.
+        self.assertEqual(order, ["DELETE FROM transfers WHERE nick = ?", "DELETE FROM imported WHERE nick = ?",
+                                 "VACUUM", "PRAGMA wal_checkpoint(TRUNCATE)"])
 
     def test_every_connection_zeroes_what_it_frees(self):
         statements = []
