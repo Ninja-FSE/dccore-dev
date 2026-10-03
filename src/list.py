@@ -713,7 +713,12 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
             if not line_strip:
                 continue
 
-            is_rule = set(line_strip) == {"="}
+            # "Every character is =", asked without building a set of the
+            # line's characters (#1126). line_strip is not empty here, so
+            # stripping the "=" away leaves nothing exactly when that is all
+            # it held. The set cost about ten times as much and ran on every
+            # line of every list: most of the scan's time at two million rows.
+            is_rule = not line_strip.strip("=")
             if state == "none":
                 if is_rule:
                     state = "open"
@@ -754,9 +759,20 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
                 continue
 
             line_lower = line_strip.lower()
-            if plain_words and not all(word in line_lower for word in plain_words):
-                continue
-            if phrase_patterns and not all(pattern.search(line_lower) for pattern in phrase_patterns):
+            # Plain loops, not all() over a generator (#1126): the generator
+            # was built afresh for every file line, and cost more than the
+            # substring tests it ran. Same order, same early stop.
+            matched = True
+            for word in plain_words:
+                if word not in line_lower:
+                    matched = False
+                    break
+            if matched:
+                for pattern in phrase_patterns:
+                    if not pattern.search(line_lower):
+                        matched = False
+                        break
+            if not matched:
                 continue
 
             total_matches += 1
