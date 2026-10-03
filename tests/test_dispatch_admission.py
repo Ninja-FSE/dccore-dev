@@ -379,6 +379,10 @@ class DispatchAdmissionTests(DCCoreTestCase):
         self.assertEqual(self._threads_started_here(), [],
                          "the freeze countdown did not end once dave was thawed")
         self.assertIn("dave", config.dcc_queue, "the thawed queue must be kept")
+        # Asked again once every thread has finished: a promotion from a
+        # background thread would only show up after the settle.
+        self.assertEqual(self.notices, [], "promoted a user who is not in any channel")
+        self.assertEqual(config.active_transfers, [])
 
     # -- SECTION A: next file for the user who just finished ----------------
 
