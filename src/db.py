@@ -262,13 +262,14 @@ def remove_hard_ban(pattern):
 # nothing recomputes them and a lost update is permanent.
 #
 # Up to MAX_DCC_SLOTS transfers finish concurrently, each in its own thread,
-# and check_and_rotate_day() runs from the IRC read loop on every channel
-# message. Holding _disk_lock across only the WRITE - which is all
-# save_advanced_stats used to do - leaves the load-modify-save pair
-# unsynchronised: two completions that overlap both read the same row, and
-# whichever writes second discards the other's increment. A 300MB and a 7MB
-# transfer finishing together added one file and 300MB instead of two files
-# and 307MB.
+# and check_and_rotate_day() runs from the IRC read loop on the first channel
+# message of each local day, and once a minute while it keeps failing (#1132;
+# it used to run on every channel message). Holding _disk_lock across only the
+# WRITE - which is all save_advanced_stats used to do - leaves the
+# load-modify-save pair unsynchronised: two completions that overlap both read
+# the same row, and whichever writes second discards the other's increment.
+# A 300MB and a 7MB transfer finishing together added one file and 300MB
+# instead of two files and 307MB.
 #
 # The midnight case is worse than a miscount: a transfer thread that loaded
 # before check_and_rotate_day() rotated, and saves after it, writes the OLD

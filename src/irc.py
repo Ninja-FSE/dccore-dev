@@ -657,11 +657,32 @@ def _report_recent_lines(recent_lines):
 DAY_ROTATION_RETRY_SECONDS = 60.0
 _day_rotation_failed_at = globals().get("_day_rotation_failed_at")
 
+# The local date ("%Y-%m-%d", the form db._rotate_day_unlocked() compares) that
+# db.check_and_rotate_day() last succeeded for (#1132). Every channel line
+# reaches the rotation check, not only commands, and each check took
+# runtime.disk_lock and read stats.txt just to compare a date. disk_lock is the
+# one lock behind every db.py write, so a slow record_download() holding it
+# stalled the IRC read thread on the next line of plain chatter - half a second
+# with a large download_counts.json. Once the day is known to be rolled over,
+# the rest of that day's lines skip the check entirely; the first line after
+# local midnight runs it again. A failure leaves this alone, so the
+# once-a-minute retry above works exactly as before. Kept across a !rehash
+# reload the same way _day_rotation_failed_at is; starting empty would only
+# cost one check.
+_day_rotated_for = globals().get("_day_rotated_for")
+
 
 def rotate_the_day_without_stopping_the_bot():
     """db.check_and_rotate_day(), except that a failure is reported and the
-    message goes on being handled. Returns True if the rotation check ran."""
-    global _day_rotation_failed_at
+    message goes on being handled. Returns True when the day is known to be
+    rolled over: the check ran now, or already succeeded earlier today."""
+    global _day_rotation_failed_at, _day_rotated_for
+    # Read BEFORE the rotation runs, never after: a check that starts at
+    # 23:59:59 and finishes after midnight must not be recorded as the new
+    # day's, or the new day would never be rolled over from here.
+    today = time.strftime("%Y-%m-%d")
+    if today == _day_rotated_for:
+        return True
     now = time.monotonic()
     if (_day_rotation_failed_at is not None
             and now - _day_rotation_failed_at < DAY_ROTATION_RETRY_SECONDS):
@@ -675,6 +696,7 @@ def rotate_the_day_without_stopping_the_bot():
               f"Commands carry on; trying again in {int(DAY_ROTATION_RETRY_SECONDS)} s.")
         return False
     _day_rotation_failed_at = None
+    _day_rotated_for = today
     return True
 
 
