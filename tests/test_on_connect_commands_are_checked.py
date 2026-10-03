@@ -122,7 +122,7 @@ class ReadingTheServer(Case):
         on_connect.note_server_line(":irc.example.org 221 OtherNick +x", NICK)
         self.assertEqual(runtime.on_connect_state,
                          {"modes": None, "listings": 0, "hidden": False,
-                          "resends": 0, "gave_up": False})
+                          "resends": 0, "gave_up": False, "sent_epoch": None})
 
     def test_a_new_connection_starts_over(self):
         on_connect.note_server_line(f":irc.example.org 221 {NICK} +x", NICK)
@@ -131,7 +131,7 @@ class ReadingTheServer(Case):
         on_connect.reset_state()
         self.assertEqual(runtime.on_connect_state,
                          {"modes": None, "listings": 0, "hidden": False,
-                          "resends": 0, "gave_up": False})
+                          "resends": 0, "gave_up": False, "sent_epoch": None})
 
 
 class TheCheck(Case):
@@ -213,10 +213,14 @@ class TheThread(Case):
 
 
 class TheResendButton(Case):
-    def connected(self, server):
+    def connected(self, server, commands_sent=True):
+        """A registered link whose delayed_join() has sent the commands - and
+        not joined to its channel: the button never asks that (#1085)."""
         import sys
         import types
-        self.set_config(bot_joined_channel=True)
+        self.set_config(bot_joined_channel=False, connection_epoch=7)
+        if commands_sent:
+            on_connect.mark_sent(7)
         old = sys.modules.get("oserve")
         sys.modules["oserve"] = types.SimpleNamespace(irc_connection=server)
         self.addCleanup(lambda: sys.modules.__setitem__("oserve", old) if old
@@ -242,20 +246,46 @@ class TheResendButton(Case):
 
     def test_not_connected_sends_nothing(self):
         self.save(COMMANDS)
-        self.set_config(bot_joined_channel=False)
+        self.connected(None)
         status, result = webserver.build_on_connect_resend_result()
         self.assertEqual(status, 409)
+        self.assertIn("not connected", result["error"])
 
-    def test_a_socket_that_has_not_joined_yet_is_not_sent_to_either(self):
-        """Registration still running: the commands are about to go out from
-        delayed_join() anyway."""
+    def test_refused_by_its_channel_it_still_sends_them(self):
+        """#1085: a +r channel answers 477 when the X login did not take, so
+        the channel is never joined - and sending the login again is the fix."""
         self.save(COMMANDS)
         server = FakeServer()
         self.connected(server)
-        self.set_config(bot_joined_channel=False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            status, result = webserver.build_on_connect_resend_result()
+        self.assertEqual(status, 200, result)
+        resent = server.wait_for(2, keep=lambda line: not line.startswith("PRIVMSG #"))
+        self.assertEqual(resent, [X_LOGIN, f"MODE {NICK} +x"])
+
+    def test_a_link_still_registering_is_not_sent_to(self):
+        """Its commands are about to go out from delayed_join() anyway."""
+        self.save(COMMANDS)
+        server = FakeServer()
+        self.connected(server, commands_sent=False)
+        status, result = webserver.build_on_connect_resend_result()
+        self.assertEqual(status, 409)
+        self.assertIn("still connecting", result["error"])
+        self.assertEqual(server.sent, [])
+
+    def test_the_last_link_having_sent_them_does_not_count(self):
+        self.save(COMMANDS)
+        server = FakeServer()
+        self.connected(server)
+        self.set_config(connection_epoch=8)    # dropped and reconnecting
         status, _result = webserver.build_on_connect_resend_result()
         self.assertEqual(status, 409)
         self.assertEqual(server.sent, [])
+
+    def test_a_new_connection_forgets_the_mark(self):
+        on_connect.mark_sent(7)
+        on_connect.reset_state()
+        self.assertFalse(on_connect.sent_on(7))
 
     def test_nothing_saved_is_said(self):
         self.connected(FakeServer())
@@ -286,6 +316,15 @@ class TheReadLoopIsWired(unittest.TestCase):
         body = code.split("def delayed_join(", 1)[1].split("threading.Thread(target=delayed_join", 1)[0]
         self.assertLess(body.index("join_batches("), body.index("target=on_connect.watch"))
         self.assertIn("args=(socket_conn, epoch),", body)
+
+    def test_the_resend_opens_once_the_commands_are_out(self):
+        """#1085: marked after the on-connect loop and before the JOIN - not on
+        joining, which a +r channel refuses without the login."""
+        code = read("src/irc.py")
+        body = code.split("def delayed_join(", 1)[1].split("threading.Thread(target=delayed_join", 1)[0]
+        mark = body.index("on_connect.mark_sent(epoch)")
+        self.assertLess(body.index("socket_conn.sendall(" + chr(10)), mark)
+        self.assertLess(mark, body.index("join_batches("))
 
 
 HARNESS = r"""

@@ -78,6 +78,38 @@ class Case(support.DCCoreTestCase):
 
 
 class TheImport(Case):
+    def test_a_nick_a_new_import_drops_is_gone_from_the_file(self):
+        """A re-import replaces the old rows, and those name nicks: the file is
+        rebuilt after, as a forget does (#1099), or a nick the new file no
+        longer holds stays readable in the free space of pages that still
+        hold other rows (#1082)."""
+        import sqlite3
+        # Rows written as an older version or another SQLite build would:
+        # freed without being zeroed. The dropped nick's rows sit among
+        # another source's, so half of them deleted that way leave copies in
+        # pages that stay live - which only a rebuild removes (as in #1099).
+        conn = sqlite3.connect(self.path)
+        conn.execute("PRAGMA secure_delete = OFF")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(transfer_log._SCHEMA)
+        with conn:
+            for n in range(1500):
+                if n % 25 == 0:
+                    row = ("keeptrack", "droppedonreimport")
+                else:
+                    row = ("othersource", f"regular{n}")
+                conn.execute("INSERT INTO imported (source, direction, nick, files, bytes, since, imported_at)"
+                             " VALUES (?, 'sent', ?, 1, 100, NULL, 1)", row)
+        with conn:
+            conn.execute("DELETE FROM imported WHERE source = 'keeptrack' AND rowid % 2 = 1")
+        conn.close()
+        self.assertGreater(self.raw().count(b"droppedonreimport"), 40)
+
+        self.assertEqual(transfer_log.import_nicks("keeptrack", [("sent", "kept", 1, 10)]), 1)
+
+        self.assertEqual(self.raw().count(b"droppedonreimport"), 0)
+        self.assertIn(b"regular1499", self.raw())
+
     def test_the_preview_says_what_would_come_across_and_writes_nothing(self):
         status, preview = webserver.build_ktdata_preview(KTDATA)
         self.assertEqual(status, 200, preview)

@@ -13,8 +13,9 @@ five fields, neither Sent nor Received, not a nick, not a number, out of range).
 never kept**: the record stores nicks, not hosts.
 
 - `transfer_log.import_nicks()` writes the rows into #1062's `imported` table, replacing an earlier KeepTrack per-nick
-  import (under `secure_delete`, the WAL emptied after), with KeepTrack's start date when the totals import brought
-  one. `top_nicks()` and `nick_summary()` add each nick's imported figures for all time and leave them out of a
+  import, with KeepTrack's start date when the totals import brought one. The rows it replaces name nicks, so the
+  file is rebuilt after (`_rebuild()`, as a forget does since #1099) and the WAL emptied: a nick the new file no longer
+  holds is not left readable in it. `top_nicks()` and `nick_summary()` add each nick's imported figures for all time and leave them out of a
   period; `forget_nick()` already removes them (#1062).
 - The Stats page has **Choose KTData.txt**, after the `vars.ini` import: `POST /api/stats/import-ktdata/preview` shows
   how many nicks per direction, their totals, the top ten, the lines skipped and why, and whether an earlier import
@@ -40,8 +41,10 @@ keeps the new lines with no JavaScript change.
   in `configure.py` asks the same. The chosen totals land in `stats.txt` as before.
 - **Received: into the transfer record.** `transfer_log` gains an `imported` table (source, direction, nick - NULL for
   the bot's own totals, a nick for #1064 - files, bytes, since) and `import_totals()`, which replaces a source's rows
-  under `secure_delete` and empties the WAL. `summary()` adds the imported totals to every all-time figure and leaves
-  them out of a period; `forget_all()` and `forget_nick()` clear them too. `apply_stats_import()` writes
+  and empties the WAL. They name no nick, so it does not rebuild the file the way forgetting does since #1099.
+  `summary()` adds the imported totals to every all-time figure and leaves them out of a period; `forget_all()` and
+  `forget_nick()` clear them too, in the same transaction as the record's own rows, so a forget rebuilds the file once
+  (`_delete()` takes several statements). `apply_stats_import()` writes
   `received_files`/`received_bytes`/`received_since` there; `current_importable_stats()` shows an earlier import's.
   With the record off (`TRANSFER_LOG_FILE` empty) the preview leaves them out and says why.
 - **What the preview says:** KeepTrack's start date (`kt_start_date()`, English month names whatever the locale, as
@@ -96,14 +99,103 @@ run in the background, cannot offer. Three more, all through the new `src/stoppi
 Tests: `tests/test_the_bot_can_be_stopped_without_its_window.py`, including the command against a child process
 holding the lock as the bot does - one that stops when asked, one that does not.
 
+### 🐛 A console-log rotation refused partway changes nothing (#1103)
+
+Found in the re-review of #1073. The current file was already moved aside first, but if a shift of the OLD files was
+then refused partway (a viewer holding `.1`), the files above it had already moved up one step; the current file went
+back, and the next try, another `CONSOLE_LOG_MAX_MB` later, shifted them again over the oldest - one old log lost per
+retry while an old one was held open.
+
+- `_ConsoleLog._rotate_locked()` moves the oldest (`.KEEP`) aside first, so every shift goes into a free name and
+  nothing is overwritten; each completed move is remembered, and a refused one undoes them newest first before the
+  current file goes back. The oldest is deleted only once the whole rotation has worked.
+- Tests: three more in `tests/test_a_log_file_beside_the_console.py` - the reproduction from the issue (`KEEP` 5,
+  `.1` held, three tries), the same with `KEEP` full, and the rotation once the file is let go.
+
+### 🐛 A list from a bot whose nick is only symbols is found in the search index (#1091)
+
+Audit 2026-10-02 L6. The search index tokenises with unicode61, which keeps letters and digits and splits on everything
+else, so a nick made only of IRC's special characters - `^_^`, `[_]`, `|-|` - is no phrase at all: `bot:"^_^"` matched
+no row, held or not. Since #1072 asks the index that way at startup, such a list was taken as missing, read from disk
+and written into the index again on every start; and the filter bar, which asks the same way, greyed it out as holding
+no match.
+
+- `list_index._has_tokens()` says whether a name has a letter or digit. `_holds_rows_for()` asks a name without one
+  with `bot = ?` alone, and `bots_with_a_match()` drops the bot phrase from its MATCH for it and lets the equality
+  decide. That is a scan of the table, but only for those names; every other name still asks the index.
+- Tests: `tests/test_symbol_only_nicks_are_found_in_the_index.py`.
+
+### 🐛 The on-connect box keeps what was typed until it is saved (#1090)
+
+Audit 2026-10-02 L5. Settings > Identity & network rebuilds its panel for every note it shows, and the on-connect box
+was then filled from the **saved** commands. Pressing **Resend commands** with an edited box - which answers "save the
+commands first" - put the old lines back beside that advice, so following it saved the old set; a refused Save threw the
+typing away the same way.
+
+- `attachOnConnectRows()` keeps `state.onConnectDraft` (the box and the delay) on every input and fills the fields from
+  it while there is one; a successful save drops it, so what the server wrote is shown from then on.
+- Tests: `tests/test_on_connect_box_keeps_its_edits.py` drives the real functions in node through Resend, a refused
+  save and a good one, each redraw on new elements as the page does.
+
+### 🐛 Resend commands works when the bot is connected but its channel refused it (#1085)
+
+Audit 2026-10-02 M5. The dashboard's **Resend commands** (#1066) asked whether the bot had joined its channel, and said
+"The bot is not connected" when it had not. On Undernet that is the very case the button is for: with a +r channel
+and an X login that went nowhere, the JOIN gets a 477, the channel is never joined, and sending the login again is the
+fix - but the only way left was a full reconnect.
+
+- `delayed_join()` now calls `on_connect.mark_sent(epoch)` once the on-connect commands are out, before the JOIN, and
+  the route asks `on_connect.sent_on(config.connection_epoch)` instead of `bot_joined_channel`. A press while the link
+  is still registering is still refused, now as "still connecting", so the commands are not sent twice; a reconnect
+  takes a new epoch, so the last link's mark never counts. "Not connected" is only said when there is no socket.
+- Tests: `tests/test_on_connect_commands_are_checked.py`.
+
+### 🐛 Clear failed no longer cancels a newer request for the same file (#1083)
+
+Audit 2026-10-02 M3. Clear failed (#1047) sends `@bot-remove <file>` for each old "no response" row, so the other bot
+lets go of a request that may still be sitting in its queue. The remove is matched by name there and takes every entry
+of ours for that file - so when "Download again", or asking again from the list, had a newer row waiting on the same
+bot and file, clearing the old row cancelled the new request too, and it sat queued here with nothing coming until it
+timed out. A row's own Delete did the same.
+
+- `dcc_fetch.another_row_wants_locked()` says whether a row still waiting (pending, offered, queued, listening,
+  receiving) asks the same bot for the same file, comparing names the way the other bot does (spaces as underscores,
+  any case). `build_fetch_clear_result()` drops those files from the removes it sends, still under the lock, and
+  `build_fetch_delete_result()` skips the remove for them. A finished or failed twin, or the same file from another
+  bot, does not stop it.
+- Tests: `tests/test_clear_spares_a_newer_request.py`.
+
+### 🐛 Three things the move into src/ and conf/ left pointing at the old places (#1084, #1088, #1089)
+
+Audit 2026-10-02 M4, L3, L4.
+
+- **Windows autostart could not be installed under the new layout (#1084).** `install-autostart.bat` kept the
+  root-only "is it set up" check after #983 gave every other launcher the `conf\` alternatives, so once the first
+  start had moved `settings.conf` and `admin_config.py` into `conf\` it said "not set up yet" and stopped - advice
+  that cannot help, since that start is what moved them. It now checks all four places, like `start-dccore.bat`.
+  `tests/test_the_launchers_find_the_conf_dir.py` covers it, and on Windows runs the real batch file under `cmd.exe`
+  with stand-in `schtasks`/`powershell` on PATH: config in `conf\`, config at the root, and nothing set up.
+- **"Run `python adminchat.py`" named a file that moved into `src/` (#1088).** The password-hash generator is
+  `src/adminchat.py` now; the instructions in `admin_config.py.sample`, `defaults.py` (so `settings.conf.sample`
+  and the Settings help), `setup_check.py`, the dashboard's refusal message, `configure.py`, `ADMIN-CONSOLE.md` and
+  `WINDOWS.md` say so. A test fails on any `python`/`py`/`{platform.python} adminchat.py` left in them.
+- **The upgrade guide's backup command failed and backed up nothing (#1089).** `cp -r data conf data.backup` needs
+  `data.backup` to exist, and before the upgrade that brings `conf/` the config is at the top of the folder. Step 2
+  now makes the folder first and copies the config from either place; a test runs the block in bash on both
+  layouts. Tests: `tests/test_the_layout_points_where_things_are.py`.
+
+
 ### 📦 Everything the window shows is also written to a log file (#1065, part 1)
 
 What the bot said was gone with its window, and #1065 goes on to let it run with no window at all. Every console line
 now also goes to `CONSOLE_LOG_FILE` (`./data/logs/dccore.log`), stamped `%Y-%m-%d %H:%M:%S` whatever
 `CONSOLE_TIMESTAMP_FORMAT` shows in the window. At `CONSOLE_LOG_MAX_MB` (5) it becomes `dccore.log.1`, the one before
-`.2`, keeping `CONSOLE_LOG_KEEP` (5); the shift relies on `os.replace()` overwriting, and a rename refused (a viewer
-holding the file on Windows) carries on in the same file. The settings are read on every line, so a changed or emptied
-path applies without a restart.
+`.2`, keeping `CONSOLE_LOG_KEEP` (5); the shift relies on `os.replace()` overwriting. The current file is moved aside
+first and the old ones shifted only once that worked: a rename refused (a viewer holding the file on Windows) leaves
+every file where it was, carries on in the same file and tries again only after another `CONSOLE_LOG_MAX_MB`, and an
+old file held open puts the current one back rather than over `.1` (both found in review: shifting first, a held file
+cost every kept log, one per line). Old files past a lowered `CONSOLE_LOG_KEEP` go at the next rotation. The settings
+are read on every line, so a changed or emptied path applies without a restart.
 
 It is fed by `platform_compat._TimestampedStream.write()` - the one object every console line already passes, building
 the log copy in the same pass - not by a second proxy on `sys.stdout`: a proxy that answered click's `write(b"")`
@@ -130,20 +222,37 @@ row from being written (with the default rollback journal the reader's lock did,
 lost). While the bot runs there are `transfers.db-wal` and `transfers.db-shm` beside the file; copy all three, or stop
 the bot first, to back it up. Forgetting a nick or everything also truncates the WAL (`PRAGMA wal_checkpoint(TRUNCATE)`),
 since a delete is written there first and the old rows would still be readable in it; if a reader that is still open
-holds that up for more than `WRITE_TIMEOUT`, a line on the console says so and the rows go with the next checkpoint. A
+holds that up for more than `WRITE_TIMEOUT`, a line on the console says so and the rows go when a later checkpoint
+empties the log (one that does not truncate leaves the frames past its new writes as they were). A
 damaged file is moved aside together with its `-wal` and `-shm`.
 
 `transfer_log.summary()` gives files sent (lists left out), lists sent, top and average speed (bytes over seconds, the
 sends too small to time left out), files received with their size and the average wait in the queue; `top_files()`
 gives the ten most-sent files; `top_nicks()` ranks the nicks by files and bytes, sent or received; `nick_summary()` gives
 the figures of one nick. All take a start time. `forget_nick()` removes one nick from the record and `forget_all()`
-empties it, and both zero what they free in the file, so a removed nick cannot be read back out of it. A write waits
+empties it, and both then rebuild the file (`VACUUM`) and empty the log, so a removed nick cannot be read back out of
+it (#1082: deleting alone left the nick in the index's interior pages and in the free space of pages that earlier
+writes had split, once the record was more than a page or two deep; every connection also sets `secure_delete` now).
+The rebuild runs under the same lock a write takes, so a send that ends during it waits for it, which is a moment for
+a record of ordinary size, and it needs free disk space about the size of the file while it runs. A write waits
 at most two seconds for a busy file, so a send is never held up long, and a read takes no lock, so a slow query cannot
-hold one up at all. A damaged file is moved aside (kept, never deleted) and a new one started. Nothing shows any of it
+hold one up at all. A damaged file is moved aside (kept, never deleted) and a new one started, whether the damage is
+found when the file is opened or, for a file that is damaged further in than its first page, by the write that hits it
+(#1087; that write is then made once more in the new file, and a read leaves the move to the next write). Nothing shows any of it
 on the dashboard yet, and nothing is said to the nick in IRC.
 
 The queue rows now carry the time they were asked for (`queued_at`), which is where the wait comes from; a row saved
 before this has none and is left out of the average. `stats.txt` and `download_counts.json` are unchanged.
+
+### 🐛 A file that was sent at once is not queued again by a repeat (#1086)
+
+The check from #1077 only looked in the nick's queue. A request that found a free slot goes straight to
+`start_dcc_send()` and never gets a queue row, so a second request for the same file a few seconds later was queued
+and the file went out a second time when the first send was over (a third repeat was then caught by the queued
+copy, so it was at most one extra copy per run of repeats, and only when a slot happened to be free). The
+`active_transfers` entry of such a send now carries the path it is sending, and `dcc.is_being_sent_to()` checks it
+next to the queue: the repeat is not added, and the nick is told once, privately, that the file "is already being
+sent to you". Once the send is over the file can be asked for again, as before. No new setting.
 
 ### 🐛 The same file is not queued twice by one nick (#1077)
 
@@ -154,8 +263,8 @@ waiting. `dcc.queued_position_of()` looks for the resolved path in the nick's ow
 folder, and the nick is told once (per file, per two minutes) that it is already queued and at which position. The
 path decides, not the name, so a same-named track of another album (#110) is a different request. A queued
 file keeps its row for the whole send, and a packed `!rar` folder keeps the folder it came from on the row
-(`source_path`), so a repeat of either is still caught while it is being sent. Only a file that started at once
-(a free slot, so it never had a queue row) lets one repeat through behind it. No new setting.
+(`source_path`), so a repeat of either is still caught while it is being sent. A file that started at once (a free
+slot, so it never had a queue row) is covered since #1086. No new setting.
 
 ### 🐛 Startup no longer reads the whole search index to see which lists it holds (#1071)
 
@@ -217,6 +326,14 @@ while it packs - up to `RAR_TIMEOUT` - so the slot stood idle, and since #1032 a
 waiting nick that nothing would dispatch. Now those exits go on to the global sweep, so the freed slot goes to the nick
 that has waited longest. The packed archive is a plain row and waits its turn for a slot. Tests:
 `tests/test_a_slot_freed_next_to_a_pack_is_offered.py`.
+
+Audit 2026-10-02 M1 (#1081): a pack that finishes with every slot busy leaves its archive queued as a row that still says
+`is_temporary_zip`, and every exit of `start_dcc_send()` took that flag to mean "this send holds `rar_inprogress`". When
+such a row was later sent as a plain row, its end cleared the lock another nick's pack was holding and woke a third
+pack, so two `rar` processes ran at once (on the same album, one deleted or appended to the other's archive).
+Ownership is now explicit: `start_dcc_send(..., owns_packer=True)` is passed only by the packer's own handoff, and only
+a send that owns the lock releases it. Tests in `test_rar_archive_lifecycle`, `test_dcc_dispatch_uses_the_live_socket`
+and `test_the_queue_save_never_touches_the_live_dict`.
 
 ### 📦 In the DCCore Chat window, a private conversation is never moved to a channel by itself
 
