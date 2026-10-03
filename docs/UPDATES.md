@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ The audio cache rewrites only the rows that changed (#1137)
+
+Performance audit 2026-10-03 P15. `audio_info.Cache.publish()` deleted every row of its scope and inserted them all
+again - a million rows on an unchanged library, the ordinary weekly rebuild, 14.5 s at the end of the rebuild while
+searches were still held.
+
+- `publish()` deletes the stored rows this rebuild did not see and those whose read failed with an I/O error (#973; the
+  skeptic's correction - their old row must go too, or a file back at its old size would get the stale suffix without
+  a read), and writes only the rows that are new or changed, in one transaction as before: 1.3 s. The table ends up
+  exactly as before; an untouched row keeps its legacy mtime and run columns and a NULL suffix rather than `""`, and
+  every reader treats NULL as `""`.
+- `self.pending = []` moves to the end of `read_pending()`; it sat after `rate()`'s `return`, where it never ran, so a
+  cold first run kept every audio file's path in memory for the rest of the rebuild.
+- Tests: `tests/test_the_audio_cache_rewrites_only_what_changed.py` - the old `publish()` kept and compared on a seeded
+  database holding every kind of row (unchanged, changed, failed read, gone, new, left unread by the time budget,
+  another list's scope), the changes SQLite reports, nothing written on an unchanged rebuild, and pending released.
+
 ### 📦 Live Transfers is its own page, and Stats follows one period (#1117)
 
 The Stats page held two things that have little to do with each other: what is happening right now (speed, slots, the
