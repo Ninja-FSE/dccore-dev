@@ -2,6 +2,36 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### ⚡ The list parser skips two per-row costs no row needs (#1136)
+
+Performance audit 2026-10-03 P14, on top of #1126, which already made the third change (the rule check). Two more
+per-row costs in the parser every list read goes through, fetched lists included:
+
+- `strip_info_suffix()` split each row on `\s*::INFO::\s*`, whose leading `\s*` made `re.split()` retry at every position
+  of the row. It now searches for the bare marker (still case-insensitive) and slices around it; both halves were
+  already stripped, and `str.strip()` removes exactly the characters `\s` matches, so the split lands in the same place.
+- `entries_to_filelist_rows()` ran `rar_folder_of()`'s regex on every row; only a title starting with `!` can match its
+  anchored `^!rar`, so nothing else asks.
+- The skeptic measured the whole parse of a 378k-row list at 6.1 s -> 4.3 s with all three changes, rows identical.
+- Tests: `tests/test_the_list_parser_skips_work_no_row_needs.py` - over every code point, that `\s` and `str.strip()`
+  agree on whitespace; the old functions against the new on marker rows, `!rar` titles and a whole adversarial list.
+
+### ⚡ The list scan checks rules and words without per-line objects (#1126)
+
+Performance audit 2026-10-03 P4. `list.find_matching_entries()` - every search of the bot's own list, and the parse of
+every fetched one - built a set of each line's characters to ask whether it was a `====` rule, and ran each search
+word and phrase through `all()` over a fresh generator on every line. On a 2M-row list a search took 9-15 s.
+
+- The rule check is `not line_strip.strip("=")` - the same answer, since the line is not empty there, at about a tenth
+  of the cost - and the word and phrase tests are plain loops with the same order and the same early stop. The skeptic
+  measured the scan at about 3x faster with both (2M rows: 9.1 s -> 2.8 s for "love"); the loop change alone was
+  0.45 s -> 0.29 s on 200k rows here. The audit's third change, a NUL guard, measured as noise and is left out.
+- Tests: `tests/test_the_list_scan_answers_the_same_with_cheaper_line_checks.py` - the old function, copied into the
+  test, against the new on an adversarial list over 20 searches and 8 limits, and call counts showing the scan makes
+  no `set()` or `all()` call.
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)

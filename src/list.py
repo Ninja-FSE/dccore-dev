@@ -494,7 +494,12 @@ def all_list_paths(name=None):
     return paths
 
 
-_INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
+# The marker alone, without the r'\s*' either side it used to carry (#1136).
+# The leading one made re.split() retry the whitespace at every position of a
+# row before giving up, on every row of every list; strip_info_suffix() strips
+# both halves anyway, and str.strip() removes exactly the characters \s
+# matches, so the split lands in the same place.
+_INFO_MARKER_RE = re.compile('::INFO::', re.IGNORECASE)
 
 # The other family of size suffix seen in production, from bots that do not
 # use "::INFO::" at all: "SDFind v3.91 by SDSailor" writes
@@ -506,7 +511,7 @@ _INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
 # to actually look like a size (digits, an optional decimal point, an
 # optional K/M/G/T, then B) - unlike "::INFO::", "----" is not a string that
 # only ever appears as this one bot's deliberate marker, so matching it
-# ANYWHERE (the way the marker split above safely can) would risk cutting a
+# ANYWHERE (the way the marker search above safely can) would risk cutting a
 # real filename that happens to contain a run of hyphens. Requiring a
 # size-shaped tail at the very end is what keeps this from firing on one.
 _DASH_SIZE_SUFFIX_RE = re.compile(
@@ -548,9 +553,9 @@ def strip_info_suffix(rest):
     trailing tag for part of the filename when it later requests that exact
     name back with `!<nick> <filename>`.
     """
-    parts = _INFO_MARKER_RE.split(rest, maxsplit=1)
-    if len(parts) == 2:
-        filename, size = parts
+    marker = _INFO_MARKER_RE.search(rest)
+    if marker:
+        filename, size = rest[:marker.start()], rest[marker.end():]
     else:
         dash_match = _DASH_SIZE_SUFFIX_RE.search(rest)
         if dash_match:
@@ -713,7 +718,12 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
             if not line_strip:
                 continue
 
-            is_rule = set(line_strip) == {"="}
+            # "Every character is =", asked without building a set of the
+            # line's characters (#1126). line_strip is not empty here, so
+            # stripping the "=" away leaves nothing exactly when that is all
+            # it held. The set cost about ten times as much and ran on every
+            # line of every list: most of the scan's time at two million rows.
+            is_rule = not line_strip.strip("=")
             if state == "none":
                 if is_rule:
                     state = "open"
@@ -754,9 +764,20 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
                 continue
 
             line_lower = line_strip.lower()
-            if plain_words and not all(word in line_lower for word in plain_words):
-                continue
-            if phrase_patterns and not all(pattern.search(line_lower) for pattern in phrase_patterns):
+            # Plain loops, not all() over a generator (#1126): the generator
+            # was built afresh for every file line, and cost more than the
+            # substring tests it ran. Same order, same early stop.
+            matched = True
+            for word in plain_words:
+                if word not in line_lower:
+                    matched = False
+                    break
+            if matched:
+                for pattern in phrase_patterns:
+                    if not pattern.search(line_lower):
+                        matched = False
+                        break
+            if not matched:
                 continue
 
             total_matches += 1
@@ -1106,7 +1127,12 @@ def entries_to_filelist_rows(entries, source):
             # meant to be copied verbatim - that is what the header of every
             # such list tells the reader to do - so this adds a field beside
             # it rather than reformatting it.
-            "rar_folder": rar_folder_of(filename),
+            #
+            # Asked only of a title that starts with "!" (#1136): nothing
+            # else can match rar_folder_of()'s anchored "^!rar", and running
+            # the regex on every row of every list cost more than the answer.
+            "rar_folder": (rar_folder_of(filename)
+                           if filename.lstrip().startswith("!") else ""),
             # What we have already asked this bot for: "requested",
             # "received", or "" for neither. Declared HERE, empty, rather
             # than added by whichever payload happens to know - both this

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Faster: reading a list - a search, or a fetched bot's list in the List Browser - takes about a third less time.** Two checks ran on every row that only a few rows need.
+- **Faster: a search of the bot's own list is about three times faster on a big list.** Every line of the list cost more work than it needed; the answers are exactly the same.
+
 ## v1.14.0 — The Bot Keeps a Record
 
 - **Faster: a finished send no longer rewrites the whole download-count file.** Each one rewrote every count the bot had ever kept - most of a second on a bot that has sent many different files, with other saves waiting behind it. The counts move into `data/download_counts.db` on the first start; `data/download_counts.json` is left exactly as it was, so going back to an older version still shows the counts up to the upgrade.
