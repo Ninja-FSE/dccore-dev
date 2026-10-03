@@ -732,9 +732,11 @@ def _open_download_counts(path):
 
 
 def _counts_damaged(err):
-    """True for a bare DatabaseError: the file's content is wrong. A locked
-    file or a full disk is a subclass, and must not move a healthy file aside."""
-    return type(err) is sqlite3.DatabaseError
+    """True for a bare DatabaseError, or a DataError: the file's content is
+    wrong (damaged pages read as an impossibly long value come back as a
+    DataError, "string or blob too big"). A locked file or a full disk is
+    another subclass, and must not move a healthy file aside."""
+    return type(err) in (sqlite3.DatabaseError, sqlite3.DataError)
 
 
 def _move_download_counts_aside(path, err):
