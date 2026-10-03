@@ -1460,9 +1460,24 @@ def check_queue_and_send(irc_sock, completed_user):
     if getattr(config, 'bot_joined_channel', False):
         with queue_lock:
             current_time = time.time()
-            for f_user, freeze_timestamp in list(config.frozen_queues.items()):
+            frozen = list(config.frozen_queues.items())
+            # ONE READ OF THE CHANNEL LISTS PER SWEEP, not one per frozen nick
+            # (#1140). user_is_present_in_ram() walks every nick in every
+            # channel, and this runs under queue_lock on every finished
+            # transfer - after a netsplit, with a hundred queues frozen, that
+            # was a hundred full scans (about 180 ms) with requests waiting on
+            # the lock. The set compares exactly as that function does, both
+            # sides lowercased, so a nick stored in any case still matches. A
+            # single frozen nick keeps the early-exit scan, which is cheaper
+            # than building the whole set.
+            if len(frozen) > 1:
+                present = nicks_in_our_channels()
+                is_back = lambda nick: str(nick).lower() in present
+            else:
+                is_back = user_is_present_in_ram
+            for f_user, freeze_timestamp in frozen:
                 # THAW: the user is back in memory - release the freeze instead of deleting
-                if user_is_present_in_ram(f_user):
+                if is_back(f_user):
                     del config.frozen_queues[f_user]
                     print(f"[DCC FREEZE-THAW] {f_user} is back in the channel list. Their queue was saved.")
                     continue
