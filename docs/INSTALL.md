@@ -382,10 +382,13 @@ Your settings and data are never touched by an upgrade: `settings.conf`, `admin_
 
 **1. Stop the daemon.** A transfer in progress will be cut off, so a quiet moment is kinder than mid-queue.
 
-**2. Back up `data/` and your config.** It holds your stats, ban list, download counts and speed record — none of it recoverable if something goes wrong.
+**2. Back up `data/` and your config.** It holds your stats, ban list, download counts and speed record — none of it recoverable if something goes wrong. Your config is at the top of the folder until the upgrade that moved it into `conf/` (#959), and in `conf/` from then on; the two `cp` lines below copy it from wherever it is.
 
 ```bash
-cp -r data conf data.backup
+mkdir -p data.backup
+cp -r data data.backup/
+cp settings.conf admin_config.py data.backup/ 2>/dev/null
+cp conf/settings.conf conf/admin_config.py data.backup/ 2>/dev/null
 ```
 
 **3. Get the new version.**

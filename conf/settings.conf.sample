@@ -826,7 +826,7 @@
 # Put the real values in admin_config.py, which is gitignored, NOT here.
 #ADMIN_HOSTMASKS = 
 
-# Generated with:  python adminchat.py
+# Generated with:  python src/adminchat.py
 #ADMIN_PASSWORD_HASH = 
 
 # How the admin console's DCC chat is connected. Auto is right for most
