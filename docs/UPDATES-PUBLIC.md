@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Faster: a list rebuild scans a big library many times faster.** On a library with many folders the scan slowed down the more folders it had - 41 seconds for 137,000 files, slower with more threads than with one. It takes about 3 seconds now.
+
 ## v1.14.0 — The Bot Keeps a Record
 
 - **Faster: a finished send no longer rewrites the whole download-count file.** Each one rewrote every count the bot had ever kept - most of a second on a bot that has sent many different files, with other saves waiting behind it. The counts move into `data/download_counts.db` on the first start; `data/download_counts.json` is left exactly as it was, so going back to an older version still shows the counts up to the upgrade.
