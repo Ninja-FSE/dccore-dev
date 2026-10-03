@@ -499,6 +499,7 @@ PRESERVE_RUNTIME = (
                           # moments before a rehash would otherwise be forgotten,
                           # so the alt-nick's join right after loses the merge it
                           # would have earned
+    'recent_departure_bases',  # the index beside it; the two are rebuilt together or not at all
     'nick_aliases',       # the merges already inferred. Losing this un-merges
                           # every bot the List Browser had already combined,
                           # for no reason connected to the setting that changed

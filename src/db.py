@@ -1,8 +1,11 @@
 # db.py - Central state storage for DCCore
+import contextlib
 import io
 import json
 import os
 import datetime
+import heapq
+import sqlite3
 import tempfile
 import threading
 import platform_compat
@@ -631,29 +634,297 @@ DOWNLOAD_COUNTS_FILE = getattr(config, "DOWNLOAD_COUNTS_FILE",
                                os.path.join("data", "download_counts.json"))
 
 
-def _load_download_counts_unlocked():
-    """Parse download_counts.json. Caller must hold _disk_lock."""
-    if not os.path.exists(DOWNLOAD_COUNTS_FILE):
-        return {}
+# THE COUNTERS LIVE IN SQLITE (#1133). They were one JSON file, and every
+# completed send loaded the whole of it, added one, wrote it all back with an
+# fsync and swapped it in - under _disk_lock, which every other write in this
+# module needs too: 56 ms a send at 10k rows, over half a second at 100k. Now a
+# send is one upsert of one row in a database beside that file, and takes
+# runtime.download_counts_lock, never _disk_lock.
+#
+# Where: DOWNLOAD_COUNTS_FILE with its extension replaced by .db, so
+# data/download_counts.json has its counters in data/download_counts.db. A
+# setting that already ends in .db names the database itself, and there is no
+# JSON beside it to import. The setting is read at the moment of each call, as
+# it always was: tests and the Settings page move it.
+#
+# THE JSON IS IMPORTED ONCE AND NEVER WRITTEN AGAIN. The first time the
+# database is opened - by whatever reaches it first, a send, the Stats page or
+# the startup migrations - every row of the JSON goes in, and a marker saying
+# so, in ONE transaction. A kill before the commit leaves neither, so the next
+# start imports again from scratch; a second opener waits for the first and
+# then finds the marker. The JSON itself is only read: it stays byte for byte
+# as it was at the upgrade, so an older version that is put back still has
+# every count up to that moment. Counts made while running that older version
+# are not carried back by a later upgrade, because the import has run.
+#
+# Rows go in the way the Most downloaded table always read them: the name
+# falls back to the key and the kind to "file". A row that is not an object, or
+# whose count is not a whole number above zero, is left out - none of them was
+# ever shown, and a later send of that key starts it at 1. A count too big for
+# SQLite's integer is left out with them.
+#
+# A damaged database is moved aside as <file>.corrupt-<timestamp>, never
+# deleted, and a fresh one is started, as transfer_log.py and list_index.py
+# do. The fresh one has no marker, so the JSON is imported again: the counts as
+# they were at the upgrade, which is less than the damaged file held and a lot
+# more than nothing. The moved file keeps the rest for anyone who wants to
+# recover it by hand.
+_COUNTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS download_counts (
+    key    TEXT    PRIMARY KEY,
+    name   TEXT    NOT NULL,
+    kind   TEXT    NOT NULL,
+    count  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS download_counts_by_kind_and_count ON download_counts (kind, count);
+CREATE TABLE IF NOT EXISTS download_counts_meta (
+    key    TEXT    PRIMARY KEY,
+    value  TEXT    NOT NULL
+);
+"""
+
+# The meta row that records the import ran, and with what.
+_COUNTS_IMPORTED = "json_imported"
+
+# Seconds a connection waits for a busy database. Writers in this process
+# queue on runtime.download_counts_lock first, so this covers the import of a
+# large JSON by another opener and a checkpoint, not ordinary sends.
+_COUNTS_TIMEOUT = 10
+
+_SQLITE_INTEGER_MAX = 2 ** 63 - 1
+
+# One completed send. The VALUES are the row a first send creates; the UPDATE
+# is the row a later one leaves, keeping the name and kind already there when
+# the caller passed none - the same fallbacks the JSON version applied.
+_COUNT_ONE_SEND = (
+    "INSERT INTO download_counts (key, name, kind, count) VALUES (?, ?, ?, 1) "
+    "ON CONFLICT(key) DO UPDATE SET count = download_counts.count + 1, "
+    "name = COALESCE(?, download_counts.name), kind = COALESCE(?, download_counts.kind)")
+
+# One imported row. Added to a row already there rather than replacing it:
+# when an earlier attempt could not read the JSON, sends were counted without
+# it, and the import that finally succeeds must not discard them.
+_IMPORT_ONE_ROW = (
+    "INSERT INTO download_counts (key, name, kind, count) VALUES (?, ?, ?, ?) "
+    "ON CONFLICT(key) DO UPDATE SET count = download_counts.count + excluded.count")
+
+
+def _download_counts_paths():
+    """(the database, the JSON file to import from or None)."""
+    configured = str(DOWNLOAD_COUNTS_FILE)
+    stem, extension = os.path.splitext(configured)
+    if extension.lower() == ".db":
+        return configured, None
+    return stem + ".db", configured
+
+
+def _open_download_counts(path):
+    conn = sqlite3.connect(path, timeout=_COUNTS_TIMEOUT, isolation_level=None)
     try:
-        with io.open(DOWNLOAD_COUNTS_FILE, "r", encoding="utf-8") as handle:
-            loaded = json.load(handle)
-        return loaded if isinstance(loaded, dict) else {}
+        # WAL, as transfer_log.py: the Stats page reading never holds up a
+        # send writing. The mode is stored in the file.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(_COUNTS_SCHEMA)
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
+def _counts_damaged(err):
+    """True for a bare DatabaseError, or a DataError: the file's content is
+    wrong (damaged pages read as an impossibly long value come back as a
+    DataError, "string or blob too big"). A locked file or a full disk is
+    another subclass, and must not move a healthy file aside."""
+    return type(err) in (sqlite3.DatabaseError, sqlite3.DataError)
+
+
+def _move_download_counts_aside(path, err):
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    aside = f"{path}.corrupt-{stamp}"
+    n = 1
+    while os.path.exists(aside):
+        n += 1
+        aside = f"{path}.corrupt-{stamp}-{n}"
+    os.rename(path, aside)
+    # A WAL left beside a fresh file would be replayed into it and carry the
+    # damage back.
+    for suffix in ("-wal", "-shm"):
+        if os.path.exists(path + suffix):
+            try:
+                os.replace(path + suffix, aside + suffix)
+            except OSError:
+                os.remove(path + suffix)
+    print(f"[DB] {path} is damaged ({err}); it was moved to {aside} and a new one "
+          f"was started, with the counts imported again from the JSON file as it "
+          f"was at the upgrade.")
+
+
+@contextlib.contextmanager
+def _counts_transaction(conn):
+    """BEGIN IMMEDIATE ... COMMIT, rolled back by anything that leaves early."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    conn.execute("COMMIT")
+
+
+def _download_counts_imported(conn):
+    return conn.execute("SELECT 1 FROM download_counts_meta WHERE key = ?",
+                        (_COUNTS_IMPORTED,)).fetchone() is not None
+
+
+def _read_legacy_download_counts(json_path):
+    """(the JSON's rows, a note for the marker). Raises OSError when the file
+    is there and cannot be read, so the import is tried again later."""
+    if json_path is None:
+        return {}, "nothing to import: the setting names the database itself"
+    try:
+        with io.open(json_path, "rb") as handle:
+            raw = handle.read()
+    except FileNotFoundError:
+        return {}, f"nothing to import: there was no {json_path}"
+    try:
+        loaded = json.loads(raw.decode("utf-8"))
+    except ValueError as err:
+        # The JSON version started empty over a file that would not parse, and
+        # its next send overwrote it. Starting empty is the same table; the file
+        # is left as it is.
+        print(f"[DB ERROR] Could not read the download counts in {json_path} ({err}); "
+              f"the counters start empty, and the file is left as it is.")
+        return {}, f"{json_path} would not parse"
+    if not isinstance(loaded, dict):
+        return {}, f"{json_path} held no rows"
+    return loaded, f"imported from {json_path}"
+
+
+def _legacy_download_count_rows(loaded):
+    """Every row of the JSON worth keeping, as (key, name, kind, count). A
+    generator, so the import inserts each row as it comes."""
+    for key, row in loaded.items():
+        if not isinstance(row, dict):
+            continue
+        try:
+            count = int(row.get("count", 0))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if count <= 0 or count > _SQLITE_INTEGER_MAX:
+            continue
+        values = (str(key), str(row.get("name") or key), str(row.get("kind") or "file"), count)
+        try:
+            for text in values[:3]:
+                text.encode("utf-8")
+        except UnicodeEncodeError:
+            continue      # a lone surrogate: SQLite cannot store it, and the JSON version could not save it
+        yield values
+
+
+def _import_download_counts_once(conn, json_path):
+    """Import the JSON unless the marker says it was. See the note above
+    _COUNTS_SCHEMA. Never raises for a JSON it cannot read or a failed import -
+    the counting goes on and the import is tried again on the next open - but
+    does raise for a damaged database, which the caller repairs."""
+    if _download_counts_imported(conn):
+        return
+    try:
+        loaded, note = _read_legacy_download_counts(json_path)
+    except OSError as err:
+        print(f"[DB ERROR] Could not read {json_path} to import the download counts "
+              f"({err}); counting goes on, and the import is tried again.")
+        return
+    try:
+        with _counts_transaction(conn):
+            # Again inside the transaction: a second opener waited here for the
+            # first one's commit, and must not import the file twice.
+            if _download_counts_imported(conn):
+                return
+            before = conn.total_changes
+            conn.executemany(_IMPORT_ONE_ROW, _legacy_download_count_rows(loaded))
+            imported = conn.total_changes - before
+            conn.execute("INSERT INTO download_counts_meta (key, value) VALUES (?, ?)",
+                         (_COUNTS_IMPORTED, note))
     except Exception as err:
-        print(f"[DB ERROR] Could not read the download counts, starting empty: {err}")
-        return {}
+        if isinstance(err, sqlite3.DatabaseError) and _counts_damaged(err):
+            raise
+        print(f"[DB ERROR] Could not import the download counts from {json_path} "
+              f"({err}); counting goes on, and the import is tried again.")
+        return
+    if loaded:
+        print(f"[DB] Download counts moved into the database: {imported} row(s) from "
+              f"{json_path}, which is left as it was.")
+
+
+def _with_download_counts(work):
+    """work(conn) on the counters' database, created, imported and repaired as
+    needed; returns what it returns. Caller holds runtime.download_counts_lock,
+    so nothing else in this process writes while a damaged file moves aside."""
+    db_path, json_path = _download_counts_paths()
+    os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    for attempt in (1, 2):
+        conn = None
+        try:
+            conn = _open_download_counts(db_path)
+            _import_download_counts_once(conn, json_path)
+            return work(conn)
+        except sqlite3.DatabaseError as err:
+            # Opening reads only the header and the schema, so a file damaged
+            # further in opens fine and fails in the work instead (#1087's
+            # lesson in transfer_log.py). Either way: move it aside, start
+            # afresh, and do the work once more.
+            if attempt == 2 or not _counts_damaged(err) or not os.path.isfile(db_path):
+                raise
+            if conn is not None:
+                conn.close()
+                conn = None
+            _move_download_counts_aside(db_path, err)
+        finally:
+            if conn is not None:
+                conn.close()
+
+
+def _read_download_counts(work):
+    """work(conn) on the counters for a reader, or [] when there are none or
+    they cannot be read. No lock when the database is there and imported - a
+    WAL reader never waits for a send - and the locked path above otherwise."""
+    db_path, json_path = _download_counts_paths()
+    try:
+        if os.path.isfile(db_path):
+            try:
+                conn = sqlite3.connect(db_path, timeout=_COUNTS_TIMEOUT, isolation_level=None)
+                try:
+                    if _download_counts_imported(conn):
+                        return work(conn)
+                finally:
+                    conn.close()
+            except sqlite3.Error:
+                pass        # not created, not imported or damaged: the locked path sorts it out
+        elif not (json_path and os.path.isfile(json_path)):
+            return []       # nothing was ever counted; do not create a database to say so
+        with runtime.download_counts_lock:
+            return _with_download_counts(work)
+    except Exception as err:
+        print(f"[DB ERROR] Could not read the download counts, showing none: {err}")
+        return []
 
 
 def load_download_counts():
-    """Every {key: {name, kind, count}} row from disk, or {} if there is none.
+    """Every {key: {name, kind, count}} row, or {} if there is none.
 
-    Same posture as load_known_bots(): a file that will not parse costs an
+    Same posture as load_known_bots(): counters that cannot be read cost an
     empty "most downloaded" table, not a refusal to start. These counters
     describe history and nothing else reads them, so losing them is a cosmetic
     failure - which is exactly why it must not be a loud one.
     """
-    with _disk_lock:
-        return _load_download_counts_unlocked()
+    rows = _read_download_counts(
+        lambda conn: conn.execute("SELECT key, name, kind, count FROM download_counts").fetchall())
+    return {key: {"name": name, "kind": kind, "count": count}
+            for key, name, kind, count in rows}
 
 
 def migrate_download_counts_to_labels():
@@ -661,9 +932,9 @@ def migrate_download_counts_to_labels():
     cost of the daemon starting.
 
     The wrapper is not decoration. This runs from oserve.startup(), and
-    load_download_counts() two functions up states the posture every other
-    reader of this file keeps: "a file that will not parse costs an empty
-    'most downloaded' table, not a refusal to start. These counters describe
+    load_download_counts() states the posture every other reader of the
+    counters keeps: "counters that cannot be read cost an empty 'most
+    downloaded' table, not a refusal to start. These counters describe
     history and nothing else reads them, so losing them is a cosmetic failure
     - which is exactly why it must not be a loud one."
 
@@ -734,7 +1005,11 @@ def _migrate_download_counts_to_labels():
     legacy keys that already start with "Flac", and those are skipped and stay
     unlabelled. That splits one folder's counters between two keys. Rare, and
     cosmetic when it happens, which is why it is documented rather than
-    solved with a schema marker in a file whose every other key is a real row.
+    solved with a schema marker.
+
+    Works on the database (#1133), whose first open imports the JSON: a bot
+    upgrading from a version with neither the labels nor the database gets
+    both, in that order, on its first start.
     """
     import library
 
@@ -744,73 +1019,60 @@ def _migrate_download_counts_to_labels():
     labels = {str(entry.name).lower() for entry in folders}
     primary = folders[0].name
 
-    with _disk_lock:
-        counts = _load_download_counts_unlocked()
+    def work(conn):
+        # An import that failed (it logged why) is tried again on the next
+        # open. Migrating before it would leave the rows it brings in later
+        # unlabelled for good, behind the marker; raising leaves the marker
+        # unwritten so the next start does both.
+        if not _download_counts_imported(conn):
+            raise RuntimeError("the counts in the JSON file are not imported yet")
         moves = {}
-        for key, row in counts.items():
-            if not isinstance(row, dict) or row.get("kind") != "file":
-                continue
+        for (key,) in conn.execute(
+                "SELECT key FROM download_counts WHERE kind = 'file' ORDER BY key").fetchall():
             # An ABSOLUTE key is not a relative path missing its label - it
             # is a file that was under no configured folder when it was
             # counted. os.path.join(label, absolute) returns the absolute path
-            # unchanged, so "migrating" it rewrote the file and logged a
+            # unchanged, so "migrating" it rewrote the counters and logged a
             # migration on every single boot while changing nothing.
-            if os.path.isabs(str(key)):
+            if os.path.isabs(key):
                 continue
-
-            head = str(key).replace("\\", "/").split("/", 1)[0]
+            head = key.replace("\\", "/").split("/", 1)[0]
             if head.lower() in labels:
                 continue
             moves[key] = os.path.join(primary, key)
-
         if not moves:
             return 0
-
-        for old_key, new_key in moves.items():
-            row = counts.pop(old_key)
-            existing = counts.get(new_key)
-            if isinstance(existing, dict):
+        with _counts_transaction(conn):
+            for old_key, new_key in moves.items():
+                (count,) = conn.execute("SELECT count FROM download_counts WHERE key = ?",
+                                        (old_key,)).fetchone()
                 # Both spellings present: add rather than let one win, because
                 # either way round would discard real downloads.
-                try:
-                    existing["count"] = (int(existing.get("count", 0))
-                                         + int(row.get("count", 0)))
-                except (TypeError, ValueError):
-                    existing["count"] = row.get("count", 0)
-            else:
-                # Either nothing was there, or what was there is not a row
-                # anything in this file wrote - a hand-edit, or a half-restored
-                # backup. `row` came through the isinstance check above and is
-                # real data; that is not. Keep the real one.
-                #
-                # This used to be `if new_key in counts:` followed by
-                # counts[new_key].get(...), which is an AttributeError the
-                # moment the existing value is a string. That ran at STARTUP,
-                # so the whole daemon refused to boot over one bad line in a
-                # file whose own loader is written to shrug off corruption.
-                counts[new_key] = row
+                if conn.execute("UPDATE download_counts SET count = count + ? WHERE key = ?",
+                                (count, new_key)).rowcount:
+                    conn.execute("DELETE FROM download_counts WHERE key = ?", (old_key,))
+                else:
+                    conn.execute("UPDATE download_counts SET key = ? WHERE key = ?",
+                                 (new_key, old_key))
+        return len(moves)
 
-        try:
-            _atomic_write(DOWNLOAD_COUNTS_FILE,
-                          json.dumps(counts, indent=1, sort_keys=True,
-                                     ensure_ascii=False))
-        except Exception as err:
-            print(f"[DB ERROR] Could not save the migrated download counts: {err}")
-            return 0
-
-    print(f"[MIGRATE] Moved {len(moves)} download counter(s) onto the "
-          f"{primary!r} folder label.")
-    return len(moves)
+    with runtime.download_counts_lock:
+        moved = _with_download_counts(work)
+    if moved:
+        print(f"[MIGRATE] Moved {moved} download counter(s) onto the "
+              f"{primary!r} folder label.")
+    return moved
 
 
 def record_download(key, name, kind):
-    """Count one completed send against `key`, and save.
+    """Count one completed send against `key`. Returns the new count, or None
+    when nothing was counted.
 
-    The whole load-increment-save runs under ONE _disk_lock acquisition, for
-    the same reason update_stats_on_complete() does: MAX_DCC_SLOTS transfers
-    finish concurrently, and a load here, a mutate here and a separate save
-    here let whichever thread saved second discard the other's increment -
-    permanently, because nothing ever recomputes these counters.
+    One upsert in the counters' database (#1133). SQLite does the increment,
+    so two transfers finishing together cannot discard each other's count - the
+    reason this used to hold _disk_lock across a load-increment-save of the
+    whole JSON file. It takes runtime.download_counts_lock instead, which
+    nothing but these counters uses.
 
     `key` identifies the thing; `name` is what a person should read. They are
     different on purpose. Two albums can hold a track with the same filename -
@@ -822,6 +1084,9 @@ def record_download(key, name, kind):
 
     Not bounded, and it does not need to be: a bot can only send what it
     shares, so the row count is capped by the size of the library itself.
+
+    Never raises: it runs on the send thread, right after a transfer that
+    succeeded, and a counter must not turn that into a failure.
     """
     # A FALSY KEY MEANS "DO NOT COUNT THIS", and it is deliberate as well as
     # defensive. dcc.download_count_identity() answers None for the master
@@ -830,25 +1095,23 @@ def record_download(key, name, kind):
     # own note. Returning here keeps that decision in the one place that
     # already decides what a send counts as.
     if not key:
-        return
-    with _disk_lock:
-        counts = _load_download_counts_unlocked()
-        row = counts.get(key)
-        if not isinstance(row, dict):
-            row = {"name": name, "kind": kind, "count": 0}
-        row["name"] = name or row.get("name") or key
-        row["kind"] = kind or row.get("kind") or "file"
-        try:
-            row["count"] = int(row.get("count", 0)) + 1
-        except (TypeError, ValueError):
-            row["count"] = 1
-        counts[key] = row
-        try:
-            _atomic_write(DOWNLOAD_COUNTS_FILE,
-                          json.dumps(counts, indent=1, sort_keys=True, ensure_ascii=False))
-        except Exception as err:
-            print(f"[DB ERROR] Could not save the download counts: {err}")
-        return row["count"]
+        return None
+    key = str(key)
+    name = str(name) if name else None
+    kind = str(kind) if kind else None
+
+    def work(conn):
+        with _counts_transaction(conn):
+            conn.execute(_COUNT_ONE_SEND, (key, name or key, kind or "file", name, kind))
+            return conn.execute("SELECT count FROM download_counts WHERE key = ?",
+                                (key,)).fetchone()[0]
+
+    try:
+        with runtime.download_counts_lock:
+            return _with_download_counts(work)
+    except Exception as err:
+        print(f"[DB ERROR] Could not save the download counts: {err}")
+        return None
 
 
 def prune_list_artifact_download_counts():
@@ -889,26 +1152,27 @@ def prune_list_artifact_download_counts():
         lists_root = os.path.abspath(
             getattr(config, "LOCAL_LIST_DIR", "./lists") or "./lists")
 
-        with _disk_lock:
-            counts = _load_download_counts_unlocked()
+        def work(conn):
             doomed = []
-            for key, row in counts.items():
-                name = row.get("name") if isinstance(row, dict) else None
+            for key, name in conn.execute(
+                    "SELECT key, name FROM download_counts ORDER BY key").fetchall():
                 if list_mod.is_list_artifact_name(name or key):
                     doomed.append(key)
                     continue
-                if os.path.isabs(str(key)) and dcc.is_safe_path(lists_root, str(key)):
+                if os.path.isabs(key) and dcc.is_safe_path(lists_root, key):
                     doomed.append(key)
-            if not doomed:
-                return 0
-            for key in doomed:
-                del counts[key]
-            _atomic_write(DOWNLOAD_COUNTS_FILE,
-                          json.dumps(counts, indent=1, sort_keys=True,
-                                     ensure_ascii=False))
-        print(f"[DB] Removed {len(doomed)} master-list row(s) from the "
-              f"download counters; the list is not a download.")
-        return len(doomed)
+            if doomed:
+                with _counts_transaction(conn):
+                    conn.executemany("DELETE FROM download_counts WHERE key = ?",
+                                     [(key,) for key in doomed])
+            return len(doomed)
+
+        with runtime.download_counts_lock:
+            removed = _with_download_counts(work)
+        if removed:
+            print(f"[DB] Removed {removed} master-list row(s) from the "
+                  f"download counters; the list is not a download.")
+        return removed
     except Exception as err:
         print(f"[DB] Could not tidy the download counters ({err}); "
               f"the master list may still appear under Most downloaded.")
@@ -927,29 +1191,39 @@ def top_downloads(limit=10, kind=None):
     Ties break on name so the order is stable between calls - a table that
     reshuffles equal rows on every poll looks like it is changing when it is
     not.
+
+    The same answer the JSON version gave (#1133). SQLite finds the limit-th
+    highest count through its (kind, count) index and returns only the rows
+    at or above it; Python sorts those, because the tie-break is Python's
+    str.lower() and SQLite's lower() only folds ASCII. Rows equal in count and
+    in name.lower() then go by key, which is the order the JSON version wrote
+    its file in and so the order they came out in before.
     """
-    rows = []
-    for key, row in load_download_counts().items():
-        if not isinstance(row, dict):
-            continue
-        try:
-            count = int(row.get("count", 0))
-        except (TypeError, ValueError):
-            continue
-        if count <= 0:
-            continue
-        row_kind = str(row.get("kind") or "file")
-        if kind is not None and row_kind != kind:
-            continue
-        rows.append({"name": str(row.get("name") or key),
-                     "kind": row_kind,
-                     "count": count})
-    rows.sort(key=lambda entry: (-entry["count"], entry["name"].lower()))
     try:
         limit = max(0, int(limit))
     except (TypeError, ValueError):
         limit = 10
-    return rows[:limit]
+    if not limit or (kind is not None and not isinstance(kind, str)):
+        return []
+    where, args = ("", []) if kind is None else ("kind = ? AND ", [kind])
+
+    def work(conn):
+        # The limit-th highest count, or 1 when there are fewer rows than the
+        # limit: a count below 1 was never shown. One range on count per query
+        # - given `count > 0 AND count >= ?`, SQLite walked the index from the
+        # wider one, every row of the kind, 40 ms at 100k rows instead of 1.
+        nth = conn.execute(f"SELECT count FROM download_counts WHERE {where}count >= 1 "
+                           f"ORDER BY count DESC LIMIT 1 OFFSET ?", args + [limit - 1]).fetchone()
+        return conn.execute(f"SELECT key, name, kind, count FROM download_counts WHERE {where}"
+                            f"count >= ?", args + [nth[0] if nth else 1]).fetchall()
+
+    # nsmallest, not a full sort: when the limit-th count is shared by most
+    # rows - every row sent once - they all come back, and only `limit` of
+    # them are wanted. The key is unique, so this is exactly sorted()[:limit].
+    rows = heapq.nsmallest(limit, _read_download_counts(work),
+                           key=lambda row: (-row[3], row[1].lower(), row[0]))
+    return [{"name": name, "kind": row_kind, "count": count}
+            for _key, name, row_kind, count in rows]
 
 
 def load_known_bots():
