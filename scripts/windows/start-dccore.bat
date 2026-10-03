@@ -198,6 +198,10 @@ rem  The Linux twin was always right (`"$PY" ... ; exit $?`, outside any
 rem  block), so the two launchers had drifted on the one thing this shim
 rem  layer exists to keep identical.
 if /i "%~1"=="check" goto :run_check
+rem  Stop the bot running from this folder (#1065): oserve.py asks it to stop
+rem  itself through data\dccore.stop and waits until it has. No kill - Windows
+rem  will not end a console program without /F, which skips its shutdown.
+if /i "%~1"=="stop" goto :run_stop
 rem  Under the logon task (#710) there is nobody at the keyboard: the Flask
 rem  offer below prints its command instead of asking, and a stop at the end
 rem  does not wait for a key. install-autostart.bat passes this.
@@ -210,6 +214,13 @@ set "CHECK_RC=%errorlevel%"
 echo.
 pause
 exit /b %CHECK_RC%
+
+:run_stop
+%PY% oserve.py --stop
+set "STOP_RC=%errorlevel%"
+echo.
+if not defined DCCORE_AUTOSTART pause
+exit /b %STOP_RC%
 
 :after_check
 

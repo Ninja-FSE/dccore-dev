@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **New: ways to stop the bot without its window.** `start-dccore stop` (on Windows `scripts\windows\start-dccore.bat stop`) asks the bot to stop and waits until it has; the dashboard's Tools page has **Stop the bot**; and the admin console has `shutdown now`. All of them stop it the way Ctrl-C in its window does.
 - **Fixed: a list from a bot whose nick is only symbols (such as `^_^`) was read again on every start, and the list filter showed it as holding no match.** Both find it now.
 - **Fixed: pressing Resend commands, or a Save that was refused, put the saved on-connect commands back over what you had typed.** What you type now stays in the box until it is saved.
 - **Fixed: Resend commands said "not connected" when the bot was connected but its channel would not let it in.** On Undernet that happens when the X login did not take - which is exactly when you want to send it again. It works now whether the channel was joined or not.

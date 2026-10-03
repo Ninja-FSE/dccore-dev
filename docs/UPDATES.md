@@ -4,6 +4,48 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The bot can be stopped without its window (#1065, part 2)
+
+Closing the window or Ctrl-C in it were the only ways to stop the bot, which a bot started by the logon task, or (next)
+run in the background, cannot offer. Three more, all through the new `src/stopping.py` and all ending in the same
+`KeyboardInterrupt` Ctrl-C raises - `request_stop()` says why, sends `QUIT :DCCore is stopping`, and calls
+`_thread.interrupt_main()`, so `run_forever()`'s existing shutdown (the bot-registry flush, exit 0) is the only one:
+
+- **`start-dccore stop`** (`start-dccore.bat stop`, `start-dccore.sh stop`, and the macOS `.command`, which hands its
+  arguments to the Linux script) runs `oserve.py --stop`, handled in the program-only block before the log file is
+  opened. It asks through a file, `data/dccore.stop`, which a watcher started at `oserve.py`'s entry point - never inside `run_forever()`, which tests drive in-process - looks for every two
+  seconds, and waits up to a minute for the instance lock to come free - the lock, taken and released, is also how it
+  tells whether a bot is running at all. Not a kill: Windows will not end a console program without `/F`, which skips
+  the shutdown. If the bot does not stop in time it says so with the pid and `taskkill /F /PID` (or `kill`).
+  `startup()` removes a stop file left from before, after taking the lock; the shutdown removes the one it answered.
+- **`shutdown now`** in the admin console (and the dashboard's Console page, which runs the same commands);
+  `shutdown` alone says what it does, since it sits one word from `quit`.
+- **Stop the bot** on the dashboard's Tools page, with a confirm: `POST /api/tools/stop`, answered before the stop.
+- **Admin > Stop the bot...** in `dccore.mrc`'s DCCore menu (script 1.10.6), with a yes/no first; it sends
+  `shutdown now`.
+
+Found in a review before merge, and fixed:
+
+- **A sleeping bot did not stop.** `_thread.interrupt_main()` only sets a flag the main thread looks at between two
+  lines of Python, so a bot in its reconnect wait (up to five minutes) did not stop until it woke, and
+  `start-dccore stop` gave up after a minute. `stopping.interrupt_main()` sends a real SIGINT -
+  `signal.raise_signal()` on Windows, `signal.pthread_kill()` to the main thread elsewhere - which wakes the sleep.
+- **A bot started with Ctrl-C ignored** (in the background by a script: `nohup python3 oserve.py &`) has no SIGINT
+  handler, so every way to stop it only sent QUIT and it was back ten seconds later. `stopping.restore_interrupt()`
+  puts Python's handler back at the program's entry.
+- **The watcher stopped watching** after the first request; it goes on now, so a second `start-dccore stop` is read
+  if the first did not take.
+- **The stop file is looked for beside the lock this bot holds**, not wherever `DCC_QUEUE_FILE` points now: a
+  settings save reloads it live. (`start-dccore stop` itself reads the setting from the file; moved while the bot
+  runs, it now says to stop that bot from the dashboard or its window once.)
+- **A second interrupt during the shutdown** (Ctrl-C twice; the dashboard and `start-dccore stop` together), or one in
+  the ten-second reconnect wait, escaped as a traceback that skipped the registry flush and exited non-zero, which
+  launchd restarts. `oserve._shut_down()` swallows a repeat and always exits 0; the wait is inside a `try` of its own.
+
+Tests: `tests/test_the_bot_can_be_stopped_without_its_window.py`, including the command against a child process
+holding the lock as the bot does - one that stops when asked, one that does not - and a real interrupt in a child
+process, its main thread asleep, with SIGINT as it starts and as a background start leaves it.
+
 ### 🐛 A console-log rotation refused partway changes nothing (#1103)
 
 Found in the re-review of #1073. The current file was already moved aside first, but if a shift of the OLD files was

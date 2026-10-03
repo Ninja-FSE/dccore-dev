@@ -225,7 +225,10 @@ nick. Each says how to start it now, once the hand-run bot is stopped:
 `systemctl --user start dccore` on Linux, `launchctl load -w
 ~/Library/LaunchAgents/com.dccore.bot.plist` on macOS, `start-dccore.bat` on
 Windows. The same applies later: with the autostart in place, do not also
-start the launcher by hand while it is running. On Linux the unit starts at
+start the launcher by hand while it is running. To stop it, on any platform:
+`start-dccore stop` (`scripts\windows\start-dccore.bat stop`,
+`./scripts/linux/start-dccore.sh stop`, `scripts/macos/start-dccore.command stop`),
+the dashboard's Tools > Stop the bot, or `shutdown now` in the admin console. On Linux the unit starts at
 login; to have it start at boot without anyone logging in, once: `loginctl
 enable-linger $USER`. Its output is in `journalctl --user -u dccore -f` (and on every platform in
 `data/logs/dccore.log`, with the date on each line); on

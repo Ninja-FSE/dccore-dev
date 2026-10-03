@@ -4756,6 +4756,14 @@ if HAVE_FLASK:
         def api_on_connect():
             return jsonify(build_on_connect_payload())
 
+        @app.route("/api/tools/stop", methods=["POST"])
+        def api_tools_stop():
+            # The Tools page's Stop the bot (#1065): answered first, then the
+            # same stop as Ctrl-C a moment later, so the page hears back.
+            import stopping
+            stopping.request_stop_soon("asked from the dashboard")
+            return jsonify({"stopping": True}), 200
+
         @app.route("/api/on-connect/resend", methods=["POST"])
         def api_on_connect_resend():
             status, result = build_on_connect_resend_result()

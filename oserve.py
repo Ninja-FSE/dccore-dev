@@ -38,6 +38,13 @@ if __name__ == "__main__":
     platform_compat.set_console_timestamp_format(
         getattr(config, "CONSOLE_TIMESTAMP_FORMAT", "%H:%M:%S"))
 
+    # `oserve.py --stop` (#1065): ask the bot running from this folder to stop,
+    # wait until it has, and exit - before anything below starts, and before
+    # the log file is opened, since this process is not the bot.
+    if "--stop" in sys.argv[1:]:
+        import stopping
+        sys.exit(stopping.stop_from_outside())
+
     # And to a file (#1065), from here on. Read on every line through
     # sys.modules: a settings save reloads defaults, and a changed or emptied
     # path then takes effect without a restart.
@@ -186,6 +193,11 @@ def startup(setup_page=None):
         print("[CRITICAL] Stop the other one first (its own window, or the autostart task), "
               "or run a second bot from a second folder.")
         sys.exit(EXIT_ALREADY_RUNNING)
+
+    # A stop file left from before (#1065) asked an earlier bot to stop, not
+    # this one: gone before the watcher could read it.
+    import stopping
+    stopping.clear_stale_stop_file()
 
     # The hard backstop for #170's RFC: scripts/setup_check.py's pre-flight
     # report is a friendlier, EARLIER warning an operator can choose to run
@@ -532,17 +544,7 @@ def run_forever():
             # Hand the whole network job to the IRC module
             irc.irc_loop()
         except KeyboardInterrupt:
-            print("\nShutting down...")
-            # One last flush of the bot registry (#691): it is written on a
-            # 30 s interval, and a Ctrl-C inside that window lost the last
-            # adverts and a source the dashboard had just added. Never
-            # fatal on the way out.
-            try:
-                import irc as _irc_flush
-                _irc_flush._flush_known_bots(force=True)
-            except Exception:
-                pass
-            sys.exit(0)
+            _shut_down()
         except Exception as main_err:
             print(f"[CRITICAL MAIN ERROR] The main loop stopped: {main_err}")
 
@@ -555,11 +557,54 @@ def run_forever():
         announce.is_ready = False
 
         print("[CONNECT] Lost the connection. Reconnecting to the IRC server in 10 seconds...")
-        time.sleep(10)
+        # Inside a try of its own (#1065 review): a stop landing in these ten
+        # seconds escaped as a traceback and skipped the flush below.
+        try:
+            time.sleep(10)
+        except KeyboardInterrupt:
+            _shut_down()
+
+
+def _shut_down():
+    """Ctrl-C, and every other way to stop (#1065): flush, then exit 0.
+
+    A second interrupt while this runs - Ctrl-C pressed twice, a stop from the
+    dashboard and from `start-dccore stop` together - is swallowed rather than
+    escaping as a traceback that skips the flush and exits non-zero, which
+    launchd restarts (#1065 review). Not by ignoring SIGINT: a test drives
+    run_forever() in-process and its runner must keep Ctrl-C."""
+    try:
+        print("\nShutting down...")
+        # The stop file is the request just answered (#1065); a copy left
+        # behind would stop the next start too.
+        try:
+            import stopping
+            stopping.clear_stale_stop_file()
+        except Exception:
+            pass
+        # One last flush of the bot registry (#691): it is written on a
+        # 30 s interval, and a Ctrl-C inside that window lost the last
+        # adverts and a source the dashboard had just added. Never
+        # fatal on the way out.
+        try:
+            import irc as _irc_flush
+            _irc_flush._flush_known_bots(force=True)
+        except Exception:
+            pass
+    except KeyboardInterrupt:
+        pass   # asked twice: still stopping, and still exit 0
+    sys.exit(0)
 
 
 if __name__ == "__main__":
     startup()
+    # The other ways to stop (#1065) all end in run_forever()'s Ctrl-C
+    # KeyboardInterrupt: the watcher for `start-dccore stop` starts here, in
+    # the program only - a test that drives run_forever() in-process must
+    # never have its own runner interrupted by it.
+    import stopping
+    stopping.restore_interrupt()
+    stopping.ensure_watcher()
     run_forever()
 
 

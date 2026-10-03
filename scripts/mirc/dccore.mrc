@@ -86,7 +86,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.10.5 }
+alias dccore.ver { return 1.10.6 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1346,6 +1346,7 @@ menu @DCCore {
   Library
   .Find duplicate filenames:dccore.send verify
   .Rebuild the list...:dccore.confirm update Rebuild the list? It walks the whole library and can take minutes.
+  .Stop the bot...:if ($input(Stop the bot? It leaves IRC and ends; start it again with start-dccore.,yq,DCCore)) { dccore.send shutdown now }
   Admin
   .Ban...:dccore.ask ban Ban pattern (for example *!*@host.example)
   .Unban...:dccore.ask unban Pattern to remove

@@ -1767,6 +1767,19 @@ def _cmd_quit(session, args):
     _forget(session)
 
 
+def _cmd_shutdown(session, args):
+    """Stop the bot (#1065) - the way Ctrl-C in its window does, for a bot
+    whose window is minimised, hidden or not there. Asks for "now" first:
+    quit closes this session, and one letter away from it is no place for a
+    command that ends the bot."""
+    if args.strip().lower() != "now":
+        session.send("This stops the bot: it leaves IRC and ends. Type 'shutdown now' to do it.")
+        return
+    session.send("Stopping the bot. Start it again with start-dccore (or the autostart task).")
+    import stopping
+    stopping.request_stop_soon(f"asked by {session.nick} in the admin console")
+
+
 def _cmd_verify(session, args):
     """Report filenames the master list carries under more than one folder.
 
@@ -2004,6 +2017,7 @@ COMMANDS = {
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),
+    "shutdown":   (_cmd_shutdown,   "stop the bot",                      "shutdown now"),
     "help":       (_cmd_help,       "this list",                         "help"),
     "quit":       (_cmd_quit,       "close this session",                "quit"),
 }

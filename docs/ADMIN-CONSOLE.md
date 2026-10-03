@@ -257,6 +257,7 @@ prefix.
 | `hello <client> <version>` | switch this session to the structured feed (below) |
 | `pair <client> <version>` | mint a login token for a script (below) |
 | `unpair [<client>]` | list the paired scripts, or revoke one |
+| `shutdown now` | stop the bot, the way Ctrl-C in its window does: it leaves IRC and ends (`shutdown` alone says how) |
 | `quit` | close the session |
 
 `lists` and `fetch` are the console side of the List Browser's freshness check and
