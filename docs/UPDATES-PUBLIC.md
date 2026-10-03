@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Faster: a list rebuild writes the list about four times faster.** Each row's name was cleaned up a character at a time; almost none needs it, and only those are touched now. The list comes out exactly the same.
+
 ## v1.14.0 — The Bot Keeps a Record
 
 - **Faster: a finished send no longer rewrites the whole download-count file.** Each one rewrote every count the bot had ever kept - most of a second on a bot that has sent many different files, with other saves waiting behind it. The counts move into `data/download_counts.db` on the first start; `data/download_counts.json` is left exactly as it was, so going back to an older version still shows the counts up to the upgrade.
