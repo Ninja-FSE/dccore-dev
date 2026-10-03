@@ -685,7 +685,8 @@ def replace_with_retry(src, dst, attempts=5, base_delay=0.02):
     ([WinError 5]) when another handle has `dst` open at the exact instant of
     the rename - security.check_user_status() does exactly that, holding
     hard_bans.txt open (unlocked, no share-deny) on the IRC read thread for
-    every PRIVMSG. Measured under synthetic load: 256/300 replace attempts
+    every PRIVMSG (since #1131, only while the file may have changed: it is
+    kept parsed otherwise). Measured under synthetic load: 256/300 replace attempts
     failed with a reader active throughout. A bounded retry-with-backoff
     (total worst case here: ~0.3s across 4 sleeps) gives that brief per-line
     read window time to close without leaving a bad-actor open handle able to
