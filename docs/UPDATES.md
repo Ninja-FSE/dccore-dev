@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The setup page's port test checks its own socket, not the port number
+
+`test_the_port_is_freed_after_ctrl_c` took a free port, served the setup page on it, pressed Ctrl-C and then bound the
+same port number again. On a shared machine another process can take that number in between: a parallel shard
+(#1146), or anything else on a CI runner. Then the test failed with `Address already in use`, and the failure said
+nothing about the setup server. It has failed this way twice in the last 200 CI runs, once before the suite ran in
+parallel.
+
+The test now records the server `run_setup_until_configured()` made and checks that its listening socket is closed and
+its serving thread has stopped. That is what "the port is freed" means, and nothing else can take it away. Mutation
+check: dropping both `shutdown()` and `server_close()` fails it. Dropping either alone does not, because werkzeug's
+`serve_forever()` closes the socket itself when it ends, so the port really is freed then. Tests only.
+
 ### 🧪 Preflight runs its hidden-tooling pass again, and the coverage gate passes (#1178)
 
 Two preflight checks had stopped doing their job, on every machine:
