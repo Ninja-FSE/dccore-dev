@@ -284,6 +284,9 @@ rebuild_schedule_last_attempt = None
 audio_reading_lock = threading.Lock()
 audio_reading      = None
 audio_reading_last = None
+# True while commands.retry_audio_rewrite_when_free() waits for the list
+# downloads to finish, so one wait at a time (#1182 audit).
+audio_retry_waiting = False
 
 # Automatic list grabbing (#926 item 5), list_grab.py. Here for the same
 # reasons: a start guard a rehash cannot reset, and a wait in progress that a

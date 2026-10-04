@@ -424,6 +424,11 @@ class TheList(FileCase):
         self.write("Example Artist - 02 - Closing.flac", flac(), folder="Album")
         self.write("Front.jpg", b"\xff\xd8" + b"\x00" * 500, folder="Album")
         self.write("Broken.mp3", b"not audio at all", folder="Album")
+        # As the bot starts it (#1182): a run by hand does not read in the background.
+        from unittest import mock
+        patcher = mock.patch.dict(os.environ, {update_list.RUN_TOKEN_ENV: "a-run-of-the-bot"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def rows(self, stop=None, **overrides):
         """One rebuild the way update_list.py's __main__ runs it since #1182:

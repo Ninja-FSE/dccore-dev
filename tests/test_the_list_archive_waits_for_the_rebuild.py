@@ -98,6 +98,25 @@ class TheArchiveWaitsForTheReadingsSwap(TheArchiveWaits):
         self.ask(self.name)
         self.assertTrue(self.sent())
 
+    def test_served_once_the_rebuild_is_done(self):
+        """The rebuild's own test, for the reading: served while it reads."""
+        update_list.write_progress("reading", force=True)
+        self.ask(self.name)
+        self.assertTrue(self.sent())
+
+    def test_refused_from_its_start_and_through_its_rewrite(self):
+        """Every phase but the reading itself (#1182 audit): a send started
+        while the rows are rewritten would still be running at the swap."""
+        self.set_config(PAUSE_ON_UPDATE=False)
+        for phase in (None, "finding", "rewriting"):
+            with self.subTest(phase=phase):
+                if phase is None:
+                    update_list.clear_progress()
+                else:
+                    update_list.write_progress(phase, force=True)
+                self.assertIn("Master list is currently rebuilding", self.ask(self.name))
+                self.assertFalse(self.sent())
+
     def test_served_again_once_it_is_over(self):
         """Its last phase still in the file, but the reading is over."""
         self.set_config(PAUSE_ON_UPDATE=False)

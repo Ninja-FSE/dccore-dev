@@ -221,6 +221,15 @@ def startup(setup_page=None):
     import stopping
     stopping.clear_stale_stop_file()
 
+    # A background audio reading the bot's last run started (#1182) outlives a
+    # bot that ended without its shutdown - its window closed, a kill, a
+    # crash. Asked to stop now, it saves what it read.
+    try:
+        import commands as _commands_orphan
+        _commands_orphan.stop_orphaned_reading()
+    except Exception as orphan_err:
+        print(f"[AUDIO-INFO] Could not look for a reading left running: {orphan_err}")
+
     # The hard backstop for #170's RFC: scripts/setup_check.py's pre-flight
     # report is a friendlier, EARLIER warning an operator can choose to run
     # (or a launcher runs for them) - this is what actually stops the daemon

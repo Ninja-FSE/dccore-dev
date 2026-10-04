@@ -1761,16 +1761,18 @@ def list_archive_waits():
 
     Through a whole rebuild (#971): the archive is the file its swap
     replaces, and a slow send holding it open on Windows made the replace
-    give up and the rebuild roll back. And through the background audio
-    reading's own packing and swap (#1182), the same short window in which
-    searches and requests pause for it - otherwise the same send makes the
-    reading's re-publish give up instead."""
+    give up and the rebuild roll back. And through a background audio reading
+    (#1182) in every phase but the reading itself - from its start, through
+    the rewrite of its rows, the packing and the swap - so a send cannot
+    start in the stretch that ends in its swap (#1182 audit). The reading,
+    which can last hours, leaves the archive free; a send still running when
+    it reaches the swap is waited for (update_list's READING_SWAP_WAIT)."""
     if getattr(config, 'update_inprogress', False) is True:
         return True
     if runtime.audio_reading is None:
         return False
     import update_list
-    return update_list.read_phase() in READING_SWAP_PHASES
+    return update_list.read_phase() != update_list.READING_PHASE
 
 
 def rebuild_pauses_requests():

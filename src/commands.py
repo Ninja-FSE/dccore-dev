@@ -1806,7 +1806,7 @@ def last_progress_at():
         return None
 
 
-def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=None):
+def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=None, env=None):
     """Run the list builder, killing it only when it stops making progress.
 
     Returns the same CompletedProcess shape subprocess.run() did, so the
@@ -1817,6 +1817,7 @@ def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=Non
     list and goes on reading audio lengths in the background. The result then
     has returncode None and the running Popen as `.process`; whoever takes it
     must keep draining its pipes - commands.watch_audio_reading() does.
+    `env` is the child's environment, None for this process's.
 
     THREE RULES:
 
@@ -1845,7 +1846,7 @@ def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=Non
     import platform_compat
     process = subprocess.Popen(argv, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True,
-                               encoding="utf-8", errors="replace",
+                               encoding="utf-8", errors="replace", env=env,
                                **platform_compat.no_console_window())
     while True:
         try:
@@ -2250,11 +2251,12 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
             # reports the background audio reading, the rebuild is done as far
             # as this thread is concerned - watch_audio_reading() takes the
             # still-running process from here.
+            token, child_env = audio_run_env()
             process = run_watching_for_a_stall(
                 [sys.executable, script_path],
                 ceiling=list_update_timeout,
                 stall=getattr(config, 'LIST_UPDATE_STALL_SECONDS', 900),
-                hand_over=child_is_reading)
+                hand_over=lambda child: child_is_reading(token), env=child_env)
             handed_over = process.returncode is None
 
             if process.returncode == 0 or handed_over:
@@ -2264,7 +2266,7 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
                 # so its pipes are always drained and a new rebuild can always
                 # find it to stop it.
                 if handed_over:
-                    start_audio_watch(process.process, "rebuild")
+                    start_audio_watch(process.process, "rebuild", token=token)
                 # The List Browser's folder tables describe the lists as they
                 # were (#1128). Each is keyed on its files' mtime and size, which
                 # a rebuild changes; dropping them here as well covers a rewrite
@@ -2440,14 +2442,35 @@ def _update_list_argv(*extra):
     return [sys.executable, os.path.join(base_path, "update_list.py")] + list(extra)
 
 
-def child_is_reading(process):
-    """Has THIS child published every list and begun the background reading?
-    Only its own report counts: a progress file a stopped reading left
-    behind names another process."""
+def audio_run_env():
+    """(token, environment) for an update_list.py this bot starts.
+
+    The token is how the bot knows a progress report is its own child's
+    (#1182 audit). Not the pid: started as a Windows venv's python.exe, the
+    script runs in a second process the launcher starts, with another pid -
+    the hand-over never happened, and the rebuild flag stayed up for the
+    whole reading. The bot's own pid lets a reading notice that the bot has
+    gone and stop by itself."""
+    import os
+    import secrets
+    import update_list
+
+    token = secrets.token_hex(12)
+    env = dict(os.environ)
+    env[update_list.RUN_TOKEN_ENV] = token
+    env[update_list.DAEMON_PID_ENV] = str(os.getpid())
+    return token, env
+
+
+def child_is_reading(token):
+    """Has the child given `token` published every list and begun the
+    background reading? Only its own report counts: a progress file a
+    stopped reading left behind carries another token."""
     import update_list
     progress = update_list.read_progress()
-    return (bool(progress) and progress.get("phase") == update_list.READING_PHASE
-            and progress.get("pid") == process.pid)
+    return (bool(token) and bool(progress)
+            and progress.get("phase") == update_list.READING_PHASE
+            and progress.get("token") == token)
 
 
 def audio_progress_line(progress):
@@ -2462,16 +2485,17 @@ def audio_progress_line(progress):
             f"{f', {rate:,}/s' if rate else ''}.")
 
 
-def start_audio_watch(process, kind, start=None):
+def start_audio_watch(process, kind, start=None, token=""):
     """Record a running reading and watch it on a thread of its own. Set
     BEFORE the caller lets go of the rebuild flag, so there is never a moment
-    when neither says something is running. `start` is for the tests."""
+    when neither says something is running. `token` is the one the child was
+    given (audio_run_env()). `start` is for the tests."""
     import threading
     import time
     import types
 
     job = types.SimpleNamespace(process=process, kind=kind, started=time.time(),
-                                done=threading.Event(), stopping=False)
+                                done=threading.Event(), stopping=False, token=token)
     with runtime.audio_reading_lock:
         runtime.audio_reading = job
     starter = start or (lambda: threading.Thread(
@@ -2538,7 +2562,8 @@ def watch_audio_reading(job, tick=5.0):
                 pass
             now = time.time()
             progress = update_list.read_progress() or {}
-            if progress.get("pid") == process.pid and progress.get("phase") == update_list.READING_PHASE:
+            mine = bool(job.token) and progress.get("token") == job.token
+            if mine and progress.get("phase") == update_list.READING_PHASE:
                 if not announced:
                     announced = True
                     last_line = now
@@ -2586,6 +2611,77 @@ def watch_audio_reading(job, tick=5.0):
                 finish_audio_reading(result)
             except Exception as say_err:
                 print(f"[AUDIO-INFO] Could not report the audio reading: {say_err}")
+            if result.get("unwritten"):
+                retry_audio_rewrite_when_free()
+
+
+AUDIO_RETRY_CHECK_SECONDS = 30.0     # between two looks at the running list downloads
+AUDIO_RETRY_GIVE_UP_SECONDS = 86400.0  # a list download held open longer than this is left
+
+
+def list_sends_running():
+    """Whether a DCC send of a list archive is running now."""
+    import os
+    import list as list_mod
+
+    for row in list(getattr(config, "active_transfers", []) or []):
+        name = row.get("file") if isinstance(row, dict) else None
+        if name and list_mod.is_list_artifact_name(os.path.basename(str(name))):
+            return True
+    return False
+
+
+def retry_audio_rewrite_when_free(start=None, sleep=None, clock=None):
+    """A reading that read its files but could not swap them into the list -
+    a list download still running held it open, on Windows - is written in
+    once no list download is running (#1182 audit). Then a reading-only run
+    starts, and from its start to its swap new list downloads wait, so
+    downloading the list again and again cannot keep the lengths out. One such
+    wait at a time; a rebuild or a reading started meanwhile makes it moot,
+    since both write in what the cache holds. True when this call started it."""
+    import threading
+    import time as time_mod
+
+    nap = sleep or time_mod.sleep
+    now = clock or time_mod.monotonic
+    with runtime.audio_reading_lock:
+        if runtime.audio_retry_waiting:
+            return False
+        runtime.audio_retry_waiting = True
+
+    def wait_then_write():
+        try:
+            began = now()
+            while now() - began < AUDIO_RETRY_GIVE_UP_SECONDS:
+                nap(AUDIO_RETRY_CHECK_SECONDS)
+                if getattr(config, "update_inprogress", False) or runtime.audio_reading is not None:
+                    return
+                if list_sends_running():
+                    continue
+                handle_audio_info_request("the audio reading", "-", authorised=True)
+                return
+            print("[AUDIO-INFO] A list download has held the list for a day; the lengths "
+                  "already read are written in by the next rebuild or Read audio info.")
+        finally:
+            runtime.audio_retry_waiting = False
+
+    (start or (lambda target: threading.Thread(target=target, daemon=True).start()))(wait_then_write)
+    return True
+
+
+def stop_orphaned_reading():
+    """At startup: a reading a previous run of the bot started, still going
+    because that bot ended without its shutdown (its window closed, a kill, a
+    crash), is asked to stop. What it read is kept. True when one was found."""
+    import update_list
+
+    holder = update_list.list_lock_holder()
+    if not holder or holder[1] != "reading":
+        return False
+    update_list.request_stop()
+    print(f"[AUDIO-INFO] An audio reading left running by the bot's last run (pid "
+          f"{holder[0] or '?'}) was asked to stop; what it read is kept.")
+    return True
 
 
 def stop_audio_reading(wait=None):
@@ -2640,6 +2736,19 @@ def handle_audio_info_request(user, target_chan, authorised=False, user_host=Non
                        "itself once it has published.")
             announce.send_debug(message, category="INFO")
             return "rebuilding", message
+        holder = update_list.list_lock_holder() if runtime.audio_reading is None else None
+        if holder is not None:
+            # A run this bot is not following holds the list: one started
+            # by hand, or by the bot's last run (#1182 audit). Never a second.
+            if holder[1] == "reading":
+                message = (f"Audio info: already reading (pid {holder[0] or '?'}, started outside "
+                           f"this bot or by its last run).")
+                announce.send_debug(message, category="INFO")
+                return "running", message
+            message = ("Audio info: a list rebuild is running - it reads the new audio files "
+                       "itself once it has published.")
+            announce.send_debug(message, category="INFO")
+            return "rebuilding", message
         if runtime.audio_reading is not None:
             progress = update_list.read_progress() or {}
             message = ("Audio info: already reading - "
@@ -2652,16 +2761,17 @@ def handle_audio_info_request(user, target_chan, authorised=False, user_host=Non
         # was killed - a stop request would end this one at its first read.
         update_list.clear_stop_request()
         update_list.clear_progress()
+        token, child_env = audio_run_env()
         try:
             process = (popen or subprocess.Popen)(
                 _update_list_argv("--read-audio-info"), stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                **platform_compat.no_console_window())
+                env=child_env, **platform_compat.no_console_window())
         except OSError as err:
             message = f"Audio info: could not start the reading: {err}"
             announce.send_debug(message, category="INFO")
             return "failed", message
-        start_audio_watch(process, "on demand")
+        start_audio_watch(process, "on demand", token=token)
     message = (f"Audio info: {user} started reading the audio files the list has no length "
                f"for yet.")
     announce.send_debug(message, category="INFO")

@@ -333,7 +333,8 @@ def reset_config(**overrides):
                         ("chat_last_id", 0),
                         # #1182: one test's background audio reading, or
                         # its result, is not the next one's.
-                        ("audio_reading", None), ("audio_reading_last", None)):
+                        ("audio_reading", None), ("audio_reading_last", None),
+                        ("audio_retry_waiting", False)):
         setattr(runtime, name, value)
 
     # A FRESH OUTBOUND CLOCK PER TEST. runtime.outbound_pacer is a

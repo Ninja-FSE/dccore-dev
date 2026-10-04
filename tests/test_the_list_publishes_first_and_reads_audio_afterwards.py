@@ -66,6 +66,11 @@ class Library(DCCoreTestCase):
         self.write("Album One", "Broken.mp3", b"not audio at all")
         self.write("Album Two", "Example Artist - 01 - Second.mp3", frames(500, mode=0x00))
         self.write("Films", "Some.Film.2021.mkv", b"\x1a\x45\xdf\xa3" + b"\x00" * 200)
+        # As the bot starts it (#1182 audit): a run started by hand does not
+        # read in the background.
+        patcher = mock.patch.dict(os.environ, {update_list.RUN_TOKEN_ENV: "a-run-of-the-bot"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def write(self, folder, name, data):
         directory = os.path.join(self.tree.music, folder)
@@ -206,7 +211,7 @@ class NothingChangedNothingPublished(Library):
     def test_the_rewrite_itself_refuses_when_no_row_changed(self):
         self.rebuild()
         before = os.stat(self.master())
-        self.assertFalse(update_list.rewrite_audio_info())
+        self.assertEqual(update_list.rewrite_audio_info(), update_list.REWRITE_UNCHANGED)
         after = os.stat(self.master())
         self.assertEqual((after.st_mtime_ns, after.st_size, after.st_ino),
                          (before.st_mtime_ns, before.st_size, before.st_ino))
@@ -330,9 +335,9 @@ class ProgressAndResult(Library):
         self.assertEqual(written[0][1]["folder_index"], 0)
         self.assertLess(phases.index("reading"), phases.index("rewriting"))
         self.assertLess(phases.index("rewriting"), phases.index("publishing"))
-        last_reading = [kwargs for phase, kwargs in written if phase == "reading"][-1]
-        self.assertEqual(last_reading["folder_index"], 4)
-        self.assertIn("rate", last_reading)
+        with_rate = [kwargs for phase, kwargs in written if phase == "reading" and "rate" in kwargs]
+        self.assertEqual(with_rate[-1]["folder_index"], 4)
+        self.assertEqual(phases[-1], "reading", "the swap's phase does not outlive it")
         self.assertFalse(os.path.exists(update_list.progress_path()), "cleared at the end")
 
     def test_the_progress_file_names_its_writer(self):
@@ -349,6 +354,7 @@ class ProgressAndResult(Library):
         self.assertIn("[AUDIO-INFO] Audio info: reading 4 file(s) in the background, 2 at a time.", lines)
         self.assertTrue(lines[-1].startswith(update_list.AUDIO_RESULT_TAG), lines[-1])
         result = json.loads(lines[-1][len(update_list.AUDIO_RESULT_TAG):])
+        self.assertEqual(result["unwritten"], [])
         self.assertEqual((result["outcome"], result["read"], result["unreadable"]), ("done", 4, 1))
         self.assertRegex(lines[-2], r"^\[AUDIO-INFO\] Audio info: done: 3 read, 1 unreadable, "
                                     r"list updated\. Read at [\d,]+ files a second, 2 at a time\.$")
