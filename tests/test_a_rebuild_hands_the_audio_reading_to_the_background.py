@@ -334,6 +334,23 @@ class TheWatcher(Case):
         self.assertEqual(runtime.audio_reading_last["outcome"], "stopped")
         self.assertIsNone(self.said[-1][1])
 
+    def test_the_list_browsers_page_tables_are_dropped_when_it_ends(self):
+        """A reading may publish the list again with its old mtime put back,
+        and the List Browser's folder tables (#1128) are keyed on mtime and
+        size: a rewrite that kept the size would be answered from a stale
+        table. Dropped whatever the outcome."""
+        import list as list_mod
+        endings = {
+            "done": Child(ticks=0, returncode=0, stdout=result_line(
+                outcome="done", read=1, unreadable=0, total=1, updated=["Main"])),
+            "failed": Child(ticks=0, returncode=1, stdout="", stderr="Traceback\nMemoryError"),
+        }
+        for outcome, child in endings.items():
+            with self.subTest(outcome=outcome), \
+                    mock.patch.object(list_mod, "forget_folder_tables") as forget:
+                self.watch(child)
+                forget.assert_called_once_with()
+
     def test_a_reading_that_dies_is_a_failure(self):
         child = Child(ticks=0, returncode=1, stdout="", stderr="Traceback\nMemoryError")
         self.watch(child)

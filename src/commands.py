@@ -2265,6 +2265,18 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
                 # find it to stop it.
                 if handed_over:
                     start_audio_watch(process.process, "rebuild")
+                # The List Browser's folder tables describe the lists as they
+                # were (#1128). Each is keyed on its files' mtime and size, which
+                # a rebuild changes; dropping them here as well covers a rewrite
+                # that kept both, on a file system with a coarse clock. AFTER the
+                # watch above and never raising, so nothing stands between a
+                # handed-over reading (#1182) and the thread draining its pipes;
+                # watch_audio_reading() drops them again once it re-publishes.
+                try:
+                    import list as list_mod
+                    list_mod.forget_folder_tables()
+                except Exception as forget_err:
+                    print(f"[UPDATE] Could not drop the List Browser's page tables: {forget_err}")
                 # ---------------------------------------------------------------------
                 # NFS and disk sync: wait two seconds after the process closes.
                 # That gives the NAS and the network buffer time to flush the files.
@@ -2561,6 +2573,14 @@ def watch_audio_reading(job, tick=5.0):
             if runtime.audio_reading is job:
                 runtime.audio_reading = None
         job.done.set()
+        # The reading may have published the list again with its old mtime
+        # put back (#1182), which the List Browser's folder tables (#1128)
+        # are keyed on: drop them, whatever the outcome.
+        try:
+            import list as list_mod
+            list_mod.forget_folder_tables()
+        except Exception as forget_err:
+            print(f"[AUDIO-INFO] Could not drop the List Browser's page tables: {forget_err}")
         if result is not None:
             try:
                 finish_audio_reading(result)
