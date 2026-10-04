@@ -1376,6 +1376,29 @@ def rebuild_pauses_everything():
             and bool(getattr(config, 'PAUSE_FOR_WHOLE_UPDATE', False)))
 
 
+# The background audio reading's own swap (#1182): building the archive again
+# and moving the rewritten list and archive into place.
+READING_SWAP_PHASES = ("packing", "publishing")
+
+
+def list_archive_waits():
+    """Whether the list archive must not be sent right now - "@nick", and the
+    archive asked for by name (dcc.py), both ask this.
+
+    Through a whole rebuild (#971): the archive is the file its swap
+    replaces, and a slow send holding it open on Windows made the replace
+    give up and the rebuild roll back. And through the background audio
+    reading's own packing and swap (#1182), the same short window in which
+    searches and requests pause for it - otherwise the same send makes the
+    reading's re-publish give up instead."""
+    if getattr(config, 'update_inprogress', False) is True:
+        return True
+    if runtime.audio_reading is None:
+        return False
+    import update_list
+    return update_list.read_phase() in READING_SWAP_PHASES
+
+
 def rebuild_pauses_requests():
     """Whether a search or a file request must wait for the rebuild right now.
 
@@ -1397,7 +1420,7 @@ def rebuild_pauses_requests():
         # while it starts and after it ends, and that is no reason to pause.
         if runtime.audio_reading is None:
             return False
-        return update_list.read_phase() in ("packing", "publishing")
+        return update_list.read_phase() in READING_SWAP_PHASES
     if rebuild_pauses_everything():
         return True
     return update_list.read_phase() not in update_list.PHASES_BEFORE_THE_SWAP
@@ -1546,8 +1569,9 @@ def send_list_trigger_info(irc_sock, user):
 
 def send_file_list(irc_sock, user, channel):
     """Find the existing .zip list and start a DCC SEND, tracking the right channel."""
-    # If a list update is running, answer with the status rather than an error
-    if getattr(config, 'update_inprogress', False) is True:
+    # If a list update is running, answer with the status rather than an
+    # error - or the audio reading is swapping the list in (#1182).
+    if list_archive_waits():
         msg = f"NOTICE {user} :{config.C_BOLD}System Notice{config.C_RESET}: Master list is currently rebuilding. Please wait a few minutes and try again. \r\n"
         oserve.queue_message(user, msg)
         return
