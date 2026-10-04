@@ -91,6 +91,12 @@ INDEX_FILE = getattr(config, "LIST_INDEX_FILE",
 DEFAULT_SEARCH_LIMIT = 200
 MAX_SEARCH_LIMIT = 2000
 
+# How many held lists one search statement names in its `bot IN (...)`. SQLite
+# before 3.32 refuses a statement with more than 999 parameters, and an
+# operator who grabs every list on a busy network can hold that many. Past it,
+# search() asks one batch after another until the page is full.
+_HELD_KEYS_PER_QUERY = 500
+
 # 2: the prefix index and folder ids below (#1130, #1135). One version for
 # both, so an upgrade rebuilds the index once and not twice.
 _SCHEMA_VERSION = 2
@@ -697,6 +703,48 @@ def drop_bot(bot):
             return False
 
 
+def drop_every_list_of(nick):
+    """Forget every list held from `nick`: the main one, indexed under the
+    bare nick, and each other one, under "<nick>/<marker>".
+
+    By the names in the index, not by the markers the held entry still
+    names. Forget dropped only those, so a list a refetch had already left
+    out - gone from the archive, empty now, or over the ceiling - kept its
+    rows and its folders for good, and nothing else ever removed them.
+
+    Compared with substr() and not LIKE: "_" is a LIKE wildcard and common in
+    a nick, so "some_bot/%" would also drop "somexbot/rar". "somebot2" is
+    never dropped with "somebot": it is neither the bare nick nor "somebot/"
+    and more.
+    """
+    name = str(nick or "").strip().lower()
+    if not name:
+        return False
+    prefix = name + "/"
+    with _conn_lock:
+        conn = _connect()
+        if conn is None:
+            return False
+        try:
+            # The same scan as drop_bot()'s `bot = ?`, which FTS5 answers by
+            # reading every row: once here, instead of once per marker.
+            for table in ("entries", "folders"):
+                conn.execute(f"DELETE FROM {table} WHERE bot = ? "
+                             f"OR substr(bot, 1, ?) = ?",
+                             (name, len(prefix), prefix))
+            conn.commit()
+            _checkpoint_locked(conn)
+            return True
+        except Exception as err:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[LIST-INDEX] Could not drop {name}'s lists from the "
+                  f"index: {err}")
+            return False
+
+
 def _checkpoint_locked(conn):
     """Force a full WAL checkpoint after a write. Caller must hold _conn_lock.
 
@@ -850,15 +898,16 @@ def search(terms, limit=None, bots=None):
     if query is None:
         return []
 
+    # The held names, _HELD_KEYS_PER_QUERY to a statement; [None] is no
+    # restriction at all.
+    batches = [None]
     if bots is not None:
         held = [str(b).strip() for b in bots if str(b).strip()]
         if not held:
             return []
-        # Same pre-filter, same reason - the equality check is below, on the
-        # rows that come back, because bot:"Bot" also matches "Bot-2".
-        held_keys = {b.strip().lower() for b in held}
-        query = ("(" + " OR ".join(f"bot:{_quote(b)}" for b in sorted(held_keys))
-                 + ") AND " + query)
+        held_keys = sorted({b.strip().lower() for b in held})
+        batches = [held_keys[i:i + _HELD_KEYS_PER_QUERY]
+                   for i in range(0, len(held_keys), _HELD_KEYS_PER_QUERY)]
 
     if limit is None:
         limit = DEFAULT_SEARCH_LIMIT
@@ -888,26 +937,48 @@ def search(terms, limit=None, bots=None):
             # page's ids already deleted. A row whose folder column is not an
             # id - written by an older version into a table it did not make -
             # shows the text it holds, as it always did.
-            found = conn.execute(
-                "SELECT bot, filename, "
-                "CASE WHEN typeof(folder) = 'integer' THEN COALESCE("
-                "(SELECT f.folder FROM folders f WHERE f.id = entries.folder), "
-                "'') ELSE folder END, size FROM entries "
-                "WHERE entries MATCH ? LIMIT ?", (query, limit)).fetchall()
+            #
+            # THE HELD LISTS ARE CHOSEN IN THE QUERY, before the LIMIT. They
+            # were chosen in Python, on whatever rows the LIMIT had let
+            # through, and `bot:"somebot"` is a tokenised phrase that also
+            # matches "somebot-2", "somebot|away" and "somebot/rar". A list
+            # that is not held - offline under Online Only, or left in the
+            # index by anything - filled the page, and the held list's matches
+            # were not on it: none at all, behind 300 rows of a "SomeBot-2",
+            # with the sidebar showing SomeBot as matched and the page not
+            # marked as cut short. bots_with_a_match() already asked
+            # `bot = ?` in its query, for the same reason. The phrases stay
+            # as a pre-filter: they are what the full-text index answers
+            # quickly.
+            found = []
+            for keys in batches:
+                match = query
+                # A nick with no letters or digits is no phrase at all (#1091):
+                # `bot:"^_^"` matches no row, so with it in the OR the list's
+                # rows never came back, though the sidebar said it matched.
+                # Then the IN alone decides.
+                if keys is not None and all(_has_tokens(k) for k in keys):
+                    match = ("(" + " OR ".join(f"bot:{_quote(k)}" for k in keys)
+                             + ") AND " + query)
+                found += conn.execute(
+                    "SELECT bot, filename, "
+                    "CASE WHEN typeof(folder) = 'integer' THEN COALESCE("
+                    "(SELECT f.folder FROM folders f WHERE f.id = entries.folder), "
+                    "'') ELSE folder END, size FROM entries "
+                    "WHERE entries MATCH ?"
+                    + ("" if keys is None else
+                       " AND bot IN (" + ", ".join(["?"] * len(keys)) + ")")
+                    + " LIMIT ?",
+                    (match, *(keys or ()), limit - len(found))).fetchall()
+                if len(found) >= limit:
+                    break
         except Exception as err:
             print(f"[LIST-INDEX] Search failed ({err}); returning nothing "
                   f"rather than a partial answer.")
             return []
 
-    rows = [{"bot": row[0], "filename": row[1], "folder": row[2],
+    return [{"bot": row[0], "filename": row[1], "folder": row[2],
              "size": row[3]} for row in found]
-    if bots is not None:
-        # The MATCH above is a phrase filter; this is the equality. Without
-        # it, holding "Bot" would return "Bot-2"'s files and offer a download
-        # from a list we do not have.
-        rows = [row for row in rows
-                if str(row["bot"]).strip().lower() in held_keys]
-    return rows
 
 
 def _holds_rows_for(conn, bot):

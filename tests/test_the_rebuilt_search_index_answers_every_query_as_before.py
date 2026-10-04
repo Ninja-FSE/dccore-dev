@@ -65,25 +65,33 @@ def old_index(conn, bot, rows):
 
 
 def old_search(conn, terms, limit, bots):
-    """Schema 1's search(), with the limit already normalised."""
+    """search() over the schema-1 table, with the limit already normalised.
+
+    The held lists are chosen as search() chooses them now: `bot IN (...)` in
+    the query, before the LIMIT, and no phrase pre-filter when a held name
+    has no tokens. Schema 1's search() chose them in Python after the LIMIT,
+    and left a symbol-only nick's rows out entirely - both fixed in search()
+    itself, which is not what this file compares. It compares the tables."""
     query = list_index.build_match_query(terms)
     if query is None:
         return []
+    held_keys = None
     if bots is not None:
         held = [str(b).strip() for b in bots if str(b).strip()]
         if not held:
             return []
-        held_keys = {b.strip().lower() for b in held}
-        query = ("(" + " OR ".join(f"bot:{list_index._quote(b)}"
-                                   for b in sorted(held_keys))
-                 + ") AND " + query)
-    found = conn.execute("SELECT bot, filename, folder, size FROM entries "
-                         "WHERE entries MATCH ? LIMIT ?", (query, limit)).fetchall()
-    rows = [{"bot": r[0], "filename": r[1], "folder": r[2], "size": r[3]}
+        held_keys = sorted({b.strip().lower() for b in held})
+        if all(list_index._has_tokens(b) for b in held_keys):
+            query = ("(" + " OR ".join(f"bot:{list_index._quote(b)}"
+                                       for b in held_keys)
+                     + ") AND " + query)
+    sql = "SELECT bot, filename, folder, size FROM entries WHERE entries MATCH ?"
+    if held_keys is not None:
+        sql += " AND bot IN (" + ", ".join(["?"] * len(held_keys)) + ")"
+    found = conn.execute(sql + " LIMIT ?",
+                         (query, *(held_keys or ()), limit)).fetchall()
+    return [{"bot": r[0], "filename": r[1], "folder": r[2], "size": r[3]}
             for r in found]
-    if bots is not None:
-        rows = [r for r in rows if str(r["bot"]).strip().lower() in held_keys]
-    return rows
 
 
 def old_bots_with_a_match(conn, terms, bots):
