@@ -11,6 +11,7 @@ import tempfile
 import zipfile
 import time
 import json
+import collections
 
 # This script is an entry point of its own (README/INSTALL.md say "python3
 # update_list.py"), and stays at the repository root for that reason - but
@@ -512,6 +513,18 @@ def _one_line(text):
 _NEEDS_ONE_LINE_CLEANING = re.compile("[\x00-\x1f\x7f\ud800-\udfff]")
 
 
+def _heading_text(folder):
+    """The heading line a folder gets in the list, exactly as written.
+
+    One function for the music list and for the rewrite of its length and
+    quality (#1182), which finds each row's cache entry by the heading above
+    it: two copies of this expression could drift, and a row would then miss
+    its suffix in one and not the other."""
+    import list as list_mod
+    raw = f"{list_mod.LIST_FOLDER_PREFIX}{folder}\\" if folder else list_mod.LIST_FOLDER_PREFIX
+    return _one_line(raw.replace("/", "\\"))
+
+
 def _discard_temp_lists(*paths):
     """Remove half-written temporary lists so they cannot be mistaken for real ones."""
     for path in paths:
@@ -1001,7 +1014,7 @@ def progress_path():
 
 
 def write_progress(phase, folder="", folder_index=0, folder_count=0,
-                   files=0, force=False):
+                   files=0, force=False, rate=None):
     """Report the current step, for the dashboard to poll.
 
     NEVER RAISES AND NEVER BLOCKS THE SCAN. This is a progress bar: a full
@@ -1010,6 +1023,11 @@ def write_progress(phase, folder="", folder_index=0, folder_count=0,
 
     Throttled to PROGRESS_WRITE_SECONDS, except when `force` marks a step an
     operator would notice missing - the start, each folder, and the end.
+
+    `pid` says which process wrote it (#1182): the daemon hands a rebuild
+    over to the background reading only when THIS child reports "reading",
+    never on a file a stopped reading left behind. `rate` is the reading's
+    files a second.
     """
     now = time.time()
     if not force and (now - _progress_last_write[0]) < PROGRESS_WRITE_SECONDS:
@@ -1017,7 +1035,9 @@ def write_progress(phase, folder="", folder_index=0, folder_count=0,
     _progress_last_write[0] = now
     payload = {"phase": phase, "folder": folder, "folder_index": folder_index,
                "folder_count": folder_count, "files": files, "at": now,
-               "started_at": _started_at}
+               "started_at": _started_at, "pid": os.getpid()}
+    if rate is not None:
+        payload["rate"] = rate
     try:
         path = progress_path()
         directory = os.path.dirname(os.path.abspath(path))
@@ -1033,23 +1053,62 @@ def write_progress(phase, folder="", folder_index=0, folder_count=0,
         pass
 
 
-# The phases in which the published list is untouched (#923): the scan, the
-# audio-info reading and the writing all work on temporary names. Anything
-# else - "publishing", which covers the swap and the prune after it, or no
-# phase at all - is a moment searches and file requests wait out.
-PHASES_BEFORE_THE_SWAP = ("scanning", "audio", "writing")
+# The phases in which the published list is untouched (#923): the scan and
+# the writing work on temporary names, and so do the background audio reading
+# and the rewrite of its rows (#1182) - "reading" and "rewriting". Anything
+# else - "packing" and "publishing", which cover building the archive and the
+# swap, or no phase at all - is a moment searches and file requests wait out.
+PHASES_BEFORE_THE_SWAP = ("scanning", "writing", "reading", "rewriting")
+
+# The phase of the background audio reading (#1182), after the list is
+# published. The daemon hands a rebuild over to it on seeing this.
+READING_PHASE = "reading"
+
+
+def read_progress():
+    """The progress file as written, or None when there is nothing readable."""
+    try:
+        with io.open(platform_compat.long_path(progress_path()), encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return loaded if isinstance(loaded, dict) else None
+    except (OSError, ValueError):
+        return None
 
 
 def read_phase():
     """The phase the running rebuild last reported, or None when it reported
     nothing readable. The daemon asks this; the rebuild is another process."""
+    loaded = read_progress()
+    phase = loaded.get("phase") if loaded else None
+    return str(phase) if phase else None
+
+
+def stop_request_path():
+    """The file that asks a background audio reading to stop (#1182). A file
+    rather than a signal: it means the same on Windows, and it reaches a
+    reading whichever process started it."""
+    return progress_path() + ".stop"
+
+
+def request_stop():
+    """Ask the reading to stop. True when the request was written."""
     try:
-        with io.open(platform_compat.long_path(progress_path()), encoding="utf-8") as handle:
-            loaded = json.load(handle)
-        phase = loaded.get("phase") if isinstance(loaded, dict) else None
-        return str(phase) if phase else None
-    except (OSError, ValueError):
-        return None
+        with io.open(platform_compat.long_path(stop_request_path()), "w", encoding="utf-8") as handle:
+            handle.write("stop\n")
+        return True
+    except OSError:
+        return False
+
+
+def stop_requested():
+    return os.path.exists(platform_compat.long_path(stop_request_path()))
+
+
+def clear_stop_request():
+    try:
+        os.remove(platform_compat.long_path(stop_request_path()))
+    except OSError:
+        pass
 
 
 def clear_progress():
@@ -1353,8 +1412,12 @@ def _neutralise_banner(text, log=print):
     return "\n".join(safe).rstrip("\n")
 
 
-def generate_master_list(list_name=None):
+def generate_master_list(list_name=None, reading_jobs=None):
     """Scan one list's folders, clear its old files first, and build its lists.
+
+    `reading_jobs`, a list, collects what is left for the background audio
+    reading once this list is published (#1182): an AudioReadingJob when
+    LIST_SHOW_AUDIO_INFO is on and new or changed audio files were listed.
 
     `list_name` picks which list to build; without one this is the primary,
     which on a single-list install is the only one there is - so every existing
@@ -1722,28 +1785,11 @@ def generate_master_list(list_name=None):
             audio.close()
         return False
 
-    # The audio files new or changed since the last rebuild (#567, #914).
-    # After the walk rather than inside it: read several at once, where on a
-    # network mount the time is round trips, and within LIST_AUDIO_INFO_MINUTES
-    # - the rebuild is pausing every search and request meanwhile.
-    if audio is not None and audio.pending:
-        workers = max(1, min(128, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 64) or 1)))
-        minutes = max(0, int(getattr(config, "LIST_AUDIO_INFO_MINUTES", 5) or 0))
-        listed = len(all_files_data) + len(video_files_data)
-        print(f"[LIST-GEN] Reading the length and quality of {len(audio.pending):,} new or changed "
-              f"audio file(s), {workers} at a time"
-              f"{f', for at most {minutes} minute(s)' if minutes else ''}...")
-        audio.read_pending(workers=workers, budget=minutes * 60,
-                           progress=lambda done, total: write_progress(
-                               "audio", folder_index=done, folder_count=total, files=listed))
-        if audio.unread:
-            print(f"[LIST-GEN] {len(audio.unread):,} audio file(s) could not be read this time "
-                  f"(a network or sharing error): they show their size alone, and the next "
-                  f"rebuild tries them again.")
-        if audio.left_count:
-            print(f"[LIST-GEN] {audio.left_count:,} audio file(s) not read within "
-                  f"LIST_AUDIO_INFO_MINUTES = {minutes}: they show their size alone this "
-                  f"time, and the next rebuild reads them.")
+    # The audio files new or changed since the last rebuild (#567, #914) are
+    # NOT read here any more (#1182). The list is written with what the cache
+    # already knows - a file not read yet shows its size alone - and they are
+    # read after every list is published, in the background, by
+    # run_audio_reading(). Nothing waits for them, and nothing is paused.
 
     if denied_dirs:
         # Said once, with the count, because it is a standing condition rather
@@ -1921,10 +1967,6 @@ def generate_master_list(list_name=None):
                         chunk = []
                     
                     # The text list gets the complete subfolder (e.g. \Digital Media 1\)
-                    raw_folder_str = (f"{list_mod.LIST_FOLDER_PREFIX}{folder}\\"
-                                      if folder else list_mod.LIST_FOLDER_PREFIX)
-                    display_folder = raw_folder_str.replace("/", "\\")
-                    
                     # The rule is drawn to the width of the folder line it wraps, not
                     # to a fixed 53 characters. Against the real library every one of
                     # the 4,107 folder headers is wider than 53 - they run 54 to 136,
@@ -1933,8 +1975,10 @@ def generate_master_list(list_name=None):
                     #
                     # Measured on _one_line()'s output rather than the raw string:
                     # that is what actually gets written, and it flattens control
-                    # characters, which changes the length.
-                    folder_line = _one_line(display_folder)
+                    # characters, which changes the length. _heading_text() is
+                    # the one spelling of it, shared with the rewrite of the
+                    # length and quality (#1182).
+                    folder_line = _heading_text(folder)
                     folder_rule = "=" * len(folder_line)
                     chunk.append(f"\n{folder_rule}\n{folder_line}\n{folder_rule}\n")
                     chunk.append(folder_summary_line(*music_totals[folder], format_size_human) + "\n")
@@ -2339,11 +2383,13 @@ def generate_master_list(list_name=None):
             except (sqlite3.Error, OSError) as cache_err:
                 print(f"[LIST-GEN] The list is published, but the audio info cache could not be "
                       f"updated ({cache_err}): the next rebuild reads again what it could not keep.")
-            rate = audio.rate()
-            print(f"[LIST-GEN] Audio info: {audio.read_count:,} file(s) read, "
-                  f"{audio.reused_count:,} unchanged since the last rebuild"
-                  f"{f', {audio.left_count:,} left for the next one' if audio.left_count else ''}."
-                  f"{f' Read at {rate:,.0f} files a second, {audio.workers} at a time.' if rate else ''}")
+            # What is left to read goes to the background reading (#1182),
+            # which starts once every list is published.
+            if audio.pending and reading_jobs is not None:
+                reading_jobs.append(AudioReadingJob(list_name, audio.scope, list(audio.pending)))
+            print(f"[LIST-GEN] Audio info: {audio.reused_count:,} file(s) unchanged since the "
+                  f"last rebuild"
+                  f"{f', {len(audio.pending):,} new or changed to read in the background' if audio.pending else ''}.")
         return True
             
     except Exception as e:
@@ -2366,8 +2412,377 @@ def generate_master_list(list_name=None):
         if audio is not None:
             audio.close()
 
-def generate_all_lists(log=print):
+# ---------------------------------------------------------------------------
+# THE BACKGROUND AUDIO READING (#1182).
+#
+# A rebuild with LIST_SHOW_AUDIO_INFO on used to read every new or changed
+# audio file before writing the list, capped by LIST_AUDIO_INFO_MINUTES, with
+# one line at the start, one at the end, and nobody able to tell how far it had
+# got. Now:
+#
+#   1. The rebuild publishes first, with what the cache already knows.
+#   2. The same process then reads what is left, with no time limit, saving to
+#      the cache in batches as it goes - so a reading that is stopped keeps
+#      what it read. Nothing is paused meanwhile.
+#   3. When it is done, and only if a row's length and quality changed, those
+#      rows are rewritten into the CURRENT published list: no new scan (the
+#      slow part on a network drive), the same atomic swap, the archive built
+#      the way a rebuild builds it, and the list's date kept - other bots
+#      decide to fetch a list again by that date (#286), so they do not fetch
+#      it twice.
+#
+# `update_list.py --read-audio-info` runs 2 and 3 alone, for the lists as they
+# are published: the dashboard's Tools page, the console's `audioinfo` and
+# dccore.mrc's Library menu start it.
+# ---------------------------------------------------------------------------
+
+# One published list's audio files left to read: the list (None for the only
+# one), its cache scope, and (key, path, size) for each file - the size None
+# when the file was named by the published list rather than by a walk.
+AudioReadingJob = collections.namedtuple("AudioReadingJob", "list_name scope pending")
+
+# How many files are read between two saves to the cache. A stopped or killed
+# reading loses at most this many reads, and a save is one transaction.
+AUDIO_SAVE_EVERY = 200
+
+# What the rewrite looks for in a file row: the size and anything after it.
+_INFO_SEPARATOR = "  ::INFO:: "
+
+
+def _scope_of(list_name):
+    """The audio cache scope of a list: its own name, the primary's for the
+    only list (#979) - the same as generate_master_list() opens.
+    """
+    return list_name or library.primary_list().name
+
+
+def _is_rule(line):
+    return bool(line) and not line.strip("=")
+
+
+def _list_lines(path):
+    """(body, ending, heading) for each line of a published music list, the
+    heading being the folder heading the line sits under (None above the
+    first). Opened with newline="" so the line endings come back exactly as
+    written - the rewrite must not turn a Windows list's CRLF into LF."""
+    heading = None
+    back2 = back1 = None
+    with io.open(platform_compat.long_path(path), encoding="utf-8", newline="") as handle:
+        for raw in handle:
+            body = raw.rstrip("\r\n")
+            ending = raw[len(body):]
+            if not body.startswith("!") and _is_rule(body) and _is_rule(back2) \
+                    and back1 is not None and not _is_rule(back1):
+                heading = back1
+            yield body, ending, heading
+            back2, back1 = back1, body
+
+
+def _row_name(body):
+    """(name, tail) of a file row - the tail being its size and anything
+    after it - or None for any other line. The nick never holds a space, and
+    the tail never holds the separator, so the first space and the LAST
+    separator bound the name whatever it contains."""
+    if not body.startswith("!"):
+        return None
+    space = body.find(" ")
+    at = body.rfind(_INFO_SEPARATOR)
+    if space < 0 or at <= space:
+        return None
+    return body[space + 1:at], body[at + len(_INFO_SEPARATOR):]
+
+
+def unread_audio_jobs(log=print):
+    """The reading-only run's work: in each published list, the audio rows
+    the cache has no entry for.
+
+    No walk: the rows are the published list's, each heading is turned back
+    into its folder - the label first (#164), then the path below it - and a
+    file's size is asked for only when it is read. A row whose folder label
+    is no longer configured is left alone; the next rebuild drops it."""
+    import list as list_mod
+
+    every = library.lists()
+    primary = library.primary_list().name
+    jobs = []
+    for entry in every:
+        list_name = None if len(every) == 1 else entry.name
+        path = list_mod.find_latest_list(list_name)
+        if not path:
+            continue
+        scope = _scope_of(list_name)
+        cache = audio_info.Cache.open(scope=scope, formerly="" if scope == primary else None, log=log)
+        if cache is None:
+            continue
+        known = cache.known
+        cache.close()
+        pending = []
+        resolved = {}
+        for body, _ending, heading in _list_lines(path):
+            row = _row_name(body)
+            if row is None or heading is None or not audio_info.is_audio(row[0]):
+                continue
+            if heading not in resolved:
+                parts = list_mod.list_heading_parts(heading)
+                folder = library.folder_for_label(parts[0], list_name) if parts else None
+                resolved[heading] = None if folder is None else (
+                    os.path.join(folder.name, *parts[1:]), os.path.join(folder.path, *parts[1:]))
+            where = resolved[heading]
+            if where is None:
+                continue
+            key = audio_info.row_key(where[0], row[0])
+            if key not in known:
+                pending.append((key, platform_compat.long_path(os.path.join(where[1], row[0])), None))
+        if pending:
+            jobs.append(AudioReadingJob(list_name, scope, pending))
+    return jobs
+
+
+def _rewrite_rows(source, target, suffixes):
+    """Write `source` to `target` with each audio row's length and quality
+    taken from `suffixes` ({heading: {name: suffix}}). Every other byte is
+    copied as it is. Returns how many rows changed."""
+    changed = 0
+    chunk = []
+    with io.open(platform_compat.long_path(target), "w", encoding="utf-8", newline="") as out:
+        for body, ending, heading in _list_lines(source):
+            row = _row_name(body)
+            if row is not None and audio_info.is_audio(row[0]):
+                name, tail = row
+                size = tail.split(" ", 1)[0]
+                suffix = suffixes.get(heading, {}).get(name, "")
+                wanted = f"{size} {suffix}" if suffix else size
+                if wanted != tail:
+                    body = body[:len(body) - len(tail)] + wanted
+                    changed += 1
+            chunk.append(body + ending)
+            if len(chunk) >= 4096:
+                out.write("".join(chunk))
+                chunk = []
+        out.write("".join(chunk))
+    return changed
+
+
+def rewrite_audio_info(list_name=None, stop=None, log=print):
+    """Step 3: the length and quality the cache now holds, written into the
+    published list. True only when the list was swapped.
+
+    The result is what a full rebuild with the same cache would publish: each
+    audio row's suffix is the cache's for that row, found by the heading and
+    name exactly as the rebuild writes them (_heading_text(), _one_line()).
+    Nothing is swapped when no row changed, when `stop()` asks, or when the
+    list on disk is no longer the one that was read - a rebuild that
+    published meanwhile wins. The list's modification time, which is the date
+    the advert gives it, is put back afterwards."""
+    import list as list_mod
+
+    stop = stop or (lambda: False)
+    directory = list_mod.list_dir(list_name)
+    txt_path = list_mod.find_latest_list(list_name)
+    if not txt_path:
+        return False
+    base_name = os.path.basename(txt_path)
+    date_str = base_name[len(config.LIST_BASE_NAME) + 1:-len(".txt")]
+    try:
+        before = os.stat(platform_compat.long_path(txt_path))
+    except OSError:
+        return False
+
+    cache = audio_info.Cache.open(scope=_scope_of(list_name), log=log)
+    if cache is None:
+        return False
+    known = cache.known
+    cache.close()
+    suffixes = {}
+    for key, (_size, suffix) in known.items():
+        if suffix:
+            folder, _sep, filename = key.partition("\x00")
+            suffixes.setdefault(_heading_text(folder), {})[_one_line(filename)] = suffix
+
+    # The archive in the format it was published in: a rebuild whose .rar
+    # fell back to .zip published a .zip, and that is the file to replace.
+    published = [fmt for fmt in list_mod.LIST_FORMATS
+                 if os.path.exists(_artifact_paths(fmt, date_str, directory)[0])]
+    if not published:
+        log(f"[AUDIO-INFO] {base_name} has no archive beside it; the list is left as it is.")
+        return False
+    fmt = list_mod.list_format() if list_mod.list_format() in published else published[0]
+
+    write_progress("rewriting", force=True)
+    tmp_txt = txt_path + ".new"
+    tmp_artifact = None
+    try:
+        changed = _rewrite_rows(txt_path, tmp_txt, suffixes)
+        if not changed:
+            _discard_temp_lists(tmp_txt)
+            return False
+        # The members a rebuild packs, in its order: this list, then the film
+        # list and the album list of the same build when they were published.
+        members = [(tmp_txt, base_name)]
+        for marker in (list_mod.VIDEO_LIST_MARKER, "RAR"):
+            other = os.path.join(directory, f"{config.LIST_BASE_NAME}-{marker}-{date_str}.txt")
+            if os.path.exists(other) and os.path.getsize(other) > 0:
+                members.append((other, os.path.basename(other)))
+        used, tmp_artifact, artifact_path = build_list_artifact(fmt, members, date_str, directory)
+        if used != fmt:
+            log(f"[AUDIO-INFO] The .{fmt} archive could not be built again; the list is left as it is.")
+            _discard_temp_lists(tmp_txt, tmp_artifact)
+            return False
+        now = os.stat(platform_compat.long_path(txt_path))
+        if stop() or (now.st_mtime_ns, now.st_size) != (before.st_mtime_ns, before.st_size):
+            _discard_temp_lists(tmp_txt, tmp_artifact)
+            return False
+        artifact_before = os.stat(platform_compat.long_path(artifact_path))
+        write_progress("publishing", force=True)
+        _publish_artifacts([(tmp_artifact, artifact_path), (tmp_txt, txt_path)])
+    except Exception as err:
+        log(f"[AUDIO-INFO] Could not write the length and quality into {base_name} ({err}); "
+            f"they are kept, and the next rebuild shows them.")
+        _discard_temp_lists(tmp_txt, tmp_artifact)
+        return False
+
+    for path, stamp in ((txt_path, before), (artifact_path, artifact_before)):
+        try:
+            os.utime(platform_compat.long_path(path), ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        except OSError:
+            pass
+    log(f"[AUDIO-INFO] {changed:,} row(s) of {base_name} now show their length and quality; "
+        f"the list keeps its date.")
+    return True
+
+
+def read_audio_info(jobs, stop=None, log=print):
+    """Step 2, then step 3 for each list that gained a length: read every
+    job's files, with no time limit. Returns what happened:
+
+        {"outcome": "nothing" | "done" | "stopped", "read", "unreadable",
+         "total", "updated": [list names]}
+
+    Progress goes to the progress file as phase "reading": folder_index is
+    the files read, folder_count the files to read, rate the files a second -
+    written only when a read completes, so a mount that stops answering is a
+    stall the daemon can see (#968).
+    """
+    global _started_at
+
+    stop = stop_requested if stop is None else stop
+    total = sum(len(job.pending) for job in jobs)
+    result = {"outcome": "nothing", "read": 0, "unreadable": 0, "total": total, "updated": []}
+    if not total:
+        return result
+    workers = max(1, min(128, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 64) or 1)))
+    # The reading's own start, for the elapsed time the dashboard shows.
+    _started_at = time.time()
+    began = time.perf_counter()
+    log(f"[AUDIO-INFO] Audio info: reading {total:,} file(s) in the background, "
+        f"{workers} at a time.")
+    write_progress(READING_PHASE, folder_index=0, folder_count=total, rate=0, force=True)
+
+    read_before = 0
+    for job in jobs:
+        cache = audio_info.Cache.open(scope=job.scope, log=log)
+        if cache is None:
+            continue
+        cache.pending = list(job.pending)
+
+        def progress(done, _of, offset=read_before):
+            count = offset + done
+            elapsed = time.perf_counter() - began
+            write_progress(READING_PHASE, folder_index=count, folder_count=total,
+                           rate=int(count / elapsed) if elapsed > 0 else 0)
+
+        try:
+            cache.read_pending(workers=workers, progress=progress, stop=stop,
+                               save_every=AUDIO_SAVE_EVERY)
+        finally:
+            cache.close()
+        result["read"] += cache.read_count
+        result["unreadable"] += cache.unreadable_count
+        read_before += cache.read_count
+        # What an operator compares to choose LIST_AUDIO_INFO_THREADS: the
+        # files a second over the whole reading, and how many at a time.
+        seconds = time.perf_counter() - began
+        result["rate"] = int(read_before / seconds) if seconds > 0 else 0
+        result["workers"] = workers
+        if cache.left_count or stop():
+            result["outcome"] = "stopped"
+            return result
+        # A row can only have changed if something was read with a length;
+        # rewrite_audio_info() then counts the rows that really did.
+        if any(suffix for _size, suffix in cache.fresh.values()):
+            if rewrite_audio_info(job.list_name, stop=stop, log=log):
+                result["updated"].append(_scope_of(job.list_name))
+            elif stop():
+                result["outcome"] = "stopped"
+                return result
+    result["outcome"] = "done"
+    return result
+
+
+def describe_audio_result(result):
+    """The reading's result as one line, for the console, the debug channel
+    and the @DCCore window. The daemon says it from the JSON the child
+    prints, so the wording lives here once."""
+    outcome = result.get("outcome")
+    read = int(result.get("read") or 0)
+    unreadable = int(result.get("unreadable") or 0)
+    total = int(result.get("total") or 0)
+    if outcome == "nothing":
+        return "Audio info: nothing new to read."
+    if outcome == "off":
+        return ("Audio info: length and quality are off (LIST_SHOW_AUDIO_INFO), "
+                "so there is nothing to read.")
+    if outcome == "stopped":
+        return (f"Audio info: stopped: {read:,} of {total:,} read and kept; "
+                f"the rest are read next time.")
+    if outcome == "failed":
+        return f"Audio info: failed: {result.get('error') or 'unknown error'}."
+    updated = list(result.get("updated") or [])
+    if not updated:
+        changed = "the list did not change"
+    elif len(updated) == 1:
+        changed = "list updated"
+    else:
+        changed = "lists updated: " + ", ".join(updated)
+    rate = result.get("rate")
+    speed = (f" Read at {rate:,} files a second, {result.get('workers')} at a time."
+             if rate else "")
+    return f"Audio info: done: {read - unreadable:,} read, {unreadable:,} unreadable, {changed}.{speed}"
+
+
+# The child's last line: the result, for the daemon to read back.
+AUDIO_RESULT_TAG = "[AUDIO-INFO-RESULT] "
+
+
+def run_audio_reading(jobs=None, log=print):
+    """Steps 2 and 3 from start to end, never raising: for a rebuild's jobs,
+    or - with none given - for the lists as they are published. Prints the
+    result line and the JSON the daemon reads back, and clears the progress
+    file when done."""
+    try:
+        if not getattr(config, "LIST_SHOW_AUDIO_INFO", False):
+            result = {"outcome": "off", "read": 0, "unreadable": 0, "total": 0, "updated": []}
+        else:
+            if jobs is None:
+                jobs = unread_audio_jobs(log)
+            result = read_audio_info(jobs, log=log)
+    except Exception as err:
+        result = {"outcome": "failed", "error": str(err), "read": 0, "unreadable": 0,
+                  "total": 0, "updated": []}
+    finally:
+        clear_progress()
+    if result.get("outcome") == "stopped":
+        clear_stop_request()
+    log(f"[AUDIO-INFO] {describe_audio_result(result)}")
+    log(AUDIO_RESULT_TAG + json.dumps(result))
+    return result
+
+
+def generate_all_lists(log=print, reading_jobs=None):
     """Build every configured list. True only if every one of them succeeded.
+
+    `reading_jobs` collects each published list's audio files left to read
+    (#1182); see generate_master_list().
 
     On a single-list install this is one call to generate_master_list() with no
     name - byte for byte what running this script has always done. The loop is
@@ -2391,23 +2806,26 @@ def generate_all_lists(log=print):
     # from a finished run reads as a rebuild still in progress, and the
     # dashboard would show a bar that never moves.
     try:
-        return _generate_all_lists(log)
+        return _generate_all_lists(log, reading_jobs)
     finally:
         clear_progress()
 
 
-def _generate_all_lists(log):
+def _generate_all_lists(log, reading_jobs=None):
     import library
 
     every = library.lists()
+    # The jobs are passed only when asked for, so a caller that builds lists
+    # without the background reading calls generate_master_list() as before.
+    extra = {} if reading_jobs is None else {"reading_jobs": reading_jobs}
     if len(every) == 1:
-        return generate_master_list()
+        return generate_master_list(**extra)
 
     failed = []
     for entry in every:
         log(f"[LIST-GEN] Building {entry.name!r} ({len(entry.folders)} folder(s))...")
         try:
-            if not generate_master_list(entry.name):
+            if not generate_master_list(entry.name, **extra):
                 failed.append(entry.name)
         except Exception as err:
             # One list's unexpected failure is not every list's. The scan
@@ -2426,6 +2844,12 @@ def _generate_all_lists(log):
 
 
 if __name__ == "__main__":
+    # The reading-only run (#1182): the audio files the published lists have
+    # no length for yet, read and written in - no scan, no rebuild.
+    if "--read-audio-info" in sys.argv[1:]:
+        outcome = run_audio_reading()["outcome"]
+        sys.exit(1 if outcome == "failed" else 0)
+
     print("--- Starting the scheduled weekly file-list update ---")
     # FILE_DIRECTORY is not in settings_file.REQUIRED (see its own comment) -
     # a blank value is a supported "not chosen yet" state the daemon itself
@@ -2456,9 +2880,16 @@ if __name__ == "__main__":
     # still in progress, and the dashboard would show a bar that never moves.
     # generate_all_lists() clears the progress file in its own finally, so a
     # crash inside it still leaves nothing behind for the dashboard to read.
-    success = generate_all_lists()
+    reading_jobs = []
+    success = generate_all_lists(reading_jobs=reading_jobs)
     if success:
         print("--- The list was updated successfully. ---")
+        # Every list is published; what is left to read is read now, in this
+        # same process, while the bot serves the new list (#1182). The daemon
+        # sees the "reading" phase and stops waiting for us. A rebuild that
+        # failed reads nothing: the next one, or a reading-only run, does.
+        if reading_jobs:
+            run_audio_reading(reading_jobs)
         sys.exit(0)
     else:
         print("--- ERROR: could not generate the list. ---")
