@@ -15,20 +15,26 @@ through the real `irc.irc_loop()`, and both are expected and bounded; no daemon 
   `MAX_REQUESTS` of them, they run one at a time, and a full scan of a 40,000-row list is 34 ms. A test server paces
   each client after a short burst, so the flood reaches the bot over several seconds and one core scans back to back.
   600 lines over 6 s cost 1.3 ms a line with no list, 2.0 ms at 10,000 rows and 3.7 ms at 40,000. The per-line figure
-  follows the list's size.
+  follows the list's size. Confirmed on a Linux test bot: with a list of about 64,000 rows the flood averaged 30% CPU
+  (v1.14.0: 63-91%), and with its lists folder emptied 3% on both versions.
 - **+30 MB on the first advert storm.** The read loop's first storm grew traced Python memory by 0.38 MB, mostly
   three lazy imports, and later storms by about 0.02 MB. The known-bot registry costs about 0.6 KB per bot and is capped
   at `KNOWN_BOTS_MAX`. 600 dashboard requests grew RSS by 0.06 MB. The 30 MB is not a Python structure; on Linux it is
   most likely glibc's per-thread malloc arenas, which plateau, as the run showed. `MALLOC_ARENA_MAX=2` in the bot's
-  environment is the check.
+  environment is the check. On a 2 GB Linux test container the growth did not appear at all (38 to 39 MB, with or
+  without it), so only a machine that shows the growth can settle it.
 - **`scripts/stress_test.py`** is the harness from #1153: 40 simulated clients flood, advertise, churn, quit together
   and hit the dashboard while it samples the bot's CPU, memory and threads. A new "READING THE NUMBERS" section in its
   docstring carries the findings above. It now imports on every platform, because `os.sysconf` is read only where it
-  exists, and refuses before any client connects when `/proc/<pid>` is missing. The warning to use only a test bot on a
-  private test server is kept word for word. README's Tests section points to it.
+  exists, and refuses before any client connects when `/proc/<pid>` is missing. The storm's "known bots after" read
+  `known_bots.json` before the bot had written the storm's last adverts: it writes the registry at most every 30 s
+  (`KNOWN_BOTS_FLUSH_SECONDS`), and only when an advert arrives. The storm now sends one more advert, from a bot it
+  already made known, before it reads the file. The warning to use only a test bot on a private test server is kept
+  word for word. README's Tests section points to it.
 - Tests: `tests/test_the_stress_harness_refuses_before_it_connects.py` checks that the warning stays, that the file
   imports without `os.sysconf`, that a mistyped phase, a server without a port and a missing bot are each refused
-  before a socket is opened, and that the simulated nicks are distinct and letters only. All 9 mutations were caught.
+  before a socket is opened, that the simulated nicks are distinct and letters only, and that the storm's last read
+  comes after one more advert from a known bot, past the flush interval. All 15 mutations were caught.
 
 ### 🧪 Preflight runs its hidden-tooling pass again, and the coverage gate passes (#1178)
 

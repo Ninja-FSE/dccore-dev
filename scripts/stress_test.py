@@ -49,12 +49,19 @@ READING THE NUMBERS (measured in-process for #1153, through the real read loop)
              over several seconds rather than one, and the CPU per line then
              follows the size of the bot's list: about 0.8 ms with no list,
              2 ms at 10,000 rows and 3.7 ms at 40,000 when the 600 lines
-             arrive over 6 s.
+             arrive over 6 s. Confirmed on a Linux test bot with a list of
+             about 64,000 rows: 30% CPU on average through the flood, and 3%
+             with its lists folder emptied (v1.14.0: 63-91% and 3%).
   storm      The registry keeps about 0.6 KB per advertising bot, at most
              irc.KNOWN_BOTS_MAX of them, and the read loop's first storm
              imports three small modules. Memory that grows by tens of MB
              is not the registry; compare a run with MALLOC_ARENA_MAX=2 in
-             the bot's environment to see how much is the C allocator.
+             the bot's environment to see how much is the C allocator. (On a
+             2 GB Linux test container the growth did not appear at all,
+             38 to 39 MB with or without it, so only a machine that shows
+             the growth can tell.) "known bots after" is read once the bot
+             has written its registry: it does so at most every 30 s, and
+             only when an advert arrives, so the storm sends one more.
 """
 
 import argparse
@@ -296,6 +303,15 @@ def run_storm(bot, args, host, port, clients):
             time.sleep(0.3)
     phase(bot, host, f"storm ({len(clients)} fake bots x 30 paced adverts)",
           lambda: on_all(clients, one), settle=90)
+    # The bot writes known_bots.json at most once per KNOWN_BOTS_FLUSH_SECONDS
+    # (30 s), and only when an advert arrives, so the storm's last adverts are
+    # still only in its memory. One more advert from a bot it already knows,
+    # well past that interval, writes them without adding a bot.
+    nudger = next((c for c in clients if c.alive), None)
+    if nudger is not None:
+        nudger.send(f"PRIVMSG {args.channel} :Type: @{nudger.nick} For My List Of: "
+                    f"1,000 Files List: Sep 1th Slots: 3/5 Queue: 0/20")
+        time.sleep(3)
     print("    known bots after:", bot.known_bots())
 
 

@@ -17,6 +17,8 @@ import importlib.util
 import io
 import os
 import sys
+import time
+import types
 import unittest
 from unittest import mock
 
@@ -101,6 +103,64 @@ class TheSimulatedNicks(unittest.TestCase):
         self.assertEqual(len(set(nicks)), 1000)
         for nick in nicks:
             self.assertTrue(nick.isalpha() and nick.isascii(), nick)
+
+
+class TheStormCountsWhatTheBotWrote(unittest.TestCase):
+    """The bot writes known_bots.json at most once per 30 s and only when an
+    advert arrives, so read straight after the storm the file still lacked
+    its last adverts and "known bots after" read low. The harness now sends
+    one more advert from a bot already known before it reads the file."""
+
+    def run_storm(self, clients):
+        harness = load_harness()
+        events = []
+
+        class FakeClient(object):
+            def __init__(self, nick, alive=True):
+                self.nick, self.alive = nick, alive
+
+            def send(self, line):
+                events.append(("send", self.nick, line))
+
+        class FakeBot(object):
+            def known_bots(self):
+                events.append(("read",))
+                return 0
+
+        def storm_then_settle(_bot, _host, _name, work, settle=5):
+            work()
+            events.append(("settled", settle))
+
+        fakes = [FakeClient(nick, alive) for nick, alive in clients]
+        args = harness.argparse.Namespace(channel="#somechannel")
+        no_waiting = types.SimpleNamespace(sleep=lambda _s: None, time=time.time)
+        with mock.patch.object(harness, "time", no_waiting), \
+                mock.patch.object(harness, "phase", storm_then_settle), \
+                contextlib.redirect_stdout(io.StringIO()):
+            harness.run_storm(FakeBot(), args, "127.0.0.1", 6667, fakes)
+        return events
+
+    def test_one_more_advert_from_a_known_bot_comes_before_the_last_read(self):
+        events = self.run_storm([("Alpha", True), ("Bravo", True)])
+
+        self.assertEqual(events[-1], ("read",))
+        self.assertEqual(events[-3][0], "settled", "the nudge comes after the storm has settled")
+        self.assertGreater(events[-3][1], 30, "the settle outlasts the bot's 30 s flush interval")
+        last_send = events[-2]
+        self.assertEqual(last_send[0], "send")
+        storm_nicks = {e[1] for e in events[1:-3]}
+        self.assertIn(last_send[1], storm_nicks, "the nudge must come from a bot the storm made known")
+        self.assertIn(f"Type: @{last_send[1]} For My List Of:", last_send[2])
+
+    def test_a_dead_client_does_not_send_it(self):
+        events = self.run_storm([("Alpha", False), ("Bravo", True)])
+
+        self.assertEqual(events[-2][1], "Bravo")
+
+    def test_with_no_client_left_it_still_reads(self):
+        events = self.run_storm([("Alpha", False)])
+
+        self.assertEqual(events[-2:], [("settled", events[-2][1]), ("read",)])
 
 
 if __name__ == "__main__":
