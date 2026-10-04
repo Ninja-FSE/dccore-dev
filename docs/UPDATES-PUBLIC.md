@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: on a network drive, a track's length and quality could come out wrong in the list.** A drive that answered a read in pieces made a variable-bitrate MP3 look constant-bitrate, so the same file could show differently from one rebuild to the next. The whole header is read now, however it arrives.
 - **New: 256 KB in the send block size menu,** for a fast seedbox, where it uses less CPU per file sent. A bigger block no longer drops a very slow downloader either: the bot waits longer for it in proportion. The default stays 64 KB, and the help says why.
 - **Faster: rows pasted from the list are found straight away.** When someone pastes several rows from one album, each after the first is looked for in the folder the first was found in - but the size pasted with the row never matched, so every row searched the whole list instead, seconds each on a big library. It matches now, whichever way the size is written.
 - **Faster: the List Browser's filter no longer slows down with many bots.** With a filter active, the sidebar was checked bot against bot every few seconds - about a second each time with a thousand-odd bots. It is worked out once per pass now.

@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 An audio read gets what it asked for, even in pieces (#1189)
+
+Found by a test bot's timed rebuilds (#1189): a cold rebuild of a 62,837-file library on NFS came out one byte shorter
+than the warm ones, from the same files. `audio_info._Window` reads each file unbuffered and took ONE `read()` as the
+whole answer - and a raw read may return fewer bytes than asked for, which a network mount with cold caches does. The
+parser then saw a truncated header: an MP3 whose Xing (VBR) header it missed was read as CBR, and its quality lost the
+leading `~`; at the shortest reads its length came out as 0m0s.
+
+- `_Window._read()` reads until it has the bytes it asked for or the file ends. It knows the file's size (`read()`
+  passes it), so an ordinary read stops at the end of the file without asking again: still one request per file,
+  as `FewRequestsPerFile` pins.
+- Tests: `tests/test_an_audio_read_gets_what_it_asked_for.py` - the same answers for CBR, Xing and VBRI MP3s, tagged
+  and with cover art, and FLAC with and without a picture, whether reads come back whole or in pieces of 7, 512, 4096
+  or 10000 bytes; one request for an ordinary file and none wasted on a short one.
+
 ### 🧪 The suite no longer waits out two fixed timers (#1148)
 
 Performance audit 2026-10-03 T3. Two tests sat out real timers: an absent user's freeze countdown slept a fixed ten
