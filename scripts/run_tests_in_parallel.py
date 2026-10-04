@@ -79,6 +79,15 @@ SUMMARY = re.compile(
 COUNT_NAMES = ("failures", "errors", "skipped", "expected failures", "unexpected successes")
 RULE = "=" * 70 + "\n"
 
+# Python 3.13 and later colour unittest's output when FORCE_COLOR or
+# PYTHON_COLORS=1 asks for it, even into a file: the summary then reads
+# "\x1b[32mOK\x1b[0m", SUMMARY does not match, and a shard that passed
+# reads as one that never finished. shard_env() asks every shard for plain
+# output, and any escape that still arrives (an interpreter that ignores
+# the variables) is taken out before the output is read.
+NO_COLOUR = {"PYTHON_COLORS": "0", "NO_COLOR": "1"}
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
 
 def test_modules():
     """Every module discover would load: tests/test*.py, as dotted names."""
@@ -115,8 +124,11 @@ def make_shards(modules, durations, count):
 
 
 def shard_env(index, base=None):
-    """The environment shard `index` runs in: the caller's, plus its port shift."""
+    """The environment shard `index` runs in: the caller's, plus its port
+    shift, with colour turned off (see NO_COLOUR)."""
     env = dict(os.environ if base is None else base)
+    env.pop("FORCE_COLOR", None)
+    env.update(NO_COLOUR)
     env[PORT_SHIFT_VARIABLE] = str(PORT_SHIFTS[index])
     return env
 
@@ -126,7 +138,9 @@ def split_summary(output):
     (output, None, None, {}) when the run never got as far as a summary.
 
     The LAST summary counts. Anything printed after it - a thread that
-    outlived the run - is kept in the body rather than lost."""
+    outlived the run - is kept in the body rather than lost. Colour escapes
+    are dropped first, from the body too (see NO_COLOUR)."""
+    output = ANSI_ESCAPE.sub("", output)
     matches = list(SUMMARY.finditer(output))
     if not matches:
         return output, None, None, {}

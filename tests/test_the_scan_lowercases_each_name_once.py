@@ -249,9 +249,14 @@ class TheScanDecidesAsBefore(DCCoreTestCase):
         # A cache of its own, so every audio file is read and seen here.
         self.set_config(LOCAL_LIST_DIR=lists, LIST_AUDIO_INFO_CACHE=os.path.join(lists, "audio.db"))
         out = io.StringIO()
+        # The audio files are read after the list is published (#1182): the
+        # reading the rebuild hands on is run here, so `reads` is still every
+        # audio file the scan noted.
+        jobs = []
         with mock.patch.object(update_list, "folder_totals", folder_totals), \
                 mock.patch.object(audio_info, "read", reader), contextlib.redirect_stdout(out):
-            self.assertTrue(update_list.generate_master_list(), out.getvalue())
+            self.assertTrue(update_list.generate_master_list(reading_jobs=jobs), out.getvalue())
+            update_list.read_audio_info(jobs)
         rar = [entry for entry in os.listdir(lists) if "-RAR-" in entry]
         packable = set()
         if rar:

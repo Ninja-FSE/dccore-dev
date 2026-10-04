@@ -380,9 +380,9 @@ class SafeExtractionTests(DCCoreTestCase):
 class OnDemandReadingTests(DCCoreTestCase):
     """Issue #76, option 2: process_fetched_list_zip() no longer stores the
     parsed rows - only a path and a precomputed count - and
-    get_fetched_bot_page() re-parses that path fresh on every call, the same
-    "no caching between calls" contract webserver.build_filelists_payload()
-    already has for this bot's own list.
+    get_fetched_bot_page() re-parses that path fresh on every call. (This
+    bot's own list keeps a table of where each folder is since #1128, so a
+    page parses only its own folders; no rows are kept there either.)
     """
 
     def setUp(self):
