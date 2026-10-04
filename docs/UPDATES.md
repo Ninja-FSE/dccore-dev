@@ -4,6 +4,45 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The list publishes first, and audio lengths are read in the background (#1182)
+
+With `LIST_SHOW_AUDIO_INFO` on, a rebuild read every new or changed audio file before it wrote the list, capped by
+`LIST_AUDIO_INFO_MINUTES`, with one line when it began and one when it ended - nobody could tell whether it was
+running or how far it had got. Agreed in #1181, design in #1182.
+
+- **Publish first** (`update_list.py`): the rebuild reads no audio before it publishes; the files not read yet become
+  jobs, and the same process runs `run_audio_reading()` after every list is published. A failed rebuild reads
+  nothing.
+- **Read in the background, no time limit** (`read_audio_info()`): `Cache.read_pending()` takes a `stop` callable and
+  saves every 200 files, so a stop keeps what was read; `publish()` (#1137) and `_one_line()`'s fast path (#1125) are
+  unchanged. `LIST_AUDIO_INFO_MINUTES` is still accepted and shown, marked as no longer used.
+- **Rewrite only the lengths** (`rewrite_audio_info()`): the audio rows' tails in the current list, no scan, line
+  endings kept, the archive built again the way a rebuild builds it, the same atomic swap, and the list's and the
+  archive's modification time put back, so the advertised date - and other bots' refetch decision - stays the same.
+  Nothing is swapped when no row changed, when a stop was asked, or when the list on disk changed meanwhile. Byte for
+  byte what a full rebuild with the same cache publishes. Searches, requests and the list archive pause only for its
+  packing and publishing phases, as for a rebuild's swap.
+- **Rebuild versus reading**: the daemon hands over when its own child (by pid) reports "reading" - the rebuild is
+  announced done and `update_inprogress` released, and a thread follows the reading. A new rebuild stops a reading
+  through a stop file beside the progress file (60 s, then kill), losing nothing read; a reading-only run is refused
+  during a rebuild. State in `runtime.py` (`audio_reading`, `audio_reading_lock`, `audio_reading_last`); shutdown asks
+  a reading to stop, up to 10 s.
+- **On demand**: `update_list.py --read-audio-info`, started by the console's `audioinfo`, a **Read audio info** card
+  on the Tools page (`POST /api/tools/audio-info`, the status payload carries `audio`) and **Library > Read audio
+  info** in `dccore.mrc`, now 1.12. Each says "nothing new to read" when there is nothing; with `LIST_SHOW_AUDIO_INFO`
+  off they say it is off.
+- **Progress**: console and debug lines ("Audio info: reading N files in the background", "3,200 of 12,000 read,
+  230/s" every 60 s, "done: 11,980 read, 20 unreadable, list updated"); `DCCORE REBUILD reading|rewriting` to scripts
+  of 1.12 and later, with an Audio info section in the @DCCore panel; a progress bar on the dashboard card, in three
+  languages. A failed or stalled reading raises a notice (`NOTICE_EVENTS`). The progress file records the writer's
+  pid and a rate; the rebuild's old "audio" phase is gone.
+- Tests: `tests/test_the_list_publishes_first_and_reads_audio_afterwards.py` (18) and
+  `tests/test_a_rebuild_hands_the_audio_reading_to_the_background.py` (39) - publish-first order, the rewrite byte for
+  byte against a full rebuild (the txt list and the archive's members), no re-publish when nothing changed, a stopped
+  reading keeps what it read, a rebuild during a reading, a reading-only run refused during a rebuild, the progress
+  lines and phases, the Tools route, the mrc menu, a `settings.conf` still setting `LIST_AUDIO_INFO_MINUTES`. Four
+  pinned tests follow the new phases and menu.
+
 ### 🧪 The suite no longer waits out two fixed timers (#1148)
 
 Performance audit 2026-10-03 T3. Two tests sat out real timers: an absent user's freeze countdown slept a fixed ten
