@@ -406,3 +406,19 @@ unittest.main(module=None, argv=["x", "__main__.Case"])
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class APathOnAnotherDrive(unittest.TestCase):
+    """GitHub's Windows runners keep the checkout on D: and the temp folder
+    on C:, where os.path.relpath() raises ValueError. --record's closing
+    message said where it wrote by relpath() and failed the run there."""
+
+    def test_a_path_relpath_cannot_reach_is_shown_whole(self):
+        def across_drives(path, start=None):
+            raise ValueError("path is on mount 'C:', start on mount 'D:'")
+        with mock.patch.object(RUNNER.os.path, "relpath", across_drives):
+            self.assertEqual(RUNNER.shown_path("C:/elsewhere/d.json"), "C:/elsewhere/d.json")
+
+    def test_a_path_inside_the_repository_is_shown_relative(self):
+        inside = os.path.join(RUNNER.REPO_ROOT, "tests", "module_durations.json")
+        self.assertEqual(RUNNER.shown_path(inside), os.path.join("tests", "module_durations.json"))

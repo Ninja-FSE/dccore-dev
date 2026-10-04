@@ -259,6 +259,18 @@ def run_suite(jobs, verbose, out, timeout=DEFAULT_TIMEOUT):
     return 0 if report(shards, finished, time.monotonic() - started, out) else 1
 
 
+def shown_path(path):
+    """`path` relative to the repository when it can be, for a message.
+
+    On Windows relpath() raises ValueError for a path on another drive - on
+    GitHub's runners the checkout is on D: and the temp folder on C: - and a
+    message is no reason to fail the run, so that path is shown whole."""
+    try:
+        return os.path.relpath(path, REPO_ROOT)
+    except ValueError:
+        return path
+
+
 def record(jobs, out, timeout=DEFAULT_TIMEOUT):
     """Time every module in a process of its own and rewrite the table."""
     modules = test_modules()
@@ -276,7 +288,7 @@ def record(jobs, out, timeout=DEFAULT_TIMEOUT):
         json.dump({module: round(seconds, 1) for module, seconds in results}, handle,
                   indent=1, sort_keys=True)
         handle.write("\n")
-    out.write(f"wrote {len(results)} timings to {os.path.relpath(DURATIONS_FILE, REPO_ROOT)}\n")
+    out.write(f"wrote {len(results)} timings to {shown_path(DURATIONS_FILE)}\n")
     return 0
 
 
