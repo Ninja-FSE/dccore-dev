@@ -2916,6 +2916,15 @@ def build_update_list_status_payload():
     progress = read_list_progress()
     if progress:
         payload["progress"] = progress
+    # The background audio reading (#1182): running after a rebuild has
+    # published, or alone from the Read audio info button. Its progress is the
+    # same file's, phase "reading"; `last` is how the last one ended, for the
+    # page to say - "nothing new to read" included.
+    payload["audio"] = {
+        "enabled": bool(getattr(config, "LIST_SHOW_AUDIO_INFO", False)),
+        "running": runtime.audio_reading is not None,
+        "last": runtime.audio_reading_last,
+    }
     return payload
 
 
@@ -2989,6 +2998,8 @@ def read_list_progress():
         "files": whole("files"),
         "percent": percent,
         "elapsed": elapsed,
+        # Files a second, while the background audio reading runs (#1182).
+        "rate": whole("rate"),
     }
 
 
@@ -3021,6 +3032,29 @@ def start_list_update():
     commands.handle_list_update_request(
         WEB_DASHBOARD_SOURCE, WEB_DASHBOARD_SOURCE, authorised=True)
     return 200, {"update": "started"}
+
+
+def start_audio_info_reading():
+    """POST /api/tools/audio-info's pure logic (#1182): the Read audio info
+    button. Starts a reading-only run - the audio files the published list
+    has no length for, read and written in - through the same
+    commands.handle_audio_info_request() the console's `audioinfo` uses.
+
+    200 when it started, or when one is already running (the page follows
+    it); 409 when a rebuild runs (it reads by itself once it has published)
+    or the setting is off. Whether there is anything to read is the run's to
+    find out: "nothing new to read" comes back as its result in the status.
+
+    Returns (http_status, payload_dict).
+    """
+    import commands
+    status, message = commands.handle_audio_info_request(
+        WEB_DASHBOARD_SOURCE, WEB_DASHBOARD_SOURCE, authorised=True)
+    if status in ("started", "running"):
+        return 200, {"reading": status, "message": message}
+    if status in ("rebuilding", "off"):
+        return 409, {"error": message, "reason": status}
+    return 500, {"error": message}
 
 
 # ==========================================================================
@@ -3254,7 +3288,7 @@ SETTINGS_LABELS = {
     "LIST_INDEX_FILE": "Cross-list search index",
     "LIST_AUDIO_INFO_CACHE": "Audio info cache",
     "LIST_SHOW_AUDIO_INFO": "Length and quality in the list",
-    "LIST_AUDIO_INFO_MINUTES": "Time limit for reading audio files",
+    "LIST_AUDIO_INFO_MINUTES": "Time limit for reading audio files (no longer used)",
     "LIST_AUDIO_INFO_THREADS": "Audio files read at once",
     "LIST_SCAN_THREADS": "Folders scanned at once",
     "DOWNLOAD_COUNTS_FILE": "Download counts file",
@@ -4990,6 +5024,12 @@ if HAVE_FLASK:
         @app.route("/api/tools/update-list/status")
         def api_tools_update_list_status():
             return jsonify(build_update_list_status_payload())
+
+        # #1182: Read audio info. Its progress is in the status above.
+        @app.route("/api/tools/audio-info", methods=["POST"])
+        def api_tools_audio_info():
+            status, result = start_audio_info_reading()
+            return jsonify(result), status
 
         # #572: what the version check last found, and a check on request.
         @app.route("/api/version-check")

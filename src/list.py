@@ -1912,6 +1912,31 @@ def rebuild_pauses_everything():
             and bool(getattr(config, 'PAUSE_FOR_WHOLE_UPDATE', False)))
 
 
+# The background audio reading's own swap (#1182): building the archive again
+# and moving the rewritten list and archive into place.
+READING_SWAP_PHASES = ("packing", "publishing")
+
+
+def list_archive_waits():
+    """Whether the list archive must not be sent right now - "@nick", and the
+    archive asked for by name (dcc.py), both ask this.
+
+    Through a whole rebuild (#971): the archive is the file its swap
+    replaces, and a slow send holding it open on Windows made the replace
+    give up and the rebuild roll back. And through a background audio reading
+    (#1182) in every phase but the reading itself - from its start, through
+    the rewrite of its rows, the packing and the swap - so a send cannot
+    start in the stretch that ends in its swap (#1182 audit). The reading,
+    which can last hours, leaves the archive free; a send still running when
+    it reaches the swap is waited for (update_list's READING_SWAP_WAIT)."""
+    if getattr(config, 'update_inprogress', False) is True:
+        return True
+    if runtime.audio_reading is None:
+        return False
+    import update_list
+    return update_list.read_phase() != update_list.READING_PHASE
+
+
 def rebuild_pauses_requests():
     """Whether a search or a file request must wait for the rebuild right now.
 
@@ -1924,11 +1949,18 @@ def rebuild_pauses_requests():
     that cannot report (a read-only data/) pauses the way it always did."""
     if getattr(config, 'PAUSE_ON_UPDATE', True) is not True:
         return False
+    import update_list
     if getattr(config, 'update_inprogress', False) is not True:
-        return False
+        # THE BACKGROUND AUDIO READING (#1182) swaps the list too, once, when
+        # it writes the lengths in: only then - while it packs the archive and
+        # swaps - and never for the reading itself, which can take hours. Not
+        # "any phase but a few" as for a rebuild: its progress file is absent
+        # while it starts and after it ends, and that is no reason to pause.
+        if runtime.audio_reading is None:
+            return False
+        return update_list.read_phase() in READING_SWAP_PHASES
     if rebuild_pauses_everything():
         return True
-    import update_list
     return update_list.read_phase() not in update_list.PHASES_BEFORE_THE_SWAP
 
 
@@ -2075,8 +2107,9 @@ def send_list_trigger_info(irc_sock, user):
 
 def send_file_list(irc_sock, user, channel):
     """Find the existing .zip list and start a DCC SEND, tracking the right channel."""
-    # If a list update is running, answer with the status rather than an error
-    if getattr(config, 'update_inprogress', False) is True:
+    # If a list update is running, answer with the status rather than an
+    # error - or the audio reading is swapping the list in (#1182).
+    if list_archive_waits():
         msg = f"NOTICE {user} :{config.C_BOLD}System Notice{config.C_RESET}: Master list is currently rebuilding. Please wait a few minutes and try again. \r\n"
         oserve.queue_message(user, msg)
         return

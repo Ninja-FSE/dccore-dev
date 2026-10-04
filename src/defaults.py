@@ -359,9 +359,15 @@ LIST_INDEX_FILE: str = "./data/list_index.db"
 # Duration and quality after the size on the list's MP3 and FLAC rows (#567):
 # "::INFO:: 10.3MB 4m31s 320/44.1/JS" - the spelling other servers' lists use.
 # Off by default because it OPENS every audio file, where the scan otherwise
-# asks for nothing but sizes: the first rebuild with it on takes noticeably
-# longer. What it read is kept in LIST_AUDIO_INFO_CACHE, checked against each
-# file's size and modification time, so later rebuilds open only new or changed
+# asks for nothing but sizes. The rebuild never waits for it (#1182): the list
+# is published with what is already known, then the files not read yet are
+# read in the background, with no time limit, and their lengths written into
+# the published list once at the end - its date kept, so other bots do not
+# fetch it again. Searches and requests pause only for that swap, as for a
+# rebuild's. A rebuild run by hand (not by the bot) publishes and leaves the
+# reading to the bot or to `update_list.py --read-audio-info`. Tools > Read audio info (and the console's `audioinfo`)
+# runs that reading on its own. What it read is kept in LIST_AUDIO_INFO_CACHE,
+# checked against each file's size, so later rebuilds open only new or changed
 # files. Read with the standard library (audio_info.py); a file it cannot read
 # keeps its size and nothing more.
 LIST_SHOW_AUDIO_INFO: bool = False  # Put duration and bitrate after the size on MP3 and FLAC rows
@@ -373,7 +379,7 @@ LIST_AUDIO_INFO_CACHE: str = "./data/audio_info.db"
 # NFS library: one at a time 9.8 files a second, 16 about 73, 64 about 236 (the
 # last partly on a cache warmed by the run before). 64 by default - a plain
 # disk answers 64 requests as readily as it answers 16; on a very old drive
-# or a very small library, lower it. The rebuild's last line says the rate it
+# or a very small library, lower it. The reading's last line says the rate it
 # got, to compare. 1 to 128.
 LIST_AUDIO_INFO_THREADS: int = 64  # Audio files read at once for length and quality
 # How many folders the rebuild lists at once (#922). On a network mount every
@@ -384,12 +390,13 @@ LIST_AUDIO_INFO_THREADS: int = 64  # Audio files read at once for length and qua
 # difference worth measuring (a fraction of a second either way). 1 is the
 # scan as it always was. 1 to 64.
 LIST_SCAN_THREADS: int = 16  # Folders listed at once while the list is rebuilt
-# The most time one rebuild spends reading audio files it has not read before
-# (#914). A rebuild pauses searches and requests, and the first one with
-# LIST_AUDIO_INFO on has the whole library to read: past this, the list
-# publishes with what was read and the rest wait for the next rebuild. 0 = no
-# limit.
-LIST_AUDIO_INFO_MINUTES: int = 5  # Minutes one rebuild may spend reading new audio files; 0 = no limit
+# NO LONGER USED (#1182). It was the most time one rebuild spent reading audio
+# files it had not read before (#914), past which the list published without
+# them. The rebuild now publishes first and reads them afterwards, in the
+# background, with no time limit, so there is nothing left to cap. Still
+# declared, so a settings.conf that sets it loads without a warning; whatever
+# it says is ignored.
+LIST_AUDIO_INFO_MINUTES: int = 5  # No longer used: audio files are read in the background with no time limit
 
 # One row per thing this bot has ever sent, keyed by its relative path or
 # archive name, with its name, kind and count. Feeds the Stats page's "Most
@@ -965,6 +972,10 @@ RAR_TIMEOUT: int    = 1800     # Longest a rar packing run may take, in seconds,
 # drive takes hours. Losing it at the thirty-minute mark costs the whole run
 # and leaves the old list in place, every time, with no setting an operator
 # could reasonably be expected to guess right.
+#
+# The same rule stops a background audio reading (#1182) that has gone silent:
+# it reports only when a read completes, so a mount that stopped answering is
+# silence. What it read is already saved.
 #
 # The child reports what it is doing to LIST_PROGRESS_FILE roughly twice a
 # second while scanning. So the question worth asking is not "how long has

@@ -270,6 +270,10 @@
     updateListSchedule:   document.getElementById("update-list-schedule"),
     updateListBar:        document.getElementById("update-list-bar"),
     updateListBarFill:    document.getElementById("update-list-bar-fill"),
+    audioInfoRunBtn:      document.getElementById("audio-info-run-btn"),
+    audioInfoStatus:      document.getElementById("audio-info-status"),
+    audioInfoBar:         document.getElementById("audio-info-bar"),
+    audioInfoBarFill:     document.getElementById("audio-info-bar-fill"),
     verifyRunBtn:         document.getElementById("verify-run-btn"),
     verifyStatus:         document.getElementById("verify-status"),
     verifyResults:        document.getElementById("verify-results"),
@@ -3950,12 +3954,6 @@
     var parts = [];
     if (progress.phase === "writing") {
       parts.push(t("tools.writingList"));
-    } else if (progress.phase === "audio") {
-      // #914: reading length and quality - folder_index/folder_count carry
-      // files read / files to read, so the bar below follows it too.
-      parts.push(t("tools.readingAudioInfo")
-        .replace("{done}", (progress.folder_index || 0).toLocaleString())
-        .replace("{total}", (progress.folder_count || 0).toLocaleString()));
     } else if (progress.folder_count) {
       parts.push(t("tools.scanningFolder")
         .replace("{index}", progress.folder_index).replace("{total}", progress.folder_count));
@@ -4011,6 +4009,7 @@
     if (!el.updateListSchedule) { return; }
     fetchJson("/api/tools/update-list/status").then(function (payload) {
       followRunningUpdate(payload);
+      followRunningAudioInfo(payload);
       var schedule = payload && payload.schedule;
       var text;
       if (!schedule) {
@@ -4043,6 +4042,9 @@
       clearInterval(updateList.pollTimer);
       updateList.pollTimer = null;
       el.updateListRunBtn.disabled = false;
+      // The rebuild has published; its audio reading (#1182) may just have
+      // begun, and the Read audio info card takes it up at once.
+      followRunningAudioInfo(payload);
       // #224: "running" alone cannot tell a rebuild that worked from one
       // that failed - this used to say "Done" unconditionally the moment
       // running flipped false, whichever it was.
@@ -4066,6 +4068,145 @@
       updateList.pollTimer = null;
       el.updateListRunBtn.disabled = false;
       showUpdateListStatus(t("tools.lostTrackOfUpdate").replace("{error}", err.message), true);
+    });
+  }
+
+  // ------------------------------------------------- Read audio info (#1182)
+  //
+  // A rebuild with "Length and quality in the list" on publishes first and
+  // reads the audio files' lengths afterwards, in the background; this card
+  // follows that reading however it was started - after a rebuild, from the
+  // console's `audioinfo`, from dccore.mrc - and its button starts one on its
+  // own. Its progress is the same status payload's: `audio.running`, and the
+  // progress file's phase "reading" (folder_index read of folder_count, rate
+  // a second). `audio.last` is how the last one ended.
+  var audioInfo = { pollTimer: null };
+
+  if (el.audioInfoRunBtn) {
+    el.audioInfoRunBtn.addEventListener("click", function () {
+      el.audioInfoRunBtn.disabled = true;
+      showAudioInfoStatus(t("tools.starting"), false);
+      postJson("/api/tools/audio-info", {}).then(function (res) {
+        if (!res.ok) {
+          el.audioInfoRunBtn.disabled = false;
+          var data = res.data || {};
+          showAudioInfoStatus(data.reason === "off" ? t("tools.audioOff")
+            : data.reason === "rebuilding" ? t("tools.audioRebuilding")
+            : (data.error || ("HTTP " + res.status)), true);
+          return;
+        }
+        startAudioInfoPolling();
+      }).catch(function (err) {
+        el.audioInfoRunBtn.disabled = false;
+        showAudioInfoStatus(t("common.requestFailed").replace("{error}", err.message), true);
+      });
+    });
+  }
+
+  function showAudioInfoStatus(text, isError) {
+    if (!el.audioInfoStatus) { return; }
+    el.audioInfoStatus.textContent = text;
+    el.audioInfoStatus.classList.toggle("is-error", !!isError);
+    if (el.audioInfoBar) { el.audioInfoBar.style.display = "none"; }
+  }
+
+  function showAudioInfoProgress(progress) {
+    if (!progress || progress.phase !== "reading") {
+      // Reading the list to find what to read (#1189: not "writing"), or
+      // writing the lengths in.
+      var writing = progress && ["rewriting", "packing", "publishing"].indexOf(progress.phase) >= 0;
+      showAudioInfoStatus(writing ? t("tools.audioWriting") : t("tools.audioFinding"), false);
+      return;
+    }
+    var done = progress.folder_index || 0;
+    var total = progress.folder_count || 0;
+    var parts = [t("tools.readingAudioInfo")
+      .replace("{done}", done.toLocaleString()).replace("{total}", total.toLocaleString())];
+    if (progress.rate) {
+      parts.push(t("tools.audioRate").replace("{rate}", progress.rate.toLocaleString()));
+    }
+    if (progress.elapsed !== null && progress.elapsed !== undefined) {
+      parts.push(describeDuration(progress.elapsed));
+    }
+    showAudioInfoStatus(parts.join(" · "), false);
+    if (!el.audioInfoBar || !total) { return; }
+    el.audioInfoBar.style.display = "block";
+    el.audioInfoBar.classList.remove("is-indeterminate");
+    el.audioInfoBarFill.style.width = Math.min(100, Math.floor(done * 100 / total)) + "%";
+  }
+
+  // How the last reading ended, in the page's language. The bot's own English
+  // line (`message`) only when the outcome is one this page does not know.
+  function describeAudioResult(last) {
+    if (!last) { return ""; }
+    var read = Number(last.read) || 0;
+    var unreadable = Number(last.unreadable) || 0;
+    if (last.outcome === "nothing") { return t("tools.audioNothing"); }
+    if (last.outcome === "off") { return t("tools.audioOff"); }
+    if (last.outcome === "busy") { return t("tools.audioBusy"); }
+    if (last.outcome === "stopped") {
+      return t("tools.audioStopped").replace("{read}", read.toLocaleString())
+        .replace("{total}", (Number(last.total) || 0).toLocaleString());
+    }
+    if (last.outcome === "done" && (last.unwritten || []).length) {
+      return t("tools.audioUnwritten").replace("{read}", (read - unreadable).toLocaleString());
+    }
+    if (last.outcome === "done") {
+      return t((last.updated || []).length ? "tools.audioDone" : "tools.audioDoneUnchanged")
+        .replace("{read}", (read - unreadable).toLocaleString())
+        .replace("{unreadable}", unreadable.toLocaleString());
+    }
+    return t("tools.audioFailed").replace("{error}", last.message || last.error || t("tools.unknownError"));
+  }
+
+  function audioResultIsError(last) {
+    return !!last && (last.outcome === "failed" || last.outcome === "stalled");
+  }
+
+  // Taken up when Tools opens, on its refresh tick, and after the button
+  // (#1023's rule for the rebuild, applied to the reading). Otherwise the card
+  // says how the last one ended, or that the setting is off.
+  function followRunningAudioInfo(payload) {
+    var audio = (payload && payload.audio) || {};
+    if (audio.running) {
+      if (audioInfo.pollTimer) { return true; }
+      if (el.audioInfoRunBtn) { el.audioInfoRunBtn.disabled = true; }
+      startAudioInfoPolling();
+      return true;
+    }
+    if (audioInfo.pollTimer) { return false; }
+    if (!audio.enabled) {
+      showAudioInfoStatus(t("tools.audioOff"), false);
+    } else if (audio.last) {
+      showAudioInfoStatus(describeAudioResult(audio.last), audioResultIsError(audio.last));
+    }
+    return false;
+  }
+
+  function startAudioInfoPolling() {
+    if (audioInfo.pollTimer) { clearInterval(audioInfo.pollTimer); }
+    pollAudioInfoStatus();
+    audioInfo.pollTimer = setInterval(pollAudioInfoStatus, UPDATE_LIST_POLL_MS);
+  }
+
+  function stopAudioInfoPolling() {
+    clearInterval(audioInfo.pollTimer);
+    audioInfo.pollTimer = null;
+    if (el.audioInfoRunBtn) { el.audioInfoRunBtn.disabled = false; }
+  }
+
+  function pollAudioInfoStatus() {
+    fetchJson("/api/tools/update-list/status").then(function (payload) {
+      var audio = payload.audio || {};
+      if (audio.running) {
+        showAudioInfoProgress(payload.progress);
+        return;
+      }
+      stopAudioInfoPolling();
+      showAudioInfoStatus(describeAudioResult(audio.last), audioResultIsError(audio.last));
+    }).catch(function (err) {
+      stopAudioInfoPolling();
+      showAudioInfoStatus(t("tools.lostTrackOfUpdate").replace("{error}", err.message), true);
     });
   }
 
