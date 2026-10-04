@@ -1400,6 +1400,7 @@ def _install_fetched_list(bot, zip_path, extract_dir):
             kept_lists[marker] = info
 
     store = _ensure_fetched_bot_lists()
+    previous = store.get(str(bot).strip().lower())
     store[str(bot).strip().lower()] = {
         "bot": str(bot).strip(),
         "fetched_at": time.time(),
@@ -1454,6 +1455,21 @@ def _install_fetched_list(bot, zip_path, extract_dir):
     # while the daemon's memory of which bots they belonged to did not, and
     # the File Lists switcher went blank until the next fetch.
     db.save_fetched_bot_lists(dict(store))
+
+    # A LIST THIS FETCH DID NOT KEEP LEAVES THE INDEX. The last copy may have
+    # held one this archive does not - or holds empty, or over the ceiling -
+    # and nothing removed its rows: not this, which indexes only the lists it
+    # keeps, and not forget_bot(), which went by the markers this entry
+    # names. They stayed for good, and as "<nick>/<marker>" they also match
+    # the bare nick's `bot:"<nick>"` pre-filter in every search.
+    # Compared as index names, which the index stores lower-cased: a marker
+    # that only changed case is the list just indexed, not one to drop.
+    old_lists = previous.get("lists") if isinstance(previous, dict) else None
+    if isinstance(old_lists, dict):
+        kept_names = {index_key(bot, marker).lower() for marker in kept_lists}
+        for marker in old_lists:
+            if index_key(bot, marker).lower() not in kept_names:
+                list_index.drop_bot(index_key(bot, marker))
 
     if len(kept_lists) > 1:
         detail = ", ".join(f"{marker or 'main'}: {info['entry_count']}"
@@ -1620,17 +1636,18 @@ def forget_bot(bot):
     # - so dropping the bare nick alone leaves the films/series rows behind
     # forever, pointing at files this call has just deleted.
     #
-    # Not a correctness problem: search_index() already restricts its answer to
-    # lists currently held, so nothing wrong is ever returned. It is a DISK
-    # problem, and the whole point of purging - the index runs roughly as large
+    # search() answers only from lists currently held, so nothing wrong is
+    # returned from them. It is above all a DISK problem, and the whole point
+    # of purging - the index runs roughly as large
     # again as the lists it describes, so on a multi-list bot the leak is most
     # of the space the purge just claimed to free.
     #
-    # `| {""}` because an entry written before an archive could hold more than
-    # one list has no "lists" key at all, and the bare nick must still go.
-    markers = (entry.get("lists") or {}) if isinstance(entry, dict) else {}
-    for marker in set(markers) | {""}:
-        list_index.drop_bot(index_key(bot, marker))
+    # By every name in the index under this nick, not by the markers the
+    # entry names: a list an earlier refetch left out is not in them, and
+    # its rows outlived the Forget too. That also covers an entry written
+    # before an archive could hold more than one list, which has no "lists"
+    # key at all.
+    list_index.drop_every_list_of(bot)
 
     real_nick = entry.get("bot", bot) if isinstance(entry, dict) else bot
     print(f"[LIST-FETCH] Forgot {real_nick}'s fetched list.")
