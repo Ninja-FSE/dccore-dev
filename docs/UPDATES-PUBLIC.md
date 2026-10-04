@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: the List Browser's filter could show no results from a bot that it said matched.** Rows from lists you do not hold (an offline bot with a similar name, a list a bot no longer offers) could fill the page first; a bot whose nick has no letters or digits never showed any. And a list a bot stops offering is now removed from the search index on the next fetch, and everything of a bot when you Forget it.
+- **Faster: the List Browser's filter answers short prefixes at once.** Typing the first letters of a search took up to a second or more per keystroke on big lists; it is a few milliseconds now. The first start after upgrading rebuilds the search index once from the lists you hold - up to about a minute per million files, before the bot connects - and says so in the log. The index takes about half as much disk again as before: make room for it if the disk is nearly full.
 - **New: 256 KB in the send block size menu,** for a fast seedbox, where it uses less CPU per file sent. A bigger block no longer drops a very slow downloader either: the bot waits longer for it in proportion. The default stays 64 KB, and the help says why.
 - **Faster: rows pasted from the list are found straight away.** When someone pastes several rows from one album, each after the first is looked for in the folder the first was found in - but the size pasted with the row never matched, so every row searched the whole list instead, seconds each on a big library. It matches now, whichever way the size is written.
 - **Faster: the List Browser's filter no longer slows down with many bots.** With a filter active, the sidebar was checked bot against bot every few seconds - about a second each time with a thousand-odd bots. It is worked out once per pass now.

@@ -17,6 +17,62 @@ its serving thread has stopped. That is what "the port is freed" means, and noth
 check: dropping both `shutdown()` and `server_close()` fails it. Dropping either alone does not, because werkzeug's
 `serve_forever()` closes the socket itself when it ends, so the port really is freed then. Tests only.
 
+### 🐛 The filter searches only held lists, and a refetch or Forget drops lists that are gone
+
+Three faults in the cross-list search index, older than 1.15, found by the pre-release audit of the 1.15 tree:
+
+- **A list that is not held could fill the filter's page.** `list_index.search()` narrowed to the held lists with an
+  FTS5 phrase OR-list - `bot:"dude"` also matches `dude-2`, `dude|away` and `dude/rar` - ran `LIMIT`, and only THEN
+  dropped rows whose bot was not held. 300 rows of an offline `Dude-2` filled the page and `Dude`'s 5 matches were
+  gone, while the sidebar said Dude matched and `truncated` said nothing was missing. The held names now go into the
+  SQL as `bot IN (...)`, 500 to a statement (SQLite before 3.32 takes at most 999 parameters), so `LIMIT` counts only
+  held rows; the phrase list stays as a pre-filter.
+- **A nick with no letters or digits never returned rows** (`^_^`): #1091's `_has_tokens` fix reached
+  `bots_with_a_match()` but not `search()`, whose `bot:"^_^"` phrase has no tokens and matches nothing. A batch
+  holding such a name drops the phrase pre-filter and lets `bot IN` decide.
+- **A list the archive no longer has stayed in the index for good.** A refetch indexed each extra list under
+  `<nick>/<marker>` but never dropped a marker the new archive lacked (or skipped as empty or oversized), and Forget
+  dropped only the current entry's lists. `_install_fetched_list()` now drops every old list name it did not keep, and
+  the new `list_index.drop_every_list_of(nick)` - `bot = nick` or a name starting `nick/`, by `substr()` so `_` and `%`
+  in a nick are not wildcards - is what Forget uses. `dude2` survives a Forget of `dude`.
+- Tests: `tests/test_a_list_that_is_not_held_does_not_fill_the_filter_page.py`,
+  `tests/test_a_list_the_archive_no_longer_has_leaves_the_index.py`,
+  `tests/test_the_filter_returns_rows_for_a_symbol_only_nick.py`, from the audit's probes. #1185's equivalence test
+  compares against a reference that selects held lists the corrected way.
+- **The outbound-pace test counts only its own lines.** This PR's macOS / 3.14 job failed it three runs in a row: 9 lines
+  where 8 were sent. A debug line that an earlier test queued, or that a thread another test left running queued
+  meanwhile, was delivered by the test's own drain as a ninth. The test failed whenever that line landed inside its
+  20 ms poll. `test_the_combined_rate_never_exceeds_one_shared_slot_per_interval` now clears the debug queue in setUp
+  and counts only its own 4 queue and 4 debug lines. A stray line only takes a later slot on the shared clock, so the
+  timing assertion stands. Reproduced both ways by holding the poll until every line had landed: the old test failed
+  and the new one passes. Counting every line again fails the "queued meanwhile" case. #1194 removes these leftovers
+  suite-wide.
+
+### ⚡ The search index gets a prefix index and stores each folder once (#1130, #1135)
+
+Performance audit 2026-10-03 P8 and P13, in one schema change so the index is rebuilt once on upgrade. The filter bar
+searches the cross-list index by prefix as the operator types, and with no prefix index FTS5 scanned every term for
+the short ones: 128 ms for "al", 1.3 s for "love m", 3.3 s for one 21-keystroke search on 2.64M rows. And every row
+stored its whole folder heading.
+
+- The FTS5 table has `prefix='1 2 3 4'` and `columnsize=0`: "al" 1.2 ms, "love m" 17 ms, the 21 keystrokes 57 ms,
+  every answer identical. Folder headings are stored once per list in a new `folders(id, bot, folder)` table and each
+  row holds the id; `index_bot_list()` and `drop_bot()` clear a list's folders with its rows, and `search()` maps the
+  ids back inside the same SELECT, so it reads one snapshot. Net size about +46% over today (the prefix index +70%,
+  the folder ids back a fifth), build time about 2x. #1129's read connection and lock order are unchanged.
+- `_SCHEMA_VERSION` 2. `_open()` reads the table's stored CREATE statement; an index made before drops and recreates
+  `entries` in the same transaction as the CREATE, says so once, and sets `_rebuild_pending`, so the held lists come
+  back through the startup backfill or before the first filter query answers - the path the damaged-file repair
+  already takes. On a big set of held lists that is about a minute per million files, before the bot connects, once.
+  After it, rows inside one page of results can come in a different order; the same rows match.
+- Going back to an earlier version: delete `data/list_index.db` first - an older one would show folder ids as folder
+  names. INSTALL.md says so, and the `defaults.py` comment and the sample settings file give the new size.
+- Tests: `tests/test_the_rebuilt_search_index_answers_every_query_as_before.py` - the schema-1 table and queries
+  against the new on about 150 terms (1-4 letter prefixes, accented, Greek and CJK text, phrases, FTS5 syntax), at three
+  limits, five bot filters and through `bots_with_a_match()`; the upgrade through the first query, the startup
+  backfill and a fetch, a restart part-way, a failed rebuild leaving the old table intact, no second rebuild.
+  `tests/test_the_search_index_stores_each_folder_once.py`.
+
 ### 🧪 Preflight runs its hidden-tooling pass again, and the coverage gate passes (#1178)
 
 Two preflight checks had stopped doing their job, on every machine:
