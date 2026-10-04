@@ -261,13 +261,30 @@ Two settings decide how the result is split up:
 
 **`LIST_SHOW_AUDIO_INFO`** (off by default) adds each MP3 and FLAC file's length and quality after its size -
 `::INFO:: 10.3MB 4m31s 320/44.1/JS`, the way other servers' lists show it (`~245` is a VBR average). Every audio
-file has to be read once. The files are read several at a time (`LIST_AUDIO_INFO_THREADS`, 64), and each rebuild
-spends at most `LIST_AUDIO_INFO_MINUTES` (5) on it, so a first pass never holds a rebuild for long: on a large library,
-or one on a network drive, the first few rebuilds each publish with part of the library read and the rest showing
-its size alone, until everything has been read once. After that only new files are read, and a rebuild costs what
-it did without the setting. What was read is kept in `data/audio_info.db`; deleting it is safe - the files are
-read again. The rebuild's last line says how fast the files were read; if raising `LIST_AUDIO_INFO_THREADS`
-further does not raise that number, you have found the server's own limit rather than the setting's.
+file has to be read once, and nothing waits for it:
+
+- **The rebuild publishes first**, with what is already known. A file not read yet shows its size alone.
+- **Then the same rebuild reads the rest in the background**, several at a time (`LIST_AUDIO_INFO_THREADS`, 64),
+  with no time limit. Searches and downloads carry on meanwhile. What it reads is saved as it goes, so a reading
+  that is stopped keeps what it read.
+- **When it is done, the lengths are written into the published list** - no new scan, the same quick swap, and the
+  list keeps its date, so other bots that fetch lists by their date do not fetch it twice. If nothing new had a
+  length to show, the list is left alone.
+
+On a large library, or one on a network drive, the first reading can take hours; after that only new files are
+read. Its progress is in the console (`Audio info: 3,200 of 12,000 read, 230/s`), in the @DCCore window's panel and
+on the dashboard's **Tools** page, and its last line says how it ended (`done: 11,980 read, 20 unreadable, list
+updated`) and how fast the files were read; if raising `LIST_AUDIO_INFO_THREADS` further does not raise that number,
+you have found the server's own limit rather than the setting's.
+
+A new rebuild started while a reading runs stops it (nothing read is lost), publishes, and starts a fresh reading.
+**Tools > Read audio info**, the console's `audioinfo` and **Library > Read audio info** in `dccore.mrc` run the
+reading on its own, for the files the list has no length for yet - after a reading was stopped, for instance. They
+say "nothing new to read" when there is nothing, and are refused while a rebuild runs: it starts its own reading.
+What was read is kept in `data/audio_info.db`; deleting it is safe - the files are read again.
+
+`LIST_AUDIO_INFO_MINUTES`, which used to cap the reading each rebuild did, is no longer used. A `settings.conf` that
+still sets it loads without complaint, and the value is ignored.
 
 ### If your users queue with AutoQ
 
