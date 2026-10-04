@@ -105,7 +105,10 @@ class TheRunnerGivesEachProcessItsOwnShift(unittest.TestCase):
     def test_the_rest_of_the_environment_is_passed_on(self):
         env = RUNNER.shard_env(2, base={"PATH": "x", RUNNER.PORT_SHIFT_VARIABLE: "7"})
 
-        self.assertEqual(env, {"PATH": "x", RUNNER.PORT_SHIFT_VARIABLE: str(RUNNER.PORT_SHIFTS[2])})
+        # Plus the two variables that keep a shard's summary free of colour
+        # escapes (tests/test_the_runner_reads_a_coloured_shard.py).
+        self.assertEqual(env, {"PATH": "x", RUNNER.PORT_SHIFT_VARIABLE: str(RUNNER.PORT_SHIFTS[2]),
+                               "PYTHON_COLORS": "0", "NO_COLOR": "1"})
 
     def test_more_at_once_than_there_are_windows_is_refused(self):
         with self.assertRaises(ValueError):
