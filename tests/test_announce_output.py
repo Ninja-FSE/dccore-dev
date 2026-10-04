@@ -267,7 +267,11 @@ class DebugPumpTests(QuietTestCase):
         self.assertIsNone(self.oserve.irc_connection)
         announce._debug_queue.clear()
         self.addCleanup(announce._debug_queue.clear)
-        self.config.DEBUG_CHANNEL = "#dccore-debug"
+        # Nor is a drain needed to read it: marked as started, send_debug()
+        # only appends rather than starting one.
+        self.addCleanup(setattr, announce, "_debug_drain_started", announce._debug_drain_started)
+        announce._debug_drain_started = True
+        self.set_config(DEBUG_CHANNEL="#dccore-debug")
 
     def last_line(self):
         self.assertTrue(announce._debug_queue, "send_debug queued nothing")
@@ -348,7 +352,7 @@ class DebugPumpTests(QuietTestCase):
 
     def test_line_is_addressed_to_the_debug_channel(self):
         """The pump must still produce a well-formed PRIVMSG to DEBUG_CHANNEL."""
-        self.config.DEBUG_CHANNEL = "#dccore-debug"
+        self.set_config(DEBUG_CHANNEL="#dccore-debug")
         announce.send_debug("hello")
         line = self.last_line()
         self.assertTrue(line.startswith("PRIVMSG #dccore-debug :"))
@@ -374,7 +378,7 @@ class DebugDrainDeliveryTests(QuietTestCase):
         # queuing at all, which ships blank - unrelated to what this class
         # tests (the drain thread's own two gates), so a channel is set here
         # purely to keep these lines reaching the queue in the first place.
-        self.config.DEBUG_CHANNEL = "#chan"
+        self.set_config(DEBUG_CHANNEL="#chan")
 
     def _close_gate(self):
         self.oserve.irc_connection = None

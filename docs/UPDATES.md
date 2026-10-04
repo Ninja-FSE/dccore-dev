@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 A test leaves the process as it found it
+
+The suite runs in four processes (#1146), each holding a mix of modules, so a test that leaves shared state behind
+breaks a LATER test in the same process - the CI flakes re-run all through 1.15's PRs. A test-isolation audit of the
+1.15 tree found the causes; all are fixed, in tests only:
+
+- **The "fixture login 401" flake:** `test_dashboard_routes`' settings saves started a real detached `!rehash` that
+  reloaded `defaults` while the next test logged in, wiping its `ADMIN_PASSWORD_HASH`. Stubbed the way
+  `test_webserver` already did, with `keep_every_setting()`.
+- **The "re-froze a queue" flake:** every test that drove a real `start_dcc_send()` left its 3 s, 15 s and 45 s
+  follow-up threads (`delayed_queue_trigger_fallback`, `delayed_port_retry`) to sweep queues inside later tests and
+  modules - 87 such threads in one four-shard run. `support.hold_send_follow_ups()`, on a general
+  `hold_threads_until_the_test_ends()`, lets them behave as in production while the test runs and ends and joins them
+  when it does; `dcc.py` is untouched.
+- **The "9 != 8 lines" flake:** a debug line an earlier test queued without a socket stayed in
+  `announce._debug_queue` and was delivered by the outbound-pace test's drain; the queue is cleared in setUp.
+- **The arrival-order flake:** the test bet on the scheduler; it now checks that the pacer served slots in ticket
+  order (100 runs under load: always), not how long a lane waited for a CPU.
+- Also: `test_adminchat`'s listeners released when their test ends; the debug drain retired per test;
+  `freeze_clock_paused_at`, `ADMIN_PASSWORD_HASH` and `DEBUG_CHANNEL` reset; `make_tree()` and every DCCoreTestCase
+  given their own `LOCAL_LIST_DIR`, `TMP_ZIP_DIR` and `HARD_BANS_FILE`; and the smaller leaks the new guard found.
+- **A guard against the next one:** `tests/__init__.py` checks every test after its last cleanup - a thread it
+  started still running (a queue sweep, a rehash or a list update fails at once) or a shipped setting changed and
+  left fails it. `tests/test_a_test_leaves_the_process_as_it_found_it.py` proves the guard catches each kind.
+- About 2% on the suite's time. Three parallel runs and a serial one green; with every open PR merged in, 8190 tests.
+
 ### 🧪 The parallel runner reads its shards in colour too
 
 Pre-release audit. Python 3.13 and later colour unittest's output when `FORCE_COLOR` or `PYTHON_COLORS=1` is set, even
