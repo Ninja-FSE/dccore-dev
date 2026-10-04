@@ -4,6 +4,29 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 The filter searches only held lists, and a refetch or Forget drops lists that are gone
+
+Three faults in the cross-list search index, older than 1.15, found by the pre-release audit of the 1.15 tree:
+
+- **A list that is not held could fill the filter's page.** `list_index.search()` narrowed to the held lists with an
+  FTS5 phrase OR-list - `bot:"dude"` also matches `dude-2`, `dude|away` and `dude/rar` - ran `LIMIT`, and only THEN
+  dropped rows whose bot was not held. 300 rows of an offline `Dude-2` filled the page and `Dude`'s 5 matches were
+  gone, while the sidebar said Dude matched and `truncated` said nothing was missing. The held names now go into the
+  SQL as `bot IN (...)`, 500 to a statement (SQLite before 3.32 takes at most 999 parameters), so `LIMIT` counts only
+  held rows; the phrase list stays as a pre-filter.
+- **A nick with no letters or digits never returned rows** (`^_^`): #1091's `_has_tokens` fix reached
+  `bots_with_a_match()` but not `search()`, whose `bot:"^_^"` phrase has no tokens and matches nothing. A batch
+  holding such a name drops the phrase pre-filter and lets `bot IN` decide.
+- **A list the archive no longer has stayed in the index for good.** A refetch indexed each extra list under
+  `<nick>/<marker>` but never dropped a marker the new archive lacked (or skipped as empty or oversized), and Forget
+  dropped only the current entry's lists. `_install_fetched_list()` now drops every old list name it did not keep, and
+  the new `list_index.drop_every_list_of(nick)` - `bot = nick` or a name starting `nick/`, by `substr()` so `_` and `%`
+  in a nick are not wildcards - is what Forget uses. `dude2` survives a Forget of `dude`.
+- Tests: `tests/test_a_list_that_is_not_held_does_not_fill_the_filter_page.py`,
+  `tests/test_a_list_the_archive_no_longer_has_leaves_the_index.py`,
+  `tests/test_the_filter_returns_rows_for_a_symbol_only_nick.py`, from the audit's probes. #1185's equivalence test
+  compares against a reference that selects held lists the corrected way.
+
 ### ⚡ The search index gets a prefix index and stores each folder once (#1130, #1135)
 
 Performance audit 2026-10-03 P8 and P13, in one schema change so the index is rebuilt once on upgrade. The filter bar
