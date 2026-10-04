@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ A List Browser page reads only its own folders (#1128)
+
+Performance audit 2026-10-03 P6. Every page of the List Browser re-parsed the whole list it showed: 13.8-15.0 s and
+about 2 GB traced per page of our own 2M-row list, and 2.4-2.5 s and 401 MB per page of a 378k-row fetched one, for
+every click.
+
+- `list.page_of_list_files()` pages from a folder table built once per list version - its files' path, size and
+  mtime_ns - holding each folder run's byte range, its row count, a crc32 of its rows and the positions dedup drops.
+  Duplicates are flagged in FILE ORDER with the exact `(folder.lower(), filename.lower(), size)` key, runs that share a
+  lower-cased heading are deduplicated again together, and groups are formed after dedup by heading text at their first
+  position, rows before any heading in the '' group - the skeptic's requirements, so every page is the one the
+  whole-list parse gives. Our own lists cover every `all_list_paths()` file, master and video. `_matching_lines()`'s
+  state machine is shared as `_scan_lines()`, so a page re-parses with the same code.
+- Own list: 14-16 ms and 1.5 MB a page; the first view builds the table in 6.3 s (59 MB peak), and it keeps 4.5 MB for
+  133k folders. Fetched list: 13-14 ms and 1.1 MB a page; the table builds in 1.3 s and keeps 1.4 MB for 42k folders.
+- Falls back to the whole-list parse for a `?q=` search, a lone CR, a file changed under its key (each open is checked
+  with fstat) or a crc mismatch. At most 8 tables, least recently used dropped first, under
+  `runtime.list_folder_table_lock`; a rebuild drops ours, and a refetch or `forget_bot()` drops that bot's. A fetched
+  list's table is built under `list_fetch._lock()`, and the table lock is only ever taken inside it, never around it.
+- Tests: `tests/test_a_list_browser_page_reads_only_its_own_folders.py` and
+  `tests/test_a_fetched_list_page_reads_only_its_own_folders.py` compare every page with the whole-list parse on
+  adversarial lists - duplicates, case-twin and repeated headings, rows before any heading, the video list, other bots'
+  `::INFO::` spellings and the dash-size suffix, a folder named "====", CRLF, a BOM, NUL bytes, invalid UTF-8, a folder
+  past the page's row cap - and assert the pages came from the table. A pinned docstring in `test_list_fetch.py` no
+  longer says the own list has no caching.
+
 ### 🧪 The suite no longer waits out two fixed timers (#1148)
 
 Performance audit 2026-10-03 T3. Two tests sat out real timers: an absent user's freeze countdown slept a fixed ten
