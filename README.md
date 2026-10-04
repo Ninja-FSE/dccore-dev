@@ -71,6 +71,8 @@ Or, in four processes at once and in a third of the time, the way CI runs it: `p
 
 Thousands of them - the count is kept in [docs/FUTURE.md](docs/FUTURE.md) - stdlib-only, on Linux, Windows and macOS, Python 3.10, 3.12 and 3.14 in CI.
 
+To see what a running bot costs under load, `scripts/stress_test.py` points 40 simulated clients at it - a flood of searches, a storm of adverts, join/part churn, a mass quit, the dashboard - and prints the bot's CPU, memory and threads for each. Linux only, and only ever against a test bot on a private test server: the flood gets its nicks muted and banned. Its docstring says how to run it.
+
 ## Responsible use
 
 DCCore is a tool for sharing files **you have the right to share**: your own recordings and creations, public-domain and Creative Commons works, and anything else whose licence allows it to be passed on. It comes with no content, points to none, and is not made for distributing material you have no right to distribute.
