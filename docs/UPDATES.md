@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The parallel runner reads its shards in colour too
+
+Pre-release audit. Python 3.13 and later colour unittest's output when `FORCE_COLOR` or `PYTHON_COLORS=1` is set, even
+into a file. A shard's summary then ended `\x1b[32mOK\x1b[0m`, `scripts/run_tests_in_parallel.py` did not recognise it,
+and every shard read as one that "ended without a summary of its own": "Ran 0 tests", FAILED and exit status 1 with
+every test passing, and preflight saying "only 0 collected". A shell that exports `FORCE_COLOR=1` was enough.
+
+- `shard_env()` turns colour off for every shard: `FORCE_COLOR` is dropped, `PYTHON_COLORS=0` and `NO_COLOR=1` are set.
+- `split_summary()` drops escape sequences before it reads a shard's output, for an interpreter that colours anyway,
+  so the progress lines it passes on are plain too.
+- Tests: `tests/test_the_runner_reads_a_coloured_shard.py` (the coloured text as Python 3.14 writes it, on every
+  Python; a real unittest child with colour forced on). `test_the_rest_of_the_environment_is_passed_on` now expects the
+  two colour variables in a shard's environment.
+
 ### 📝 The settings help says what the code does
 
 Pre-release docs audit. Four "?" texts on the Settings page, and the sample built from them, described something the
