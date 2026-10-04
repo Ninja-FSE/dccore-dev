@@ -373,8 +373,17 @@ class DispatchAdmissionTests(DCCoreTestCase):
         self.assertNotIn("dave", config.user_processing_lock)
         self.assertIn("dave", config.frozen_queues, "the absent user was not frozen")
 
-        with dcc.queue_lock:
-            config.frozen_queues.pop("dave", None)
+        # THAWED UNTIL NO COUNTDOWN IS LEFT, not once. Dave is still queued and
+        # still absent, so any queue sweep that runs meanwhile freezes him
+        # again and starts a new countdown - correctly. In the four-process run
+        # (#1146) a background thread another module left running did exactly
+        # that: two countdowns were alive after a single thaw, and the test
+        # failed on one CI job in nine while passing 40 times out of 40 alone.
+        deadline = time.time() + 10.0
+        while self._threads_started_here() and time.time() < deadline:
+            with dcc.queue_lock:
+                config.frozen_queues.pop("dave", None)
+            time.sleep(0.01)
         self.settle()
         self.assertEqual(self._threads_started_here(), [],
                          "the freeze countdown did not end once dave was thawed")
