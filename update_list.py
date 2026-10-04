@@ -411,6 +411,44 @@ def has_backslash_component(relative_path, separator=None):
     return any("\\" in part for part in flattened.split("/"))
 
 
+def relative_folder(root, scan_root, paths=None):
+    """os.path.relpath(root, scan_root), for a `root` the walk produced.
+
+    THE WALK BUILDS EVERY ROOT FROM scan_root ITSELF (#1138): each directory
+    is its parent's path, a separator and the entry's name, so the relative
+    path is simply what follows scan_root - a slice. relpath() made each one
+    absolute and normalised both paths first, about 10-20 us a directory on
+    Windows for an answer the string already held.
+
+    The slice is taken only where relpath() could not answer differently:
+    `root` must begin with scan_root and a separator, and what follows must
+    be plain names - nothing empty, no "." or "..", and on Windows no forward
+    slash, no colon (a drive or a stream to relpath(); no Windows name holds
+    one) and no name ending in a dot or a space, which Windows'
+    normalisation strips. Anything else asks relpath(), exactly as before.
+
+    `paths` is for the tests, like has_backslash_component()'s `separator`:
+    ntpath or posixpath, so both platforms' rules are checked on either.
+    Production passes nothing and gets os.path.
+    """
+    paths = os.path if paths is None else paths
+    if root == scan_root:
+        return "."
+    sep = paths.sep
+    prefix = scan_root if scan_root.endswith((sep, paths.altsep or sep)) else scan_root + sep
+    if root.startswith(prefix):
+        rest = root[len(prefix):]
+        names = rest.split(sep)
+        if paths.altsep:
+            plain = paths.altsep not in rest and ":" not in rest and all(
+                name and name[-1] not in ". " for name in names)
+        else:
+            plain = all(name and name != "." and name != ".." for name in names)
+        if plain:
+            return rest
+    return paths.relpath(root, scan_root)
+
+
 def is_listed_file(name, ignored=None):
     """Does this file go into the list? Everything does, unless it is skipped.
 
@@ -1570,7 +1608,10 @@ def generate_master_list(list_name=None):
             # would mean an operator who adds a second folder after weeks of
             # serving changes every path anyone already saved; doing it once,
             # at the upgrade, is one break instead of two.
-            rel_dir = os.path.relpath(root, scan_root)
+            #
+            # relative_folder() rather than os.path.relpath(): the same
+            # answer, sliced off the string when it safely can be (#1138).
+            rel_dir = relative_folder(root, scan_root)
             if rel_dir == ".":
                 rel_dir = ""
             rel_dir = (os.path.join(scan_folder.name, rel_dir)
@@ -1610,12 +1651,24 @@ def generate_master_list(list_name=None):
             # first. is_listed_file() is not consulted here on purpose - a
             # video the operator has ignored still says what kind of folder
             # this is.
+            #
+            # EACH NAME IS LOWER-CASED ONCE (#1138). is_listed_file(),
+            # is_packable_file(), belongs_in_video_list() and
+            # audio_info.is_audio() each lower-cased the name again - up to
+            # five times a file - and rebuilt a tuple of the extensions each
+            # time. The checks below are those helpers' own, made on `low`
+            # against the tuples resolved once per scan; an empty tuple
+            # matches nothing, as it did there. The helpers stay, for every
+            # other caller. A folder's packable flag is likewise added once,
+            # after its files, instead of once per packable file.
             folder_has_video = split_video and any(
-                is_video_file(name, video_exts) for name, _bytes in files)
+                str(name).lower().endswith(video_exts) for name, _bytes in files)
+            packable_here = False
 
             # Keep every track under its exact, complete path on disk
             for file, file_bytes in files:
-                if is_listed_file(file, ignored):
+                low = str(file).lower()
+                if not low.endswith(ignored):
                     if file_bytes is None:
                         full_file_path = os.path.join(root, file)
                         # #228: a bare `except: pass` left file_bytes at 0 and
@@ -1639,22 +1692,28 @@ def generate_master_list(list_name=None):
                     # remembered per folder. A folder earns its !rar row from
                     # holding something worth packing, not from holding
                     # anything at all - see RAR_EXTENSIONS.
-                    if is_packable_file(file, packable_exts):
-                        packable_folders.add(rel_dir)
+                    if low.endswith(packable_exts):
+                        packable_here = True
 
                     # WHICH list the row goes in. With the split off, video
                     # lands in the same list as everything else, which is the
                     # behaviour this had before the setting existed.
-                    if split_video and belongs_in_video_list(file, folder_has_video, video_exts, companion_exts):
+                    if split_video and (low.endswith(video_exts) or (
+                            folder_has_video and low.endswith(companion_exts))):
                         video_files_data.append((rel_dir, file, file_bytes))
                     else:
                         all_files_data.append((rel_dir, file, file_bytes))
-                        if audio is not None and audio_info.is_audio(file):
+                        if audio is not None and low.endswith(audio_info.AUDIO_EXTENSIONS):
                             # No request here: an unchanged file is answered
                             # from the cache by its size, the rest are read
-                            # after the walk, many at once (#914).
+                            # after the walk, many at once (#914). The path
+                            # goes as (root, name), joined only for a file
+                            # that is read - on an unchanged library that is
+                            # almost none of them (#1138).
                             audio.note(audio_info.row_key(rel_dir, file),
-                                       os.path.join(root, file), file_bytes)
+                                       (root, file), file_bytes)
+            if packable_here:
+                packable_folders.add(rel_dir)
 
     if walk_errors:
         print(f"[LIST-GEN ERROR] {len(walk_errors)} part(s) of the library could not be "

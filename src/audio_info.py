@@ -336,7 +336,7 @@ class Cache:
         self.sizes = {}      # key -> size, for the same
         self.fresh = {}      # key -> (size, suffix) read by this rebuild
         self.unread = set()  # keys whose read failed with an I/O error: not remembered (#973)
-        self.pending = []    # (key, path, size) still to read
+        self.pending = []    # (key, path or (folder, name), size) still to read
         self.read_count = 0
         self.reused_count = 0
         self.left_count = 0
@@ -376,7 +376,12 @@ class Cache:
     def note(self, key, path, size):
         """One listed audio file. No request is made here: a file whose size
         has not changed is answered from the cache, anything else waits for
-        read_pending()."""
+        read_pending().
+
+        `path` may be a (folder, name) pair, joined only if the file is read:
+        on an unchanged library almost every call is answered from the cache,
+        and joining a path a million times for nothing cost a second or two
+        on Windows (#1138)."""
         hit = self.known.get(key)
         if hit is not None and hit[0] == size:
             self.seen[key] = hit[1]
@@ -423,6 +428,10 @@ class Cache:
                     if item is None:
                         return
                     key, path, size = item
+                    if isinstance(path, tuple):
+                        # (folder, name) from the walk, joined only now that
+                        # the file is really read (#1138).
+                        path = os.path.join(*path)
                     running[pool.submit(self.reader, path, size)] = (key, size)
 
             top_up()
