@@ -377,7 +377,10 @@ def startup(setup_page=None):
         # empty index, and the dashboard's filter stated positively that no
         # list matched anything. Once per start, and only for what is
         # missing; a list already indexed costs one quick question to the
-        # index (#1071 - it used to read the whole index to find out).
+        # index (#1071 - it used to read the whole index to find out). The
+        # one start that pays in full is the first after an upgrade that
+        # rebuilt the index for its prefix index and folder ids (#1130,
+        # #1135): every held list is indexed again here, once.
         try:
             import list_index
             list_index.backfill_missing(config.fetched_bot_lists)
