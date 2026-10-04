@@ -267,6 +267,18 @@ rebuild_schedule_guard        = threading.Lock()
 rebuild_schedule_started      = False
 rebuild_schedule_last_attempt = None
 
+# The background audio reading (#1182): after a rebuild has published, the
+# same update_list.py process goes on reading audio lengths, and the daemon
+# stops waiting for it. audio_reading is that process's record while it runs
+# (an object with .process, .kind, .started and .done, set by commands.py), or
+# None; audio_reading_last is the last reading's result, for the dashboard.
+# Here because a !rehash reloads commands.py while a reading can run for
+# hours, and a reload must neither forget the process a new rebuild has to
+# stop nor build a second lock beside the one a waiting thread holds.
+audio_reading_lock = threading.Lock()
+audio_reading      = None
+audio_reading_last = None
+
 # Automatic list grabbing (#926 item 5), list_grab.py. Here for the same
 # reasons: a start guard a rehash cannot reset, and a wait in progress that a
 # reload of list_grab.py must not forget (or it would plan a second grab).

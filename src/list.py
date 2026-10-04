@@ -1388,11 +1388,18 @@ def rebuild_pauses_requests():
     that cannot report (a read-only data/) pauses the way it always did."""
     if getattr(config, 'PAUSE_ON_UPDATE', True) is not True:
         return False
+    import update_list
     if getattr(config, 'update_inprogress', False) is not True:
-        return False
+        # THE BACKGROUND AUDIO READING (#1182) swaps the list too, once, when
+        # it writes the lengths in: only then - while it packs the archive and
+        # swaps - and never for the reading itself, which can take hours. Not
+        # "any phase but a few" as for a rebuild: its progress file is absent
+        # while it starts and after it ends, and that is no reason to pause.
+        if runtime.audio_reading is None:
+            return False
+        return update_list.read_phase() in ("packing", "publishing")
     if rebuild_pauses_everything():
         return True
-    import update_list
     return update_list.read_phase() not in update_list.PHASES_BEFORE_THE_SWAP
 
 

@@ -330,7 +330,10 @@ def reset_config(**overrides):
                         # per-bot record - reloaded from the test's own file.
                         ("list_grab_started", False), ("list_grab_plan", None),
                         ("list_grab_last", None), ("list_grab_state", None),
-                        ("chat_last_id", 0)):
+                        ("chat_last_id", 0),
+                        # #1182: one test's background audio reading, or
+                        # its result, is not the next one's.
+                        ("audio_reading", None), ("audio_reading_last", None)):
         setattr(runtime, name, value)
 
     # A FRESH OUTBOUND CLOCK PER TEST. runtime.outbound_pacer is a

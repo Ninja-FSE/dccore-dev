@@ -1806,11 +1806,17 @@ def last_progress_at():
         return None
 
 
-def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0):
+def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=None):
     """Run the list builder, killing it only when it stops making progress.
 
     Returns the same CompletedProcess shape subprocess.run() did, so the
     caller's success path is unchanged.
+
+    `hand_over(process)`, asked every tick, lets the caller stop waiting for
+    a child that is still running (#1182): a rebuild that has published every
+    list and goes on reading audio lengths in the background. The result then
+    has returncode None and the running Popen as `.process`; whoever takes it
+    must keep draining its pipes - commands.watch_audio_reading() does.
 
     THREE RULES:
 
@@ -1853,6 +1859,11 @@ def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0):
                                                out, err)
         except subprocess.TimeoutExpired:
             pass
+
+        if hand_over is not None and hand_over(process):
+            handed = subprocess.CompletedProcess(argv, None, "", "")
+            handed.process = process
+            return handed
 
         now = time.time()
         if ceiling and (now - begun) >= ceiling:
@@ -2192,6 +2203,14 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             script_path = os.path.join(base_path, "update_list.py")
 
+            # A background audio reading still running is stopped first
+            # (#1182): what it read is kept, this rebuild publishes with it,
+            # and starts a fresh reading for the rest. A stop request left by
+            # a run that was killed must not end this one's reading at once.
+            import update_list
+            stop_audio_reading()
+            update_list.clear_stop_request()
+
             if not os.path.exists(script_path):
                 announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
                 # #224: build_update_list_status_payload() used to report only
@@ -2227,17 +2246,31 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
             # update_list.py); this guards our reading of them, so a
             # future child that does not still cannot take the daemon's
             # report away with it.
+            # hand_over (#1182): once the child has published every list and
+            # reports the background audio reading, the rebuild is done as far
+            # as this thread is concerned - watch_audio_reading() takes the
+            # still-running process from here.
             process = run_watching_for_a_stall(
                 [sys.executable, script_path],
                 ceiling=list_update_timeout,
-                stall=getattr(config, 'LIST_UPDATE_STALL_SECONDS', 900))
-            
-            if process.returncode == 0:
+                stall=getattr(config, 'LIST_UPDATE_STALL_SECONDS', 900),
+                hand_over=child_is_reading)
+            handed_over = process.returncode is None
+
+            if process.returncode == 0 or handed_over:
+                # The background audio reading (#1182), still running: watched
+                # from here on, and recorded FIRST - before anything below can
+                # raise, and before the finally lets go of the rebuild flag -
+                # so its pipes are always drained and a new rebuild can always
+                # find it to stop it.
+                if handed_over:
+                    start_audio_watch(process.process, "rebuild")
                 # ---------------------------------------------------------------------
                 # NFS and disk sync: wait two seconds after the process closes.
                 # That gives the NAS and the network buffer time to flush the files.
                 # ---------------------------------------------------------------------
-                print(f"[UPDATE-SYNC] The script finished. Waiting 2.0s for the disk to sync before reading...")
+                print(f"[UPDATE-SYNC] The {'list is published' if handed_over else 'script finished'}. "
+                      f"Waiting 2.0s for the disk to sync before reading...")
                 time.sleep(2.0)
                 # ---------------------------------------------------------------------
                 
@@ -2299,6 +2332,13 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
                 config.last_list_update_error = None
                 config.last_list_update_seconds = int(time.time() - started)
 
+                # A background audio reading already over (one that took less
+                # than a tick, #1182) says how it went after the rebuild does.
+                if not handed_over:
+                    reading = parse_audio_result(process.stdout)
+                    if reading is not None:
+                        finish_audio_reading(reading)
+
             else:
                 error_msg = subprocess_failure_message(process.stderr, process.stdout)
                 # A rebuild that failed is still failed tomorrow: the list
@@ -2359,6 +2399,253 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
 
     # Start the background thread
     threading.Thread(target=async_list_updater, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# THE BACKGROUND AUDIO READING (#1182). With LIST_SHOW_AUDIO_INFO on, the
+# rebuild publishes first and the same update_list.py process then goes on
+# reading audio lengths. The daemon stops waiting for it the moment it reports
+# the "reading" phase - the rebuild is over as far as anyone is concerned: its
+# result is announced, searches and requests run, a new !update may start -
+# and a thread of its own watches the reading to the end. A new rebuild stops
+# a reading that runs (what it read is kept: it saves as it goes), publishes,
+# and starts a fresh one. `--read-audio-info` runs the reading alone, on
+# demand: the dashboard's Tools page, the console's `audioinfo`, dccore.mrc's
+# Library menu. Only one runs at a time, and never during a rebuild.
+# ---------------------------------------------------------------------------
+
+AUDIO_STOP_WAIT = 60.0         # seconds a stopped reading gets to finish the reads in flight
+AUDIO_PROGRESS_SECONDS = 60.0  # between two progress lines on the console
+
+
+def _update_list_argv(*extra):
+    """How update_list.py is started: an entry point of its own at the
+    repository root (#959), one directory up from this file.
+    """
+    import os
+    import sys
+    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return [sys.executable, os.path.join(base_path, "update_list.py")] + list(extra)
+
+
+def child_is_reading(process):
+    """Has THIS child published every list and begun the background reading?
+    Only its own report counts: a progress file a stopped reading left
+    behind names another process."""
+    import update_list
+    progress = update_list.read_progress()
+    return (bool(progress) and progress.get("phase") == update_list.READING_PHASE
+            and progress.get("pid") == process.pid)
+
+
+def audio_progress_line(progress):
+    """"Audio info: 3,200 of 12,000 read, 230/s." from the progress file."""
+    def whole(name):
+        try:
+            return max(0, int(progress.get(name) or 0))
+        except (TypeError, ValueError):
+            return 0
+    rate = whole("rate")
+    return (f"Audio info: {whole('folder_index'):,} of {whole('folder_count'):,} read"
+            f"{f', {rate:,}/s' if rate else ''}.")
+
+
+def start_audio_watch(process, kind, start=None):
+    """Record a running reading and watch it on a thread of its own. Set
+    BEFORE the caller lets go of the rebuild flag, so there is never a moment
+    when neither says something is running. `start` is for the tests."""
+    import threading
+    import time
+    import types
+
+    job = types.SimpleNamespace(process=process, kind=kind, started=time.time(),
+                                done=threading.Event(), stopping=False)
+    with runtime.audio_reading_lock:
+        runtime.audio_reading = job
+    starter = start or (lambda: threading.Thread(
+        target=watch_audio_reading, args=(job,), daemon=True).start())
+    starter()
+    return job
+
+
+def parse_audio_result(output):
+    """The result the reading printed last, or None when it printed none."""
+    import json
+    import update_list
+
+    for line in reversed((output or "").splitlines()):
+        if line.startswith(update_list.AUDIO_RESULT_TAG):
+            try:
+                loaded = json.loads(line[len(update_list.AUDIO_RESULT_TAG):])
+            except ValueError:
+                return None
+            return loaded if isinstance(loaded, dict) else None
+    return None
+
+
+def finish_audio_reading(result):
+    """Say how a reading ended - the console, the debug channel and the
+    @DCCore window all hear it - and keep it for the dashboard."""
+    import time
+    import announce
+    import update_list
+
+    line = result.get("message") or update_list.describe_audio_result(result)
+    if result.get("outcome") in ("failed", "stalled"):
+        # The background audio reading failed or went silent (#1182): the
+        # lengths stay missing until somebody looks, so it is a notice.
+        announce.send_debug(line, category="INFO", notice="error")
+    else:
+        announce.send_debug(line, category="INFO")
+    runtime.audio_reading_last = dict(result, message=line, at=time.time())
+
+
+def watch_audio_reading(job, tick=5.0):
+    """Wait for a reading to end, draining its pipes, and say how it went.
+
+    Its progress goes to the console every AUDIO_PROGRESS_SECONDS, and its
+    start once to the debug channel. The rebuild's stall rule applies: a
+    reading whose progress file has not moved for LIST_UPDATE_STALL_SECONDS
+    is killed (#968) - it reports only when a read completes, so a mount that
+    stopped answering is silence. What it read is in the cache already."""
+    import subprocess
+    import time
+    import update_list
+
+    process = job.process
+    stall = getattr(config, "LIST_UPDATE_STALL_SECONDS", 900)
+    announced = False
+    last_line = time.time()
+    result = None
+    try:
+        while True:
+            try:
+                out, err = process.communicate(timeout=tick)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            now = time.time()
+            progress = update_list.read_progress() or {}
+            if progress.get("pid") == process.pid and progress.get("phase") == update_list.READING_PHASE:
+                if not announced:
+                    announced = True
+                    last_line = now
+                    import announce
+                    announce.send_debug(f"Audio info: reading {int(progress.get('folder_count') or 0):,} "
+                                        f"files in the background.", category="INFO")
+                elif now - last_line >= AUDIO_PROGRESS_SECONDS:
+                    last_line = now
+                    print(f"[AUDIO-INFO] {audio_progress_line(progress)}")
+            reported_at = last_progress_at()
+            if reported_at is not None and stall and now - reported_at >= stall:
+                process.kill()
+                process.communicate()
+                update_list.clear_progress()
+                result = {"outcome": "stalled", "message": (
+                    f"Audio info: stopped - nothing reported for {describe_duration(now - reported_at)}. "
+                    f"The library may have gone away; what was read is kept.")}
+                return
+        result = parse_audio_result(out)
+        if result is None:
+            if job.stopping:
+                result = {"outcome": "stopped", "message": (
+                    "Audio info: stopped; what was read is kept, and the rest are read next time.")}
+            else:
+                result = {"outcome": "failed",
+                          "error": subprocess_failure_message(err, out)}
+    except Exception as watch_err:
+        print(f"[AUDIO-INFO] Could not follow the audio reading: {watch_err}")
+        result = {"outcome": "failed", "error": str(watch_err)}
+    finally:
+        with runtime.audio_reading_lock:
+            if runtime.audio_reading is job:
+                runtime.audio_reading = None
+        job.done.set()
+        if result is not None:
+            try:
+                finish_audio_reading(result)
+            except Exception as say_err:
+                print(f"[AUDIO-INFO] Could not report the audio reading: {say_err}")
+
+
+def stop_audio_reading(wait=None):
+    """Stop a reading that runs, keeping what it read. True if one was.
+
+    Asked through update_list's stop file, which the reading looks at between
+    reads: no new read starts, the ones in flight finish and are saved. One
+    that does not end within `wait` - a read hung on a mount that stopped
+    answering - is killed; the batches it saved are still there."""
+    import update_list
+
+    job = runtime.audio_reading
+    if job is None:
+        return False
+    job.stopping = True
+    update_list.request_stop()
+    if not job.done.wait(AUDIO_STOP_WAIT if wait is None else wait):
+        try:
+            job.process.kill()
+        except OSError:
+            pass
+        job.done.wait(10.0)
+    update_list.clear_stop_request()
+    return True
+
+
+def handle_audio_info_request(user, target_chan, authorised=False, user_host=None, popen=None):
+    """Start a reading-only run: the audio files the published lists have no
+    length for, read and written in. Returns (status, message), status one of
+    "started", "running", "rebuilding", "off", "failed" or "denied".
+
+    Refused while a rebuild runs - it starts its own reading once it has
+    published - and answered with the progress when a reading already runs.
+    Whether there is anything to read is the child's to find out, from the
+    list: "nothing new to read" arrives as its result. `popen` is for the
+    tests."""
+    import subprocess
+    import announce
+    import platform_compat
+    import update_list
+
+    if not authorised and not is_admin(user, user_host):
+        print(f"[SECURITY] Unauthorised user {user} tried to start the audio reading.")
+        return "denied", "Not allowed."
+    if not getattr(config, "LIST_SHOW_AUDIO_INFO", False):
+        message = update_list.describe_audio_result({"outcome": "off"})
+        announce.send_debug(message, category="INFO")
+        return "off", message
+    with runtime.list_update_gate:
+        if getattr(config, "update_inprogress", False) is True:
+            message = ("Audio info: a list rebuild is running - it reads the new audio files "
+                       "itself once it has published.")
+            announce.send_debug(message, category="INFO")
+            return "rebuilding", message
+        if runtime.audio_reading is not None:
+            progress = update_list.read_progress() or {}
+            message = ("Audio info: already reading - "
+                       + audio_progress_line(progress)[len("Audio info: "):]
+                       if progress.get("phase") == update_list.READING_PHASE
+                       else "Audio info: already reading.")
+            announce.send_debug(message, category="INFO")
+            return "running", message
+        # Nothing runs, so whatever these say is left over from a run that
+        # was killed - a stop request would end this one at its first read.
+        update_list.clear_stop_request()
+        update_list.clear_progress()
+        try:
+            process = (popen or subprocess.Popen)(
+                _update_list_argv("--read-audio-info"), stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                **platform_compat.no_console_window())
+        except OSError as err:
+            message = f"Audio info: could not start the reading: {err}"
+            announce.send_debug(message, category="INFO")
+            return "failed", message
+        start_audio_watch(process, "on demand")
+    message = (f"Audio info: {user} started reading the audio files the list has no length "
+               f"for yet.")
+    announce.send_debug(message, category="INFO")
+    return "started", message
 
 
 # ---------------------------------------------------------------------------

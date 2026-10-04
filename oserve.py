@@ -616,6 +616,13 @@ def _shut_down():
             _irc_flush._flush_known_bots(force=True)
         except Exception:
             pass
+        # A background audio reading (#1182) is the rebuild's own process
+        # and would outlive the bot: asked to stop, it saves what it read.
+        try:
+            import commands as _commands_stop
+            _commands_stop.stop_audio_reading(wait=10.0)
+        except Exception:
+            pass
     except KeyboardInterrupt:
         pass   # asked twice: still stopping, and still exit 0
     sys.exit(0)
