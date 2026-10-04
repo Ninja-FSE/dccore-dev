@@ -486,7 +486,8 @@
 #KNOWN_BOTS_FILE = ./data/known_bots.json
 
 # The search index over every list you have fetched from other bots. Can be
-# large; safe to delete, it is rebuilt at the next fetch.
+# large. Safe to delete with the bot stopped: the next start builds it again
+# from the lists on disk, which takes a while with big lists.
 #
 # The cross-list search index: every fetched bot list in one SQLite database,
 # so the List Browser's filter can search all of them at once.
@@ -502,9 +503,8 @@
 # short filter-bar prefixes fast (#1130); that adds about 70%, and storing
 # each folder heading once (#1135) takes back about a fifth of the result.
 # An index made before both is rebuilt once from the lists on disk. Built as
-# each list is fetched, and safe to delete:
-# the filter stops working until the next fetch rebuilds it, and nothing else
-# reads it. A damaged one is moved aside as list_index.db.corrupt-<timestamp>
+# each list is fetched, and safe to delete with the bot stopped: the next
+# start indexes the lists on disk again, and nothing else reads it. A damaged one is moved aside as list_index.db.corrupt-<timestamp>
 # and rebuilt from the lists on disk (#628); the copy can be deleted.
 #LIST_INDEX_FILE = ./data/list_index.db
 

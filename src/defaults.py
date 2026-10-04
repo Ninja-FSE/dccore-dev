@@ -349,9 +349,8 @@ KNOWN_BOTS_FILE: str = "./data/known_bots.json"
 # short filter-bar prefixes fast (#1130); that adds about 70%, and storing
 # each folder heading once (#1135) takes back about a fifth of the result.
 # An index made before both is rebuilt once from the lists on disk. Built as
-# each list is fetched, and safe to delete:
-# the filter stops working until the next fetch rebuilds it, and nothing else
-# reads it. A damaged one is moved aside as list_index.db.corrupt-<timestamp>
+# each list is fetched, and safe to delete with the bot stopped: the next
+# start indexes the lists on disk again, and nothing else reads it. A damaged one is moved aside as list_index.db.corrupt-<timestamp>
 # and rebuilt from the lists on disk (#628); the copy can be deleted.
 LIST_INDEX_FILE: str = "./data/list_index.db"
 
