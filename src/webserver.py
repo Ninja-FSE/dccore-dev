@@ -1211,11 +1211,13 @@ def build_filelists_payload(offset=0, limit=None, name=None, q=""):
     is out of scope; this dedup is the trivial single-source case, collapsing
     only the same filename listed under two different folders.
 
-    Issue #76, option 3: still parses the ENTIRE list every call, exactly as
-    before (this bot's own list has no size cap of its own, so there is no
-    cheaper way to know how many rows exist or to dedup correctly) - only
-    what gets returned is now a page of it, `[offset:offset+limit]`, plus the
-    `total` row count, instead of the whole thing. `limit=None` (the route's
+    Issue #76, option 3: what gets returned is a page, `[offset:offset+limit]`
+    in folders, plus the `total` counts, never the whole list. Unfiltered, the
+    page comes from list.page_of_own_lists() (#1128): a table of where each
+    folder is, built once per version of the lists, so a page parses only its
+    own folders - it used to parse the ENTIRE list for every page, 31 s and
+    2.1 GB at two million rows. A `q` search, and any list the table cannot
+    answer for, still parses the whole list as before. `limit=None` (the route's
     default when `?limit=` was omitted) means FILELISTS_DEFAULT_PAGE_SIZE, not
     "unlimited" - a caller that genuinely wants no cap must pass a `limit` up
     to FILELISTS_MAX_PAGE_SIZE explicitly.
@@ -1230,11 +1232,19 @@ def build_filelists_payload(offset=0, limit=None, name=None, q=""):
         limit = FILELISTS_DEFAULT_PAGE_SIZE
 
     search_words = split_list_search_words(q)
-    entries, _total = list_mod.find_matching_entries(search_words, limit=None, name=name)
-    rows = list_mod.entries_to_filelist_rows(entries, getattr(config, "NICKNAME", "?"))
-    groups = list_mod.group_rows_by_folder(rows)
-    page, total_folders, total_rows, row_capped = list_mod.page_folder_groups(
-        groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
+    source = getattr(config, "NICKNAME", "?")
+    answer = None
+    if not search_words:
+        answer = list_mod.page_of_own_lists(
+            list_mod.all_list_paths(name), offset, limit, source,
+            max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
+    if answer is None:
+        entries, _total = list_mod.find_matching_entries(search_words, limit=None, name=name)
+        rows = list_mod.entries_to_filelist_rows(entries, source)
+        groups = list_mod.group_rows_by_folder(rows)
+        answer = list_mod.page_folder_groups(
+            groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
+    page, total_folders, total_rows, row_capped = answer
     return {
         "folders": page,
         "total": total_folders,

@@ -2231,6 +2231,12 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
                 [sys.executable, script_path],
                 ceiling=list_update_timeout,
                 stall=getattr(config, 'LIST_UPDATE_STALL_SECONDS', 900))
+            # The List Browser's folder tables describe the lists as they
+            # were (#1128). Each is keyed on its files' mtime and size, which
+            # a rebuild changes; dropping them here as well covers a rewrite
+            # that kept both, on a file system with a coarse clock.
+            import list as list_mod
+            list_mod.forget_folder_tables()
             
             if process.returncode == 0:
                 # ---------------------------------------------------------------------
