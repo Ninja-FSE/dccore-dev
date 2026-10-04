@@ -166,6 +166,13 @@ class TheCombinedOutboundRateIsCapped(DCCoreTestCase):
         # left (the value itself is restored by set_config above).
         runtime.outbound_pacer = runtime.OutboundPacer()
 
+        # A line an earlier test queued for the debug channel while no socket
+        # was published is still in the process-wide queue, and this test's
+        # drain would deliver it as a ninth line (macOS / 3.14 CI, three runs
+        # in a row on one PR).
+        announce._debug_queue.clear()
+        self.addCleanup(announce._debug_queue.clear)
+
         self.sock = TimestampedSocket()
         self.oserve.irc_connection = self.sock
 
@@ -235,14 +242,22 @@ class TheCombinedOutboundRateIsCapped(DCCoreTestCase):
         self.start_queue_worker()
         self.start_debug_drain()
 
+        # Only this test's own lines are counted: a line that another test's
+        # leftover thread queues meanwhile also takes a slot on the shared
+        # clock, which can only make this test's lines later, never earlier.
+        def own_lines():
+            return [(at, payload) for at, payload in list(self.sock.sent)
+                    if " :queue line " in str(payload) or " :debug line " in str(payload)]
+
         deadline = time.time() + 3.0
-        while time.time() < deadline and len(self.sock.sent) < 8:
+        while time.time() < deadline and len(own_lines()) < 8:
             time.sleep(0.02)
 
-        self.assertEqual(len(self.sock.sent), 8,
+        own = own_lines()
+        self.assertEqual(len(own), 8,
                          "all 4 queue lines and 4 debug lines must eventually be delivered")
 
-        elapsed = self.sock.sent[-1][0] - started
+        elapsed = own[-1][0] - started
         # 8 sends sharing ONE clock need at least 7 slots at the larger of
         # the two configured delays - here that resolves to MSG_DELAY for
         # both lanes, about 0.35s total. Two INDEPENDENT clocks - the bug
