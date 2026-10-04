@@ -4,6 +4,42 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ A List Browser page reads only its own folders (#1128)
+
+Performance audit 2026-10-03 P6. Every page of the List Browser re-parsed the whole list it showed: 13.8-15.0 s and
+about 2 GB traced per page of our own 2M-row list, and 2.4-2.5 s and 401 MB per page of a 378k-row fetched one, for
+every click.
+
+- `list.page_of_list_files()` pages from a folder table built once per list version - its files' path, size and
+  mtime_ns - holding each folder run's byte range, its row count, a crc32 of its rows and the positions dedup drops.
+  Duplicates are flagged in FILE ORDER with the exact `(folder.lower(), filename.lower(), size)` key, runs that share a
+  lower-cased heading are deduplicated again together, and groups are formed after dedup by heading text at their first
+  position, rows before any heading in the '' group - the skeptic's requirements, so every page is the one the
+  whole-list parse gives. Our own lists cover every `all_list_paths()` file, master and video. `_matching_lines()`'s
+  state machine is shared as `_scan_lines()`, so a page re-parses with the same code.
+- Own list: 14-16 ms and 1.5 MB a page; the first view builds the table in 6.3 s (59 MB peak), and it keeps about 5 MB
+  for 133k folders. Fetched list: 13-14 ms and 1.1 MB a page; the table builds in 1.3 s and keeps about 1.6 MB for 42k
+  folders.
+- A table never costs much more than its list: the rows dedup drops are kept as `[start, stop)` spans in one flat array,
+  only for runs a group shows, and the build counts what it stores against a budget of half the list's size (at least
+  1 MB). Past it the build gives up, keeps nothing, and the list is read whole for every page. The audit's crafted
+  lists (two headings alternating with one row each) made the table hold 524 MB at 16.8 MB (981 MB peak, 23 s under
+  the fetch lock); the build now gives up after 1.5-1.8 s at 16.8 and 41.9 MB (12 MB peak) and holds nothing. A list
+  of millions of copies of one row is one span: 58 bytes, where 247 MB were held.
+- Falls back to the whole-list parse for a `?q=` search, a lone CR, a table over its budget, a file changed under its
+  key (each open is checked with fstat) or a crc mismatch; a lone CR or a table over its budget is remembered for that
+  version of the list, so it is not tried again on every page. At most 8 tables, least recently used dropped first,
+  under `runtime.list_folder_table_lock`; a rebuild drops ours, and a refetch or `forget_bot()` drops that bot's. A
+  fetched list's table is built under `list_fetch._lock()`, and the table lock is only ever taken inside it, never
+  around it.
+- Tests: `tests/test_a_list_browser_page_reads_only_its_own_folders.py`,
+  `tests/test_a_fetched_list_page_reads_only_its_own_folders.py` and
+  `tests/test_a_folder_table_never_costs_much_more_than_its_list.py` compare every page with the whole-list parse on
+  adversarial lists - duplicates, case-twin and repeated headings, rows before any heading, the video list, other bots'
+  `::INFO::` spellings and the dash-size suffix, a folder named "====", CRLF, a BOM, NUL bytes, invalid UTF-8, a folder
+  past the page's row cap - and assert the pages came from the table. A pinned docstring in `test_list_fetch.py` no
+  longer says the own list has no caching.
+
 ### 🐛 An audio read gets what it asked for, even in pieces (#1189)
 
 Found by a test bot's timed rebuilds (#1189): a cold rebuild of a 62,837-file library on NFS came out one byte shorter

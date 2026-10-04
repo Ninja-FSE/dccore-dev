@@ -248,6 +248,12 @@ download_counts_lock = threading.Lock()
 # reload costs one recount, which is harmless, where rebinding the lock is not.
 list_count_lock = threading.Lock()
 
+# list.py's folder tables for the List Browser's pages of our own list
+# (#1128). Here for the same reason as list_count_lock just above; the dict
+# stays in list.py, where a reload costs one rebuild of a table. Taken INSIDE
+# list_fetch's own lock for a fetched list's page, never around it.
+list_folder_table_lock = threading.Lock()
+
 # The automatic list refresh's start guard (#625). list_fetch.ensure_auto_
 # refetch_worker() starts the hourly loop from wherever AUTO_REFETCH_LISTS is
 # found on - boot, or the rehash a dashboard save fires - and must start it
