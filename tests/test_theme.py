@@ -71,6 +71,12 @@ class ThemedPathCase(DCCoreTestCase):
 
     def setUp(self):
         super().setUp()
+        # send_debug() starts the process-wide debug drain on its first call,
+        # and these tests read the deque instead (see drive()). Marked as
+        # started, send_debug only appends. The drain used to be started for
+        # real here and to run for the rest of the process.
+        self.addCleanup(setattr, announce, "_debug_drain_started", announce._debug_drain_started)
+        announce._debug_drain_started = True
         self.tree = self.make_tree()
         # DEBUG_CHANNEL is named explicitly rather than inherited: these are
         # byte-identical golden fixtures, and send_debug's line embeds the
