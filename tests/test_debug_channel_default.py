@@ -118,6 +118,8 @@ class ABlankValueJoinsNothing(unittest.TestCase):
         """
         import irc
 
+        self.addCleanup(setattr, config, "CHANNEL", config.CHANNEL)
+        self.addCleanup(setattr, config, "DEBUG_CHANNEL", config.DEBUG_CHANNEL)
         config.CHANNEL = "#alpha,#beta"
         config.DEBUG_CHANNEL = ""
 
@@ -263,6 +265,8 @@ class AnOperatorWhoWantsOneStillGetsIt(unittest.TestCase):
         """
         import irc
 
+        self.addCleanup(setattr, config, "CHANNEL", config.CHANNEL)
+        self.addCleanup(setattr, config, "DEBUG_CHANNEL", config.DEBUG_CHANNEL)
         config.CHANNEL = "#alpha,#beta"
         config.DEBUG_CHANNEL = "#thedebug"
 
