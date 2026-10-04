@@ -374,10 +374,11 @@ LIST_AUDIO_INFO_THREADS: int = 64  # Audio files read at once for length and qua
 # How many folders the rebuild lists at once (#922). On a network mount every
 # directory listing and every file's size is a round trip, and one folder at a
 # time none of them overlap - about 80 s of every rebuild on a 64,136-file NFS
-# library, with searches paused. With 2 ms of simulated latency per request,
-# 16 at a time scanned 15 times as fast as one. On a local disk it makes no
-# difference worth measuring (a fraction of a second either way). 1 is the
-# scan as it always was. 1 to 64.
+# library. With 2 ms of simulated latency per request, 16 at a time
+# scanned 15 times as fast as one. On a local disk it makes no difference
+# worth measuring (a fraction of a second either way). Searches are answered
+# from the current list while the scan runs, unless PAUSE_FOR_WHOLE_UPDATE
+# is on. 1 is the scan as it always was. 1 to 64.
 LIST_SCAN_THREADS: int = 16  # Folders listed at once while the list is rebuilt
 # The most time one rebuild spends reading audio files it has not read before
 # (#914). A rebuild pauses searches and requests, and the first one with
@@ -742,7 +743,8 @@ LIST_PROGRESS_FILE: str = "./data/list_progress.json"
 # transfer for no gain.
 DCC_BLOCK_SIZE: int = 65536      # 64 KB - one of 4096/8192/16384/32768/65536/131072/262144
 
-# The socket send buffer for a DCC transfer, in bytes. 0 leaves it to the OS.
+# The socket send buffer for a DCC transfer, in bytes. 0 is the per-platform
+# default below: 4 MB on Windows, the OS's own tuning elsewhere.
 #
 # THIS IS THE ONE THAT MATTERS ON A FAST, DISTANT LINK, and it is not the
 # packet size above. What bounds throughput on TCP is the bandwidth-delay
@@ -751,13 +753,16 @@ DCC_BLOCK_SIZE: int = 65536      # 64 KB - one of 4096/8192/16384/32768/65536/13
 # at roughly 5 Mbps no matter how big each write is - the writer simply waits
 # for the far end to acknowledge before it can put more on the wire.
 #
-# LEFT AT 0 BY DEFAULT, deliberately. Both Windows and Linux auto-tune this
-# buffer, and setting it explicitly TURNS THAT OFF - so a value chosen for one
-# link can be worse than the default on every other. It is here to be
-# experimented with on a link the operator knows, not to be set hopefully.
+# LEFT AT 0 BY DEFAULT, deliberately, and 0 is not the same on every platform
+# (see dcc._DEFAULT_SEND_BUFFER). Linux and macOS auto-tune this buffer, and
+# setting it explicitly TURNS THAT OFF - so a value chosen for one link can be
+# worse than the default on every other; there 0 leaves it to the OS. Windows
+# leaves it at a fixed 64 KB, which caps a distant transfer at a few MB/s, so
+# there 0 sets 4 MB. It is here to be experimented with on a link the operator
+# knows, not to be set hopefully.
 DCC_SEND_BUFFER: int = 0         # 0 = per-platform default (4MB on Windows, OS auto-tuning on Linux)
 DCC_PORT_START: int = 55000      # First port the bot listens on for outgoing DCC sends; forward this range if you are behind NAT
-DCC_PORT_END: int   = 55010      # Last port of that range; each simultaneous transfer needs one free port, so keep at least MAX_DCC_SLOTS
+DCC_PORT_END: int   = 55010      # Last port of that range; sends, passive fetches and a listen-mode admin console share it, so keep at least MAX_DCC_SLOTS + MAX_FETCH_SLOTS + 1
 
 # ---------------------------------------------------------------------
 # CROSS-BOT FILE FETCH (dcc_fetch.py - receiving files FROM other bots)
