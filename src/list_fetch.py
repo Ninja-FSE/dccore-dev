@@ -1066,11 +1066,12 @@ def process_fetched_list_zip(bot, zip_path):
     parseable - a file that merely LOOKS like a valid master list but is
     actually garbage must still be caught here, same as before - and to get
     an accurate post-dedup row count for the dashboard switcher) but keeps
-    only that count afterward. get_fetched_bot_page() below re-parses
-    `list_path` fresh on every later request, exactly the way
-    webserver.build_filelists_payload() has always done for THIS bot's own
-    list - nothing about a fetched list is retained in memory between views
-    except this small summary dict.
+    only that count afterward. get_fetched_bot_page() below reads each later
+    page from `list_path` on disk - no rows of a fetched list are retained in
+    memory between views, only this small summary dict and, since #1128, a
+    table of where each folder starts (about 38 bytes per folder, and never
+    more than half the list's size or 1 MB, whichever is more: past that the
+    pages read the list whole).
 
     Returns (success, reason): reason is None on success, otherwise a short
     human-readable string suitable for logging/dashboard display. Never
@@ -1103,6 +1104,12 @@ def process_fetched_list_zip(bot, zip_path):
     """
     with _lock():
         result = _process_fetched_list_zip_unlocked(bot, zip_path)
+        # The files under this bot's directory were rewritten or put back:
+        # its folder tables describe what was there (#1128). Under the lock,
+        # so no page builds one from the files half way through. Keyed on
+        # mtime and size as well, but a same-size rewrite inside one tick of
+        # a coarse clock would keep both.
+        list_mod.forget_folder_tables(under=list_extract_dir(bot))
     # Outside the lock: telling a console can take a moment and nothing
     # else should wait for it (#750).
     try:
@@ -1488,11 +1495,13 @@ def get_fetched_bot_page(entry, offset, limit, search_words=None):
     """Issue #76, option 2's on-demand reader: given one
     config.fetched_bot_lists[...] entry (the dict process_fetched_list_zip()
     above builds - "bot", "fetched_at", "list_path", "entry_count",
-    "source_zip"), re-parse its `list_path` FRESH via
-    list.find_matching_entries() + list.entries_to_filelist_rows() - no
-    caching between calls, exactly like webserver.build_filelists_payload()
-    already does for this bot's own list - dedup, and return one page of the
-    result.
+    "source_zip"), read one page of its `list_path`. Unfiltered, from
+    list.page_of_list_files() (#1128): a table of where each folder is, built
+    once per version of the file, so a page parses only its own folders. It
+    used to re-parse the whole file for every page - 11 s and 412 MB at
+    378k rows. No rows are kept between calls, only the table. A search, or
+    a file the table cannot answer for, re-parses the whole file as before
+    via list.find_matching_entries() + list.entries_to_filelist_rows().
 
     `search_words`, when given, is passed straight through to
     find_matching_entries() - the same pre-split word list @find and the
@@ -1542,6 +1551,10 @@ def get_fetched_bot_page(entry, offset, limit, search_words=None):
     representation at a time" guarantee process_fetched_list_zip() already
     gives writers, extended to readers.
 
+    The folder table's own lock (runtime.list_folder_table_lock, #1128) is
+    taken inside this one, here and in the two places that drop tables under
+    it, and never the other way round: the own list's pages take it alone.
+
     No deadlock risk: this is the only other place in the codebase that
     acquires this lock, dcc_fetch.py's call into process_fetched_list_zip()
     happens with no other lock held (see _handle_completed_list_fetch()'s
@@ -1566,6 +1579,22 @@ def get_fetched_bot_page(entry, offset, limit, search_words=None):
             print(f"[LIST-FETCH] {reason}.")
             return [], 0, 0, False, reason
 
+        # Under the lock, the table's build and the stat that keys it too: a
+        # same-bot refetch rewrites this path in place, and a table built
+        # from a half-written file would be filed under the new file's key.
+        # A crafted list cannot hold the lock long with it: its build stops
+        # at the table's budget (list._folder_table_budget()) and the page is
+        # read whole, as before the table. Building outside this lock would
+        # not let a fetch install meanwhile either: the build holds the
+        # table lock, and an install drops tables under that lock while it
+        # holds this one.
+        if not search_words:
+            answer = list_mod.page_of_list_files(
+                [resolved_path], offset, limit, bot,
+                max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
+            if answer is not None:
+                page, total_folders, total_rows, row_capped = answer
+                return page, total_folders, total_rows, row_capped, None
         try:
             entries, _total = list_mod.find_matching_entries(
                 search_words or [], limit=None, list_path=resolved_path)
@@ -1612,6 +1641,9 @@ def forget_bot(bot):
         if entry is None:
             return False
         db.save_fetched_bot_lists(dict(store))
+        # Its folder tables go with it (#1128): nothing can page this list
+        # again, and they would only hold a place among the few kept.
+        list_mod.forget_folder_tables(under=list_extract_dir(bot))
 
     # Off the lock: a slow rmtree on a network-mounted FETCHED_FILES_DIR must
     # not hold up an unrelated fetch that only needs the dict, and the entry

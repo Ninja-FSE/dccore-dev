@@ -29,6 +29,9 @@ python3 configure.py                    # a few questions
 python3 update_list.py                  # build the first list
 ```
 
+With track lengths in the list (`LIST_SHOW_AUDIO_INFO`), a hand-run `update_list.py` publishes and then says how to
+read the lengths: `update_list.py --read-audio-info`, or the running bot's **Read audio info**.
+
 On Windows, `py` rather than `python3` — a python.org install gives you `py` and `python`, not `python3`, and Windows ships an alias that makes `python3` open the Microsoft Store instead:
 
 ```bat

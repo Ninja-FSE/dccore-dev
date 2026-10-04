@@ -23,6 +23,101 @@ code does not do, and the Spanish and French help left out sentences the English
   read as a numbered section header, so the sample carried a bogus `[on a local disk it makes no]` section; the reflowed
   comment no longer starts a line with one.
 
+### 📦 The list publishes first, and audio lengths are read in the background (#1182)
+
+With `LIST_SHOW_AUDIO_INFO` on, a rebuild read every new or changed audio file before it wrote the list, capped by
+`LIST_AUDIO_INFO_MINUTES`, with one line when it began and one when it ended - nobody could tell whether it was
+running or how far it had got. Agreed in #1181, design in #1182.
+
+- **Publish first** (`update_list.py`): the rebuild reads no audio before it publishes; the files not read yet become
+  jobs, and - in a rebuild the bot started - the same process runs `run_audio_reading()` after every list is
+  published. A failed rebuild reads nothing. Run by hand (a terminal, cron, `configure.py`) it publishes and prints
+  how many files are left and how to read them, instead of blocking for hours; `--read-audio-info` by hand reads in
+  the foreground with a progress line every 30 s.
+- **Read in the background, no time limit** (`read_audio_info()`): `Cache.read_pending()` takes a `stop` callable and
+  saves every 200 files, so a stop keeps what was read; `publish()` (#1137) and `_one_line()`'s fast path (#1125) are
+  unchanged. `LIST_AUDIO_INFO_MINUTES` is still accepted and shown, marked as no longer used.
+- **Rewrite only the lengths** (`rewrite_audio_info()`): the audio rows' tails in the current list, no scan, line
+  endings kept, the archive built again the way a rebuild builds it, the same atomic swap, and the list's and the
+  archive's modification time put back, so the advertised date - and other bots' refetch decision - stays the same.
+  Nothing is swapped when no row changed, when a stop was asked, or when the list on disk changed meanwhile. Byte for
+  byte what a full rebuild with the same cache publishes. Searches and requests pause only for its packing and
+  publishing phases, as for a rebuild's swap; the list archive waits in every phase of a reading but the reading
+  itself, and the swap is tried again for up to 10 minutes while a list download that was already running holds
+  the old list (Windows). If it still cannot be swapped, the result names the list, and the bot starts a
+  reading-only run once no list download is running. The rewrite stages under `.audio.new`, never a rebuild's
+  `.new`.
+- **Rebuild versus reading**: the daemon hands over when its own child reports "reading", recognised by a token the
+  bot passes in `DCCORE_RUN_TOKEN` and the child writes into the progress file (not by pid: a Windows venv's
+  `python.exe` runs the script as a second process) - the rebuild is announced done and `update_inprogress`
+  released, and a thread follows the reading. **One run at a time, across processes**: every `update_list.py` holds
+  an OS lock beside the progress file (`platform_compat.take_file_lock()`); a rebuild that finds a reading holding
+  it - the bot's, a terminal's, or one whose bot died - asks it to stop through the stop file and waits up to 60 s;
+  a second rebuild, or a reading-only run that finds anything, is refused. A reading stops by itself when the bot
+  that started it (`DCCORE_DAEMON_PID`) is gone, and the bot's start asks a reading left running to stop. A new
+  rebuild in the bot stops its own reading first (60 s, then kill), losing nothing read. State in `runtime.py`
+  (`audio_reading`, `audio_reading_lock`, `audio_reading_last`, `audio_retry_waiting`); shutdown asks a reading to
+  stop, up to 10 s.
+- **On demand**: `update_list.py --read-audio-info`, started by the console's `audioinfo`, a **Read audio info** card
+  on the Tools page (`POST /api/tools/audio-info`, the status payload carries `audio`) and **Library > Read audio
+  info** in `dccore.mrc`, now 1.12. The run also writes in every length the cache holds and the list does not show
+  yet (a swap that failed or was stopped). Each says "nothing new to read" when there is nothing; with
+  `LIST_SHOW_AUDIO_INFO` off they say it is off.
+- **Progress**: console and debug lines ("Audio info: reading N files in the background", "3,200 of 12,000 read,
+  230/s" every 60 s, "done: 11,980 read, 20 unreadable, list updated"); `DCCORE REBUILD reading|finding|rewriting`
+  to scripts of 1.12 and later, with an Audio info section in the @DCCore panel ("finding what to read" while a
+  reading started alone reads the list - it said "writing the list" before, #1189); an older script is never sent
+  the reading's phases, not even in the moments the rebuild flag is still up, but `publishing`; a progress bar on
+  the dashboard card, in three languages. The 60 s progress line goes to the bot's own window and log, not the
+  debug feed (an hours-long reading would post to the debug channel every minute); `audioinfo` asked while one
+  runs says how far it has got, and answers with what actually happened - started, already reading, refused during
+  a rebuild, or off - instead of "Reading ..." first. A failed or stalled reading raises a notice (`NOTICE_EVENTS`). The progress file records
+  the writer's token, pid and a rate, and a forced "reading" write after each list's swap keeps "publishing" from
+  outliving it; the rebuild's old "audio" phase is gone.
+- Tests: `tests/test_the_list_publishes_first_and_reads_audio_afterwards.py` (18) and
+  `tests/test_a_rebuild_hands_the_audio_reading_to_the_background.py` (39) - publish-first order, the rewrite byte for
+  byte against a full rebuild (the txt list and the archive's members), no re-publish when nothing changed, a stopped
+  reading keeps what it read, a rebuild during a reading, a reading-only run refused during a rebuild, the progress
+  lines and phases, the Tools route, the mrc menu, a `settings.conf` still setting `LIST_AUDIO_INFO_MINUTES`. Four
+  pinned tests follow the new phases and menu. The audit's findings are pinned in
+  `tests/test_the_audio_reading_runs_once_and_always_gets_written_in.py`.
+
+### ⚡ A List Browser page reads only its own folders (#1128)
+
+Performance audit 2026-10-03 P6. Every page of the List Browser re-parsed the whole list it showed: 13.8-15.0 s and
+about 2 GB traced per page of our own 2M-row list, and 2.4-2.5 s and 401 MB per page of a 378k-row fetched one, for
+every click.
+
+- `list.page_of_list_files()` pages from a folder table built once per list version - its files' path, size and
+  mtime_ns - holding each folder run's byte range, its row count, a crc32 of its rows and the positions dedup drops.
+  Duplicates are flagged in FILE ORDER with the exact `(folder.lower(), filename.lower(), size)` key, runs that share a
+  lower-cased heading are deduplicated again together, and groups are formed after dedup by heading text at their first
+  position, rows before any heading in the '' group - the skeptic's requirements, so every page is the one the
+  whole-list parse gives. Our own lists cover every `all_list_paths()` file, master and video. `_matching_lines()`'s
+  state machine is shared as `_scan_lines()`, so a page re-parses with the same code.
+- Own list: 14-16 ms and 1.5 MB a page; the first view builds the table in 6.3 s (59 MB peak), and it keeps about 5 MB
+  for 133k folders. Fetched list: 13-14 ms and 1.1 MB a page; the table builds in 1.3 s and keeps about 1.6 MB for 42k
+  folders.
+- A table never costs much more than its list: the rows dedup drops are kept as `[start, stop)` spans in one flat array,
+  only for runs a group shows, and the build counts what it stores against a budget of half the list's size (at least
+  1 MB). Past it the build gives up, keeps nothing, and the list is read whole for every page. The audit's crafted
+  lists (two headings alternating with one row each) made the table hold 524 MB at 16.8 MB (981 MB peak, 23 s under
+  the fetch lock); the build now gives up after 1.5-1.8 s at 16.8 and 41.9 MB (12 MB peak) and holds nothing. A list
+  of millions of copies of one row is one span: 58 bytes, where 247 MB were held.
+- Falls back to the whole-list parse for a `?q=` search, a lone CR, a table over its budget, a file changed under its
+  key (each open is checked with fstat) or a crc mismatch; a lone CR or a table over its budget is remembered for that
+  version of the list, so it is not tried again on every page. At most 8 tables, least recently used dropped first,
+  under `runtime.list_folder_table_lock`; a rebuild drops ours, and a refetch or `forget_bot()` drops that bot's. A
+  fetched list's table is built under `list_fetch._lock()`, and the table lock is only ever taken inside it, never
+  around it.
+- Tests: `tests/test_a_list_browser_page_reads_only_its_own_folders.py`,
+  `tests/test_a_fetched_list_page_reads_only_its_own_folders.py` and
+  `tests/test_a_folder_table_never_costs_much_more_than_its_list.py` compare every page with the whole-list parse on
+  adversarial lists - duplicates, case-twin and repeated headings, rows before any heading, the video list, other bots'
+  `::INFO::` spellings and the dash-size suffix, a folder named "====", CRLF, a BOM, NUL bytes, invalid UTF-8, a folder
+  past the page's row cap - and assert the pages came from the table. A pinned docstring in `test_list_fetch.py` no
+  longer says the own list has no caching.
+
 ### 🐛 An audio read gets what it asked for, even in pieces (#1189)
 
 Found by a test bot's timed rebuilds (#1189): a cold rebuild of a 62,837-file library on NFS came out one byte shorter
