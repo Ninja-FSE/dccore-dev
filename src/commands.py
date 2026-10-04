@@ -1609,8 +1609,8 @@ def handle_hard_unban_request(user, target_chan, msg_text, authorised=False, use
     # code truncated it with open(..., "w") and wrote the survivors back one at a
     # time: a crash, a full disk or a kill in between left it short or EMPTY.
     #
-    # That fails OPEN. security.check_user_status re-reads this file on every
-    # command and only distrusts a "no match" when the read RAISED - a file that
+    # That fails OPEN. security.check_user_status re-reads this file whenever it
+    # changes and only distrusts a "no match" when the read RAISED - a file that
     # is readable but truncated is indistinguishable from one with no bans in it,
     # so every hard-banned user is admitted until somebody notices.
     import db

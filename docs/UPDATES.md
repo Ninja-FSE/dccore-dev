@@ -2,6 +2,380 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🧪 The suite no longer waits out two fixed timers (#1148)
+
+Performance audit 2026-10-03 T3. Two tests sat out real timers: an absent user's freeze countdown slept a fixed ten
+seconds a step, and the dispatch test waited its deadline out twice - twenty seconds for one test - and the transfer
+record's fill helper wrote its rows one transaction at a time. About 50 s of every run.
+
+- `dcc.FREEZE_POLL_SECONDS` (10 s, unchanged) is how long the countdown sleeps between looks, read on every pass, so a
+  test can make it wake quickly and a `!rehash` reaches a countdown already running. The dispatch test shortens it,
+  thaws the user, checks the countdown ends, and asks again once its threads have settled whether anyone was promoted.
+- `fill_many()` builds its rows through `record_sent()` and writes them in one transaction.
+- Tests: `tests/test_the_suite_waits_on_no_fixed_timers.py`.
+### 🧪 The suite runs in four processes (#1146)
+
+Performance audit 2026-10-03 T1, on top of #1147 and #1149. The suite ran in one process: 5-10 minutes, on CI and in
+preflight.
+
+- `scripts/run_tests_in_parallel.py` splits the test modules into up to four shards balanced by
+  `tests/module_durations.json` (longest first; a module not measured yet counts as the median; `--record` remeasures),
+  runs them at once and reports one summary: about 2 minutes instead of 6-10. A shard that fails, errors, never prints
+  its summary or exits non-zero after printing OK fails the run; one still running after 30 minutes is stopped and its
+  output so far printed. A test holds the shards to exactly the modules `unittest discover` finds.
+- EVERY SHARD LISTENS ON PORTS OF ITS OWN. All four would have scanned the same DCC ports, and on Linux two binds can
+  both succeed until one socket listens. The runner gives each shard a `DCCORE_TEST_PORT_SHIFT` (1000, 2000, 3000 or
+  8000); `tests/__init__.py` moves the configured range by it, and again after a reload of `defaults`; and every range a
+  test pins is written as `dcc_ports(start, end)`. A plain run has no shift and nothing changes in it.
+- CI's "Run the regression suite" step runs the parallel runner: the same 3 OS x 3 Python matrix, every module on every
+  job. Test lines no longer stream as they run; they print when the shards finish. Preflight's plain and counting
+  passes go through the runner; the coverage and hidden-tooling passes stay serial.
+- Sharding exposed tests that leaked shared state, now fixed: a dashboard debug sink left registered, the browser-setup
+  tests leaving `SERVER` and other settings changed (`keep_every_setting()` in the base class), two outbound-pace
+  threads racing on `redirect_stdout` and leaving `sys.stdout` swallowed, `test_membership_events` without its own
+  `NICKNAME`, and five tests writing temp files into the repository root.
+- Tests: `tests/test_the_suite_runs_in_balanced_shards.py`, `tests/test_every_shard_listens_on_ports_of_its_own.py`
+  (four real processes through the runner), `tests/test_the_outbound_pace_tests_leave_stdout_alone.py`, and the dev-only
+  `tests/test_preflight_runs_the_suite_in_parallel.py` (on the public strip list). README and PUBLIC-REPO-WORKFLOW.md
+  say how to run it.
+
+### 🧪 Source-reading tests parse each text once (#1147)
+
+Performance audit 2026-10-03 T2, on top of #1149. Source-reading tests opened `src/*.py` and ran `ast.parse()` on it
+themselves: one run parsed the same big modules about 29,000 times - `irc.py` 210 times, at 50-150 ms a parse.
+
+- `tests.support.parse_source(text, filename)` parses each distinct text once per process, for texts of 10,000
+  characters or more, keyed on the TEXT itself and never on a path and its mtime, so a file rewritten within one
+  timestamp tick is parsed afresh. The trees are shared, so a test reads them and never changes them.
+- 34 test modules use it. A guard test fails any test module that parses a text read from a file with `ast.parse()`
+  itself, subclasses a `NodeTransformer` or calls a helper that edits a tree - so new source-reading tests must use
+  `parse_source()`; the failure message says so. The 35 touched modules ran in 80.9 s instead of 115.4 s.
+- Tests: `tests/test_source_reading_tests_parse_each_text_once.py`.
+
+### 🧪 The suite leaves the temp folder as it found it (#1149)
+
+Performance audit 2026-10-03 T4. Every run left about 236 entries in the temp folder. Tests removed their directories
+with `shutil.rmtree(..., ignore_errors=True)`, which on Windows quietly leaves the whole directory behind while one
+file in it is still open - a sqlite connection nobody closed - and `DCCoreTestCase` removed its own in `tearDown()`,
+before a test's `addCleanup()` had closed what it opened there. On one machine 103,000 `dccore-list-index-*` folders
+from `test_crosslist_search`'s `IndexCase` had built up, and a temp folder that size made every child process slow to
+start - the Ctrl-C tests in `test_the_bot_can_be_stopped_without_its_window` timed out on it.
+
+- `tests.support.remove_tree()` removes a directory and means it: if a file is still held it closes the cached index
+  connection, then collects unreferenced connections, and tries again. `temp_dir(test)` and
+  `DCCoreTestCase.make_temp_dir()` hand out a directory that is removed by the LAST cleanup of the test; every test that
+  leaked uses one now, `IndexCase` included.
+- `scripts/preflight.py` runs every pass with TEMP, TMP and TMPDIR pointed at a folder of its own, names what a pass
+  leaves there and fails it. One entry is expected: the fixed sink for a write from a thread that outlived its test.
+- Tests: `tests/test_a_test_leaves_the_temp_folder_as_it_found_it.py`, and the dev-only
+  `tests/test_preflight_names_what_a_pass_leaves_in_temp.py` (on the public strip list).
+### ⚡ A bigger send block keeps the slow-link floor, and 256 KB is on the menu (#1139)
+
+Performance audit 2026-10-03 P17. Every block of a send costs a read, a `sendall()` and an ack check, so a bigger
+`DCC_BLOCK_SIZE` costs less sender CPU per GB: 30-40% less at 256 KB than at 64 KB on loopback, 4-16 KB two to three
+times more. But CPython's socket timeout covers a WHOLE `sendall()`, so with the fixed 60 s the slowest receiver a send
+survived was block / 60 s: 1.1 KB/s at 64 KB, 2.2 KB/s at the 128 KB the menu already offered, 4.4 KB/s at 256 KB.
+
+- `dcc._send_timeout(block)`: 60 s up to 64 KB, exactly as before, and 60 s per 64 KB above that, applied right after
+  the block is resolved, so the slowest receiver that survives stays 64 KB a minute at any size. It reaches only
+  `sendall()`: `_drain_acks()` and `_wait_for_final_ack()` recv only after `select()` says there is data.
+- 256 KB is on the menu (`settings_file.CHOICES`, `webserver.CHOICE_LABELS`) for a fast seedbox, where it saves up to
+  about 10% of a core at a saturated 1 Gbps.
+- **The default stays 64 KB**, against the audit's proposal. The live speed - Speed now on the dashboard, `Speed:` in
+  the channel advert - is a one-second sample of `bytes_sent`, which moves a whole block at a time, so a transfer
+  slower than about one block a second reads 0 in most samples and a one-block jump in the rest: at 100 KB/s, 0 or
+  256 KB/s with 256 KB blocks, 64 or 128 KB/s with 64 KB. The issue's skeptic measured the CPU saving at real link
+  speeds at about 1% of a core at 100 Mbps, and a receiver that stops reading would hold its slot 240 s instead of
+  60 s. The help (three languages), the `defaults.py` comment, the sample settings file and `FUTURE.md` say all this.
+- Tests: `tests/test_a_bigger_send_block_keeps_the_slow_link_floor.py` - the timeout at every size, the floor, real
+  loopback sends at the default, 128 KB and 256 KB, the menu and its label, the default held to the fallback;
+  `test_rehash_config_window.py` and `test_size_settings_have_units.py` gain 256 KB in the menu.
+### 🐛 A pasted size hint matches the list's own rows (#1121)
+
+Performance audit 2026-10-03 B1. The list writes every row's size with two decimals (`::INFO:: 7.30MB`, the
+`format_total_size` nested in `generate_master_list`), but `dcc._matches_size_hint()` - the check behind the #886 folder
+memory - formatted the file's size with `update_list.format_size_human()`, which gives one (`7.3MB`), and compared the
+two as text. They never matched, so the folder memory never answered a pasted row: every one went to the full list
+scan, about three seconds a row on a million-row list, for every track of an album pasted in one go.
+
+- `dcc._size_fits_hint()` reads the hint as a number at its own unit and precision, and compares the file's size
+  rounded the same way, the float computed as the list writer computes it (a float divided by 1024.0 per step, exact,
+  so the rounding at a `.xx5` boundary goes the same way). So `7.30MB`, `7.3MB`, `7MB`, `1.0kb`, `6.32Mb` and lists from
+  older versions and other bots all match their file, and a different size does not. A first word that is not a size
+  matches nothing, as before.
+- Tests: `tests/test_a_pasted_size_hint_matches_the_list.py` builds a real list with `generate_master_list()` over files
+  of awkward sizes and checks every row's own hint against its file, and the #886 folder memory end to end; plus the
+  other formats. The seven size formatters in the code base are left as they are - one owner for them is a separate
+  tidy-up.
+### ⚡ The frozen-queue sweep reads the channel lists once (#1140)
+
+Performance audit 2026-10-03 P18. Step 1 of `check_queue_and_send()` - every finished transfer, every fallback trigger,
+every thaw - called `user_is_present_in_ram()` once per frozen nick, and each call walks every nick in every channel,
+all under `queue_lock`. After a netsplit froze a hundred queues that was about 180 ms a call with 3 channels of 2,000
+nicks, with requests and the dispatcher waiting on the lock.
+
+- With two or more frozen nicks the sweep takes one `nicks_in_our_channels()` set and checks each nick against it,
+  both sides lowercased exactly as `user_is_present_in_ram()` does: 2.8 ms instead of 180 ms at a hundred frozen. A
+  single frozen nick keeps the early-exit scan, which the skeptic measured as cheaper for one.
+- The lock order is unchanged: `channel_users_lock` is still taken inside `queue_lock`, as `nicks_waiting_for_a_slot()`
+  already does. The snapshot is taken once per sweep, so it can be a few milliseconds older for the last nick checked.
+- Tests: `tests/test_the_frozen_sweep_reads_the_channel_lists_once.py` - one read for 20 frozen nicks and for 2, the
+  per-nick scan for one, mixed case on either side, and 40 randomised trials against `user_is_present_in_ram()`.
+### ⚡ The List Browser's filter highlight groups the bots once per call (#1141)
+
+Performance audit 2026-10-03 P19. While a filter was active, `applyFilterHighlight()` called `entriesForNick()` for
+every sidebar row, and each call walked every key of `state.filelistsBots`, lowercasing each nick - rows times bots,
+again on every 4 s sidebar poll and every filter answer. About a second a pass with 1,300 bot rows.
+
+- `entriesByNick()` builds a nick-to-rows map (null prototype, so a nick like `constructor` is just a nick) once per
+  call, from the same `state.filelistsBots` the sidebar was drawn from; `entriesForNick(nick, byNick)` looks a nick up
+  in it and returns a copy. Built per call, never kept, so it cannot disagree with what the sidebar last rendered.
+- The rows, their order and the classes the filter puts on them are unchanged.
+- Tests: `tests/test_the_filter_highlight_groups_the_bots_once_per_call.py`; two pinned source tests follow the new
+  statement.
+### ⚡ Views that are not on screen are not polled (#1142)
+
+Performance audit 2026-10-03 P20. Every open dashboard tab fetched `/api/fetch/status` every 4 s and
+`/api/filelists/bots` every 4 s, whatever view was showing and even with the browser tab hidden. Only the Downloads
+view draws the first - with 2,000 pending rows about 1 MB a poll - and only the List Browser draws the second.
+
+- Both intervals now poll only while their view is the active one and `document.hidden` is false.
+  `activateView("download")` and `activateView("filelists")` already fetch on the way in, so a transfer that finished
+  or a list fetched meanwhile is there the moment the view opens.
+- The always-visible status card and connection dot are fed by the `/api/queue` tick, which is unchanged; so is the
+  console log poll, which keeps running on every view on purpose.
+- Tests: `tests/test_views_off_screen_are_not_polled.py`.
+### ⚡ The dashboard's JSON keeps its keys in built order (#1143)
+
+Performance audit 2026-10-03 P21. `create_app()` left Flask's JSON provider at `sort_keys=True`, so every dict in
+every answer was sorted key by key - most of what `/api/fetch/status` cost to serialise (86 ms against 57 ms on a
+2,500-row queue), polled every 4 s.
+
+- `webserver._keep_json_key_order(app)` turns sorting off: `app.json.sort_keys` on Flask 2.2 and later,
+  `app.config["JSON_SORT_KEYS"]` on 2.0 and 2.1, the floor `requirements-web.txt` allows.
+- `ensure_ascii` stays on, against the audit's optional half: off, a filename `os.listdir()` returned as a lone
+  surrogate goes out raw, Werkzeug cannot encode the body, and the whole route answers 500.
+- The one place app.js lists a payload's keys - the KeepTrack preview's skipped reasons - sorts them itself, so it reads
+  as before. Everything else looks fields up by name.
+- Tests: `tests/test_the_dashboard_json_keeps_its_keys_in_built_order.py`, including the surrogate filename and both
+  Flask generations.
+### ⚡ The list rebuild's threaded walk takes each finished folder in constant time (#1124)
+
+Performance audit 2026-10-03 P2. `update_list.walk_with_sizes()` waited with `concurrent.futures.wait()` on every
+folder still outstanding, which rescans - and locks - all of them on each completion: quadratic in the number of
+folders. 40.9 s with 16 workers on 136,800 files in 19,811 folders, against 9.5 s with one worker; eight times the
+folders took 47 times as long.
+
+- Each folder's future puts `(folder, future)` on a `queue.SimpleQueue` from its done-callback, and the caller counts
+  the folders still outstanding: 3.0 s on the same library. `list_one()`, errors reported on the caller's thread, the
+  worker count and `shutdown(cancel_futures=True)` are unchanged; a cancelled future's callback lands in a queue nobody
+  reads any more, which is harmless.
+- Tests: `tests/test_the_walk_schedules_directories_in_linear_time.py` - lock acquisitions per finished folder stay
+  constant with 300 outstanding (the old `wait()` took tens of thousands), the result matches `workers=1`, and stopping
+  early leaves no worker running.
+### ⚡ The list rows are written without a per-character pass (#1125)
+
+Performance audit 2026-10-03 P3. `update_list._one_line()` round-tripped every name through UTF-8 and rebuilt it a
+character at a time, the nick was looked up per row, and every row was its own `write()`: 26.8 s to write the music and
+`!rar` lists of a million rows, 15.2 s of it in `_one_line()`.
+
+- `_one_line()` first runs one search for exactly the characters its slow path changes - a control character, DEL or a
+  lone surrogate - and returns any other name untouched. The nick is looked up once per list, and each folder's
+  heading and rows go out in one `write()`, in the music list and the film list. 6.1 s for the same write, the output
+  byte-identical.
+- Tests: `tests/test_the_list_rows_are_written_without_per_character_work.py` - the old `_one_line()` kept word for
+  word and compared on every code point below U+3000, every surrogate and a sample of the rest; whole rebuilds of a fake
+  library (accents, emoji, NUL, tab, DEL, a newline, lone surrogates, case-twin folders) byte-identical to rebuilds with
+  the old function, for the music, `!rar` and film lists; and nick lookups and `write()` calls that do not grow with
+  the rows.
+### ⚡ The day's statistics rollover is checked once a day, not once a message (#1132)
+
+Performance audit 2026-10-03 P10. Every channel line reached `db.check_and_rotate_day()`, which takes
+`runtime.disk_lock` and reads `stats.txt` just to compare a date. `disk_lock` is the lock behind every `db.py` write, so
+a slow `record_download()` holding it stalled the IRC read thread on the next line of plain chatter: 747 ms with a
+100k-row `download_counts.json`.
+
+- `irc._day_rotated_for` holds the local date the last successful rollover ran for; the rest of that day's lines return
+  before the lock (196 us a line before, 1.4 us after), and the first line after local midnight checks again. The date
+  is read BEFORE the rollover runs, so a check that crosses midnight is recorded for the old day and the new day still
+  rolls over. A failure never sets it, so #592's single report and 60 s retry are unchanged. Kept across a `!rehash`
+  reload like `_day_rotation_failed_at`.
+- As the issue said: an unreadable `stats.txt` in the middle of a day is no longer reported from the read loop;
+  transfers still report it, and they run their own rollover under the lock as before.
+- Tests: `tests/test_the_day_rollover_is_checked_once_a_day_not_once_a_message.py`;
+  `test_a_failed_midnight_rotation_does_not_stop_every_command.test_recovery_clears_the_failure` now pins one check for
+  the rest of that day.
+### ⚡ The read loop's line patterns are compiled once, not per question (#1144)
+
+Performance audit 2026-10-03 P22, the skeptic's smaller fix only. The read loop asks `is_server_numeric()` and
+`is_user_event()` about eighteen times for every server line, and each call built its pattern string again and looked
+it up in `re`'s cache; `parse_privmsg()`, `parse_kick()` and `parse_notice()` ran their anchored regex on every line.
+
+- The two helpers keep their compiled pattern per code - the very same pattern, so the #433 and #513 anchoring is
+  untouched - and the three parsers return None first when their bare command word is not in the line: the anchored
+  regex needs that word, so this can only skip lines it would reject anyway. The read loop itself is untouched, so the
+  source-reading dispatch tests are too.
+- The skeptic measured the helper calls at 34.9 -> 22.7 us a line; across the whole loop that is within noise, and it
+  matters only in a burst, such as a netjoin. The full restructure the audit proposed rewrites the security-sensitive
+  dispatch and is not done.
+- Tests: `tests/test_reading_a_server_line_does_not_rebuild_its_patterns.py` - the old helpers against the new on real
+  lines, forged ones (user events forged inside a message body) and 4,000 generated lines with tab separators.
+### ⚡ A netjoin does not sort the chat rate table per JOIN or log every departure (#1145)
+
+Performance audit 2026-10-03 P23. Two costs on JOIN, PART and QUIT in `serverschat.py`:
+
+- `_prune()` trimmed the chat rate table back to exactly `_TRACK_MAX` (200), so during a netjoin - hundreds of
+  strangers inside one window - every following JOIN filtered and sorted all 200 entries under `chat_lock` to drop one:
+  132.6 us a JOIN. It now trims to `_TRACK_KEEP`, three quarters of the cap, so the next 50 JOINs do neither: 6.5 us.
+  Forgetting a nick's count early only ever lets it through; the all-senders cap and the JOIN-WHO cap still hold.
+- `note_gone()` printed "was not a known DCCore Chat peer - nothing to remove" for every PART and QUIT of an ordinary
+  user. The #982 follow-up added it for live testing, but nearly every departure is not a peer, so it became most of the
+  console log: at a few departures a second it rotated half a day's diagnostics away. It now prints only under
+  `DEBUG_MODE`; a known peer's departure is said as before.
+- Tests: `tests/test_a_netjoin_does_not_sort_per_join_or_log_every_departure.py`.
+### ⚡ The audio cache rewrites only the rows that changed (#1137)
+
+Performance audit 2026-10-03 P15. `audio_info.Cache.publish()` deleted every row of its scope and inserted them all
+again - a million rows on an unchanged library, the ordinary weekly rebuild, 14.5 s at the end of the rebuild while
+searches were still held.
+
+- `publish()` deletes the stored rows this rebuild did not see and those whose read failed with an I/O error (#973; the
+  skeptic's correction - their old row must go too, or a file back at its old size would get the stale suffix without
+  a read), and writes only the rows that are new or changed, in one transaction as before: 1.3 s. The table ends up
+  exactly as before; an untouched row keeps its legacy mtime and run columns and a NULL suffix rather than `""`, and
+  every reader treats NULL as `""`.
+- `self.pending = []` moves to the end of `read_pending()`; it sat after `rate()`'s `return`, where it never ran, so a
+  cold first run kept every audio file's path in memory for the rest of the rebuild.
+- Tests: `tests/test_the_audio_cache_rewrites_only_what_changed.py` - the old `publish()` kept and compared on a seeded
+  database holding every kind of row (unchanged, changed, failed read, gone, new, left unread by the time budget,
+  another list's scope), the changes SQLite reports, nothing written on an unchanged rebuild, and pending released.
+### ⚡ The rebuild's scan lower-cases each name once and slices each folder's path (#1138)
+
+Performance audit 2026-10-03 P16. For every file the scan called `is_listed_file()`, `is_packable_file()`,
+`belongs_in_video_list()` and `audio_info.is_audio()`, each lower-casing the name again and rebuilding its tuple of
+extensions; every folder went through `os.path.relpath()` (22.7 us a folder on Windows); and every audio file's path was
+joined whether it would be read or not. 9.9 s for a million files in 71,429 folders.
+
+- Each name is lower-cased once and checked against the extension tuples resolved once per scan - the helpers' own
+  checks, which stay for every other caller - and a folder is marked packable once, after its files. 5.0 s.
+- `update_list.relative_folder()` cuts the relative path off the walk's root string and asks `relpath()` whenever the
+  answer could differ: a root not under the scan root, an empty, `.` or `..` component, and on Windows a `/`, a `:`, or
+  a name ending in a dot or a space (which `relpath()` strips, even under `\\?\`).
+- Audio files go to `Cache.note()` as `(folder, name)`, joined only for a file that is actually read; on an unchanged
+  library that is almost none.
+- SORT-1, the global sort, is left out: the skeptic re-rated it small, and it changes the data the writer reads.
+- Tests: `tests/test_the_scan_lowercases_each_name_once.py` - the old loop against the new under seven settings (the
+  split on and off, each extension list empty, string-form settings): the same rows, packable folders, totals and audio
+  paths read; `relative_folder()` against `relpath()` under both ntpath and posixpath rules.
+  `test_what_the_scan_does_to_every_file.py` now pins the `relative_folder()` call.
+### ⚡ hard_bans.txt is parsed once per version of the file, not per message (#1131)
+
+Performance audit 2026-10-03 P9. `security.check_user_status()` runs on every channel message, before anything knows
+whether it is a command, and it opened `hard_bans.txt`, re-escaped and recompiled every pattern each time. Past about
+512 patterns that also overflowed `re`'s own cache, so every pattern compiled from scratch on every line: 0.5 ms a
+message at 20 bans, 64 ms at 600, 270 ms at 2,000 - about four messages a second.
+
+- `security._hard_ban_rules()` keeps the parsed rules in one `(signature, trusted, text, rules)` tuple, replaced in a
+  single assignment and keyed on the file's path, mtime, size and inode. A version is trusted on its key only once its
+  mtime is more than 3 s older than the moment it was stat'ed (git's "racy" rule), so a same-size rewrite in place
+  cannot hide behind an unchanged key; until then every check re-reads the file and re-parses only a changed text.
+- `db.add_hard_ban()` and `db.remove_hard_ban()` drop the parsed copy after every write, failed ones included
+  (`security.forget_hard_ban_rules()`), so `!ban` and `!unban` never depend on the stat key.
+- The decisions are unchanged: the same three pattern shapes, first match in file order, the same fail-open path on a
+  read error, and "does the file exist" decided as `os.path.exists()` decided it. The over-broad-pattern warning now
+  prints once per version of the file instead of once per message.
+- Tests: `tests/test_hard_bans_are_parsed_once_per_version_of_the_file.py` - a verbatim copy of the old scan against 40
+  random files (CRLF, CR and LF endings, metacharacters, NEL), open and parse counts, the same-mtime rewrite, both
+  writers and the fail-open path. `test_bans_and_flood.test_star_only_pattern_is_refused` expects the warning on the
+  first check and not the second.
+### ⚡ The filter bar reads beside a list being indexed (#1129)
+
+Performance audit 2026-10-03 P7. `list_index.index_bot_list()` holds `runtime.list_index_lock` for the whole write of a
+fetched list - about 9 s at a realistic 378k rows, 46 s at 1.5M - and every filter-bar keystroke waited on that same
+lock and connection: the List Browser's filter froze for as long as a fetch took to index.
+
+- `search()`, `bots_with_a_match()` and `indexed_bots()` read on a connection of their own (`PRAGMA query_only`) under
+  a new `runtime.list_index_read_lock`. WAL gives each query a snapshot of the last COMMITTED state - the old list until
+  the write commits, the new one after, never the half-replaced one between the delete and the insert - so the false
+  "empty" `bots_with_a_match()` guards against still cannot happen. The skeptic's prototype answered keystrokes in
+  about 120 ms during a 9 s write.
+- The read connection is opened only after the writer's `_connect()` has made the schema or repaired a damaged file,
+  and `_close_locked()` closes it FIRST on every path - `close()`, a moved `LIST_INDEX_FILE`, the repair, which renames
+  the file straight after (Windows refuses that while any handle is open). Lock order: `list_index_lock`, then
+  `list_index_read_lock`; a reader never takes the write lock while holding its own, and an ordinary keystroke takes
+  only its own.
+- The behaviour change: a keystroke during a write answers from the list as it was before the write, instead of
+  waiting for it.
+- Tests: `tests/test_a_list_being_indexed_does_not_hold_the_filter_bar.py` - queries answered from the old list while a
+  write sits uncommitted, the lock order instrumented, the reader closed before the rename and on every close path,
+  schema-first opening, read-only. In `test_crosslist_search.py` two failure-injection tests patch the new `_reader()`
+  seam instead of `_connect()`, and the handle test expects three opens instead of two.
+### ⚡ Installing a fetched list streams its rows into the index (#1134)
+
+Performance audit 2026-10-03 P12, on top of #1136 and #1126 (the same scan) and #1122 (the same `backfill_missing()`).
+Installing a fetched list parsed it with `find_matching_entries()` into a dict per row, raw line included, turned that
+into a second dict per row with `entries_to_filelist_rows()`, kept both lists alive for the whole index write - and
+only ever used them to count the rows and write them to the index: +412 MB peak for a 378k-row list.
+
+- One generator, `list._matching_lines()`, is the scan; `find_matching_entries()` collects it into its capped list as
+  before, and the new `list.iter_filelist_rows()` hands the same rows on one at a time. `list.CountedRows` counts them
+  as the index takes them; its `total()` drains whatever the index did not take, so the count is the whole list even
+  when the index is unavailable or stops part-way (the skeptic's hole), and re-raises a parse error, so a list that
+  cannot be read still fails at the count as it did at the up-front parse. No `__len__`, on purpose: `list()` would
+  drain it before handing over the first row. `index_bot_list()` returns the rows it inserted instead of `len(rows)`.
+- Used in `list_fetch._install_fetched_list()`, `_measure_extra_list()` and `list_index.backfill_missing()`: +144 MB
+  peak instead of +412 MB, about 10% faster, the index content identical.
+- The parse now runs inside the index write lock, so this lands after #1129, which moves the filter bar's readers off
+  that lock. A list that cannot be read now also prints `index_bot_list()`'s "Could not index" line before the
+  rollback; the end state is unchanged.
+- Tests: `tests/test_installing_a_fetched_list_streams_its_rows.py`; `TheIndexIsWrittenByTheFetch` in
+  `test_crosslist_search.py` anchors on the `CountedRows` line.
+
+### ⚡ The list parser skips two per-row costs no row needs (#1136)
+
+Performance audit 2026-10-03 P14, on top of #1126, which already made the third change (the rule check). Two more
+per-row costs in the parser every list read goes through, fetched lists included:
+
+- `strip_info_suffix()` split each row on `\s*::INFO::\s*`, whose leading `\s*` made `re.split()` retry at every position
+  of the row. It now searches for the bare marker (still case-insensitive) and slices around it; both halves were
+  already stripped, and `str.strip()` removes exactly the characters `\s` matches, so the split lands in the same place.
+- `entries_to_filelist_rows()` ran `rar_folder_of()`'s regex on every row; only a title starting with `!` can match its
+  anchored `^!rar`, so nothing else asks.
+- The skeptic measured the whole parse of a 378k-row list at 6.1 s -> 4.3 s with all three changes, rows identical.
+- Tests: `tests/test_the_list_parser_skips_work_no_row_needs.py` - over every code point, that `\s` and `str.strip()`
+  agree on whitespace; the old functions against the new on marker rows, `!rar` titles and a whole adversarial list.
+
+### ⚡ The list scan checks rules and words without per-line objects (#1126)
+
+Performance audit 2026-10-03 P4. `list.find_matching_entries()` - every search of the bot's own list, and the parse of
+every fetched one - built a set of each line's characters to ask whether it was a `====` rule, and ran each search
+word and phrase through `all()` over a fresh generator on every line. On a 2M-row list a search took 9-15 s.
+
+- The rule check is `not line_strip.strip("=")` - the same answer, since the line is not empty there, at about a tenth
+  of the cost - and the word and phrase tests are plain loops with the same order and the same early stop. The skeptic
+  measured the scan at about 3x faster with both (2M rows: 9.1 s -> 2.8 s for "love"); the loop change alone was
+  0.45 s -> 0.29 s on 200k rows here. The audit's third change, a NUL guard, measured as noise and is left out.
+- Tests: `tests/test_the_list_scan_answers_the_same_with_cheaper_line_checks.py` - the old function, copied into the
+  test, against the new on an adversarial list over 20 searches and 8 limits, and call counts showing the scan makes
+  no `set()` or `all()` call.
+
+### 🐛 Backfill indexes every list a held archive has (#1122)
+
+Performance audit 2026-10-03 B2, its bug half. A fetched archive can hold several lists, and a fetch indexes each under
+its own name: the bare nick for the main list, `<nick>/<marker>` for the rest (`list_fetch.index_key`). When the index
+was emptied (an upgrade, a deleted file) or repaired (a damaged one moved aside), `list_index.backfill_missing()` went
+through each bot's main list alone, so its other lists - a RAR list - were never indexed again, and the filter bar
+showed a list that does match as holding nothing.
+
+- `list_index._held_lists()` gives every list of a held entry with the name it is indexed under, and
+  `backfill_missing()` checks and indexes each one on its own. An entry written before archives could hold more than
+  one list still has its main list done; a list whose file is gone is skipped and the rest go on.
+- The other half of #1122 - running the rebuild in the background instead of inside `startup()` - stays open: it
+  needs `list_fetch`'s locking and two pinned tests changed.
+- Tests: `tests/test_backfill_indexes_every_held_list.py`.
+
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
 ### ⚡ The download counters live in SQLite, imported once from the JSON (#1133)

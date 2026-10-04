@@ -10,6 +10,8 @@ minimal LXC, so the tests must run there too - and on Windows, where the port is
 headed - with nothing more than a Python install.
 """
 
+import ast
+import gc
 import os
 import shutil
 import sys
@@ -49,6 +51,39 @@ _PRISTINE = [
     (dcc, "start_dcc_send", dcc.start_dcc_send),
     (dcc, "check_queue_and_send", dcc.check_queue_and_send),
 ]
+
+
+# Parsed source, shared by every source-reading test in the process (#1147).
+# Those tests re-parsed the same big modules thousands of times a run - irc.py
+# was opened 210 times, and one parse of it costs 50 to 150 ms - when each
+# distinct text needs parsing once.
+#
+# KEYED ON THE TEXT ITSELF, never on a path and its mtime: several tests
+# write a file and scan it again, and a rewrite inside one timestamp tick
+# would hand back the old tree - the same trap as a stale __pycache__.
+# Reading the text again is cheap; parsing it is what costs.
+#
+# The trees are SHARED: a test must read them and never change them.
+# tests/test_source_reading_tests_parse_each_text_once.py holds the suite to
+# that. Texts under _PARSE_CACHE_MIN_CHARS parse in well under a
+# millisecond and are not kept.
+_PARSED_SOURCES = {}
+_PARSE_CACHE_MIN_CHARS = 10000
+
+
+def parse_source(text, filename="<unknown>"):
+    """ast.parse(text, filename), parsed once per process for the same text.
+
+    The tree returned may be the one another test was given: read it, walk
+    it, never change it.
+    """
+    if len(text) < _PARSE_CACHE_MIN_CHARS:
+        return ast.parse(text, filename=filename)
+    key = (filename, text)
+    tree = _PARSED_SOURCES.get(key)
+    if tree is None:
+        tree = _PARSED_SOURCES[key] = ast.parse(text, filename=filename)
+    return tree
 
 
 def restore_daemon_functions():
@@ -495,6 +530,55 @@ class CapturedDispatch:
         return [c["file"] for c in self.calls]
 
 
+def remove_tree(path):
+    """Remove a test's temp directory, and mean it (#1149).
+
+    shutil.rmtree(path, ignore_errors=True) was the rule here, and on Windows
+    it quietly left the whole directory behind whenever one file in it was
+    still open - a sqlite connection nobody closed, its -wal beside it. A
+    full run left about 236 directories in the temp folder, every run, and
+    nothing said so: 232,000 had built up on one machine, and listing that
+    folder had become slow enough to slow the tests that start a child
+    process from it.
+
+    So: try; if a file is still held, close the index connection the suite
+    caches and try again; if that was not it, collect the connections
+    nobody holds any more (a collected sqlite3.Connection closes its file)
+    and try once more. Whatever still cannot go is left rather than raised:
+    a cleanup must not fail a test that passed.
+    """
+    if not path or not os.path.lexists(path):
+        return
+    try:
+        shutil.rmtree(path)
+        return
+    except OSError:
+        pass
+    try:
+        import list_index
+        list_index.close()
+        shutil.rmtree(path)
+        return
+    except Exception:  # noqa: BLE001 - best effort; the last try below decides
+        pass
+    # A whole collection costs a moment on a heap this size, so only when
+    # closing the index was not enough.
+    gc.collect()
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def temp_dir(test, prefix="dccore-test-"):
+    """A fresh directory that is removed when `test` ends, however it ends.
+
+    For any unittest.TestCase; DCCoreTestCase.make_temp_dir() is the same
+    thing as a method. Registered with addCleanup, so a failing assertion
+    or an error in setUp after this line still removes it (#1149).
+    """
+    path = tempfile.mkdtemp(prefix=prefix)
+    test.addCleanup(remove_tree, path)
+    return path
+
+
 class TempTree:
     """A throwaway music library and lists directory.
 
@@ -533,7 +617,7 @@ class TempTree:
             handle.write("PRIVATE KEY")
 
     def cleanup(self):
-        shutil.rmtree(self.root, ignore_errors=True)
+        remove_tree(self.root)
 
 
 class DCCoreTestCase(unittest.TestCase):
@@ -567,6 +651,17 @@ class DCCoreTestCase(unittest.TestCase):
         #
         # #415 gave the fetch history the same treatment for the same reason.
         self.addCleanup(self._park_thread_written_files_on_dead_paths)
+        # Registered before everything else below, so it runs after all of
+        # it (#1149). Removing these in tearDown() ran BEFORE every
+        # addCleanup() - before a test's own cleanup had closed the sqlite
+        # file it opened in one of them - and on Windows that left the
+        # directory behind, every time. Its directories are made further down.
+        # The lists are handed to the cleanup, not read off self when it
+        # runs: a test that calls setUp() a second time must not orphan the
+        # first call's directories.
+        self._made_dirs = []
+        self._trees = []
+        self.addCleanup(self._remove_made_dirs, self._made_dirs, self._trees)
         # NO TEST MAY WRITE THE OPERATOR'S OWN settings.conf. Anything that
         # reaches settings_file.save() - the /api/settings route most
         # obviously - writes DEFAULT_PATH unless this variable says otherwise,
@@ -580,7 +675,7 @@ class DCCoreTestCase(unittest.TestCase):
         # graph - because the subprocess it reads stdout from had started
         # printing "[CONFIG] Wrote 1 setting(s)".
         settings_home = tempfile.mkdtemp(prefix="dccore-settings-")
-        self.addCleanup(shutil.rmtree, settings_home, ignore_errors=True)
+        self._made_dirs.append(settings_home)
         previous_settings_file = os.environ.get("DCCORE_SETTINGS_FILE")
         os.environ["DCCORE_SETTINGS_FILE"] = os.path.join(
             settings_home, "settings.conf")
@@ -591,7 +686,6 @@ class DCCoreTestCase(unittest.TestCase):
             else os.environ.pop("DCCORE_SETTINGS_FILE", None))
 
         self.oserve = install_fake_oserve()
-        self._trees = []
         # dcc_fetch.check_fetch_queue() persists finished fetches to disk on
         # every tick it runs (dcc_fetch._persist_fetch_history_locked()), and
         # reset_config() leaves fetch_feature_disabled False - so the many
@@ -603,6 +697,7 @@ class DCCoreTestCase(unittest.TestCase):
         import db
         import dcc_fetch
         self._fetch_history_dir = tempfile.mkdtemp(prefix="dccore-fetch-history-")
+        self._made_dirs.append(self._fetch_history_dir)
         self._real_fetch_history_file = db.FETCH_HISTORY_FILE
         db.FETCH_HISTORY_FILE = os.path.join(self._fetch_history_dir, "fetch_history.json")
         # Fourth file, same rule. This one is easy to write by accident:
@@ -755,14 +850,15 @@ class DCCoreTestCase(unittest.TestCase):
 
     def tearDown(self):
         restore_daemon_functions()
-        # The cross-list index caches ONE sqlite connection at module level and
-        # keeps it for the life of the process, which is right for the daemon
-        # and wrong for a test run: a test that opens one indirectly - through
-        # a fetch completing, or a dashboard route - leaves it open, pointing
-        # at a temp directory this teardown is about to delete. On Windows that
-        # is a locked file in a directory being removed, and the connection
-        # survives to interpreter shutdown, where it surfaces as a
-        # ResourceWarning with no test name attached to it.
+        # The cross-list index caches its sqlite connections at module level -
+        # the writers' one, and the dashboard readers' own since #1129, which
+        # close() closes with it - and keeps them for the life of the process,
+        # which is right for the daemon and wrong for a test run: a test that
+        # opens one indirectly - through a fetch completing, or a dashboard
+        # route - leaves it open, pointing at a temp directory this teardown
+        # is about to delete. On Windows that is a locked file in a directory
+        # being removed, and the connection survives to interpreter shutdown,
+        # where it surfaces as a ResourceWarning with no test name attached.
         import list_index
         list_index.close()
 
@@ -796,7 +892,23 @@ class DCCoreTestCase(unittest.TestCase):
         db.DCC_QUEUE_FILE = _ORPHANED_QUEUE_SINK
         db.SPEED_RECORD_FILE = _ORPHANED_SPEED_RECORD_SINK
         db.FETCHED_BOT_LISTS_FILE = self._real_fetched_bot_lists_file
-        shutil.rmtree(self._fetch_history_dir, ignore_errors=True)
+        # self._fetch_history_dir is removed by _remove_made_dirs(), the
+        # last cleanup to run, not here (#1149).
+
+    @staticmethod
+    def _remove_made_dirs(made_dirs, trees):
+        """Remove this test's redirect directories, the trees it made and
+        the ones make_temp_dir() handed out (#1149). The last cleanup."""
+        for tree in trees:
+            tree.cleanup()
+        for path in made_dirs:
+            remove_tree(path)
+
+    def make_temp_dir(self, prefix="dccore-test-"):
+        """A fresh directory, removed after every other cleanup of this test (#1149)."""
+        path = tempfile.mkdtemp(prefix=prefix)
+        self._made_dirs.append(path)
+        return path
 
     def _park_thread_written_files_on_dead_paths(self):
         """Point every name a start_dcc_send() thread can still reach, after
@@ -841,6 +953,21 @@ class DCCoreTestCase(unittest.TestCase):
                 self.addCleanup(setattr, config, name, old_value)
             else:
                 self.addCleanup(delattr, config, name)
+
+    def keep_every_setting(self):
+        """Put every setting back when this test ends, whichever of them it
+        changed - for a test that applies a whole settings file to the live
+        config, as the browser setup page does.
+
+        Those tests put back the names they set themselves and nothing else,
+        and apply_setup() also changes SERVER, CHANNEL and the rest: the next
+        module to read SERVER's default got the form's example host. A plain
+        run hid it, because the module that ran next in alphabetical order
+        reloads defaults; a parallel run (#1146) put that module in another
+        shard.
+        """
+        names = list(getattr(config, "SHIPPED_VALUES", {})) + ["ADMIN_PASSWORD_HASH"]
+        self.set_config(**{name: getattr(config, name) for name in names if hasattr(config, name)})
 
     def make_tree(self, **kwargs):
         tree = TempTree(**kwargs)

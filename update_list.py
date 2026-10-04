@@ -203,6 +203,13 @@ def walk_with_sizes(top, onerror=None, workers=None):
     the order directories come back in changes, and the caller sorts before
     writing anything (#443). onerror is called here, on the caller's thread,
     never from a worker. One worker is the walk as it always was.
+
+    Finished directories are collected through a queue (#1124): each one's
+    future puts itself on it when done, and the caller takes them off one at
+    a time. Waiting with concurrent.futures.wait() on every outstanding
+    directory instead rescanned - and locked - all of them on each
+    completion, which made the walk quadratic in the number of directories:
+    41 s against 3 s on 137k files, and 16 workers slower than one.
     """
     if workers is None:
         workers = scan_workers()
@@ -270,23 +277,36 @@ def walk_with_sizes(top, onerror=None, workers=None):
                 yield current, files
         return
 
-    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+    import queue
+    from concurrent.futures import ThreadPoolExecutor
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="list-scan")
+    # Each directory's future puts (directory, future) here when it is done,
+    # so taking the next finished one costs the same however many are still
+    # outstanding (#1124). SimpleQueue does its own locking.
+    finished = queue.SimpleQueue()
+
+    def submit(directory):
+        future = pool.submit(list_one, directory)
+        future.add_done_callback(lambda done, path=directory: finished.put((path, done)))
+
     try:
-        running = {pool.submit(list_one, top): top}
-        while running:
-            finished, _ = wait(running, return_when=FIRST_COMPLETED)
-            for future in finished:
-                current = running.pop(future)
-                files, subdirs, errors = future.result()
-                report(errors)
-                for subdir in subdirs:
-                    running[pool.submit(list_one, subdir)] = subdir
-                if files is not None:
-                    yield current, files
+        submit(top)
+        outstanding = 1
+        while outstanding:
+            current, future = finished.get()
+            outstanding -= 1
+            files, subdirs, errors = future.result()
+            report(errors)
+            for subdir in subdirs:
+                submit(subdir)
+            outstanding += len(subdirs)
+            if files is not None:
+                yield current, files
     finally:
         # A caller that stops early - an exception mid-scan - must not leave
-        # workers listing a library nobody is reading any more.
+        # workers listing a library nobody is reading any more. The futures
+        # this cancels still run their done-callback and land in `finished`,
+        # which nobody reads any more; that is harmless.
         pool.shutdown(wait=True, cancel_futures=True)
 
 
@@ -391,6 +411,44 @@ def has_backslash_component(relative_path, separator=None):
     return any("\\" in part for part in flattened.split("/"))
 
 
+def relative_folder(root, scan_root, paths=None):
+    """os.path.relpath(root, scan_root), for a `root` the walk produced.
+
+    THE WALK BUILDS EVERY ROOT FROM scan_root ITSELF (#1138): each directory
+    is its parent's path, a separator and the entry's name, so the relative
+    path is simply what follows scan_root - a slice. relpath() made each one
+    absolute and normalised both paths first, about 10-20 us a directory on
+    Windows for an answer the string already held.
+
+    The slice is taken only where relpath() could not answer differently:
+    `root` must begin with scan_root and a separator, and what follows must
+    be plain names - nothing empty, no "." or "..", and on Windows no forward
+    slash, no colon (a drive or a stream to relpath(); no Windows name holds
+    one) and no name ending in a dot or a space, which Windows'
+    normalisation strips. Anything else asks relpath(), exactly as before.
+
+    `paths` is for the tests, like has_backslash_component()'s `separator`:
+    ntpath or posixpath, so both platforms' rules are checked on either.
+    Production passes nothing and gets os.path.
+    """
+    paths = os.path if paths is None else paths
+    if root == scan_root:
+        return "."
+    sep = paths.sep
+    prefix = scan_root if scan_root.endswith((sep, paths.altsep or sep)) else scan_root + sep
+    if root.startswith(prefix):
+        rest = root[len(prefix):]
+        names = rest.split(sep)
+        if paths.altsep:
+            plain = paths.altsep not in rest and ":" not in rest and all(
+                name and name[-1] not in ". " for name in names)
+        else:
+            plain = all(name and name != "." and name != ".." for name in names)
+        if plain:
+            return rest
+    return paths.relpath(root, scan_root)
+
+
 def is_listed_file(name, ignored=None):
     """Does this file go into the list? Everything does, unless it is skipped.
 
@@ -434,9 +492,24 @@ def _one_line(text):
     UTF-8 encoder. Sanitised here rather than left to fail at the write: one
     bad name in a library of thousands now costs a mangled-but-valid name in
     the list, not the entire rebuild.
+
+    Almost no name needs either change, so one regex search decides first
+    (#1125): the per-character pass below cost about 15 us per row, and the
+    largest share of a rebuild's writing time. The pattern is exactly the
+    characters the slow path changes - the controls and DEL it flattens, and
+    the lone surrogates that the UTF-8 'replace' round trip turns into "?",
+    which is the only thing that round trip changes.
     """
-    text = str(text).encode("utf-8", "replace").decode("utf-8")
+    text = str(text)
+    if _NEEDS_ONE_LINE_CLEANING.search(text) is None:
+        return text
+    text = text.encode("utf-8", "replace").decode("utf-8")
     return "".join(" " if ch < " " or ch == "\x7f" else ch for ch in text)
+
+
+# What _one_line() would change: a control character, DEL, or a lone
+# surrogate (#1125). A name with none of them is returned as it is.
+_NEEDS_ONE_LINE_CLEANING = re.compile("[\x00-\x1f\x7f\ud800-\udfff]")
 
 
 def _discard_temp_lists(*paths):
@@ -1535,7 +1608,10 @@ def generate_master_list(list_name=None):
             # would mean an operator who adds a second folder after weeks of
             # serving changes every path anyone already saved; doing it once,
             # at the upgrade, is one break instead of two.
-            rel_dir = os.path.relpath(root, scan_root)
+            #
+            # relative_folder() rather than os.path.relpath(): the same
+            # answer, sliced off the string when it safely can be (#1138).
+            rel_dir = relative_folder(root, scan_root)
             if rel_dir == ".":
                 rel_dir = ""
             rel_dir = (os.path.join(scan_folder.name, rel_dir)
@@ -1575,12 +1651,24 @@ def generate_master_list(list_name=None):
             # first. is_listed_file() is not consulted here on purpose - a
             # video the operator has ignored still says what kind of folder
             # this is.
+            #
+            # EACH NAME IS LOWER-CASED ONCE (#1138). is_listed_file(),
+            # is_packable_file(), belongs_in_video_list() and
+            # audio_info.is_audio() each lower-cased the name again - up to
+            # five times a file - and rebuilt a tuple of the extensions each
+            # time. The checks below are those helpers' own, made on `low`
+            # against the tuples resolved once per scan; an empty tuple
+            # matches nothing, as it did there. The helpers stay, for every
+            # other caller. A folder's packable flag is likewise added once,
+            # after its files, instead of once per packable file.
             folder_has_video = split_video and any(
-                is_video_file(name, video_exts) for name, _bytes in files)
+                str(name).lower().endswith(video_exts) for name, _bytes in files)
+            packable_here = False
 
             # Keep every track under its exact, complete path on disk
             for file, file_bytes in files:
-                if is_listed_file(file, ignored):
+                low = str(file).lower()
+                if not low.endswith(ignored):
                     if file_bytes is None:
                         full_file_path = os.path.join(root, file)
                         # #228: a bare `except: pass` left file_bytes at 0 and
@@ -1604,22 +1692,28 @@ def generate_master_list(list_name=None):
                     # remembered per folder. A folder earns its !rar row from
                     # holding something worth packing, not from holding
                     # anything at all - see RAR_EXTENSIONS.
-                    if is_packable_file(file, packable_exts):
-                        packable_folders.add(rel_dir)
+                    if low.endswith(packable_exts):
+                        packable_here = True
 
                     # WHICH list the row goes in. With the split off, video
                     # lands in the same list as everything else, which is the
                     # behaviour this had before the setting existed.
-                    if split_video and belongs_in_video_list(file, folder_has_video, video_exts, companion_exts):
+                    if split_video and (low.endswith(video_exts) or (
+                            folder_has_video and low.endswith(companion_exts))):
                         video_files_data.append((rel_dir, file, file_bytes))
                     else:
                         all_files_data.append((rel_dir, file, file_bytes))
-                        if audio is not None and audio_info.is_audio(file):
+                        if audio is not None and low.endswith(audio_info.AUDIO_EXTENSIONS):
                             # No request here: an unchanged file is answered
                             # from the cache by its size, the rest are read
-                            # after the walk, many at once (#914).
+                            # after the walk, many at once (#914). The path
+                            # goes as (root, name), joined only for a file
+                            # that is read - on an unchanged library that is
+                            # almost none of them (#1138).
                             audio.note(audio_info.row_key(rel_dir, file),
-                                       os.path.join(root, file), file_bytes)
+                                       (root, file), file_bytes)
+            if packable_here:
+                packable_folders.add(rel_dir)
 
     if walk_errors:
         print(f"[LIST-GEN ERROR] {len(walk_errors)} part(s) of the library could not be "
@@ -1809,10 +1903,22 @@ def generate_master_list(list_name=None):
             # (#69). One pass over rows already in memory; the heading is
             # written before its rows, so the total has to be known first.
             music_totals = folder_totals(all_files_data)
+            # ONCE PER BUILD, AND ONE WRITE PER FOLDER (#1125). The nick is
+            # the same for every row of one build - a rebuild is its own
+            # process and nothing changes the config under it - so asking
+            # list_nick() per row only cost time. Each folder's heading and
+            # rows are gathered in `chunk` and written together: one write()
+            # per row was a measurable share of a million-row list.
+            row_head = f"!{list_nick()} "
+            rar_head = f"!{list_nick()} !rar "
+            chunk = []
 
             for folder, filename, bytes_size in all_files_data:
                 if folder != current_folder:
                     current_folder = folder
+                    if chunk:
+                        f.write("".join(chunk))
+                        chunk = []
                     
                     # The text list gets the complete subfolder (e.g. \Digital Media 1\)
                     raw_folder_str = (f"{list_mod.LIST_FOLDER_PREFIX}{folder}\\"
@@ -1830,10 +1936,8 @@ def generate_master_list(list_name=None):
                     # characters, which changes the length.
                     folder_line = _one_line(display_folder)
                     folder_rule = "=" * len(folder_line)
-                    f.write(f"\n{folder_rule}\n")
-                    f.write(f"{folder_line}\n")
-                    f.write(f"{folder_rule}\n")
-                    f.write(folder_summary_line(*music_totals[folder], format_size_human) + "\n")
+                    chunk.append(f"\n{folder_rule}\n{folder_line}\n{folder_rule}\n")
+                    chunk.append(folder_summary_line(*music_totals[folder], format_size_human) + "\n")
                     
                     # Strip multi-disc suffixes, for the !rar album list ONLY.
                     #
@@ -1955,7 +2059,7 @@ def generate_master_list(list_name=None):
                         # (*.mp3 and *.rar), not the tail. See defaults.py's note
                         # above LIST_IGNORED_EXTENSIONS for the quoted source.
                         if display_rar_folder not in written_rar_folders:
-                            f_rar.write(f"!{list_nick()} !rar {_one_line(display_rar_folder)}\n")
+                            f_rar.write(f"{rar_head}{_one_line(display_rar_folder)}\n")
                             written_rar_folders.add(display_rar_folder)
                 single_file_size = format_size_human(bytes_size)
                 # "4m31s 320/44.1/JS" after the size (#567), or nothing. After
@@ -1965,7 +2069,9 @@ def generate_master_list(list_name=None):
                     tail = audio.suffix(audio_info.row_key(folder, filename))
                     if tail:
                         single_file_size = f"{single_file_size} {tail}"
-                f.write(f"!{list_nick()} {_one_line(filename)}  ::INFO:: {single_file_size}\n")
+                chunk.append(f"{row_head}{_one_line(filename)}  ::INFO:: {single_file_size}\n")
+            if chunk:
+                f.write("".join(chunk))
 
         # The film and series list. Written after the music one and from the
         # same walk, exactly as the album list is - a separate file with its
@@ -2000,18 +2106,27 @@ def generate_master_list(list_name=None):
 
                 video_folder = None
                 video_totals = folder_totals(video_files_data)
+                # As in the music list above (#1125): the nick once, and one
+                # write per folder.
+                row_head = f"!{list_nick()} "
+                chunk = []
                 for folder, filename, bytes_size in video_files_data:
                     if folder != video_folder:
                         video_folder = folder
+                        if chunk:
+                            f_video.write("".join(chunk))
+                            chunk = []
                         raw = (f"{list_mod.LIST_FOLDER_PREFIX}{folder}\\"
                                if folder else list_mod.LIST_FOLDER_PREFIX)
                         line = _one_line(raw.replace("/", "\\"))
                         rule = "=" * len(line)
-                        f_video.write(f"\n{rule}\n{line}\n{rule}\n")
-                        f_video.write(folder_summary_line(*video_totals[folder], format_size_human) + "\n")
-                    f_video.write(
-                        f"!{list_nick()} {_one_line(filename)}"
+                        chunk.append(f"\n{rule}\n{line}\n{rule}\n")
+                        chunk.append(folder_summary_line(*video_totals[folder], format_size_human) + "\n")
+                    chunk.append(
+                        f"{row_head}{_one_line(filename)}"
                         f"  ::INFO:: {format_size_human(bytes_size)}\n")
+                if chunk:
+                    f_video.write("".join(chunk))
             print(f"[LIST-GEN] Film & series list created: {tmp_video_path}")
 
         print(f"[LIST-GEN] Text list created: {tmp_txt_path}")

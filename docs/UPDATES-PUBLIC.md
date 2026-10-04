@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **New: 256 KB in the send block size menu,** for a fast seedbox, where it uses less CPU per file sent. A bigger block no longer drops a very slow downloader either: the bot waits longer for it in proportion. The default stays 64 KB, and the help says why.
+- **Faster: rows pasted from the list are found straight away.** When someone pastes several rows from one album, each after the first is looked for in the folder the first was found in - but the size pasted with the row never matched, so every row searched the whole list instead, seconds each on a big library. It matches now, whichever way the size is written.
+- **Faster: the List Browser's filter no longer slows down with many bots.** With a filter active, the sidebar was checked bot against bot every few seconds - about a second each time with a thousand-odd bots. It is worked out once per pass now.
+- **Lighter: the dashboard no longer downloads the Downloads list and the List Browser's bots while you look at another page,** or while the browser tab is in the background. Each is fetched fresh when you open it.
+- **Faster: a list rebuild scans a big library many times faster.** On a library with many folders the scan slowed down the more folders it had - 41 seconds for 137,000 files, slower with more threads than with one. It takes about 3 seconds now.
+- **Faster: a list rebuild writes the list about four times faster.** Each row's name was cleaned up a character at a time; almost none needs it, and only those are touched now. The list comes out exactly the same.
+- **Quieter: the console no longer logs every user who leaves a channel.** A line meant for testing DCCore Chat said so for every ordinary departure, and on a busy channel it pushed the useful lines out of the log. It shows only with debug mode on; a Chat peer leaving is still logged.
+- **Faster: the end of a list rebuild on a big library.** The cache of track lengths and quality was rewritten whole on every rebuild - about 15 seconds for a million tracks while searches waited. Only what changed is written now.
+- **Faster: a bot with many hard bans keeps up with a busy channel.** The ban list was read and worked out again for every message in the channel - at 2,000 bans the bot could handle about four messages a second. It is read again only when it changes.
+- **Fixed: the List Browser's filter no longer freezes while a fetched list is being indexed.** Each keystroke waited until the new list was written - several seconds, or most of a minute for a very big list. It answers at once now, from the lists as they were until the new one is in.
+- **Lighter: installing a fetched list uses about a third of the memory.** Every row of the list was held twice while it was added to the search index, only to be counted; it is streamed in now.
+- **Faster: reading a list - a search, or a fetched bot's list in the List Browser - takes about a third less time.** Two checks ran on every row that only a few rows need.
+- **Faster: a search of the bot's own list is about three times faster on a big list.** Every line of the list cost more work than it needed; the answers are exactly the same.
+- **Fixed: after the cross-list search index was rebuilt, a bot's RAR list showed as having no match in the List Browser's filter.** Only each bot's main list was put back into the index. Every list it holds is now.
+
 ## v1.14.0 — The Bot Keeps a Record
 
 - **Faster: a finished send no longer rewrites the whole download-count file.** Each one rewrote every count the bot had ever kept - most of a second on a bot that has sent many different files, with other saves waiting behind it. The counts move into `data/download_counts.db` on the first start; `data/download_counts.json` is left exactly as it was, so going back to an older version still shows the counts up to the upgrade.

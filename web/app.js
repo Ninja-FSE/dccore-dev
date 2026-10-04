@@ -2215,19 +2215,30 @@
     return row && row.nick ? String(row.nick) : nickOfSource(source);
   }
 
-  // Every row currently held for one bot, wherever state.filelistsBots put
-  // them - not a separate map kept in step by hand, so it can never disagree
-  // with what the sidebar last rendered from the same rows.
-  function entriesForNick(nick) {
-    var nickLower = String(nick || "").toLowerCase();
-    var out = [];
+  // Every row currently held in state.filelistsBots, grouped by the lower-cased
+  // nick the sidebar shows it under, in one pass. Built fresh from the same
+  // rows each time it is asked for and never kept between calls, so it can
+  // never disagree with what the sidebar last rendered. Null-prototype, so a
+  // bot named "constructor" or "__proto__" is just another key.
+  function entriesByNick() {
+    var byNick = Object.create(null);
     Object.keys(state.filelistsBots).forEach(function (key) {
       var row = state.filelistsBots[key];
-      if (String(row.nick || row.bot || "").toLowerCase() === nickLower) {
-        out.push(row);
-      }
+      var nickLower = String(row.nick || row.bot || "").toLowerCase();
+      (byNick[nickLower] || (byNick[nickLower] = [])).push(row);
     });
-    return out;
+    return byNick;
+  }
+
+  // Every row currently held for one bot, wherever state.filelistsBots put
+  // them - not a separate map kept in step by hand, so it can never disagree
+  // with what the sidebar last rendered from the same rows. A caller asking
+  // for many nicks at once passes one entriesByNick() it built for that call
+  // (#1141): scanning every bot once per sidebar row was O(rows x bots), over
+  // a second per filter answer with the registry near its 2,000-bot cap.
+  function entriesForNick(nick, byNick) {
+    var group = (byNick || entriesByNick())[String(nick || "").toLowerCase()];
+    return group ? group.slice() : [];
   }
 
   // The ?list= for a source key, or "" for the primary.
@@ -3062,6 +3073,10 @@
       payload.empty.forEach(function (name) { empty[String(name).toLowerCase()] = true; });
     }
     var hidden = 0;
+    // One pass over the held rows for the whole sidebar, built here and
+    // dropped when this call returns (#1141): asking entriesForNick() to scan
+    // every bot again for each row made a filter answer O(rows x bots).
+    var byNick = entriesByNick();
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       var bot = String(row.dataset.bot || "").toLowerCase();
@@ -3070,7 +3085,7 @@
       // it reads as having "nothing" only if NONE of them matched - one
       // matching list is reason enough to keep the row on screen, even
       // though the tab open on it right now might be a different, empty one.
-      var group = entriesForNick(nick);
+      var group = entriesForNick(nick, byNick);
       var groupKeys = group.length
         ? group.map(function (entry) { return String(entry.bot).toLowerCase(); })
         : [bot];
@@ -3806,7 +3821,9 @@
       }).join(", "));
     });
     var skipped = payload.skipped || {};
-    var reasons = Object.keys(skipped);
+    // Sorted here (#1143): the server sends dict keys in the order it built
+    // them, and this list read alphabetically only because it used to sort.
+    var reasons = Object.keys(skipped).sort();
     if (reasons.length) {
       ktdataLine(t("stats.ktdataSkipped")
         .replace("{count}", reasons.reduce(function (n, r) { return n + skipped[r]; }, 0))
@@ -6007,10 +6024,17 @@
     }).catch(function () { markConnection(false); });
   }, REFRESH_MS);
 
-  // Downloads can complete while the operator is looking at a different
-  // view, so this polls independently of which tab is active - same
-  // reasoning as the sidebar status card above.
-  setInterval(loadDownloads, DOWNLOADS_POLL_MS);
+  // Only while Downloads is the view on screen (#1142). Nothing outside
+  // #view-download draws what /api/fetch/status returns - the summary and
+  // both tables live inside it, and the always-visible status card and
+  // connection dot are fed by the /api/queue tick above - while the payload
+  // runs to hundreds of KB with a full history. activateView("download")
+  // fetches it fresh the moment the view opens, so a transfer that finished
+  // meanwhile is there on arrival. A hidden browser tab is not on screen
+  // either.
+  setInterval(function () {
+    if (state.active === "download" && !document.hidden) { loadDownloads(); }
+  }, DOWNLOADS_POLL_MS);
 
   // Only while Live Transfers is the view on screen. Speed now and the queue
   // counters move second to second; Stats does not, and polling a view
@@ -6025,16 +6049,22 @@
     if (state.active === "tools" && !updateList.pollTimer) { loadUpdateListSchedule(); }
   }, REFRESH_MS);
 
-  // A list-fetch (Download tab, or the File Lists fetch box) can complete
-  // while the operator is on any other view - keep the switcher's options
-  // fresh regardless of which tab is showing, same reasoning as above.
-  setInterval(pollFilelistsBots, FILELISTS_BOTS_POLL_MS);
+  // Only while the List Browser is the view on screen (#1142). Everything
+  // that reads state.filelistsBots - the sidebar, the tabs, the freshness
+  // banner, the purge and re-download buttons - lives in #view-filelists,
+  // and activateView("filelists") polls on the way in, so a list fetched
+  // while the operator was elsewhere is in the sidebar the moment it opens.
+  // That entry poll also redraws the sidebar in a language chosen meanwhile.
+  setInterval(function () {
+    if (state.active === "filelists" && !document.hidden) { pollFilelistsBots(); }
+  }, FILELISTS_BOTS_POLL_MS);
 
-  // Runs continuously regardless of which view is active, the same as
-  // loadDownloads above: the buffer this polls (webserver._console_log) is
-  // bounded server-side either way, and a console that is already caught up
-  // when the operator switches to it is worth more than the handful of
-  // requests saved by only polling while the tab is visible.
+  // Runs continuously regardless of which view is active, unlike the
+  // Downloads and List Browser polls above: the buffer this polls
+  // (webserver._console_log) is bounded server-side either way, and a
+  // console that is already caught up when the operator switches to it is
+  // worth more than the handful of requests saved by only polling while the
+  // tab is visible.
   pollConsoleLog();
   consoleLogTimer = setInterval(pollConsoleLog, CONSOLE_LOG_POLL_MS);
   pollFilelistsBots();
