@@ -634,8 +634,9 @@ alias dccore.structured {
   ; running (#1024), however it was started; `end` when it stops. Kept in
   ; dccore.live and cleared by every STATUS, so a missed `end` lasts one burst.
   ; The background audio reading (#1182) comes the same way, as phase
-  ; `reading <read> <to_read> <files_a_second> <elapsed>`, then `rewriting`
-  ; while it writes the lengths into the list - to 1.12 or later only.
+  ; `reading <read> <to_read> <files_a_second> <elapsed>`, `finding` while a
+  ; reading started alone reads the list to find what to read, then
+  ; `rewriting` while it writes the lengths into the list - to 1.12 or later.
   if (%type == REBUILD) {
     if ($2 == end) { hdel dccore.live rebuild }
     else { hadd dccore.live rebuild $2- }
@@ -789,6 +790,7 @@ alias dccore.rebuild.short {
   var %n = $gettok(%l,3,32)
   if ($gettok(%l,1,32) == reading) { return audio info $dccore.num($gettok(%l,2,32)) $+ / $+ $dccore.num(%n) }
   if ($gettok(%l,1,32) == rewriting) { return audio info: writing the list }
+  if ($gettok(%l,1,32) == finding) { return audio info: finding what to read }
   return rebuilding $iif(%n > 0,folder $gettok(%l,2,32) $+ / $+ %n,$gettok(%l,1,32))
 }
 
@@ -1049,9 +1051,10 @@ alias dccore.panel {
     var %r = $dccore.st(rebuild)
     ; Audio info (#1182): the background reading after a rebuild, or on its
     ; own from the Library menu - files read of files to read, and the rate.
-    if ($istok(reading rewriting,$gettok(%r,1,32),32)) {
+    if ($istok(reading rewriting finding,$gettok(%r,1,32),32)) {
       aline -l %head $dccore.win Audio info
       if ($gettok(%r,1,32) == rewriting) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp writing the list }
+      elseif ($gettok(%r,1,32) == finding) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp finding what to read }
       elseif ($gettok(%r,4,32) > 0) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,2,32)) $+ / $+ $dccore.num($gettok(%r,3,32)) read $dccore.dot $dccore.num($gettok(%r,4,32)) $+ /s }
       else { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,2,32)) $+ / $+ $dccore.num($gettok(%r,3,32)) read }
     }

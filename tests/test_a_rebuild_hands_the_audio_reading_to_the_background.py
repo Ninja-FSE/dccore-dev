@@ -61,6 +61,10 @@ class Child(not_hung.FakeChild):
         self.pid = pid
 
 
+# The token this bot gives its child (commands.audio_run_env()).
+TOKEN = "token-of-this-run"
+
+
 def result_line(**result):
     return update_list.AUDIO_RESULT_TAG + json.dumps(result)
 
@@ -76,8 +80,9 @@ class Case(DCCoreTestCase):
         announce.send_debug = lambda text, category="INFO", notice=None: self.said.append((text, notice))
         self.addCleanup(setattr, announce, "send_debug", real)
 
-    def report(self, phase="reading", pid=424242, at=None, **fields):
-        payload = dict({"phase": phase, "pid": pid, "at": time.time() if at is None else at,
+    def report(self, phase="reading", token=TOKEN, at=None, **fields):
+        payload = dict({"phase": phase, "pid": 424242, "token": token,
+                        "at": time.time() if at is None else at,
                         "started_at": time.time() - 30}, **fields)
         with io.open(self.progress, "w", encoding="utf-8") as handle:
             json.dump(payload, handle)
@@ -89,14 +94,39 @@ class Case(DCCoreTestCase):
 class TheHandOver(Case):
 
     def test_only_this_childs_own_report_counts(self):
-        child = Child(pid=11)
-        self.assertFalse(commands.child_is_reading(child), "no progress file")
-        self.report(phase="scanning", pid=11)
-        self.assertFalse(commands.child_is_reading(child))
-        self.report(phase="reading", pid=12)
-        self.assertFalse(commands.child_is_reading(child), "a stopped reading's leftover")
-        self.report(phase="reading", pid=11)
-        self.assertTrue(commands.child_is_reading(child))
+        """By the token it was given, not by its pid (#1182 audit): a
+        Windows venv's python.exe runs the script as a second process."""
+        self.assertFalse(commands.child_is_reading(TOKEN), "no progress file")
+        self.report(phase="scanning")
+        self.assertFalse(commands.child_is_reading(TOKEN))
+        self.report(phase="reading", token="another-run")
+        self.assertFalse(commands.child_is_reading(TOKEN), "a stopped reading's leftover")
+        self.report(phase="reading", token="")
+        self.assertFalse(commands.child_is_reading(""), "a run started by hand has none")
+        self.report(phase="reading")
+        self.assertTrue(commands.child_is_reading(TOKEN))
+
+    def test_the_pid_does_not_matter(self):
+        self.report(phase="reading", token=TOKEN)
+        with io.open(self.progress, encoding="utf-8") as handle:
+            payload = json.load(handle)
+        payload["pid"] = 1
+        with io.open(self.progress, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+        self.assertTrue(commands.child_is_reading(TOKEN))
+
+    def test_the_child_is_given_the_token_and_the_bots_pid(self):
+        token, env = commands.audio_run_env()
+        self.assertGreaterEqual(len(token), 16)
+        self.assertEqual(env[update_list.RUN_TOKEN_ENV], token)
+        self.assertEqual(env[update_list.DAEMON_PID_ENV], str(os.getpid()))
+        self.assertNotEqual(commands.audio_run_env()[0], token, "one per run")
+
+    def test_the_child_writes_it_into_its_progress(self):
+        with mock.patch.dict(os.environ, {update_list.RUN_TOKEN_ENV: TOKEN}):
+            update_list.write_progress("reading", force=True)
+        self.assertEqual(update_list.read_progress()["token"], TOKEN)
+        self.assertTrue(commands.child_is_reading(TOKEN))
 
     def test_the_watcher_lets_go_of_a_child_still_running(self):
         child = Child(ticks=None)
@@ -132,9 +162,9 @@ class ARebuild(Case):
         self.watched = []
         real_watch = commands.start_audio_watch
         self.addCleanup(setattr, commands, "start_audio_watch", real_watch)
-        commands.start_audio_watch = lambda process, kind, start=None: (
-            self.watched.append((process, kind, config.update_inprogress)),
-            real_watch(process, kind, start=lambda: None))[1]
+        commands.start_audio_watch = lambda process, kind, start=None, token="": (
+            self.watched.append((process, kind, config.update_inprogress, token)),
+            real_watch(process, kind, start=lambda: None, token=token))[1]
 
     def run_with(self, runner):
         real = commands.run_watching_for_a_stall
@@ -145,14 +175,20 @@ class ARebuild(Case):
     def test_handed_over_it_is_a_finished_rebuild_and_a_watched_reading(self):
         child = Child()
 
+        given = {}
+
         def runner(argv, **kwargs):
-            self.assertIs(kwargs["hand_over"], commands.child_is_reading)
+            given["token"] = kwargs["env"][update_list.RUN_TOKEN_ENV]
+            self.report(phase="reading", token=given["token"])
+            self.assertTrue(kwargs["hand_over"](child), "its own token hands it over")
+            self.report(phase="reading", token="another-run")
+            self.assertFalse(kwargs["hand_over"](child), "another run's does not")
             handed = subprocess.CompletedProcess(argv, None, "", "")
             handed.process = child
             return handed
 
         self.run_with(runner)
-        self.assertEqual(self.watched, [(child, "rebuild", True)],
+        self.assertEqual(self.watched, [(child, "rebuild", True, given["token"])],
                          "watched while the rebuild flag was still up: never a gap")
         self.assertIs(runtime.audio_reading.process, child)
         self.assertFalse(config.update_inprogress, "the rebuild is over")
@@ -240,8 +276,8 @@ class AReadingOnlyRun(Case):
         self.popen = popen
         real_watch = commands.start_audio_watch
         self.addCleanup(setattr, commands, "start_audio_watch", real_watch)
-        commands.start_audio_watch = lambda process, kind, start=None: real_watch(
-            process, kind, start=lambda: None)
+        commands.start_audio_watch = lambda process, kind, start=None, token="": real_watch(
+            process, kind, start=lambda: None, token=token)
 
     def ask(self):
         return commands.handle_audio_info_request("admin", "#chan", authorised=True, popen=self.popen)
@@ -288,7 +324,7 @@ class AReadingOnlyRun(Case):
 class TheWatcher(Case):
 
     def watch(self, child, **kwargs):
-        job = commands.start_audio_watch(child, "rebuild", start=lambda: None)
+        job = commands.start_audio_watch(child, "rebuild", start=lambda: None, token=TOKEN)
         commands.watch_audio_reading(job, tick=0.01, **kwargs)
         return job
 
@@ -303,7 +339,7 @@ class TheWatcher(Case):
         self.assertEqual(runtime.audio_reading_last["message"], self.said[-1][0])
 
     def test_the_start_once_and_the_progress_on_the_console(self):
-        self.report(phase="reading", pid=424242, folder_index=3200, folder_count=12000, rate=230)
+        self.report(phase="reading", folder_index=3200, folder_count=12000, rate=230)
         child = Child(ticks=3, returncode=0, stdout=result_line(outcome="stopped", read=3200, total=12000))
         out = io.StringIO()
         with mock.patch.object(commands, "AUDIO_PROGRESS_SECONDS", 0), \
@@ -396,11 +432,12 @@ class TheConsoleAndTheWindow(Case):
         session.send = sent.append
         asked = []
         with mock.patch.object(commands, "handle_audio_info_request",
-                               lambda user, target, authorised=False: asked.append((user, authorised))), \
+                               lambda user, target, authorised=False: asked.append((user, authorised))
+                               or ("started", "Audio info: Op started reading.")), \
                 mock.patch.object(threading, "Thread", commands_tests._SyncThread):
             adminchat._cmd_audioinfo(session, "")
         self.assertEqual(asked, [("Op", True)])
-        self.assertTrue(sent and "audio files" in sent[0])
+        self.assertEqual(sent, ["Audio info: Op started reading."])
 
     def test_the_reading_is_a_rebuild_line_for_a_script_that_draws_it(self):
         commands.start_audio_watch(Child(), "rebuild", start=lambda: None)
@@ -562,7 +599,9 @@ class TheMircScript(unittest.TestCase):
         panel = self.text[self.text.index("alias dccore.panel {"):]
         panel = panel[:panel.index("\n}")]
         section = panel[panel.index("Audio info (#1182)"):panel.index("aline -l %head $dccore.win Rebuilding")]
-        self.assertIn("if ($istok(reading rewriting,$gettok(%r,1,32),32)) {", section)
+        self.assertIn("if ($istok(reading rewriting finding,$gettok(%r,1,32),32)) {", section)
+        self.assertIn("elseif ($gettok(%r,1,32) == finding) {", section)
+        self.assertIn("finding what to read }", section)
         self.assertIn("aline -l %head $dccore.win Audio info", section)
         self.assertIn("read $dccore.dot $dccore.num($gettok(%r,4,32)) $+ /s", section)
 

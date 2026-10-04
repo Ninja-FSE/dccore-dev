@@ -582,6 +582,24 @@ def script_draws_audio(version):
     return theirs is not None and theirs >= ours
 
 
+# The phases only the background audio reading writes (#1182).
+AUDIO_PHASES = ("reading", "finding", "rewriting")
+
+
+def _audio_rebuild_line(progress):
+    """The REBUILD line of a background audio reading."""
+    if progress.get("phase") == "reading":
+        return (f"DCCORE REBUILD reading {_num(progress.get('folder_index'))} "
+                f"{_num(progress.get('folder_count'))} {_num(progress.get('rate'))} "
+                f"{_num(progress.get('elapsed'))}")
+    # Writing the lengths in - or, before anything is read, finding what to
+    # read: a reading-only run reads the whole list first, and calling that
+    # "writing the list" told the operator the wrong thing (#1189).
+    writing = progress.get("phase") in ("rewriting", "packing", "publishing")
+    return (f"DCCORE REBUILD {'rewriting' if writing else 'finding'} 0 0 0 "
+            f"{_num(progress.get('elapsed'))}")
+
+
 def rebuild_lines(now=None, reading=False):
     """`DCCORE REBUILD <phase> <folder_index> <folder_count> <files> <elapsed>`
     while a master-list rebuild runs, however it was started (console, !update,
@@ -591,8 +609,10 @@ def rebuild_lines(now=None, reading=False):
 
     With `reading` - a script that draws it (#1182) - the background audio
     reading too, once the rebuild is over or when it was started alone:
-    `DCCORE REBUILD reading <read> <to_read> <files_a_second> <elapsed>`, and
-    `rewriting 0 0 0 <elapsed>` while it writes the lengths into the list."""
+    `DCCORE REBUILD reading <read> <to_read> <files_a_second> <elapsed>`,
+    `finding 0 0 0 <elapsed>` while a reading-only run reads the list to find
+    what to read, and `rewriting 0 0 0 <elapsed>` while it writes the
+    lengths into the list."""
     import runtime
     rebuilding = bool(getattr(config, "update_inprogress", False))
     if not rebuilding and not (reading and runtime.audio_reading is not None):
@@ -605,12 +625,16 @@ def rebuild_lines(now=None, reading=False):
         print(f"[ADMINCHAT] Rebuild progress unavailable: {err}")
     progress = progress or {}
     if not rebuilding:
-        if progress.get("phase") == "reading":
-            return [f"DCCORE REBUILD reading {_num(progress.get('folder_index'))} "
-                    f"{_num(progress.get('folder_count'))} {_num(progress.get('rate'))} "
-                    f"{_num(progress.get('elapsed'))}"]
-        # Starting (it reads the list first), or writing the lengths in.
-        return [f"DCCORE REBUILD rewriting 0 0 0 {_num(progress.get('elapsed'))}"]
+        return [_audio_rebuild_line(progress)]
+    # A rebuild, but the progress file is a reading's: the rebuild has just
+    # handed over (the bot notices on its next tick, then counts the lists),
+    # or it is stopping a reading first. The audio shape to a script that
+    # draws it; to an older one a phase it draws right, never "reading" in
+    # the folder fields - "Rebuilding reading, folder 37/12000" (#1182 audit).
+    if progress.get("phase") in AUDIO_PHASES:
+        if reading:
+            return [_audio_rebuild_line(progress)]
+        return [f"DCCORE REBUILD publishing 0 0 0 {_num(progress.get('elapsed'))}"]
     phase = _clean(progress.get("phase") or "starting", token=True)
     return [f"DCCORE REBUILD {phase} {_num(progress.get('folder_index'))} "
             f"{_num(progress.get('folder_count'))} {_num(progress.get('files'))} "
@@ -1579,14 +1603,20 @@ def _cmd_update(session, args):
 def _cmd_audioinfo(session, args):
     """Read the length and quality of the audio files the list has none for
     yet, and write them in (#1182) - the same run as the dashboard's Read
-    audio info and dccore.mrc's Library menu. Its progress and its result
-    ("nothing new to read" included) come through the debug feed, like
-    `update`'s."""
+    audio info and dccore.mrc's Library menu.
+
+    THE ANSWER IS WHAT HAPPENED (#1182 audit): started, refused while a
+    rebuild runs, already reading (with how far it has got), or off. It used
+    to say "Reading ..." first whatever came next, and a refusal reached the
+    window only through the debug feed - not at all with the feed or its
+    info lines off. Its end ("nothing new to read" included) comes through
+    the debug feed. How far a reading has got is in the @DCCore panel (1.12
+    and later), on the dashboard and in the bot's own window - not in the
+    feed, where an hours-long reading would post a line every minute to the
+    debug channel too - and `audioinfo` asked again while one runs says it."""
     import commands
-    session.send("Reading the length and quality of the audio files the list has none "
-                 "for yet ...")
-    _run_detached(session, "audioinfo", lambda: commands.handle_audio_info_request(
-        session.nick, CONSOLE_SOURCE, authorised=True))
+    _run_detached(session, "audioinfo", lambda: session.send(commands.handle_audio_info_request(
+        session.nick, CONSOLE_SOURCE, authorised=True)[1]))
 
 
 # LIST FRESHNESS AND FETCH (#750). The List Browser in the dashboard shows, for

@@ -4112,9 +4112,10 @@
 
   function showAudioInfoProgress(progress) {
     if (!progress || progress.phase !== "reading") {
-      // Reading the list to find what to read, or writing the lengths in.
+      // Reading the list to find what to read (#1189: not "writing"), or
+      // writing the lengths in.
       var writing = progress && ["rewriting", "packing", "publishing"].indexOf(progress.phase) >= 0;
-      showAudioInfoStatus(writing ? t("tools.audioWriting") : t("tools.starting"), false);
+      showAudioInfoStatus(writing ? t("tools.audioWriting") : t("tools.audioFinding"), false);
       return;
     }
     var done = progress.folder_index || 0;
@@ -4142,9 +4143,13 @@
     var unreadable = Number(last.unreadable) || 0;
     if (last.outcome === "nothing") { return t("tools.audioNothing"); }
     if (last.outcome === "off") { return t("tools.audioOff"); }
+    if (last.outcome === "busy") { return t("tools.audioBusy"); }
     if (last.outcome === "stopped") {
       return t("tools.audioStopped").replace("{read}", read.toLocaleString())
         .replace("{total}", (Number(last.total) || 0).toLocaleString());
+    }
+    if (last.outcome === "done" && (last.unwritten || []).length) {
+      return t("tools.audioUnwritten").replace("{read}", (read - unreadable).toLocaleString());
     }
     if (last.outcome === "done") {
       return t((last.updated || []).length ? "tools.audioDone" : "tools.audioDoneUnchanged")
