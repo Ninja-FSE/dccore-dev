@@ -218,6 +218,14 @@ SETTINGS_DEFAULTS = {
     # so no test ever holds that thread; the ones that exercise the check
     # turn it on themselves and give it a fake GitHub.
     "CHECK_FOR_UPDATES": False,
+    # Shipped blank. Eleven tests set a dashboard and console password, and
+    # every later test in the process ran with one configured: webserver.start()
+    # and the console's "no password configured" refusal answered differently
+    # depending on which module happened to run before.
+    "ADMIN_PASSWORD_HASH": "",
+    # Shipped blank, which drops channel debug lines (#424). A test that named
+    # a debug channel left every later send_debug() queueing channel lines.
+    "DEBUG_CHANNEL": "",
 }
 
 RUNTIME_FLAGS = {
@@ -318,6 +326,14 @@ def reset_config(**overrides):
         fetch_module._connect_failures.clear()
         fetch_module._disk_was_low[0] = False
 
+    # The dashboard's failed-login counts. A test that posts a wrong password
+    # left 127.0.0.1 one attempt closer to its block (MAX_PASSWORD_ATTEMPTS
+    # is 3, for 900 s), and the next tests that log in without clearing the
+    # pool themselves would then get 401 for a password they typed right.
+    webserver_module = sys.modules.get("webserver")
+    if webserver_module is not None:
+        webserver_module._web_bad_ips.clear()
+
     # What the version check (#572) last found. Read from runtime.py itself,
     # not through config, so reset there: a release "found" by one test would
     # otherwise be the next test's `status` line.
@@ -330,7 +346,15 @@ def reset_config(**overrides):
                         # per-bot record - reloaded from the test's own file.
                         ("list_grab_started", False), ("list_grab_plan", None),
                         ("list_grab_last", None), ("list_grab_state", None),
-                        ("chat_last_id", 0)):
+                        ("chat_last_id", 0),
+                        # Stamped by dcc.pause_freeze_clock() when a test drives
+                        # irc_loop() to its disconnect epilogue. Left set, the
+                        # next test whose run reaches activation calls
+                        # resume_freeze_clock(), which pushes every frozen
+                        # queue's timestamp forward by the whole time since the
+                        # earlier test - minutes - so a queue that test expects
+                        # to expire is kept.
+                        ("freeze_clock_paused_at", None)):
         setattr(runtime, name, value)
 
     # A FRESH OUTBOUND CLOCK PER TEST. runtime.outbound_pacer is a
@@ -370,6 +394,17 @@ def reset_config(**overrides):
     for key, value in overrides.items():
         setattr(config, key, value)
     return config
+
+
+# Every setting reset_config() above puts back on every call. A
+# DCCoreTestCase test that changes one of these and leaves it is not held to
+# account by the leak guard in tests/__init__.py: the next DCCoreTestCase
+# starts from the reset value whatever it was left at.
+# tests/test_a_test_leaves_the_process_as_it_found_it.py checks that each
+# name here really is reset.
+SETTINGS_RESET_FOR_EVERY_TEST = frozenset(SETTINGS_DEFAULTS) | frozenset((
+    "NICKNAME", "ORIGINAL_NICK", "LIST_BASE_NAME", "ALT_NICKNAME", "ADMIN_NICK",
+    "MY_IP_OR_DOCK", "CHANNEL", "FILE_DIRECTORY"))
 
 
 class RecordingSocket:
@@ -530,6 +565,147 @@ class CapturedDispatch:
         return [c["file"] for c in self.calls]
 
 
+# THE SWEEPS A REAL SEND SCHEDULES FOR LATER.
+#
+# Every path out of dcc.start_dcc_send() starts one more thread on its way
+# out: delayed_queue_trigger_fallback sleeps 3 s (15 s per failure when the
+# row is kept) and then calls check_queue_and_send(); the no-free-port branch
+# starts delayed_port_retry, which does the same after 45 s. Nothing joined
+# them. Each one woke inside whatever test was running by then and swept THAT
+# test's queue: it thawed or dropped a frozen queue, dispatched a queued row,
+# started a second freeze countdown, or landed in a recording stub another
+# test had put on dcc.check_queue_and_send. That is the "a background thread
+# re-froze a queue" flake; #642 and 9ee9c541 each hardened one victim.
+SEND_FOLLOW_UPS = ("delayed_queue_trigger_fallback", "delayed_port_retry")
+
+# How long a cleanup waits for a held thread that was already past its sleep
+# when the test ended: a pass over the queue, not a transfer.
+_HELD_THREAD_JOIN_SECONDS = 10.0
+
+
+class _SleepThatEndsWithTheTest:
+    """`time`, as one held thread sees it: its sleep is cut short the moment
+    the test that started it ends. Everything else is the real module."""
+
+    def __init__(self, ended):
+        self._ended = ended
+
+    def sleep(self, seconds):
+        self._ended.wait(seconds)
+
+    def __getattr__(self, name):
+        import time
+        return getattr(time, name)
+
+
+def hold_threads_until_the_test_ends(test, targets, skipped_once_it_has=()):
+    """Keep the threads `test` starts on a function named in `targets` inside
+    the test.
+
+    While the test runs they behave as in production: the same sleeps, the
+    same calls. When it ends, a sleep still running returns at once, every
+    function named in `skipped_once_it_has` does nothing from then on, and
+    each thread is joined before the next test starts.
+
+    How: when such a thread starts, its target is rebuilt so that `time` and
+    each skipped name resolve to stand-ins - a module global or a variable of
+    the enclosing function (the daemon often imports time inside a function),
+    whichever the code uses. The stand-in for a skipped function looks the
+    real one up when it is called, as the original did. The daemon's code is
+    not touched, and the process-wide time.sleep, which every other thread
+    uses, is not patched. A target that stops sleeping through `time.sleep`
+    sleeps for real, and the leak guard in tests/__init__.py names it.
+
+    Register it BEFORE the cleanup that joins whatever thread starts these:
+    cleanups run in reverse order.
+    """
+    ended = threading.Event()
+    held = []
+    real_start = threading.Thread.start
+
+    def rebuilt(target):
+        source_globals = target.__globals__
+
+        def skipped(name):
+            def call(*args, **kwargs):
+                if ended.is_set():
+                    return None
+                return source_globals[name](*args, **kwargs)
+            return call
+
+        replace = {"time": _SleepThatEndsWithTheTest(ended)}
+        replace.update((name, skipped(name)) for name in skipped_once_it_has)
+        scoped = dict(source_globals)
+        scoped.update(replace)
+        cells = tuple(types.CellType(replace[name]) if name in replace else cell
+                      for name, cell in zip(target.__code__.co_freevars,
+                                            target.__closure__ or ()))
+        function = types.FunctionType(target.__code__, scoped, target.__name__,
+                                      target.__defaults__, cells or None)
+        function.held_by_a_test = True
+        return function
+
+    def start(thread):
+        target = getattr(thread, "_target", None)
+        # Held once, by the innermost test: a test that runs another test
+        # inside itself has two of these patches stacked, and the inner one
+        # is the one whose end the thread must not outlive.
+        if (getattr(target, "__name__", None) in targets
+                and not getattr(target, "held_by_a_test", False)):
+            thread._target = rebuilt(target)
+            held.append(thread)
+        return real_start(thread)
+
+    def release():
+        ended.set()
+        for thread in held:
+            thread.join(_HELD_THREAD_JOIN_SECONDS)
+        threading.Thread.start = real_start
+
+    threading.Thread.start = start
+    test.addCleanup(release)
+    return held
+
+
+def hold_send_follow_ups(test):
+    """Keep the sweeps a real start_dcc_send() schedules inside `test`.
+
+    While the test runs they behave as they do in production: the same
+    delay, then the real dcc.check_queue_and_send() (so a test can still wait
+    for one; test_the_queue_save_never_touches_the_live_dict does). When the
+    test ends, a sweep still waiting stops waiting and sweeps nothing, and
+    every one of them is joined, so none can reach a later test.
+
+    DCCoreTestCase calls this in setUp. A plain unittest.TestCase that drives
+    a real send calls it itself, before it starts the send: the sender's own
+    finally is what starts the follow-up.
+    """
+    return hold_threads_until_the_test_ends(test, SEND_FOLLOW_UPS,
+                                            skipped_once_it_has=("check_queue_and_send",))
+
+
+def retire_the_debug_drain():
+    """Stop announce's debug drain, if a test started one, and clear its line.
+
+    send_debug() starts _debug_drain_worker once per process and latches
+    _debug_drain_started; the worker loops for ever. Left running, it popped
+    later tests' debug lines and wrote them to whichever socket a later test
+    had published as oserve.irc_connection, and took that test's pacer slot.
+    test_announce_output and test_theme both left one.
+
+    A new _debug_drain_id is what the worker itself checks to retire
+    (announce.py: "Superseded by a newer drain"), so it ends at its next
+    pass, and the next real send_debug() starts a fresh one.
+    """
+    module = sys.modules.get("announce")
+    if module is None:
+        return
+    with module._debug_drain_guard:
+        if module._debug_drain_started:
+            module._debug_drain_id = object()
+            module._debug_drain_started = False
+
+
 def remove_tree(path):
     """Remove a test's temp directory, and mean it (#1149).
 
@@ -623,6 +799,13 @@ class TempTree:
 class DCCoreTestCase(unittest.TestCase):
     """Base case: clean config and a stub oserve for every test."""
 
+    # Settings the harness itself sets, which the leak guard in
+    # tests/__init__.py therefore does not count against the test: the ones
+    # reset_config() resets for every test, and the four pointed at dead
+    # sinks after every test, on purpose (_park_thread_written_files_on_dead_paths).
+    SETTINGS_THE_HARNESS_SETS = SETTINGS_RESET_FOR_EVERY_TEST | frozenset((
+        "DCC_QUEUE_FILE", "SPEED_RECORD_FILE", "DOWNLOAD_COUNTS_FILE", "TRANSFER_LOG_FILE"))
+
     def setUp(self):
         restore_daemon_functions()
         self.config = reset_config()
@@ -662,6 +845,16 @@ class DCCoreTestCase(unittest.TestCase):
         self._made_dirs = []
         self._trees = []
         self.addCleanup(self._remove_made_dirs, self._made_dirs, self._trees)
+        # Registered early, so both run after every cleanup the test adds -
+        # in particular after the one that joins a sending thread, whose own
+        # finally is what starts a follow-up sweep.
+        self.addCleanup(retire_the_debug_drain)
+        hold_send_follow_ups(self)
+        # A line queued for the debug channel by an earlier test, and never
+        # drained because no socket was published then, is not this test's.
+        # A drain this test starts would deliver it as one of its own:
+        # test_a_shared_outbound_pace counted 9 lines where it sent 8.
+        announce._debug_queue.clear()
         # NO TEST MAY WRITE THE OPERATOR'S OWN settings.conf. Anything that
         # reaches settings_file.save() - the /api/settings route most
         # obviously - writes DEFAULT_PATH unless this variable says otherwise,
@@ -751,6 +944,15 @@ class DCCoreTestCase(unittest.TestCase):
         # test that wants to see that happen can.
         self.set_config(FETCHED_FILES_DIR=os.path.join(
             self._fetch_history_dir, "fetched"))
+        # The list and archive folders, for a test that does not make a tree
+        # of its own. make_tree() used to set these directly, so after any
+        # test that called it both pointed into that test's deleted tree for
+        # the rest of the process, a different dead path depending on which
+        # test ran last. Putting the shipped ./lists and ./data/tmp_zips back
+        # would be worse: they are the checkout's own folders. A path of this
+        # test's own, not created, is neither.
+        self.set_config(LOCAL_LIST_DIR=os.path.join(self._fetch_history_dir, "lists"),
+                        TMP_ZIP_DIR=os.path.join(self._fetch_history_dir, "tmp_zips"))
 
         self._real_known_bots_file = db.KNOWN_BOTS_FILE
         db.KNOWN_BOTS_FILE = os.path.join(self._fetch_history_dir,
@@ -842,6 +1044,12 @@ class DCCoreTestCase(unittest.TestCase):
         db.FETCHED_BOT_LISTS_FILE = os.path.join(self._fetch_history_dir,
                                                  "fetched_bot_lists.json")
         self.set_config(
+            # The operator's hand-kept ban list. Not written by the daemon,
+            # but read on every request: a test that does not name one of its
+            # own must not answer from this machine's. And eighty tests set
+            # it directly to a file in their own temp tree; restored here,
+            # they no longer leave the next test reading a deleted file.
+            HARD_BANS_FILE=os.path.join(self._fetch_history_dir, "hard_bans.txt"),
             BANS_FILE=os.path.join(self._fetch_history_dir, "bans.txt"),
             STATS_FILE=os.path.join(self._fetch_history_dir, "stats.txt"),
             LIST_INDEX_FILE=os.path.join(self._fetch_history_dir, "list_index.db"),
@@ -972,7 +1180,8 @@ class DCCoreTestCase(unittest.TestCase):
     def make_tree(self, **kwargs):
         tree = TempTree(**kwargs)
         self._trees.append(tree)
-        self.config.FILE_DIRECTORY = tree.music
-        self.config.LOCAL_LIST_DIR = tree.lists
-        self.config.TMP_ZIP_DIR = os.path.join(tree.root, "tmp_zips")
+        # Through set_config(), so the folders setUp gave this test come back
+        # when it ends rather than this tree's, which is deleted by then.
+        self.set_config(FILE_DIRECTORY=tree.music, LOCAL_LIST_DIR=tree.lists,
+                        TMP_ZIP_DIR=os.path.join(tree.root, "tmp_zips"))
         return tree
