@@ -1,5 +1,6 @@
 # list.py - Slimmed down; scanning lives in update_list.py
 import array
+import bisect
 import os
 import zlib
 import time
@@ -1391,8 +1392,18 @@ def page_folder_groups(groups, offset, limit, max_rows=None):
 # instead: where each folder's rows are in the files, how many there are, and
 # which of them dedup drops. A page then seeks to its own folders and parses
 # only those. Nothing per ROW is kept, so the #76 rule that a list is not held
-# in memory still stands: about 35 bytes per folder - 133,000 folders come to
-# about 4.5 MB.
+# in memory still stands: about 38 bytes per folder - 133,000 folders come to
+# about 5 MB.
+#
+# AND NEVER MUCH MORE THAN THE LIST ITSELF. A fetched list is written by
+# somebody else, and a crafted one under the 128 MB text ceiling - two
+# headings alternating with one row each, or millions of copies of one row -
+# made the first version of this table hold about 30 times the list's size:
+# 526 MB for a 16.8 MB list, built in 21 s under list_fetch's lock (the
+# #1128 audit). So the rows dedup drops are kept as [start, stop) spans in
+# one flat array, and only for runs a group shows, and the build counts what
+# it stores as it goes: past _folder_table_budget() it gives up, and the
+# list is read whole for every page, as it was before there was a table.
 #
 # EXACTLY today's page, which is more than it looks:
 #  - dedup is (folder.lower(), filename.lower(), size) in FILE ORDER, across
@@ -1424,17 +1435,50 @@ _folder_table_lock = runtime.list_folder_table_lock
 _folder_tables = {}   # signature -> _FolderTable, or None when unusable
 _FOLDER_TABLES_KEPT = 8
 
+# The budget: a table may cost at most this share of its files' size, and
+# any list at least the floor, so a small list always gets one. A normal list
+# costs far less - about 3% of its size at two million rows of our own list,
+# where a folder holds a heading and a dozen rows of 60 bytes or more. Only a
+# list of tiny folders or of rows dedup drops, which is what a crafted list
+# is made of, comes near it.
+_FOLDER_TABLE_BUDGET_FLOOR = 1 << 20
+_FOLDER_TABLE_BUDGET_SHARE = 2       # a table costs at most size / 2
+
+# What the build counts against the budget, in bytes. A run: its six seg_
+# items and run_next (30), what the build alone keeps for it - its heading's
+# number, the next run with the same lower-cased heading, a slot for the
+# second dedup (12) - and, at most, the group it starts, with its last run
+# while built (12), the heading (4) and the lower-cased heading (8). A span of dropped rows: two numbers while
+# the build collects it and two in the table (16). A run with spans: its
+# number and where they start, while built and in the table (16). The heading
+# strings themselves are not counted: the build drops them, and there are no
+# more of them than runs.
+_RUN_BYTES = 66
+_SPAN_BYTES = 16
+_DUP_RUN_BYTES = 16
+
+
+def _folder_table_budget(signature):
+    """The most a table of the files in `signature` may cost, in bytes."""
+    size = sum(size for _path, _mtime, size in signature)
+    return max(_FOLDER_TABLE_BUDGET_FLOOR, size // _FOLDER_TABLE_BUDGET_SHARE)
+
 
 class _StaleFolderTable(Exception):
     """A file no longer holds what its table says. The page falls back."""
+
+
+class _OverBudget(Exception):
+    """The table would cost more than _folder_table_budget(). Never kept."""
 
 
 class _FolderTable(object):
     """Where each folder group of a set of list files is. See above."""
 
     __slots__ = ("signature", "seg_file", "seg_start", "seg_open",
-                 "seg_end", "seg_rows", "seg_crc", "seg_dups", "group_first",
-                 "group_more", "group_count", "total_rows")
+                 "seg_end", "seg_rows", "seg_crc", "run_next", "dup_runs",
+                 "dup_from", "dup_spans", "group_first", "group_count",
+                 "total_rows")
 
     def __init__(self, signature):
         self.signature = signature
@@ -1447,23 +1491,42 @@ class _FolderTable(object):
         self.seg_end = array.array("q")      # just past its last row
         self.seg_rows = array.array("i")     # rows the parser yields in it
         self.seg_crc = array.array("I")      # crc32 of those rows' lines
-        self.seg_dups = {}                   # run -> positions dedup drops
+        self.run_next = array.array("i")     # the next run of its group, or -1
+        # The rows dedup drops, for the runs a group shows (#1128's audit):
+        # those runs in order, where each one's spans start in dup_spans
+        # (one more entry at the end), and [start, stop) row positions in the
+        # run, in pairs. A run of a million copies of one row is one span.
+        self.dup_runs = array.array("i")
+        self.dup_from = array.array("i")
+        self.dup_spans = array.array("i")
         self.group_first = array.array("i")  # a group's first run
-        self.group_more = {}                 # group -> its other runs
         self.group_count = array.array("i")  # rows it shows
         self.total_rows = 0
 
     def runs(self, group):
-        first = self.group_first[group]
-        return [first] + self.group_more.get(group, [])
+        """The runs of `group`, in file order."""
+        runs = []
+        run = self.group_first[group]
+        while run != -1:
+            runs.append(run)
+            run = self.run_next[run]
+        return runs
+
+    def dups(self, run):
+        """The [start, stop) spans of rows dedup drops in `run`, flat."""
+        at = bisect.bisect_left(self.dup_runs, run)
+        if at == len(self.dup_runs) or self.dup_runs[at] != run:
+            return ()
+        return self.dup_spans[self.dup_from[at]:self.dup_from[at + 1]]
 
     def nbytes(self):
-        """What the table keeps, roughly, for the comment above."""
+        """What the table keeps: the items of its arrays, which is all it
+        holds that grows with the list."""
         arrays = (self.seg_file, self.seg_start, self.seg_open, self.seg_end,
-                  self.seg_rows, self.seg_crc, self.group_first,
+                  self.seg_rows, self.seg_crc, self.run_next, self.dup_runs,
+                  self.dup_from, self.dup_spans, self.group_first,
                   self.group_count)
-        return (sum(a.buffer_info()[1] * a.itemsize for a in arrays)
-                + sys.getsizeof(self.seg_dups) + sys.getsizeof(self.group_more))
+        return sum(len(a) * a.itemsize for a in arrays)
 
 
 class _LoneCarriageReturn(Exception):
@@ -1495,7 +1558,8 @@ def _binary_lines(handle, start, end, at, crc_line):
 
 
 def _build_folder_table(paths, signature):
-    """The folder table of `paths`, or None when it cannot be exact.
+    """The folder table of `paths`, or None when it cannot be exact or would
+    cost more than _folder_table_budget().
 
     Raises OSError when a file cannot be read, and _StaleFolderTable when one
     changed while it was being read. A file rewritten between the signature
@@ -1503,102 +1567,191 @@ def _build_folder_table(paths, signature):
     the file."""
     if len(paths) > 255:
         return None
-    table = _FolderTable(signature)
-    run_key = []        # per run: its group's text, for the build only
-    by_lower = {}       # folder.lower() -> its runs, for the build only
     try:
-        for file_index, path in enumerate(paths):
-            with open(path, "rb") as handle:
-                at = [0, 0]
-                raw = [b""]
-                heading = [0]   # where the heading in force started
+        return _build_folder_table_within(paths, signature,
+                                          _folder_table_budget(signature))
+    except (_LoneCarriageReturn, _OverBudget):
+        # Nothing of the half-built table is kept: it is only ever returned
+        # whole.
+        return None
 
-                def on_heading():
-                    heading[0] = at[0]
 
-                run_folder = _NO_RUN
-                seen = None
-                position = 0
-                crc = 0
-                for line_strip, folder in _scan_lines(
-                        _binary_lines(handle, 0, None, at, raw), [], [],
-                        on_heading=on_heading):
-                    if run_folder is _NO_RUN or folder != run_folder:
-                        if run_folder is not _NO_RUN:
-                            table.seg_rows.append(position)
-                            table.seg_crc.append(crc)
-                        run_folder = folder
-                        run = len(table.seg_start)
-                        table.seg_file.append(file_index)
-                        table.seg_start.append(heading[0] if folder is not None else 0)
-                        table.seg_open.append(1 if folder is not None else 0)
-                        table.seg_end.append(0)
-                        key = folder or ""
-                        run_key.append(key)
-                        by_lower.setdefault(key.lower(), []).append(run)
-                        seen = set()
-                        position = 0
-                        crc = 0
-                    crc = zlib.crc32(raw[0], crc)
-                    table.seg_end[-1] = at[1]
+def _span_append(runs, starts, spans, run, position):
+    """Mark row `position` of `run` dropped, in the flat span arrays; True
+    when that took a new span, which the caller counts."""
+    if runs and runs[-1] == run:
+        if spans[-1] == position:
+            spans[-1] = position + 1
+            return False
+    else:
+        runs.append(run)
+        starts.append(len(spans))
+    spans.append(position)
+    spans.append(position + 1)
+    return True
+
+
+def _build_folder_table_within(paths, signature, budget):
+    table = _FolderTable(signature)
+    # For the build only, per run: its heading's number in `keys`, and the
+    # next run whose heading is the same lower-cased (-1: none).
+    run_key = array.array("i")
+    next_same = array.array("i")
+    keys = {}                        # heading text -> its number
+    key_lower = array.array("i")     # per heading: its lower-cased one's number
+    lowers = {}                      # heading.lower() -> its number
+    lower_first = array.array("i")   # per lower-cased heading: its first run
+    lower_last = array.array("i")    # ... and its last
+    # The rows each run's own dedup drops, in run order, and those the second
+    # dedup below drops, in the order it reads runs - flat spans, as kept.
+    one_runs, one_from, one_spans = (array.array("i"), array.array("i"),
+                                     array.array("i"))
+    two_runs, two_from, two_spans = (array.array("i"), array.array("i"),
+                                     array.array("i"))
+
+    def check_budget():
+        cost = (len(run_key) * _RUN_BYTES
+                + (len(one_spans) + len(two_spans)) // 2 * _SPAN_BYTES
+                + (len(one_runs) + len(two_runs)) * _DUP_RUN_BYTES)
+        if cost > budget:
+            raise _OverBudget()
+
+    for file_index, path in enumerate(paths):
+        with open(path, "rb") as handle:
+            at = [0, 0]
+            raw = [b""]
+            heading = [0]   # where the heading in force started
+
+            def on_heading():
+                heading[0] = at[0]
+
+            run_folder = _NO_RUN
+            run = -1
+            seen = None
+            position = 0
+            crc = 0
+            for line_strip, folder in _scan_lines(
+                    _binary_lines(handle, 0, None, at, raw), [], [],
+                    on_heading=on_heading):
+                if run_folder is _NO_RUN or folder != run_folder:
+                    if run_folder is not _NO_RUN:
+                        table.seg_rows.append(position)
+                        table.seg_crc.append(crc)
+                    run_folder = folder
+                    run = len(table.seg_start)
+                    table.seg_file.append(file_index)
+                    table.seg_start.append(heading[0] if folder is not None else 0)
+                    table.seg_open.append(1 if folder is not None else 0)
+                    table.seg_end.append(0)
+                    key = folder or ""
+                    number = keys.get(key)
+                    if number is None:
+                        lower = key.lower()
+                        lower_number = lowers.get(lower)
+                        if lower_number is None:
+                            lower_number = lowers[lower] = len(lower_first)
+                            lower_first.append(run)
+                            lower_last.append(-1)
+                        number = keys[key] = len(key_lower)
+                        key_lower.append(lower_number)
+                    run_key.append(number)
+                    next_same.append(-1)
+                    lower_number = key_lower[number]
+                    if lower_last[lower_number] != -1:
+                        next_same[lower_last[lower_number]] = run
+                    lower_last[lower_number] = run
+                    check_budget()
+                    seen = set()
+                    position = 0
+                    crc = 0
+                crc = zlib.crc32(raw[0], crc)
+                table.seg_end[-1] = at[1]
+                filename, size = _split_entry_line(line_strip)
+                dedup_key = (filename.lower(), size)
+                if dedup_key in seen:
+                    if _span_append(one_runs, one_from, one_spans, run, position):
+                        check_budget()
+                else:
+                    seen.add(dedup_key)
+                position += 1
+            if run_folder is not _NO_RUN:
+                table.seg_rows.append(position)
+                table.seg_crc.append(crc)
+    seen = None
+    one_from.append(len(one_spans))
+
+    # A run is deduplicated on its own above, which is exact only when no
+    # other run shares its folder.lower(). Those that do - a repeated
+    # heading, two headings that differ only in case, rows before the
+    # first heading of each file - are done again together, in file order.
+    two_slot = array.array("i", [-1]) * len(run_key)
+    handles = {}
+    try:
+        for lower_number, first in enumerate(lower_first):
+            if first == lower_last[lower_number]:
+                continue
+            seen = set()
+            run = first
+            while run != -1:
+                for position, (line_strip, _folder) in enumerate(
+                        _run_lines(table, run, handles)):
                     filename, size = _split_entry_line(line_strip)
                     dedup_key = (filename.lower(), size)
                     if dedup_key in seen:
-                        table.seg_dups.setdefault(len(table.seg_start) - 1, set()).add(position)
+                        if not two_runs or two_runs[-1] != run:
+                            two_slot[run] = len(two_runs)
+                        if _span_append(two_runs, two_from, two_spans, run, position):
+                            check_budget()
                     else:
                         seen.add(dedup_key)
-                    position += 1
-                if run_folder is not _NO_RUN:
-                    table.seg_rows.append(position)
-                    table.seg_crc.append(crc)
-
-        # A run is deduplicated on its own above, which is exact only when no
-        # other run shares its folder.lower(). Those that do - a repeated
-        # heading, two headings that differ only in case, rows before the
-        # first heading of each file - are done again together, in file order.
-        handles = {}
-        try:
-            for runs in by_lower.values():
-                if len(runs) < 2:
-                    continue
-                seen = set()
-                for run in runs:
-                    dups = set()
-                    for position, (line_strip, _folder) in enumerate(
-                            _run_lines(table, run, handles)):
-                        filename, size = _split_entry_line(line_strip)
-                        dedup_key = (filename.lower(), size)
-                        if dedup_key in seen:
-                            dups.add(position)
-                        else:
-                            seen.add(dedup_key)
-                    if dups:
-                        table.seg_dups[run] = dups
-                    else:
-                        table.seg_dups.pop(run, None)
-        finally:
-            for handle in handles.values():
-                handle.close()
-    except _LoneCarriageReturn:
-        return None
+                run = next_same[run]
+            seen = None
+    finally:
+        for handle in handles.values():
+            handle.close()
+    two_from.append(len(two_spans))
 
     # Grouped AFTER dedup, by heading text, in first-seen order: a run whose
-    # every row was a duplicate starts no group, as in group_rows_by_folder().
-    groups = {}
-    for run, key in enumerate(run_key):
-        shown = table.seg_rows[run] - len(table.seg_dups.get(run, ()))
+    # every row was a duplicate starts no group, as in group_rows_by_folder(),
+    # and its spans are not kept - no page reads that run.
+    groups = {}                       # heading number -> its group
+    group_last = array.array("i")     # per group: its last run so far
+    table.run_next = array.array("i", [-1]) * len(run_key)
+    one_at = 0
+    for run, number in enumerate(run_key):
+        lower_number = key_lower[number]
+        spans = ()
+        if lower_first[lower_number] != lower_last[lower_number]:
+            slot = two_slot[run]
+            if slot != -1:
+                spans = two_spans[two_from[slot]:two_from[slot + 1]]
+        else:
+            while one_at < len(one_runs) and one_runs[one_at] < run:
+                one_at += 1
+            if one_at < len(one_runs) and one_runs[one_at] == run:
+                spans = one_spans[one_from[one_at]:one_from[one_at + 1]]
+        dropped = 0
+        for index in range(0, len(spans), 2):
+            dropped += spans[index + 1] - spans[index]
+        shown = table.seg_rows[run] - dropped
         if not shown:
             continue
-        group = groups.get(key)
+        if spans:
+            table.dup_runs.append(run)
+            table.dup_from.append(len(table.dup_spans))
+            table.dup_spans.extend(spans)
+        group = groups.get(number)
         if group is None:
-            group = groups[key] = len(table.group_first)
+            group = groups[number] = len(table.group_first)
             table.group_first.append(run)
             table.group_count.append(0)
+            group_last.append(run)
         else:
-            table.group_more.setdefault(group, []).append(run)
+            table.run_next[group_last[group]] = run
+            group_last[group] = run
         table.group_count[group] += shown
         table.total_rows += shown
-    table.seg_dups = {run: frozenset(dups) for run, dups in table.seg_dups.items()}
+    table.dup_from.append(len(table.dup_spans))
     return table
 
 
@@ -1650,6 +1803,9 @@ def _folder_table(paths):
             print(f"[LIST] Could not index the list's folders ({err}); "
                   f"reading it whole for this page.")
             return None
+        # A None is kept too: a list over its budget, or with a lone
+        # carriage return, is the same list on the next page, which then
+        # reads it whole at once instead of building most of a table first.
         while len(_folder_tables) >= _FOLDER_TABLES_KEPT:
             _folder_tables.pop(next(iter(_folder_tables)))
         _folder_tables[signature] = table
@@ -1686,8 +1842,9 @@ def page_of_list_files(paths, offset, limit, source, max_rows=None):
 
     The same (page, total_folders, total_rows, row_capped), parsing only the
     folders the page holds. None when the table cannot answer - a file that
-    cannot be read, a lone carriage return, a file that changed under it -
-    and the caller then reads the lists whole, as it always did.
+    cannot be read, a lone carriage return, a file that changed under it, a
+    list whose table would cost more than its budget - and the caller then
+    reads the lists whole, as it always did.
     """
     paths = list(paths)
     table = _folder_table(paths)
@@ -1718,10 +1875,15 @@ def page_of_list_files(paths, offset, limit, source, max_rows=None):
             entries = []
             if read:
                 for run in table.runs(group):
-                    dups = table.seg_dups.get(run, ())
+                    # Its dropped rows' spans, walked along with the rows:
+                    # both are in position order.
+                    spans = table.dups(run)
+                    span = 0
                     for position, (line_strip, folder) in enumerate(
                             _run_lines(table, run, handles)):
-                        if position in dups:
+                        while span < len(spans) and position >= spans[span + 1]:
+                            span += 2
+                        if span < len(spans) and position >= spans[span]:
                             continue
                         filename, size = _split_entry_line(line_strip)
                         entries.append({"folder": folder, "filename": filename,
