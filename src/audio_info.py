@@ -102,8 +102,9 @@ class _Window:
     from that offset. The file is opened unbuffered, so a read is a request
     and nothing is fetched behind it."""
 
-    def __init__(self, handle):
+    def __init__(self, handle, size=None):
         self.handle = handle
+        self.size = size
         self.base = 0
         self.data = b""
 
@@ -115,9 +116,31 @@ class _Window:
         if 0 <= start and start + need <= len(self.data):
             return self.data[start:start + length]
         self.handle.seek(offset)
-        self.data = self.handle.read(max(length, FIRST_READ))
+        self.data = self._read(offset, max(length, FIRST_READ))
         self.base = offset
         return self.data[:length]
+
+    def _read(self, offset, want):
+        """`want` bytes from `offset`, or as many as the file has (#1189).
+
+        One raw read() may return FEWER bytes than asked for - a network
+        mount with cold caches does - and taken as the whole answer that
+        handed the parser a truncated header: an MP3 whose Xing header it
+        missed was read as CBR, and a cold rebuild's list came out a byte
+        different from a warm one's. So read again until the bytes are there
+        or the file ends. Knowing the size, an ordinary read stops at the end
+        of the file without asking again to be told so: still one request."""
+        if self.size is not None:
+            want = max(0, min(want, self.size - offset))
+        chunks = []
+        got = 0
+        while got < want:
+            piece = self.handle.read(want - got)
+            if not piece:
+                break
+            chunks.append(piece)
+            got += len(piece)
+        return b"".join(chunks)
 
 
 def _id3v2_end(window, start=0):
@@ -286,7 +309,7 @@ def read(path, size=None):
             return None
         # Unbuffered: a read is exactly one request, nothing fetched behind it.
         with open(path, "rb", buffering=0) as handle:
-            window = _Window(handle)
+            window = _Window(handle, size)
             if name.endswith(".mp3"):
                 return _read_mp3(window, size)
             return _read_flac(window, size)
