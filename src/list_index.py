@@ -45,12 +45,14 @@ substring - this index is only the dashboard's cross-list filter.
 
 FAILURE POSTURE
 
-Every function here is best-effort. A missing, locked or old-schema database
-costs the filter bar and nothing else: the lists themselves are on disk, the
-browser still pages them, and each list is indexed again the next time it is
-fetched. A DAMAGED database is not left in place: sqlite3 refuses it on every
-open, and every caller - a fetch completing, the startup backfill, the filter
-bar - opens it the same way, so nothing would ever repair it. _connect() moves
+Every function here is best-effort. A missing or locked database costs the
+filter bar and nothing else: the lists themselves are on disk, the browser
+still pages them, and each list is indexed again the next time it is fetched.
+An index made before the prefix index (#1130) is rebuilt once, from the held
+lists, the way a damaged one is below. A DAMAGED database is not left in
+place: sqlite3 refuses it on every open, and every caller - a fetch
+completing, the startup backfill, the filter bar - opens it the same way, so
+nothing would ever repair it. _connect() moves
 it aside as `<file>.corrupt-<timestamp>`, starts a fresh one, and the held
 lists are re-indexed from disk on the next filter query. Nothing in the
 daemon's serving path reads this file, so it is never a reason to refuse to
@@ -89,7 +91,30 @@ INDEX_FILE = getattr(config, "LIST_INDEX_FILE",
 DEFAULT_SEARCH_LIMIT = 200
 MAX_SEARCH_LIMIT = 2000
 
-_SCHEMA_VERSION = 1
+# 2: the prefix index and folder ids below (#1130, #1135). One version for
+# both, so an upgrade rebuilds the index once and not twice.
+_SCHEMA_VERSION = 2
+
+# The FTS5 table's options. Kept as one string because _open() also looks for
+# it in the stored CREATE statement: CREATE ... IF NOT EXISTS keeps a table
+# made without them, so an index from before them would never get them.
+#
+# prefix='1 2 3 4' - THE PREFIX INDEX (#1130). build_match_query() puts a
+# wildcard on the word being typed, and without an index for prefixes FTS5
+# answers "al"* by merging the doclist of every token that starts with "al" -
+# and bots_with_a_match() asks that once per held list. Measured on 2.64M rows
+# in three lists, the keystroke "al" took about 2.8 s and a 19-keystroke
+# sequence 8.2 s; with prefix indexes for 1 to 4 characters, 2 ms and 0.1 s,
+# with the same rows answered in the same order. The 1 is for the last word
+# of a phrase, which gets its wildcard from its first letter on ("love m"*).
+# It costs disk - about 70% on its own, measured on 880k rows, and a third
+# with the folder ids below - and each list takes about twice as long to
+# index, which no longer holds the filter bar since #1129.
+#
+# columnsize=0 (#1135). FTS5 otherwise keeps a per-row record of each
+# column's token count, and nothing reads it but bm25() and rank, which
+# nothing here uses: search() has no ORDER BY. About 5% of the file.
+_FTS_OPTIONS = "tokenize='unicode61', prefix='1 2 3 4', columnsize=0"
 
 # One connection, reused. Opening a database per keystroke would be the
 # cheapest thing here to get wrong.
@@ -189,7 +214,20 @@ def _open(path):
     file also stays locked until the object is collected, so the next attempt
     fails for a new reason and the log stops describing the original one -
     and the move-aside in _connect() could not rename it at all.
+
+    AN INDEX FROM BEFORE SCHEMA 2 IS REBUILT (#1130, #1135). FTS5 cannot add
+    a prefix index or drop the column sizes on an existing table, and its
+    folder column held text where it now holds an id, so the old table is
+    dropped and made again, in one transaction with the CREATE: the file
+    never holds no table at all. The rows come back the way a repaired file's
+    do - the held lists are indexed again from disk, by the startup backfill
+    or before the first filter query answers - so nothing a held list had is
+    lost for good. The check reads the table's own stored CREATE statement
+    rather than the meta row, which every earlier version wrote on every
+    open: an index the old code reopened keeps its options and is not
+    rebuilt twice.
     """
+    global _rebuild_pending
     conn = None
     try:
         # check_same_thread=False: a fetch completing writes from the
@@ -197,13 +235,30 @@ def _open(path):
         # caller here holds _conn_lock for the whole operation anyway.
         conn = sqlite3.connect(path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("BEGIN")
+        stored = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'entries'").fetchone()
+        rebuilt = stored is not None and _FTS_OPTIONS not in str(stored[0])
+        if rebuilt:
+            conn.execute("DROP TABLE entries")
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS entries USING fts5("
             # bot is INDEXED - that is the whole point. It lets the existence
             # question below be asked per bot and stop at the first hit,
             # instead of enumerating every match to find out who is missing.
+            # folder holds an id into `folders`, not the heading (#1135).
             "bot, filename, folder UNINDEXED, size UNINDEXED, "
-            "tokenize='unicode61')")
+            + _FTS_OPTIONS + ")")
+        # EACH FOLDER ONCE (#1135). Every row stored its full heading, which
+        # repeats about nine times per folder at the median, and the index was
+        # larger than the list text it indexes. A heading is stored here once
+        # per list, and the row holds its id. Keyed by the index name, as the
+        # rows are, so a list's folders go with its rows.
+        conn.execute("CREATE TABLE IF NOT EXISTS folders "
+                     "(id INTEGER PRIMARY KEY, bot TEXT, folder TEXT)")
+        conn.execute("CREATE INDEX IF NOT EXISTS folders_by_bot "
+                     "ON folders (bot)")
         conn.execute("CREATE TABLE IF NOT EXISTS meta "
                      "(key TEXT PRIMARY KEY, value TEXT)")
         conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
@@ -216,6 +271,16 @@ def _open(path):
             except Exception:
                 pass
         raise
+    if rebuilt:
+        print("[LIST-INDEX] Rebuilding the search index once, to make "
+              "short prefixes in the dashboard's filter fast: the lists you "
+              "hold are indexed again from disk, up to about a minute per "
+              "million files, and the file comes out about half as big again "
+              "as before. Browsing and @find are unaffected.")
+        # The same flag a repaired file sets: the readers run the backfill
+        # before they answer, so an emptied table is never reported as
+        # holding no match even when no startup backfill ran first.
+        _rebuild_pending = True
     return conn
 
 
@@ -549,6 +614,15 @@ def index_bot_list(bot, rows):
             # beside the new ones, and a crash between the two must not leave
             # the bot indexed twice.
             conn.execute("DELETE FROM entries WHERE bot = ?", (name,))
+            # And its folders, or every refetch under a new set of headings
+            # would leave the old ones behind for good (#1135).
+            conn.execute("DELETE FROM folders WHERE bot = ?", (name,))
+            # The list's headings get ids as its rows go past, and are written
+            # after them, in the same transaction: one dict of this list's
+            # headings, never a second copy of its rows.
+            folder_ids = {}
+            next_id = conn.execute(
+                "SELECT COALESCE(MAX(id), 0) + 1 FROM folders").fetchone()[0]
             conn.executemany(
                 "INSERT INTO entries (bot, filename, folder, size) "
                 "VALUES (?, ?, ?, ?)",
@@ -561,7 +635,11 @@ def index_bot_list(bot, rows):
                 # of the list in memory first - at the four million rows this
                 # index is measured against, hundreds of megabytes of tuples
                 # held for the length of the write and for no reason.
-                _counted_values(name, rows, indexed))
+                _counted_values(name, rows, indexed, folder_ids, next_id))
+            conn.executemany(
+                "INSERT INTO folders (id, bot, folder) VALUES (?, ?, ?)",
+                ((folder_id, name, folder)
+                 for folder, folder_id in folder_ids.items()))
             conn.commit()
             _checkpoint_locked(conn)
             # Counted as they went in, not len(rows): `rows` may be a stream
@@ -577,13 +655,23 @@ def index_bot_list(bot, rows):
             return 0
 
 
-def _counted_values(name, rows, indexed):
-    """index_bot_list()'s INSERT parameters, counting each into indexed[0]."""
+def _counted_values(name, rows, indexed, folder_ids, next_id):
+    """index_bot_list()'s INSERT parameters, counting each into indexed[0].
+
+    Each row's heading becomes an id (#1135): the one already given to that
+    exact text in this list, or the next free one, recorded in `folder_ids`
+    for the caller to write into `folders`. Exact text, case and all - two
+    headings that differ only in case are two folders, as they were when
+    each row carried its own."""
     for row in rows:
         indexed[0] += 1
+        folder = str(row.get("folder") or "")
+        folder_id = folder_ids.get(folder)
+        if folder_id is None:
+            folder_id = folder_ids[folder] = next_id + len(folder_ids)
         yield (name,
                str(row.get("title") or row.get("filename") or ""),
-               str(row.get("folder") or ""),
+               folder_id,
                str(row.get("size") or ""))
 
 
@@ -598,6 +686,9 @@ def drop_bot(bot):
             return False
         try:
             conn.execute("DELETE FROM entries WHERE bot = ?", (name,))
+            # Its folders too (#1135): forget_bot() and a purge come through
+            # here, and a folder whose rows are gone is a leak, not a cache.
+            conn.execute("DELETE FROM folders WHERE bot = ?", (name,))
             conn.commit()
             _checkpoint_locked(conn)
             return True
@@ -791,8 +882,17 @@ def search(terms, limit=None, bots=None):
         if conn is None:
             return []
         try:
+            # The heading comes back from `folders` in the SAME statement
+            # (#1135), so from the same snapshot: a second query after this
+            # one could see a refetch that committed in between, with the
+            # page's ids already deleted. A row whose folder column is not an
+            # id - written by an older version into a table it did not make -
+            # shows the text it holds, as it always did.
             found = conn.execute(
-                "SELECT bot, filename, folder, size FROM entries "
+                "SELECT bot, filename, "
+                "CASE WHEN typeof(folder) = 'integer' THEN COALESCE("
+                "(SELECT f.folder FROM folders f WHERE f.id = entries.folder), "
+                "'') ELSE folder END, size FROM entries "
                 "WHERE entries MATCH ? LIMIT ?", (query, limit)).fetchall()
         except Exception as err:
             print(f"[LIST-INDEX] Search failed ({err}); returning nothing "
