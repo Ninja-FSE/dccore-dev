@@ -12,6 +12,10 @@
 - **Faster: the end of a list rebuild on a big library.** The cache of track lengths and quality was rewritten whole on every rebuild - about 15 seconds for a million tracks while searches waited. Only what changed is written now.
 - **Faster: a bot with many hard bans keeps up with a busy channel.** The ban list was read and worked out again for every message in the channel - at 2,000 bans the bot could handle about four messages a second. It is read again only when it changes.
 - **Fixed: the List Browser's filter no longer freezes while a fetched list is being indexed.** Each keystroke waited until the new list was written - several seconds, or most of a minute for a very big list. It answers at once now, from the lists as they were until the new one is in.
+- **Lighter: installing a fetched list uses about a third of the memory.** Every row of the list was held twice while it was added to the search index, only to be counted; it is streamed in now.
+- **Faster: reading a list - a search, or a fetched bot's list in the List Browser - takes about a third less time.** Two checks ran on every row that only a few rows need.
+- **Faster: a search of the bot's own list is about three times faster on a big list.** Every line of the list cost more work than it needed; the answers are exactly the same.
+- **Fixed: after the cross-list search index was rebuilt, a bot's RAR list showed as having no match in the List Browser's filter.** Only each bot's main list was put back into the index. Every list it holds is now.
 
 ## v1.14.0 — The Bot Keeps a Record
 

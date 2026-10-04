@@ -1213,10 +1213,13 @@ def _measure_extra_list(bot, marker, path):
               f"bytes, over the {max_list_text_size()}-byte ceiling.")
         return None
 
+    # Streamed into the index rather than built in memory first (#1134); see
+    # _install_fetched_list(). The first row is read here, so a list that
+    # cannot be parsed at all is caught before anything is written.
     try:
-        entries, _total = list_mod.find_matching_entries(
-            [], limit=None, list_path=platform_compat.long_path(path))
-        rows = list_mod.entries_to_filelist_rows(entries, str(bot).strip())
+        rows = list_mod.CountedRows(list_mod.iter_filelist_rows(
+            platform_compat.long_path(path), str(bot).strip()))
+        has_rows = rows.any_rows()
     except Exception as err:
         print(f"[LIST-FETCH] Skipping {bot}'s '{marker}' list: could not "
               f"parse it ({err}).")
@@ -1227,7 +1230,7 @@ def _measure_extra_list(bot, marker, path):
     # nothing, which is the noise this change is otherwise removing. The MAIN
     # list is exempt: it is the archive's identity, and an empty one is a fact
     # about that bot worth seeing rather than a file to ignore.
-    if not rows:
+    if not has_rows:
         print(f"[LIST-FETCH] Skipping {bot}'s '{marker}' list: no entries in "
               f"it.")
         return None
@@ -1236,7 +1239,15 @@ def _measure_extra_list(bot, marker, path):
     # bot's lists a match came from - and so re-fetching replaces that list's
     # rows rather than the whole bot's.
     list_index.index_bot_list(index_key(bot, marker), rows)
-    return {"list_path": path, "entry_count": len(rows),
+    try:
+        # Every row, whether or not the index took them: CountedRows drains
+        # what it did not, and raises what the list itself raised.
+        entry_count = rows.total()
+    except Exception as err:
+        print(f"[LIST-FETCH] Skipping {bot}'s '{marker}' list: could not "
+              f"parse it ({err}).")
+        return None
+    return {"list_path": path, "entry_count": entry_count,
             "file_name": os.path.basename(path)}
 
 
@@ -1339,14 +1350,13 @@ def _install_fetched_list(bot, zip_path, extract_dir):
     # outside the extraction guard, on a file that is plainly there.
     #
     # This is the ONE courtesy parse - see process_fetched_list_zip()'s
-    # docstring. `rows` was only ever used for its length; nothing keeps a
-    # reference to it (or to `entries`) once the count is taken and the index
-    # below has been written, so both are free to be garbage-collected as soon
-    # as this function returns.
-    entries, _total = list_mod.find_matching_entries(
-        [], limit=None, list_path=platform_compat.long_path(list_path))
-    rows = list_mod.entries_to_filelist_rows(entries, str(bot).strip())
-    entry_count = len(rows)
+    # docstring. The rows are only ever counted and written to the index, so
+    # they are STREAMED into it (#1134): this built a dict per row with the
+    # raw line in it and then a second dict per row, and held both lists for
+    # the whole write - about 412 MB at 378k rows, where streaming peaks at
+    # 143 MB. CountedRows counts them as the index takes them.
+    rows = list_mod.CountedRows(list_mod.iter_filelist_rows(
+        platform_compat.long_path(list_path), str(bot).strip()))
 
     # THE SEARCH INDEX (#133 step 5), written from the parse that was already
     # happening. The dashboard's filter bar searches every held list at once,
@@ -1362,6 +1372,11 @@ def _install_fetched_list(bot, zip_path, extract_dir):
     # the next fetch tries again. A fetch that succeeded must not be reported
     # as failed over it.
     indexed = list_index.index_bot_list(str(bot).strip(), rows)
+    # Taken AFTER the write, which is what consumed the rows. total() is
+    # still every row in the list when the index took none of them
+    # (unavailable) or stopped part-way: it drains the rest. A list that
+    # could not be parsed raises here, as the up-front parse did.
+    entry_count = rows.total()
     if indexed != entry_count:
         print(f"[LIST-FETCH] {bot}'s list was stored but only {indexed} of "
               f"{entry_count} entries reached the search index; the "
