@@ -48,11 +48,15 @@ file that has not changed - and written back once. SQLite (stdlib) at
 LIST_AUDIO_INFO_CACHE. Rows for files no longer in the library are dropped only
 when a rebuild publishes; what a failed or stopped rebuild read is kept.
 
-A TIME LIMIT, so the first run cannot hold the bot. A rebuild pauses searches
-and requests (PAUSE_ON_UPDATE), and the first one with this on has every audio
-file to read. LIST_AUDIO_INFO_MINUTES bounds it: past the limit no new read is
-started, the list publishes with what was read, and the rest keep their size
-alone until the next rebuild reads them. Later rebuilds read only new files.
+IN THE BACKGROUND, AFTER THE LIST IS PUBLISHED (#1182). The rebuild used to
+read every new or changed file before it wrote the list, within
+LIST_AUDIO_INFO_MINUTES; the first one with this on has every audio file to
+read. Now the rebuild publishes first with what the cache already knows, and
+the same process then reads the rest with no time limit, saving to the cache
+in batches as it goes (read_pending()'s `save_every`), so a reading that is
+stopped keeps what it read. update_list.py then rewrites the length and
+quality into the published list once. A `stop` callable ends a reading early:
+no new read starts, the ones in flight finish and are kept.
 """
 
 import os
@@ -338,8 +342,9 @@ class Cache:
 
     note() is called from the walk for each listed audio file: a file whose
     size matches the stored row is answered from memory, anything else is put
-    aside. read_pending() then reads what was put aside, many at once and
-    within a time limit. suffix() answers while the list is written. publish()
+    aside. read_pending() then reads what was put aside, many at once - since
+    #1182 after the list is published, in the background. suffix() answers
+    while the list is written. publish()
     stores what this rebuild knows and drops every row it did not see - a file
     removed from the library - and is called only when the rebuild publishes;
     close() without it keeps what was read and drops nothing, so an aborted
@@ -359,10 +364,15 @@ class Cache:
         self.sizes = {}      # key -> size, for the same
         self.fresh = {}      # key -> (size, suffix) read by this rebuild
         self.unread = set()  # keys whose read failed with an I/O error: not remembered (#973)
-        self.pending = []    # (key, path or (folder, name), size) still to read
+        # (key, path or (folder, name), size) still to read. The size may be
+        # None for a file named by the published list rather than the walk
+        # (#1182): it is then asked for when the file is read.
+        self.pending = []
+        self._unsaved = []   # keys in `fresh` not written to the database yet (#1182)
         self.read_count = 0
         self.reused_count = 0
         self.left_count = 0
+        self.unreadable_count = 0  # read, and nothing came of it: size alone (#1182)
         self.workers = 0
         self.read_seconds = 0.0
         self.published = False
@@ -413,12 +423,18 @@ class Cache:
         else:
             self.pending.append((key, path, size))
 
-    def read_pending(self, workers=16, budget=None, clock=time.monotonic, progress=None):
+    def read_pending(self, workers=16, budget=None, clock=time.monotonic, progress=None,
+                     stop=None, save_every=0):
         """Read what note() put aside, `workers` at a time. With `budget`
         (seconds), no read is STARTED after it runs out - the ones in flight
-        finish - and the rest are left for the next rebuild. `progress(done,
-        total)` is called once at the start and then only when a read has
-        completed (#968).
+        finish - and the rest are left for the next rebuild. `stop()`, when it
+        answers True, does the same (#1182): a new rebuild ending a reading
+        that runs in the background. `progress(done, total)` is called once at
+        the start and then only when a read has completed (#968).
+
+        `save_every` > 0 writes what was read to the database every that many
+        files (#1182), so a reading that is stopped, or killed, keeps what it
+        read and not only what close() would have written at the end.
 
         ONLY REAL PROGRESS IS REPORTED. The rebuild's watchdog stops a child
         whose progress file has not moved for LIST_UPDATE_STALL_SECONDS.
@@ -447,6 +463,8 @@ class Cache:
                 while len(running) < workers * 2:
                     if deadline is not None and clock() >= deadline:
                         return
+                    if stop is not None and stop():
+                        return
                     item = next(queue, None)
                     if item is None:
                         return
@@ -455,7 +473,7 @@ class Cache:
                         # (folder, name) from the walk, joined only now that
                         # the file is really read (#1138).
                         path = os.path.join(*path)
-                    running[pool.submit(self.reader, path, size)] = (key, size)
+                    running[pool.submit(self._read_one, path, size)] = (key, size)
 
             top_up()
             reported = 0
@@ -466,7 +484,8 @@ class Cache:
                 for future in finished:
                     key, size = running.pop(future)
                     try:
-                        suffix = describe(future.result())
+                        size, info = future.result()
+                        suffix = describe(info)
                     except OSError:
                         # Size alone this time, and not remembered: the
                         # next rebuild reads it again (#973).
@@ -478,7 +497,12 @@ class Cache:
                     self.sizes[key] = size
                     if key not in self.unread:
                         self.fresh[key] = (size, suffix)
+                        self._unsaved.append(key)
+                    if not suffix:
+                        self.unreadable_count += 1
                     done += 1
+                if save_every and len(self._unsaved) >= save_every:
+                    self.save_fresh()
                 if progress is not None and done != reported:
                     reported = done
                     progress(done, total)
@@ -492,6 +516,32 @@ class Cache:
         # library (#1137). This line used to sit after rate()'s return, where
         # it never ran.
         self.pending = []
+
+    def _read_one(self, path, size):
+        """(size, what the reader made of it), on a worker thread. A file the
+        published list named has no size from a walk (#1182): it is asked
+        for here, on the worker, so those round trips overlap like the reads,
+        and an OSError doing it counts as the read's own (#973).
+        """
+        if size is None:
+            size = os.path.getsize(path)
+        return size, self.reader(path, size)
+
+    def save_fresh(self):
+        """Write what was read since the last save (#1182). True when it was
+        written; False when the database refused, and the rows stay unsaved
+        for the next save or close() to try again - a locked cache must not
+        end a reading that has hours to go."""
+        if not self._unsaved:
+            return True
+        rows = [(key, self.fresh[key]) for key in self._unsaved]
+        try:
+            with self.conn:
+                self._save(rows)
+        except sqlite3.Error:
+            return False
+        self._unsaved = []
+        return True
 
     def rate(self):
         """Files read per second of reading, or None when nothing was read.
@@ -533,11 +583,14 @@ class Cache:
         self.published = True
 
     def close(self):
-        """Without publish(): keep what was read, drop nothing."""
+        """Without publish(): keep what was read, drop nothing. Only what no
+        batch has saved yet is written (#1182); the rest is already there.
+        """
         try:
-            if not self.published and self.fresh:
+            if not self.published and self._unsaved:
                 with self.conn:
-                    self._save(self.fresh.items())
+                    self._save((key, self.fresh[key]) for key in self._unsaved)
+                self._unsaved = []
             self.conn.close()
         except sqlite3.Error:
             pass

@@ -2944,8 +2944,9 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # the file the swap replaces. A slow send of a same-day archive
             # (a second rebuild keeps its name) started mid-scan held it
             # open, and on Windows the swap's replace gave up and the whole
-            # rebuild rolled back.
-            if getattr(config, 'update_inprogress', False) is True:
+            # rebuild rolled back. The background audio reading's own swap
+            # (#1182) waits the same way - list.list_archive_waits().
+            if list_mod.list_archive_waits():
                 oserve = sys.modules.get('oserve')
                 if oserve:
                     oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Notice{config.C_RESET}: Master list is currently rebuilding. Please wait a few minutes and try again. \r\n")
