@@ -4705,6 +4705,29 @@ def build_console_command_result(command_text, remote_addr=None):
 
 if HAVE_FLASK:
 
+    def _keep_json_key_order(app):
+        """Turn off Flask's key sorting for every JSON answer (#1143).
+
+        Sorting every key of every dict was most of what /api/fetch/status
+        cost to serialise, and the Downloads view polls it every few seconds.
+        Nothing reads the keys in sorted order: the page looks fields up by
+        name and json.loads gives the same dict either way.
+
+        app.json, the provider object, arrived in Flask 2.2; 2.0 and 2.1 (the
+        floor requirements-web.txt allows) read app.config["JSON_SORT_KEYS"]
+        instead, which 2.3 dropped. So the setting goes wherever the installed
+        Flask looks for it.
+
+        ensure_ascii is left on deliberately. Off, a filename os.listdir()
+        returned as a lone surrogate is written out raw, Werkzeug cannot
+        encode the body, and the whole route answers 500.
+        """
+        provider = getattr(app, "json", None)
+        if provider is not None and hasattr(provider, "sort_keys"):
+            provider.sort_keys = False
+        else:
+            app.config["JSON_SORT_KEYS"] = False
+
     def create_app():
         # Flask resolves a relative static_folder against this module's OWN
         # directory (its root_path) - now src/, not the repository root - so
@@ -4725,6 +4748,7 @@ if HAVE_FLASK:
         # ceiling applies before authentication, where the daemon has the
         # least reason to trust what it is being handed.
         app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
+        _keep_json_key_order(app)
 
         @app.before_request
         def require_login():
