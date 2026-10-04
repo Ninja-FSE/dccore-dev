@@ -69,6 +69,15 @@ def capture(argv, env=None):
                           encoding="utf-8", errors="replace")
 
 
+# What the hidden-tooling pass asks first: can rar still be found with the
+# host's tooling stripped away? Run from the repository root, where the
+# daemon's modules are not - they are in src/ (#959), so it puts src/ on the
+# path itself, as the suite's own imports do. Without that, the import failed,
+# the probe printed nothing, and every run skipped the pass (#1178).
+TOOLING_PROBE = ("import sys; sys.path.insert(0, 'src'); import platform_compat; "
+                 "print(platform_compat.rar_command() or 'NONE')")
+
+
 def hostile_env():
     """A copy of the environment with host-installed tooling made undiscoverable.
 
@@ -350,16 +359,24 @@ def main():
     # A hostile pass that is not actually hostile is worse than no check at all: it
     # reports safety it never tested. This exact assertion caught the first version
     # of this script, which hid nothing.
-    probe = capture(
-        [py, "-c", "import platform_compat; print(platform_compat.rar_command() or 'NONE')"],
-        env=env,
-    )
+    probe = capture([py, "-c", TOOLING_PROBE], env=env)
     found = probe.stdout.strip()
     print("")
     print("=== verifying the hostile environment ===")
     print(f"    rar_command() under stripped env: {found}")
     hostile_ran = False
-    if found != "NONE":
+    if probe.returncode != 0 or not found:
+        # THE PROBE ITSELF FAILED (#1178). It printed nothing - an import that
+        # broke, a crash - so there is no answer about the tooling at all. This
+        # used to fall into the branch below and read as "host tooling is
+        # reachable regardless", blaming the machine: after the modules moved
+        # into src/ (#959) the probe's import failed on every machine, and the
+        # hidden pass was skipped everywhere without anyone being told why.
+        print("--- hostile environment check FAILED: the probe could not run.")
+        for line in (probe.stderr or "").strip().splitlines()[-5:]:
+            print(f"    {line}")
+        results.append(False)
+    elif found != "NONE":
         # SKIPPED, not failed. This step exists to prove the suite passes on a
         # bare runner with no host tooling, and it fakes that by stripping PATH
         # and the tooling variables. On a machine where rar lives somewhere that
