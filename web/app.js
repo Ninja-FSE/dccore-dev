@@ -2215,19 +2215,30 @@
     return row && row.nick ? String(row.nick) : nickOfSource(source);
   }
 
-  // Every row currently held for one bot, wherever state.filelistsBots put
-  // them - not a separate map kept in step by hand, so it can never disagree
-  // with what the sidebar last rendered from the same rows.
-  function entriesForNick(nick) {
-    var nickLower = String(nick || "").toLowerCase();
-    var out = [];
+  // Every row currently held in state.filelistsBots, grouped by the lower-cased
+  // nick the sidebar shows it under, in one pass. Built fresh from the same
+  // rows each time it is asked for and never kept between calls, so it can
+  // never disagree with what the sidebar last rendered. Null-prototype, so a
+  // bot named "constructor" or "__proto__" is just another key.
+  function entriesByNick() {
+    var byNick = Object.create(null);
     Object.keys(state.filelistsBots).forEach(function (key) {
       var row = state.filelistsBots[key];
-      if (String(row.nick || row.bot || "").toLowerCase() === nickLower) {
-        out.push(row);
-      }
+      var nickLower = String(row.nick || row.bot || "").toLowerCase();
+      (byNick[nickLower] || (byNick[nickLower] = [])).push(row);
     });
-    return out;
+    return byNick;
+  }
+
+  // Every row currently held for one bot, wherever state.filelistsBots put
+  // them - not a separate map kept in step by hand, so it can never disagree
+  // with what the sidebar last rendered from the same rows. A caller asking
+  // for many nicks at once passes one entriesByNick() it built for that call
+  // (#1141): scanning every bot once per sidebar row was O(rows x bots), over
+  // a second per filter answer with the registry near its 2,000-bot cap.
+  function entriesForNick(nick, byNick) {
+    var group = (byNick || entriesByNick())[String(nick || "").toLowerCase()];
+    return group ? group.slice() : [];
   }
 
   // The ?list= for a source key, or "" for the primary.
@@ -3062,6 +3073,10 @@
       payload.empty.forEach(function (name) { empty[String(name).toLowerCase()] = true; });
     }
     var hidden = 0;
+    // One pass over the held rows for the whole sidebar, built here and
+    // dropped when this call returns (#1141): asking entriesForNick() to scan
+    // every bot again for each row made a filter answer O(rows x bots).
+    var byNick = entriesByNick();
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       var bot = String(row.dataset.bot || "").toLowerCase();
@@ -3070,7 +3085,7 @@
       // it reads as having "nothing" only if NONE of them matched - one
       // matching list is reason enough to keep the row on screen, even
       // though the tab open on it right now might be a different, empty one.
-      var group = entriesForNick(nick);
+      var group = entriesForNick(nick, byNick);
       var groupKeys = group.length
         ? group.map(function (entry) { return String(entry.bot).toLowerCase(); })
         : [bot];
