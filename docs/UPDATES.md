@@ -109,6 +109,20 @@ scan, about three seconds a row on a million-row list, for every track of an alb
   of awkward sizes and checks every row's own hint against its file, and the #886 folder memory end to end; plus the
   other formats. The seven size formatters in the code base are left as they are - one owner for them is a separate
   tidy-up.
+### ⚡ The frozen-queue sweep reads the channel lists once (#1140)
+
+Performance audit 2026-10-03 P18. Step 1 of `check_queue_and_send()` - every finished transfer, every fallback trigger,
+every thaw - called `user_is_present_in_ram()` once per frozen nick, and each call walks every nick in every channel,
+all under `queue_lock`. After a netsplit froze a hundred queues that was about 180 ms a call with 3 channels of 2,000
+nicks, with requests and the dispatcher waiting on the lock.
+
+- With two or more frozen nicks the sweep takes one `nicks_in_our_channels()` set and checks each nick against it,
+  both sides lowercased exactly as `user_is_present_in_ram()` does: 2.8 ms instead of 180 ms at a hundred frozen. A
+  single frozen nick keeps the early-exit scan, which the skeptic measured as cheaper for one.
+- The lock order is unchanged: `channel_users_lock` is still taken inside `queue_lock`, as `nicks_waiting_for_a_slot()`
+  already does. The snapshot is taken once per sweep, so it can be a few milliseconds older for the last nick checked.
+- Tests: `tests/test_the_frozen_sweep_reads_the_channel_lists_once.py` - one read for 20 frozen nicks and for 2, the
+  per-nick scan for one, mixed case on either side, and 40 randomised trials against `user_is_present_in_ram()`.
 
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
