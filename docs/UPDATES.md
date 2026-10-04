@@ -30,6 +30,23 @@ breaks a LATER test in the same process - the CI flakes re-run all through 1.15'
   left fails it. `tests/test_a_test_leaves_the_process_as_it_found_it.py` proves the guard catches each kind.
 - About 2% on the suite's time. Three parallel runs and a serial one green; with every open PR merged in, 8190 tests.
 
+### 🧪 Preflight runs its hidden-tooling pass again, and the coverage gate passes (#1178)
+
+Two preflight checks had stopped doing their job, on every machine:
+
+- **The hidden-tooling pass was always skipped.** Before running the suite with the host's tooling stripped away,
+  preflight asks a child whether rar can still be found - with `import platform_compat` from the repository root.
+  Since the modules moved into `src/` (#959) that import failed; the probe printed nothing, preflight read "not NONE"
+  as "host tooling is reachable regardless", and skipped the pass, blaming the machine. `preflight.TOOLING_PROBE`
+  puts `src/` on the path, and a probe that cannot run now FAILS preflight instead of reading as a skip.
+- **The function-coverage gate failed on main.** `stopping.interrupt_main`, `request_stop_soon`,
+  `restore_interrupt`, `running_pid` and `dcc_fetch.fetch_dispatcher_worker` were reached only in child processes or
+  stubbed out by every boot test, and a profiler in the test process saw none of them. Each is driven in-process now,
+  with the dangerous edge replaced: no real Ctrl-C (both the Windows and the POSIX branch, on any system), no real
+  lock, and the dispatcher's endless loop ended by its own sleep after three passes - one of them failing.
+- Tests: `tests/test_the_stop_paths_and_the_fetch_dispatcher_run_in_process.py`, and the dev-only
+  `tests/test_preflight_hides_the_tooling_for_real.py` (on the public strip list).
+
 ### 🧪 The suite no longer waits out two fixed timers (#1148)
 
 Performance audit 2026-10-03 T3. Two tests sat out real timers: an absent user's freeze countdown slept a fixed ten
