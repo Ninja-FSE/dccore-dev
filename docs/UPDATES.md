@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟨 Unreleased
+## 🟩 v1.15.0 (2026-10-04) - "The Bot Gets Faster"
 
 ### 🧪 Preflight's skip ceiling is above what a Linux box legitimately skips
 
