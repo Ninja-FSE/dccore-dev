@@ -41,12 +41,12 @@ import announce  # noqa: E402
 import dcc  # noqa: E402
 import runtime  # noqa: E402
 
-from tests.support import DCCoreTestCase  # noqa: E402
+from tests import dcc_ports  # noqa: E402
+from tests.support import DCCoreTestCase, parse_source  # noqa: E402
 from tests.test_dcc_resume_end_to_end import RecordingIrcSocket, loopback_is_usable  # noqa: E402
 
 USER = "someuser"
-PORT_START = 51360
-PORT_END = 51370
+PORT_START, PORT_END = dcc_ports(51360, 51370)
 CONTENT = bytes(range(256)) * 2048          # 524,288 bytes: two 256 KB blocks
 OLD_FLOOR = 65536 / 60.0                    # bytes per second a send survives at 64 KB
 
@@ -55,7 +55,7 @@ def shipped_default():
     """DCC_BLOCK_SIZE as written in defaults.py, not as a test left it."""
     path = os.path.join(REPO_ROOT, "src", "defaults.py")
     with io.open(path, encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
+        tree = parse_source(handle.read())
     for node in tree.body:
         if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "DCC_BLOCK_SIZE":
             return ast.literal_eval(node.value)
