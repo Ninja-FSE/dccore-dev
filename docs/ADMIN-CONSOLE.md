@@ -711,6 +711,17 @@ acknowledgement...` never gives up - is closed after 75 seconds and
 retried the same way. Closing the window closes the chat and stops the
 retries; `/dccore connect` starts them again.
 
+When mIRC starts, `@DCCore` opens by itself, minimised, with its button at
+the end of the switchbar (dccore.mrc 1.13 or later). Until the console
+connects, its title and first line say what it is waiting for: mIRC not
+connected to the bot's network yet, the bot not answering yet, the console
+not open (you closed the window last time, so it waits for
+`/dccore connect`), or no bot paired yet, with the command to pair one.
+Opening it does not dial the bot: the usual reconnect when mIRC connects to
+the bot's network fills it in. Closing the window does not stop it opening next time; the setting under
+**Open when mIRC starts** in the options does. DCCore Chat and the Downloads
+window can open the same way; both are off by default.
+
 ### Options
 
 `/dccore options` (or right-click → Script Settings):
@@ -729,6 +740,8 @@ retries; `/dccore connect` starts them again.
   beside itself (`dccore-bg-<n>.bmp`) and tiles it behind the text;
 - the bot's nick, whether the script reconnects by itself, the pairing
   state with **Pair again...** and **Forget token**.
+- **Open when mIRC starts (minimised)**: `@DCCore` (on by default),
+  `@DCCore-Chat` and `@DCCore-Downloads` (both off by default).
 
 These are the script's own filters, kept by mIRC in `dccore.ini`. The
 bot's **Settings → Console feed** tickboxes remain the ceiling on what is
@@ -742,7 +755,7 @@ sent at all: what is off there never reaches the script.
 /dccore disconnect           close the chat and stop reconnecting
 /dccore unpair               forget the token here and revoke it on the bot
 /dccore trust                accept the bot's current host as the one to send the token to
-/dccore options              what to show, colours, panel, title bar, beep
+/dccore options              what to show, colours, panel, title bar, beep, windows at start
 /dccore window               open or focus @DCCore
 /dccore chat [text]          open DCCore Chat, or say something in it (public)
 /dccore downloads            open @DCCore-Downloads: what the bot is fetching from other bots (needs 1.10)
