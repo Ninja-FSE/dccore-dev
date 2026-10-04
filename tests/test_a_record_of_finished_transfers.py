@@ -312,11 +312,27 @@ class ForgettingReallyRemoves(Case):
     VICTIM = b"secretvictim"
 
     def fill_many(self, victims=30, others=600):
-        """Enough rows for the table and its indexes to be several pages deep (#1082)."""
-        for n in range(others):
-            self.sent(f"Some Album/Track {n}.flac", nick=f"nick{n % 40}")
-            if n % (others // victims) == 0:
-                self.sent(f"Private/Secret {n}.flac", nick="SecretVictim")
+        """Enough rows for the table and its indexes to be several pages deep (#1082).
+
+        The rows are built by record_sent() itself, but written in ONE
+        transaction on one connection (#1148). Writing them one record_sent()
+        at a time reopened the file, re-ran its pragmas and schema and
+        checkpointed the log on every close: 18 ms a row, about 11 seconds a
+        test. These tests check what forgetting leaves in the file, not the
+        writer, which the tests above cover row by row.
+        """
+        rows = []
+        with mock.patch.object(transfer_log, "_record", rows.append):
+            for n in range(others):
+                self.sent(f"Some Album/Track {n}.flac", nick=f"nick{n % 40}")
+                if n % (others // victims) == 0:
+                    self.sent(f"Private/Secret {n}.flac", nick="SecretVictim")
+        conn = transfer_log._open(config.TRANSFER_LOG_FILE, transfer_log.WRITE_TIMEOUT)
+        try:
+            with conn:
+                conn.executemany(transfer_log._INSERT, rows)
+        finally:
+            conn.close()
 
     def test_a_forgotten_nick_is_gone_from_a_record_that_is_many_pages_deep(self):
         self.fill_many()

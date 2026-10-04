@@ -1214,6 +1214,11 @@ def redispatch_waiting_pack(irc_sock, just_finished=None):
     return owner
 
 FREEZE_TIMEOUT = 300.0   # seconds an absent user's queue is kept, counted only while the bot is online
+# How often the countdown wakes to look at the user again. A module constant,
+# read on every pass of user_queue_timer (#1148), so a test can make the
+# countdown wake quickly instead of waiting out a real ten-second step, and a
+# !rehash that changes it reaches a countdown that is already running.
+FREEZE_POLL_SECONDS = 10.0
 
 
 def pause_freeze_clock(now=None):
@@ -1328,7 +1333,7 @@ def freeze_absent_user(irc_sock, user, target_chan):
         # sweep can no longer delete what this countdown says has a minute
         # left.
         while elapsed < FREEZE_TIMEOUT:
-            time.sleep(10)
+            time.sleep(FREEZE_POLL_SECONDS)
 
             # A) Something else already thawed the queue (JOIN / NAMES / !rehash)
             if t_key not in getattr(config, 'frozen_queues', {}):
@@ -1358,7 +1363,7 @@ def freeze_absent_user(irc_sock, user, target_chan):
             try:
                 elapsed = time.time() - float(config.frozen_queues.get(t_key) or time.time())
             except (TypeError, ValueError):
-                elapsed += 10
+                elapsed += FREEZE_POLL_SECONDS
 
         # THE FREEZE IS TESTED AND TAKEN UNDER THE LOCK, IN ONE MOVE (#659,
         # audit M57). This used to test `t_key in frozen_queues` outside
