@@ -454,9 +454,24 @@ def _one_line(text):
     UTF-8 encoder. Sanitised here rather than left to fail at the write: one
     bad name in a library of thousands now costs a mangled-but-valid name in
     the list, not the entire rebuild.
+
+    Almost no name needs either change, so one regex search decides first
+    (#1125): the per-character pass below cost about 15 us per row, and the
+    largest share of a rebuild's writing time. The pattern is exactly the
+    characters the slow path changes - the controls and DEL it flattens, and
+    the lone surrogates that the UTF-8 'replace' round trip turns into "?",
+    which is the only thing that round trip changes.
     """
-    text = str(text).encode("utf-8", "replace").decode("utf-8")
+    text = str(text)
+    if _NEEDS_ONE_LINE_CLEANING.search(text) is None:
+        return text
+    text = text.encode("utf-8", "replace").decode("utf-8")
     return "".join(" " if ch < " " or ch == "\x7f" else ch for ch in text)
+
+
+# What _one_line() would change: a control character, DEL, or a lone
+# surrogate (#1125). A name with none of them is returned as it is.
+_NEEDS_ONE_LINE_CLEANING = re.compile("[\x00-\x1f\x7f\ud800-\udfff]")
 
 
 def _discard_temp_lists(*paths):
@@ -1829,10 +1844,22 @@ def generate_master_list(list_name=None):
             # (#69). One pass over rows already in memory; the heading is
             # written before its rows, so the total has to be known first.
             music_totals = folder_totals(all_files_data)
+            # ONCE PER BUILD, AND ONE WRITE PER FOLDER (#1125). The nick is
+            # the same for every row of one build - a rebuild is its own
+            # process and nothing changes the config under it - so asking
+            # list_nick() per row only cost time. Each folder's heading and
+            # rows are gathered in `chunk` and written together: one write()
+            # per row was a measurable share of a million-row list.
+            row_head = f"!{list_nick()} "
+            rar_head = f"!{list_nick()} !rar "
+            chunk = []
 
             for folder, filename, bytes_size in all_files_data:
                 if folder != current_folder:
                     current_folder = folder
+                    if chunk:
+                        f.write("".join(chunk))
+                        chunk = []
                     
                     # The text list gets the complete subfolder (e.g. \Digital Media 1\)
                     raw_folder_str = (f"{list_mod.LIST_FOLDER_PREFIX}{folder}\\"
@@ -1850,10 +1877,8 @@ def generate_master_list(list_name=None):
                     # characters, which changes the length.
                     folder_line = _one_line(display_folder)
                     folder_rule = "=" * len(folder_line)
-                    f.write(f"\n{folder_rule}\n")
-                    f.write(f"{folder_line}\n")
-                    f.write(f"{folder_rule}\n")
-                    f.write(folder_summary_line(*music_totals[folder], format_size_human) + "\n")
+                    chunk.append(f"\n{folder_rule}\n{folder_line}\n{folder_rule}\n")
+                    chunk.append(folder_summary_line(*music_totals[folder], format_size_human) + "\n")
                     
                     # Strip multi-disc suffixes, for the !rar album list ONLY.
                     #
@@ -1975,7 +2000,7 @@ def generate_master_list(list_name=None):
                         # (*.mp3 and *.rar), not the tail. See defaults.py's note
                         # above LIST_IGNORED_EXTENSIONS for the quoted source.
                         if display_rar_folder not in written_rar_folders:
-                            f_rar.write(f"!{list_nick()} !rar {_one_line(display_rar_folder)}\n")
+                            f_rar.write(f"{rar_head}{_one_line(display_rar_folder)}\n")
                             written_rar_folders.add(display_rar_folder)
                 single_file_size = format_size_human(bytes_size)
                 # "4m31s 320/44.1/JS" after the size (#567), or nothing. After
@@ -1985,7 +2010,9 @@ def generate_master_list(list_name=None):
                     tail = audio.suffix(audio_info.row_key(folder, filename))
                     if tail:
                         single_file_size = f"{single_file_size} {tail}"
-                f.write(f"!{list_nick()} {_one_line(filename)}  ::INFO:: {single_file_size}\n")
+                chunk.append(f"{row_head}{_one_line(filename)}  ::INFO:: {single_file_size}\n")
+            if chunk:
+                f.write("".join(chunk))
 
         # The film and series list. Written after the music one and from the
         # same walk, exactly as the album list is - a separate file with its
@@ -2020,18 +2047,27 @@ def generate_master_list(list_name=None):
 
                 video_folder = None
                 video_totals = folder_totals(video_files_data)
+                # As in the music list above (#1125): the nick once, and one
+                # write per folder.
+                row_head = f"!{list_nick()} "
+                chunk = []
                 for folder, filename, bytes_size in video_files_data:
                     if folder != video_folder:
                         video_folder = folder
+                        if chunk:
+                            f_video.write("".join(chunk))
+                            chunk = []
                         raw = (f"{list_mod.LIST_FOLDER_PREFIX}{folder}\\"
                                if folder else list_mod.LIST_FOLDER_PREFIX)
                         line = _one_line(raw.replace("/", "\\"))
                         rule = "=" * len(line)
-                        f_video.write(f"\n{rule}\n{line}\n{rule}\n")
-                        f_video.write(folder_summary_line(*video_totals[folder], format_size_human) + "\n")
-                    f_video.write(
-                        f"!{list_nick()} {_one_line(filename)}"
+                        chunk.append(f"\n{rule}\n{line}\n{rule}\n")
+                        chunk.append(folder_summary_line(*video_totals[folder], format_size_human) + "\n")
+                    chunk.append(
+                        f"{row_head}{_one_line(filename)}"
                         f"  ::INFO:: {format_size_human(bytes_size)}\n")
+                if chunk:
+                    f_video.write("".join(chunk))
             print(f"[LIST-GEN] Film & series list created: {tmp_video_path}")
 
         print(f"[LIST-GEN] Text list created: {tmp_txt_path}")
