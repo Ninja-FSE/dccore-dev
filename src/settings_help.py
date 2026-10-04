@@ -200,7 +200,7 @@ PLAIN_HELP = {
     'LIST_VIDEO_COMPANION_EXTENSIONS': 'File types that belong to a film and should go in the film list with it - subtitles, .nfo, .sfv - when they are in the same folder as a video. In a folder with no video (an album) they stay with the music.',
     'RAR_ENABLED': 'Let people request a whole folder packed as one .rar file (with !rar). Turn off if you do not have the rar program or do not want the bot packing folders. Single-file downloads work either way.',
     'RAR_EXTENSIONS': 'A folder can be requested as a .rar only if it contains one of these file types. The default is music formats, so albums can be packed but a folder with one big film cannot.',
-    'RAR_BINARY': "Where the rar program is on this machine. Leave empty and the bot finds it by itself (on the PATH, or in WinRAR's folder on Windows).",
+    'RAR_BINARY': "Where the rar program is on this machine. Leave empty and the bot finds it by itself (on the PATH, or in WinRAR's folder on Windows). It also opens a list another bot sends as .rar; without it such a list is refused.",
     'MAX_RAR_FOLDER_SIZE': 'The biggest folder the bot will pack as a .rar, in bytes. Stops somebody asking for a folder of hundreds of gigabytes. 10 GB fits any album or box set; 0 means no limit.',
     'RAR_TIMEOUT': 'How many seconds a folder may take to pack before the bot gives up on it.',
     'LIST_UPDATE_TIMEOUT': 'A hard limit in seconds on how long a list rebuild may run. 0 means no limit, which is the right choice: a huge library can genuinely take hours, and the setting below already catches a rebuild that has stopped doing anything.',

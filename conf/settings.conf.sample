@@ -212,7 +212,8 @@
 #RAR_ENABLED = true
 
 # Where the rar program is on this machine. Leave empty and the bot finds it
-# by itself (on the PATH, or in WinRAR's folder on Windows).
+# by itself (on the PATH, or in WinRAR's folder on Windows). It also opens a
+# list another bot sends as .rar; without it such a list is refused.
 #
 # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
 #RAR_BINARY = 

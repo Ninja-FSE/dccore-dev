@@ -34,6 +34,12 @@
 #     anything wildly beyond that shape outright, before either guard above
 #     even runs.
 #
+# Not every list is a zip. A RAR list is opened with the rar program under
+# these same guards (see "RAR lists (#1200)" below), a plain .txt list is
+# taken as it is once it looks like one (_accept_plain_text_list()), and
+# anything else - a 7z, binary data - is refused, and the list already held
+# for that bot stays as it was (_hold_existing_list()).
+#
 # Extraction lands in a per-bot subdirectory - <FETCHED_FILES_DIR>/lists/<bot
 # nick>/ - deliberately never alongside dcc_fetch.py's own raw fetched files:
 # those are "a file I fetched to listen to", this is "a list archive I
@@ -50,6 +56,7 @@ import io
 import os
 import re
 import shutil
+import subprocess
 import threading
 import time
 import zipfile
@@ -120,6 +127,31 @@ _COPY_CHUNK = 65536
 # banner is capped at 8KB, so this is comfortable headroom over the point
 # the answer is knowable.
 _PLAUSIBLE_LIST_PREFIX = 64 * 1024
+
+# Control characters a text list never holds (#1200). Left out of the set:
+# tab, the line ends, vertical tab and form feed, DOS's end-of-file mark
+# (\x1a), and IRC's formatting codes (bold, colour, reset, monospace,
+# reverse, italic, strikethrough, underline), which a banner copied out of
+# an IRC client can carry. Random bytes are about 7% these; text is none.
+_BINARY_CONTROL_BYTES = bytes(
+    code for code in range(32)
+    if code not in b"\t\n\r\x0b\x0c\x1a\x02\x03\x0f\x11\x16\x1d\x1e\x1f")
+
+# What a list archive DCCore cannot use as plain text starts with. RAR is
+# "Rar!\x1a\x07" for both RAR4 (then \x00) and RAR5 (then \x01\x00); 7z is
+# its own six bytes.
+_RAR_SIGNATURE = b"Rar!\x1a\x07"
+_SEVEN_ZIP_SIGNATURE = b"7z\xbc\xaf\x27\x1c"
+
+# How long one rar child may run while a fetched RAR list is read: listing
+# it, or unpacking one member. A list of the biggest size allowed unpacks in
+# seconds; a rar that is still going after this is hung, and a hung child
+# here would hold the fetch lock that every other list fetch waits on.
+_RAR_LIST_TIMEOUT = 300
+
+# The longest line of rar's listing read in one go. RAR caps a name at 2048
+# bytes; a "line" longer than this is not a listing this code knows.
+_RAR_LISTING_LINE_LIMIT = 16384
 
 
 _FALLBACK_LOCK = threading.Lock()
@@ -253,15 +285,18 @@ def _fetch_file_size_budget_name():
     return f"the list archive ceiling (MAX_LIST_TEXT_SIZE x {MAX_LISTS_PER_ARCHIVE})"
 
 
-def _validate_zip_members(infolist, extract_dir):
+def _validate_zip_members(infolist, extract_dir, kind="zip"):
     """Check EVERY member before anything is extracted. Returns a short
     rejection reason string, or None if the whole archive is clear to
     extract. Never partial: the caller only proceeds if this returns None.
+
+    `kind` names the archive in the reason. A RAR list (#1200) is held to
+    these same guards, through members shaped like ZipInfo - see _RarMember.
     """
     if not infolist:
-        return "zip archive is empty"
+        return f"{kind} archive is empty"
     if len(infolist) > MAX_LIST_ZIP_ENTRIES:
-        return (f"zip contains {len(infolist)} entries, more than the "
+        return (f"{kind} contains {len(infolist)} entries, more than the "
                 f"{MAX_LIST_ZIP_ENTRIES} a real master-list archive should "
                 f"ever need (zip-bomb-shaped guard)")
 
@@ -272,7 +307,7 @@ def _validate_zip_members(infolist, extract_dir):
             continue
         total_uncompressed += info.file_size
         if total_uncompressed > max_total:
-            return (f"zip's declared total uncompressed size exceeds "
+            return (f"{kind}'s declared total uncompressed size exceeds "
                      f"{_fetch_file_size_budget_name()} ({max_total} bytes) - "
                      f"refusing to extract (zip-bomb guard)")
 
@@ -282,7 +317,7 @@ def _validate_zip_members(infolist, extract_dir):
         # BEFORE the join below, rather than relying on is_safe_path() to
         # catch every possible form of it after the fact.
         if member_name.startswith('/') or (len(member_name) > 1 and member_name[1] == ':'):
-            return f"zip entry {info.filename!r} has an absolute path"
+            return f"{kind} entry {info.filename!r} has an absolute path"
 
         parts = [p for p in member_name.split('/') if p not in ('', '.')]
         if not parts:
@@ -290,7 +325,7 @@ def _validate_zip_members(infolist, extract_dir):
 
         dest_path = os.path.join(extract_dir, *parts)
         if not dcc.is_safe_path(extract_dir, dest_path):
-            return (f"zip entry {info.filename!r} would extract outside the "
+            return (f"{kind} entry {info.filename!r} would extract outside the "
                      f"target directory (path traversal / zip-slip)")
 
         # A component made only of dots - "..", "...", "...." and so on.
@@ -317,7 +352,7 @@ def _validate_zip_members(infolist, extract_dir):
         # directory is called "....".
         for part in parts:
             if set(part) == {'.'}:
-                return (f"zip entry {info.filename!r} has a path component "
+                return (f"{kind} entry {info.filename!r} has a path component "
                          f"made only of dots ({part!r})")
 
     return None
@@ -604,6 +639,21 @@ def _pick_list_file(extract_dir):
     return candidates[0]
 
 
+def _looks_binary(head):
+    """True when `head` (raw bytes) cannot be the start of a text list.
+
+    One NUL settles it: no text list holds one, and every archive format
+    has them in its first few bytes. Failing that, control characters from
+    _BINARY_CONTROL_BYTES making up more than a 32nd of the head - random
+    data is about 7% of them, so a short binary with no NUL is still caught,
+    while a stray one in a real list is not enough to refuse it.
+    """
+    if b"\x00" in head:
+        return True
+    controls = len(head) - len(head.translate(None, _BINARY_CONTROL_BYTES))
+    return controls * 32 > len(head)
+
+
 def _accept_plain_text_list(source_path, extract_dir):
     """Take a list that arrived as plain text, returning (path, reason).
 
@@ -628,14 +678,35 @@ def _accept_plain_text_list(source_path, extract_dir):
     # 128MB and the answer is in the first few lines - after a header and a
     # banner, which is itself capped at 8KB.
     try:
-        with io.open(platform_compat.long_path(source_path), "r",
-                     encoding="utf-8", errors="replace") as handle:
+        with io.open(platform_compat.long_path(source_path), "rb") as handle:
             head = handle.read(_PLAUSIBLE_LIST_PREFIX)
     except OSError as err:
         shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
         return None, f"could not read the fetched list: {err}"
 
-    if not any(line.lstrip().startswith("!") for line in head.splitlines()):
+    # BINARY NEVER PASSES (#1200). The request-line test below was the only
+    # check, and it read the head with str.splitlines(), which also breaks on
+    # \x0b, \x0c, \x1c-\x1e and \x85: compressed data fell apart into
+    # thousands of short "lines", one of them started with "!", and 64KB of
+    # random bytes passed 50 times out of 50. A RAR or 7z list was installed
+    # as the bot's list - zero rows, reported as arrived - in place of the
+    # good one already held.
+    #
+    # Judged on the raw bytes, not on U+FFFD after decoding: a list written
+    # in a legacy 8-bit code page decodes to as many replacement characters
+    # as random bytes do (a Greek cp1253 list is about 45% of them, random
+    # data about 44%), so that ratio cannot tell the two apart. A NUL, or
+    # control characters no text list contains, can.
+    if _looks_binary(head):
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
+        return None, ("the file is not a zip, a RAR archive or a text list - "
+                      "it holds binary data - so it is not a file list")
+
+    # Lines are split where the list parser splits them: text mode ends a
+    # line at "\n", "\r\n" or a lone "\r", and nowhere else.
+    text = head.decode("utf-8", "replace")
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if not any(line.lstrip().startswith("!") for line in lines):
         shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
         return None, ("the file is not a zip and holds no request lines, so it "
                       "is not a file list")
@@ -648,6 +719,323 @@ def _accept_plain_text_list(source_path, extract_dir):
         shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
         return None, f"could not read the fetched list: {err}"
     return destination, None
+
+
+# ==========================================================================
+# RAR lists (#1200).
+#
+# A peer running DCCore with LIST_FORMAT = "rar" sends its list as a RAR
+# archive, and before this the archive itself went down the plain-text route
+# and was installed as the list. Python cannot read RAR, so the configured
+# rar program does - the same one dcc.py packs albums with, found the same
+# way (platform_compat.rar_command()).
+#
+# The archive is held to the zip route's guards, in the same order: every
+# member is LISTED and checked before a single byte is unpacked - the entry
+# count, the declared sizes against the zip-bomb budget, absolute paths,
+# drive letters, traversal and all-dots components (_validate_zip_members()
+# itself), then the text ceiling on the list that is picked.
+#
+# rar never chooses where anything is written. Each .txt member is printed
+# to a pipe ("rar p") and copied by this code to a path built here from the
+# checked name, stopping the moment it passes the size the member declared.
+# So a link member, a lying size or a name rar would resolve differently
+# from this code can never put a byte anywhere but the extraction directory,
+# and never more of them than the listing allowed for.
+# ==========================================================================
+
+class _RarMember(object):
+    """One entry of a RAR listing, shaped like the ZipInfo that
+    _validate_zip_members() reads: filename, file_size and is_dir()."""
+
+    __slots__ = ("filename", "file_size", "_is_dir")
+
+    def __init__(self, filename, file_size, is_dir):
+        self.filename = filename
+        self.file_size = file_size
+        self._is_dir = is_dir
+
+    def is_dir(self):
+        return self._is_dir
+
+
+def _archive_signature(path):
+    """"rar" or "7z" when the file starts with that format's signature,
+    else None. Read from the content, never the offered name - the same
+    reason the zip check reads the archive's own end record."""
+    try:
+        with io.open(platform_compat.long_path(path), "rb") as handle:
+            start = handle.read(8)
+    except OSError:
+        return None
+    if start.startswith(_RAR_SIGNATURE):
+        return "rar"
+    if start.startswith(_SEVEN_ZIP_SIGNATURE):
+        return "7z"
+    return None
+
+
+def _rar_argv(rar_bin, args):
+    """The command line for one rar child. A seam of its own so the tests
+    can put a stand-in rar behind every real code path below on a machine
+    with no rar installed."""
+    return [rar_bin] + list(args)
+
+
+class _RarChild(object):
+    """One rar process, read through its stdout, and killed by its own
+    handle - never by name: the operator may be running rar themselves - if
+    it outlives _RAR_LIST_TIMEOUT.
+
+    The watchdog is a timer rather than a timeout on a wait, because the
+    reader blocks in read() on the pipe, and a hung rar never returns from
+    that. Killing it closes the pipe, which ends the read.
+    """
+
+    def __init__(self, rar_bin, args):
+        self.timed_out = False
+        # A list of arguments and never a shell, no stdin (a password prompt
+        # would otherwise wait for ever; -p- says the same to rar), and
+        # stderr discarded so a chatty rar cannot fill a pipe nobody reads.
+        self.process = subprocess.Popen(_rar_argv(rar_bin, args),
+                                        stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.DEVNULL,
+                                        **platform_compat.no_console_window())
+        self._watchdog = threading.Timer(_RAR_LIST_TIMEOUT, self._expire)
+        self._watchdog.daemon = True
+        self._watchdog.start()
+
+    def _expire(self):
+        self.timed_out = True
+        self._kill()
+
+    def _kill(self):
+        try:
+            self.process.kill()
+        except OSError:
+            pass
+
+    def finish(self, completed):
+        """Wait for the child and return its exit code. `completed` says the
+        caller read its output to the end; otherwise the caller stopped
+        early, and the child is killed rather than waited on."""
+        try:
+            if not completed:
+                self._kill()
+            try:
+                return self.process.wait(timeout=_RAR_LIST_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                self._kill()
+                return self.process.wait()
+        finally:
+            self._watchdog.cancel()
+            self.process.stdout.close()
+
+
+def _decode_rar_listing_line(raw):
+    """One line of rar's listing as text, or None if it cannot be read.
+
+    On Windows rar is asked for UTF-8 (-scfr) and anything else is refused.
+    Elsewhere it prints names in the locale's encoding, as the file system
+    hands them over, so they are decoded the way Python decodes file names -
+    and go back to rar unchanged when a member is asked for by name.
+    """
+    if platform_compat.IS_WINDOWS:
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    return os.fsdecode(raw)
+
+
+def _list_rar_members(rar_bin, archive):
+    """Every entry of `archive`, from rar's technical listing ("rar lt").
+    Returns (members, None), or (None, reason).
+
+    Read a line at a time, so an archive of a million tiny entries is
+    refused at entry MAX_LIST_ZIP_ENTRIES + 1 instead of being held whole in
+    memory first. -c- keeps the archive comment out of the listing: the
+    sender writes the comment, and it can hold lines shaped like entries.
+    """
+    unreadable = "rar's listing of the archive could not be read"
+    args = ["lt", "-p-", "-cfg-", "-c-"]
+    if platform_compat.IS_WINDOWS:
+        args.append("-scfr")
+    args += ["--", archive]
+    child = _RarChild(rar_bin, args)
+    entries = []
+    reason = None
+    completed = False
+    try:
+        while True:
+            raw = child.process.stdout.readline(_RAR_LISTING_LINE_LIMIT)
+            if not raw:
+                completed = True
+                break
+            if len(raw) >= _RAR_LISTING_LINE_LIMIT and not raw.endswith(b"\n"):
+                reason = unreadable + " (a line of it is too long)"
+                break
+            line = _decode_rar_listing_line(raw)
+            if line is None:
+                reason = unreadable + " (it is not UTF-8)"
+                break
+            line = line.rstrip("\r\n").lstrip(" ")
+            # "Name: <the name>" - the name exactly as rar printed it, spaces
+            # and all, because it is handed back to rar to ask for the member.
+            key, sep, value = line.partition(": ")
+            if key == "Name" and sep:
+                if len(entries) >= MAX_LIST_ZIP_ENTRIES:
+                    reason = (f"RAR contains more than {MAX_LIST_ZIP_ENTRIES} "
+                              f"entries, more than a real master-list archive "
+                              f"should ever need (zip-bomb-shaped guard)")
+                    break
+                entries.append({"Name": value})
+                continue
+            # Everything before the first entry is rar's banner and the
+            # archive's own details.
+            if not entries or not line:
+                continue
+            if not sep or key in entries[-1]:
+                reason = unreadable
+                break
+            entries[-1][key] = value
+    finally:
+        code = child.finish(completed=completed)
+
+    if child.timed_out:
+        return None, (f"rar took more than {_RAR_LIST_TIMEOUT} seconds to "
+                      f"list the archive")
+    if reason:
+        return None, reason
+    if code != 0:
+        return None, (f"rar could not read the archive (exit code {code}) - "
+                      f"it is damaged, encrypted, or not a whole RAR archive")
+
+    members = []
+    for entry in entries:
+        name = entry["Name"]
+        kind = entry.get("Type", "").strip()
+        if kind == "Directory":
+            members.append(_RarMember(name, 0, True))
+        elif kind == "File":
+            size = entry.get("Size", "").strip()
+            if not re.fullmatch(r"[0-9]+", size):
+                return None, unreadable
+            members.append(_RarMember(name, int(size), False))
+        else:
+            # A link, a hard link or a "file copy" points at something else,
+            # and a list archive has no reason to hold one.
+            return None, (f"RAR entry {name!r} is not a file or a folder "
+                          f"({kind or 'no type given'})")
+    return members, None
+
+
+def _validate_rar_names(members):
+    """The checks a RAR member's NAME needs beyond the zip route's, because
+    rar is asked for each member by that name and reads it as a pattern.
+    Returns a reason, or None.
+
+    "*" and "?" would match other members, a leading "@" or "-" reads as a
+    list file or a switch, and two names differing only in case are one
+    name to rar on Windows. Control characters cannot be told apart from the
+    listing's own line breaks. A real list archive has none of these.
+    """
+    seen = set()
+    for member in members:
+        name = member.filename
+        if (any(ch in name for ch in "*?") or name.startswith(("@", "-"))
+                or any(ord(ch) < 32 for ch in name)):
+            return (f"RAR entry {name!r} has a name rar would read as a "
+                    f"pattern or a switch")
+        folded = name.replace("\\", "/").rstrip("/").lower()
+        if folded in seen:
+            return f"RAR entry {name!r} appears in the archive twice"
+        seen.add(folded)
+    return None
+
+
+def _unpack_rar_member(rar_bin, archive, member, dest_path):
+    """Copy one member out of `archive` to `dest_path`, through a pipe.
+    Returns None, or the reason the whole archive is refused.
+
+    Never more than the size the listing declared for it: that is the
+    number _validate_zip_members() summed against the budget, so reading
+    past it is the zip bomb those guards exist for - stopped here on the
+    real bytes, without trusting rar to stop on its own.
+    """
+    os.makedirs(platform_compat.long_path(os.path.dirname(dest_path)),
+                exist_ok=True)
+    child = _RarChild(rar_bin, ["p", "-inul", "-p-", "-cfg-", "--",
+                                archive, member.filename])
+    written = 0
+    completed = False
+    try:
+        with open(platform_compat.long_path(dest_path), "wb") as dst:
+            while True:
+                chunk = child.process.stdout.read(_COPY_CHUNK)
+                if not chunk:
+                    completed = True
+                    break
+                written += len(chunk)
+                if written > member.file_size:
+                    break
+                dst.write(chunk)
+    finally:
+        code = child.finish(completed=completed)
+
+    if child.timed_out:
+        return (f"rar took more than {_RAR_LIST_TIMEOUT} seconds to unpack "
+                f"{member.filename!r}")
+    if written > member.file_size:
+        return (f"RAR entry {member.filename!r} unpacked past its declared "
+                f"size of {member.file_size} bytes (zip-bomb guard)")
+    if code != 0:
+        return (f"rar could not unpack {member.filename!r} (exit code {code})")
+    return None
+
+
+def _extract_rar_list(rar_path, extract_dir):
+    """The RAR counterpart of the zip branch of
+    _extract_and_locate_list_file(), with the same (list_path, reason)
+    contract and the same rule: refused means nothing of it is left on disk.
+    """
+    def refuse(reason):
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
+        return None, reason
+
+    rar_bin = platform_compat.rar_command(getattr(config, "RAR_BINARY", None))
+    if not rar_bin:
+        return refuse("the list arrived as a RAR archive, and no rar program "
+                      "was found to open it - install rar, or set RAR_BINARY "
+                      "to where it is")
+    archive = os.path.abspath(rar_path)
+    try:
+        members, reason = _list_rar_members(rar_bin, archive)
+        if reason:
+            return refuse(reason)
+        reason = (_validate_zip_members(members, extract_dir, kind="RAR")
+                  or _validate_rar_names(members))
+        if reason:
+            return refuse(reason)
+        # Only the .txt members: they are all _pick_list_file() and
+        # pick_list_files() ever look at, so nothing else is worth a child.
+        for member in members:
+            if member.is_dir() or not member.filename.lower().endswith(".txt"):
+                continue
+            parts = [p for p in member.filename.replace("\\", "/").split("/")
+                     if p not in ("", ".")]
+            reason = _unpack_rar_member(rar_bin, archive, member,
+                                        os.path.join(extract_dir, *parts))
+            if reason:
+                return refuse(reason)
+    except (OSError, ValueError, subprocess.SubprocessError) as err:
+        return refuse(f"extraction aborted: {err}")
+    except Exception as err:
+        # Same promise as the zip branch: never an exception loose in the
+        # fetch thread over bytes a peer chose.
+        return refuse(f"extraction aborted: {type(err).__name__}: {err}")
+    return _pick_list_file(extract_dir), None
 
 
 def _extract_and_locate_list_file(zip_path, extract_dir):
@@ -708,7 +1096,18 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
     # the sending bot and a peer calling a zip "list.txt" must not skip the
     # archive guards. zipfile.is_zipfile() reads the file's own end-of-archive
     # record.
+    #
+    # A RAR list is not a zip either, and is opened with rar (#1200). A 7z is
+    # named in the refusal rather than called binary data, so the operator
+    # knows what the peer sent.
     if not zipfile.is_zipfile(platform_compat.long_path(zip_path)):
+        signature = _archive_signature(zip_path)
+        if signature == "rar":
+            return _extract_rar_list(zip_path, extract_dir)
+        if signature == "7z":
+            shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
+            return None, ("the list arrived as a 7z archive, which DCCore "
+                          "cannot open - it reads .txt, .zip and .rar lists")
         return _accept_plain_text_list(zip_path, extract_dir)
 
     try:
