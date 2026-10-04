@@ -26,6 +26,14 @@ Three faults in the cross-list search index, older than 1.15, found by the pre-r
   `tests/test_a_list_the_archive_no_longer_has_leaves_the_index.py`,
   `tests/test_the_filter_returns_rows_for_a_symbol_only_nick.py`, from the audit's probes. #1185's equivalence test
   compares against a reference that selects held lists the corrected way.
+- **The outbound-pace test counts only its own lines.** This PR's macOS / 3.14 job failed it three runs in a row: 9 lines
+  where 8 were sent. A debug line that an earlier test queued, or that a thread another test left running queued
+  meanwhile, was delivered by the test's own drain as a ninth. The test failed whenever that line landed inside its
+  20 ms poll. `test_the_combined_rate_never_exceeds_one_shared_slot_per_interval` now clears the debug queue in setUp
+  and counts only its own 4 queue and 4 debug lines. A stray line only takes a later slot on the shared clock, so the
+  timing assertion stands. Reproduced both ways by holding the poll until every line had landed: the old test failed
+  and the new one passes. Counting every line again fails the "queued meanwhile" case. #1194 removes these leftovers
+  suite-wide.
 
 ### ⚡ The search index gets a prefix index and stores each folder once (#1130, #1135)
 
