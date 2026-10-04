@@ -5,6 +5,7 @@
 - **New: 256 KB in the send block size menu,** for a fast seedbox, where it uses less CPU per file sent. A bigger block no longer drops a very slow downloader either: the bot waits longer for it in proportion. The default stays 64 KB, and the help says why.
 - **Faster: rows pasted from the list are found straight away.** When someone pastes several rows from one album, each after the first is looked for in the folder the first was found in - but the size pasted with the row never matched, so every row searched the whole list instead, seconds each on a big library. It matches now, whichever way the size is written.
 - **Faster: the List Browser's filter no longer slows down with many bots.** With a filter active, the sidebar was checked bot against bot every few seconds - about a second each time with a thousand-odd bots. It is worked out once per pass now.
+- **Lighter: the dashboard no longer downloads the Downloads list and the List Browser's bots while you look at another page,** or while the browser tab is in the background. Each is fetched fresh when you open it.
 
 ## v1.14.0 — The Bot Keeps a Record
 

@@ -6022,10 +6022,17 @@
     }).catch(function () { markConnection(false); });
   }, REFRESH_MS);
 
-  // Downloads can complete while the operator is looking at a different
-  // view, so this polls independently of which tab is active - same
-  // reasoning as the sidebar status card above.
-  setInterval(loadDownloads, DOWNLOADS_POLL_MS);
+  // Only while Downloads is the view on screen (#1142). Nothing outside
+  // #view-download draws what /api/fetch/status returns - the summary and
+  // both tables live inside it, and the always-visible status card and
+  // connection dot are fed by the /api/queue tick above - while the payload
+  // runs to hundreds of KB with a full history. activateView("download")
+  // fetches it fresh the moment the view opens, so a transfer that finished
+  // meanwhile is there on arrival. A hidden browser tab is not on screen
+  // either.
+  setInterval(function () {
+    if (state.active === "download" && !document.hidden) { loadDownloads(); }
+  }, DOWNLOADS_POLL_MS);
 
   // Only while Live Transfers is the view on screen. Speed now and the queue
   // counters move second to second; Stats does not, and polling a view
@@ -6040,16 +6047,22 @@
     if (state.active === "tools" && !updateList.pollTimer) { loadUpdateListSchedule(); }
   }, REFRESH_MS);
 
-  // A list-fetch (Download tab, or the File Lists fetch box) can complete
-  // while the operator is on any other view - keep the switcher's options
-  // fresh regardless of which tab is showing, same reasoning as above.
-  setInterval(pollFilelistsBots, FILELISTS_BOTS_POLL_MS);
+  // Only while the List Browser is the view on screen (#1142). Everything
+  // that reads state.filelistsBots - the sidebar, the tabs, the freshness
+  // banner, the purge and re-download buttons - lives in #view-filelists,
+  // and activateView("filelists") polls on the way in, so a list fetched
+  // while the operator was elsewhere is in the sidebar the moment it opens.
+  // That entry poll also redraws the sidebar in a language chosen meanwhile.
+  setInterval(function () {
+    if (state.active === "filelists" && !document.hidden) { pollFilelistsBots(); }
+  }, FILELISTS_BOTS_POLL_MS);
 
-  // Runs continuously regardless of which view is active, the same as
-  // loadDownloads above: the buffer this polls (webserver._console_log) is
-  // bounded server-side either way, and a console that is already caught up
-  // when the operator switches to it is worth more than the handful of
-  // requests saved by only polling while the tab is visible.
+  // Runs continuously regardless of which view is active, unlike the
+  // Downloads and List Browser polls above: the buffer this polls
+  // (webserver._console_log) is bounded server-side either way, and a
+  // console that is already caught up when the operator switches to it is
+  // worth more than the handful of requests saved by only polling while the
+  // tab is visible.
   pollConsoleLog();
   consoleLogTimer = setInterval(pollConsoleLog, CONSOLE_LOG_POLL_MS);
   pollFilelistsBots();
