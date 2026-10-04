@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 Preflight's skip ceiling is above what a Linux box legitimately skips
+
+Preflight refuses to pass when the suite skips more than `MAX_SKIPPED` tests, so that a whole family of tests going
+dark is noticed. The ceiling was 60. The suite has grown Windows-only tests since it was set, and a plain Linux machine
+now skips 63 - the `cmd.exe`, `MAX_PATH`, GDI and drive-root tests, all of which run on the Windows CI job - so
+`scripts/preflight.py` failed on a healthy Linux checkout with "skipped FAILED". The ceiling is now 80. The reasons
+are still printed whatever the count, and `tests/test_preflight_counts_what_was_skipped.py` still bounds the value
+between 40 and 100.
+
 ### 🧪 The setup page's port test checks its own socket, not the port number
 
 `test_the_port_is_freed_after_ctrl_c` took a free port, served the setup page on it, pressed Ctrl-C and then bound the

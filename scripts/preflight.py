@@ -244,11 +244,11 @@ def report_temp_leftovers(folder):
 # How many skips the normal pass may carry before preflight refuses to call
 # it a pass. Skips are legitimate - a Windows box cannot exercise permission
 # bits, a POSIX box has no cmd.exe - and the ceiling is set well above what
-# any one platform skips for those reasons (about a dozen here, a few dozen
-# on a shell with no bash), so that only a whole family of tests going dark
-# trips it. The REASONS are always printed, whatever the count: that is the
+# any one platform skips for those reasons (63 on a plain Linux box, all of
+# them Windows-only tests; a few more on a shell with no bash), so that only a
+# whole family of tests going dark trips it. The REASONS are always printed, whatever the count: that is the
 # part that turns "skipped=35" into "run this from Git Bash".
-MAX_SKIPPED = 60
+MAX_SKIPPED = 80
 
 SKIP_REASON = re.compile(r"\.\.\. skipped ['\"](.*)['\"]\s*$")
 
