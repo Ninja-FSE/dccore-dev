@@ -396,15 +396,21 @@ def reset_config(**overrides):
     return config
 
 
-# Every setting reset_config() above puts back on every call. A
-# DCCoreTestCase test that changes one of these and leaves it is not held to
-# account by the leak guard in tests/__init__.py: the next DCCoreTestCase
-# starts from the reset value whatever it was left at.
-# tests/test_a_test_leaves_the_process_as_it_found_it.py checks that each
-# name here really is reset.
-SETTINGS_RESET_FOR_EVERY_TEST = frozenset(SETTINGS_DEFAULTS) | frozenset((
-    "NICKNAME", "ORIGINAL_NICK", "LIST_BASE_NAME", "ALT_NICKNAME", "ADMIN_NICK",
-    "MY_IP_OR_DOCK", "CHANNEL", "FILE_DIRECTORY"))
+# Every setting reset_config() above puts back on every call, and the value
+# it puts back. For the leak guard in tests/__init__.py:
+#   - a DCCoreTestCase test that changes one of these and leaves it is not
+#     held to account: the next DCCoreTestCase starts from the reset value
+#     whatever it was left at;
+#   - no test is held to account for leaving one AT its reset value. A plain
+#     TestCase that calls reset_config() itself changes them from whatever
+#     the test before left, which is the reset doing its job.
+# tests/test_a_test_leaves_the_process_as_it_found_it.py checks that
+# reset_config() really sets each of these to the value given here.
+SETTINGS_RESET_VALUES = dict(SETTINGS_DEFAULTS, NICKNAME="DCCore", ORIGINAL_NICK="DCCore",
+                             LIST_BASE_NAME="DCCore", ALT_NICKNAME="DCCore_", ADMIN_NICK="SysOp",
+                             MY_IP_OR_DOCK="203.0.113.7", CHANNEL="#dccore-test",
+                             FILE_DIRECTORY="/nonexistent-dccore-test-directory")
+SETTINGS_RESET_FOR_EVERY_TEST = frozenset(SETTINGS_RESET_VALUES)
 
 
 class RecordingSocket:

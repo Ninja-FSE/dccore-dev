@@ -113,3 +113,129 @@ if PORT_SHIFT:
         return reloaded
 
     _importlib.reload = _reload_into_the_shards_window
+
+
+# A TEST LEAVES THE PROCESS AS IT FOUND IT.
+#
+# Each shard runs a hundred-odd modules in one process, and the CI flakes
+# that kept being re-run were all one test reaching into a later one:
+#   - a settings save in test_dashboard_routes started a real !rehash on a
+#     thread nobody waited for; it reloaded defaults while the NEXT test was
+#     logging in, cleared the password hash, and the login answered 401;
+#   - every real DCC send left a 3, 15 or 45 s queue sweep behind, which woke
+#     inside a later test and thawed, dropped or re-froze ITS queue;
+#   - DCC CHAT listeners held a third of the shard's ports for a minute;
+#   - settings set directly and never put back (the DCC port range collapsed
+#     to one port, a password hash, a debug channel, two list folders).
+# None of them failed the test that caused it, so each one cost a hunt.
+#
+# So every test, whatever its base class, is checked after its last cleanup:
+#   - a thread it started that is still running fails it. One that is only
+#     finishing gets LEAK_GRACE_SECONDS; a queue sweep, a rehash or a list
+#     update fails at once, because ending a little later is exactly how
+#     those reach the next test;
+#   - a setting it changed and did not put back fails it - unless the value
+#     left is the one defaults.py ships, which is what a test that reloads
+#     defaults gets, and is no leak; or the value tests/support.py's
+#     reset_config() gives it; or unless the test's class names it in
+#     SETTINGS_THE_HARNESS_SETS (DCCoreTestCase: the ones its setUp resets
+#     for every test anyway).
+# It costs a snapshot of a dozen threads and the ~140 shipped settings per
+# test; a grace wait only happens when something is still running.
+#
+# Hooked into unittest.TestCase._callSetUp, the one call every test makes
+# before setUp (Python 3.8 onwards), so a plain TestCase is held to it as
+# well as DCCoreTestCase - several of the leaks above were plain TestCases.
+# tests/test_a_test_leaves_the_process_as_it_found_it.py proves the hook is
+# still in place and still catches each kind.
+import threading as _threading
+import time as _time
+import unittest as _unittest
+
+LEAK_GRACE_SECONDS = 5.0
+
+# Threads that do their harm by ending late: alive after the cleanups at all
+# is already a leak, however soon they would finish.
+ACTS_ON_A_LATER_TEST = frozenset((
+    "delayed_queue_trigger_fallback", "delayed_port_retry",  # dcc.start_dcc_send()
+    "handle_rehash_request",                                 # a settings save's !rehash
+    "async_list_updater",                                    # a list update request
+))
+
+_UNSET = object()
+
+
+def _settings():
+    """{name: value} for every setting defaults.py ships, or None before the
+    daemon's config has been imported at all."""
+    config = _sys.modules.get("defaults")
+    shipped = getattr(config, "SHIPPED_VALUES", None)
+    if not isinstance(shipped, dict):
+        return None
+    return {name: getattr(config, name, _UNSET) for name in shipped}
+
+
+def _same(left, right):
+    try:
+        return left is right or bool(left == right)
+    except Exception:  # noqa: BLE001 - a value that cannot compare is not the same
+        return False
+
+
+def _target_name(thread):
+    target = getattr(thread, "_target", None)
+    return getattr(target, "__name__", None) or thread.name
+
+
+def _check_the_test_left_the_process_as_it_found_it(test, found):
+    problems = []
+
+    new = [thread for thread in _threading.enumerate()
+           if thread not in found["threads"] and thread.is_alive()]
+    late = [thread for thread in new if _target_name(thread) in ACTS_ON_A_LATER_TEST]
+    deadline = _time.monotonic() + LEAK_GRACE_SECONDS
+    for thread in new:
+        if thread not in late:
+            thread.join(max(0.0, deadline - _time.monotonic()))
+    left = late + [thread for thread in new if thread not in late and thread.is_alive()]
+    if left:
+        problems.append(
+            "threads this test started are still running after its cleanups: %s. "
+            "Join them in a cleanup, or stub what starts them (a real DCC send: "
+            "tests.support.hold_send_follow_ups)." % ", ".join(
+                sorted(repr(_target_name(thread)) for thread in left)))
+
+    before = found["settings"]
+    after = _settings()
+    if before is not None and after is not None:
+        shipped = getattr(_sys.modules.get("defaults"), "SHIPPED_VALUES", {})
+        theirs = getattr(test, "SETTINGS_THE_HARNESS_SETS", ())
+        support = _sys.modules.get("tests.support") or _sys.modules.get("support")
+        reset = getattr(support, "SETTINGS_RESET_VALUES", {})
+        changed = ["%s: %r -> %r" % (name, before[name], after[name])
+                   for name in sorted(before)
+                   if name in after and name not in theirs
+                   and not _same(before[name], after[name])
+                   and not _same(after[name], shipped.get(name, _UNSET))
+                   and not _same(after[name], reset.get(name, _UNSET))]
+        if changed:
+            problems.append(
+                "settings this test changed and did not put back: %s. Use "
+                "set_config() (DCCoreTestCase) or addCleanup(setattr, config, "
+                "name, old_value)." % "; ".join(changed))
+
+    if problems:
+        raise AssertionError("This test leaks into the tests after it. " + " ".join(problems))
+
+
+_plain_call_set_up = _unittest.TestCase._callSetUp
+
+
+def _call_set_up_and_check_afterwards(self):
+    found = {"threads": set(_threading.enumerate()), "settings": _settings()}
+    # The first cleanup registered, so the last to run.
+    self.addCleanup(_check_the_test_left_the_process_as_it_found_it, self, found)
+    return _plain_call_set_up(self)
+
+
+_unittest.TestCase._callSetUp = _call_set_up_and_check_afterwards
