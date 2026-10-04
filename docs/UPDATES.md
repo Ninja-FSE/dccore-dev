@@ -290,6 +290,28 @@ message at 20 bans, 64 ms at 600, 270 ms at 2,000 - about four messages a second
   random files (CRLF, CR and LF endings, metacharacters, NEL), open and parse counts, the same-mtime rewrite, both
   writers and the fail-open path. `test_bans_and_flood.test_star_only_pattern_is_refused` expects the warning on the
   first check and not the second.
+### ⚡ The filter bar reads beside a list being indexed (#1129)
+
+Performance audit 2026-10-03 P7. `list_index.index_bot_list()` holds `runtime.list_index_lock` for the whole write of a
+fetched list - about 9 s at a realistic 378k rows, 46 s at 1.5M - and every filter-bar keystroke waited on that same
+lock and connection: the List Browser's filter froze for as long as a fetch took to index.
+
+- `search()`, `bots_with_a_match()` and `indexed_bots()` read on a connection of their own (`PRAGMA query_only`) under
+  a new `runtime.list_index_read_lock`. WAL gives each query a snapshot of the last COMMITTED state - the old list until
+  the write commits, the new one after, never the half-replaced one between the delete and the insert - so the false
+  "empty" `bots_with_a_match()` guards against still cannot happen. The skeptic's prototype answered keystrokes in
+  about 120 ms during a 9 s write.
+- The read connection is opened only after the writer's `_connect()` has made the schema or repaired a damaged file,
+  and `_close_locked()` closes it FIRST on every path - `close()`, a moved `LIST_INDEX_FILE`, the repair, which renames
+  the file straight after (Windows refuses that while any handle is open). Lock order: `list_index_lock`, then
+  `list_index_read_lock`; a reader never takes the write lock while holding its own, and an ordinary keystroke takes
+  only its own.
+- The behaviour change: a keystroke during a write answers from the list as it was before the write, instead of
+  waiting for it.
+- Tests: `tests/test_a_list_being_indexed_does_not_hold_the_filter_bar.py` - queries answered from the old list while a
+  write sits uncommitted, the lock order instrumented, the reader closed before the rename and on every close path,
+  schema-first opening, read-only. In `test_crosslist_search.py` two failure-injection tests patch the new `_reader()`
+  seam instead of `_connect()`, and the handle test expects three opens instead of two.
 
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
