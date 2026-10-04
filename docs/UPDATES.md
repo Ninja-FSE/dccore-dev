@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 The settings help says what the code does
+
+Pre-release docs audit. Four "?" texts on the Settings page, and the sample built from them, described something the
+code does not do, and the Spanish and French help left out sentences the English carries.
+
+- `DCC_SEND_BUFFER`: 0 was "let Windows or Linux decide". On Windows 0 sets a 4 MB buffer, because Windows would
+  otherwise hold a fixed 64 KB; only Linux and macOS tune it themselves. The help and the `defaults.py` comment say so.
+- `DCC_PORT_END`: sends are not the only users of the range. Passive downloads from other bots and a listen-mode admin
+  console take ports from it too, so the help asks for send slots plus fetch slots plus one, not send slots alone.
+- `LIST_SCAN_THREADS`: searches do not wait during the scan unless "Pause for the whole rebuild" is on; by default they
+  are answered from the current list until the swap. The help and the `defaults.py` comment no longer say they wait.
+- Spanish and French gained the sentences they lacked: the 14-day refetch of an undated list (`AUTO_REFETCH_LISTS`),
+  the 8-list cap on a fetched archive (`MAX_FETCH_FILE_SIZE`), that file requests are not counted (`MAX_REQUESTS`),
+  and the Stats page where a nick can be forgotten (`TRANSFER_LOG_FILE`). The English `BOT_WINDOW` help now lists
+  `shutdown now` in the admin console as a way to stop a hidden bot, as the translations already did.
+- `conf/settings.conf.sample` regenerated. A comment line in `LIST_SCAN_THREADS`'s block began with a number and was
+  read as a numbered section header, so the sample carried a bogus `[on a local disk it makes no]` section; the reflowed
+  comment no longer starts a line with one.
+
 ### 📦 The list publishes first, and audio lengths are read in the background (#1182)
 
 With `LIST_SHOW_AUDIO_INFO` on, a rebuild read every new or changed audio file before it wrote the list, capped by

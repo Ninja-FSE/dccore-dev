@@ -555,20 +555,19 @@
 # Audio files read at once for length and quality
 #LIST_AUDIO_INFO_THREADS = 64
 
-
-[on a local disk it makes no]
 # How many folders are listed at once while the list is rebuilt. On a network
 # drive most of the time is waiting, so more at once makes every rebuild
-# shorter - and searches wait while it runs. 1 lists one folder at a time. 1
-# to 64.
+# shorter. With Pause for the whole rebuild on, searches wait while it runs. 1
+# lists one folder at a time. 1 to 64.
 #
 # How many folders the rebuild lists at once (#922). On a network mount every
 # directory listing and every file's size is a round trip, and one folder at a
 # time none of them overlap - about 80 s of every rebuild on a 64,136-file NFS
-# library, with searches paused. With 2 ms of simulated latency per request,
-# 16 at a time scanned 15 times as fast as one. On a local disk it makes no
-# difference worth measuring (a fraction of a second either way). 1 is the
-# scan as it always was. 1 to 64.
+# library. With 2 ms of simulated latency per request, 16 at a time
+# scanned 15 times as fast as one. On a local disk it makes no difference
+# worth measuring (a fraction of a second either way). Searches are answered
+# from the current list while the scan runs, unless PAUSE_FOR_WHOLE_UPDATE
+# is on. 1 is the scan as it always was. 1 to 64.
 # Folders listed at once while the list is rebuilt
 #LIST_SCAN_THREADS = 16
 
@@ -970,8 +969,9 @@
 
 # How the bot runs on Windows when start-dccore.bat starts it: in its window
 # (normal), minimised to the taskbar, or with no window (hidden), its output
-# then in the log file. Stop a hidden bot with start-dccore.bat stop or Tools
-# > Stop the bot. The first run always has its window.
+# then in the log file. Stop a hidden bot with start-dccore.bat stop, Tools >
+# Stop the bot or shutdown now in the admin console. The first run always has
+# its window.
 #
 # How the bot runs on Windows when start-dccore.bat starts it (#1065):
 # normal     in its own window, as always - closing it stops the bot
@@ -1116,11 +1116,13 @@
 #DCC_BLOCK_SIZE = 65536
 
 # How much data the operating system may hold in flight for one send, in
-# bytes. Leave at 0 to let Windows or Linux decide - that is right for nearly
-# every connection. Only worth experimenting with on a very fast link to a
-# distant downloader.
+# bytes. 0 uses the platform default: 4 MB on Windows, which would otherwise
+# hold only 64 KB, and the system's own tuning on Linux and macOS - right for
+# nearly every connection. Only worth trying on a very fast link to a distant
+# downloader.
 #
-# The socket send buffer for a DCC transfer, in bytes. 0 leaves it to the OS.
+# The socket send buffer for a DCC transfer, in bytes. 0 is the per-platform
+# default below: 4 MB on Windows, the OS's own tuning elsewhere.
 # 
 # THIS IS THE ONE THAT MATTERS ON A FAST, DISTANT LINK, and it is not the
 # packet size above. What bounds throughput on TCP is the bandwidth-delay
@@ -1129,10 +1131,13 @@
 # at roughly 5 Mbps no matter how big each write is - the writer simply waits
 # for the far end to acknowledge before it can put more on the wire.
 # 
-# LEFT AT 0 BY DEFAULT, deliberately. Both Windows and Linux auto-tune this
-# buffer, and setting it explicitly TURNS THAT OFF - so a value chosen for one
-# link can be worse than the default on every other. It is here to be
-# experimented with on a link the operator knows, not to be set hopefully.
+# LEFT AT 0 BY DEFAULT, deliberately, and 0 is not the same on every platform
+# (see dcc._DEFAULT_SEND_BUFFER). Linux and macOS auto-tune this buffer, and
+# setting it explicitly TURNS THAT OFF - so a value chosen for one link can be
+# worse than the default on every other; there 0 leaves it to the OS. Windows
+# leaves it at a fixed 64 KB, which caps a distant transfer at a few MB/s, so
+# there 0 sets 4 MB. It is here to be experimented with on a link the operator
+# knows, not to be set hopefully.
 # 0 = per-platform default (4MB on Windows, OS auto-tuning on Linux)
 #DCC_SEND_BUFFER = 0
 
@@ -1143,10 +1148,11 @@
 # First port the bot listens on for outgoing DCC sends; forward this range if you are behind NAT
 #DCC_PORT_START = 55000
 
-# The last port of that range. Each transfer running at the same time needs
-# its own port, so keep at least as many ports as you have send slots.
+# The last port of that range. Sends, downloads from other bots and a listen-
+# mode admin console all take their ports from it, so keep at least as many
+# ports as your send slots and fetch slots together, plus one.
 #
-# Last port of that range; each simultaneous transfer needs one free port, so keep at least MAX_DCC_SLOTS
+# Last port of that range; sends, passive fetches and a listen-mode admin console share it, so keep at least MAX_DCC_SLOTS + MAX_FETCH_SLOTS + 1
 #DCC_PORT_END = 55010
 
 # How many downloads FROM other bots you run at the same time. Separate from
