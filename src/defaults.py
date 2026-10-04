@@ -344,7 +344,8 @@ KNOWN_BOTS_FILE: str = "./data/known_bots.json"
 # per keystroke. sqlite3 is stdlib, so the no-third-party-packages property
 # holds. See list_index.py for why it is FTS5 specifically.
 #
-# EXPECT IT TO BE LARGE. Roughly a third larger than the lists themselves.
+# EXPECT IT TO BE LARGE: about three times the lists' own text (#1189:
+# 240 MB of lists, 778 MB of index).
 # Four million rows measured at 452MB before the prefix index that makes
 # short filter-bar prefixes fast (#1130); that adds about 70%, and storing
 # each folder heading once (#1135) takes back about a fifth of the result.

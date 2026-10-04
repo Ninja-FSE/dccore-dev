@@ -273,10 +273,10 @@ def _open(path):
         raise
     if rebuilt:
         print("[LIST-INDEX] Rebuilding the search index once, to make "
-              "short prefixes in the dashboard's filter fast and the file "
-              "smaller: the lists you hold are indexed again from disk, "
-              "about a minute per million files. Browsing and @find are "
-              "unaffected.")
+              "short prefixes in the dashboard's filter fast: the lists you "
+              "hold are indexed again from disk, up to about a minute per "
+              "million files, and the file comes out about half as big again "
+              "as before. Browsing and @find are unaffected.")
         # The same flag a repaired file sets: the readers run the backfill
         # before they answer, so an emptied table is never reported as
         # holding no match even when no startup backfill ran first.

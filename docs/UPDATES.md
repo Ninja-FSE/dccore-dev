@@ -14,7 +14,7 @@ stored its whole folder heading.
 - The FTS5 table has `prefix='1 2 3 4'` and `columnsize=0`: "al" 1.2 ms, "love m" 17 ms, the 21 keystrokes 57 ms,
   every answer identical. Folder headings are stored once per list in a new `folders(id, bot, folder)` table and each
   row holds the id; `index_bot_list()` and `drop_bot()` clear a list's folders with its rows, and `search()` maps the
-  ids back inside the same SELECT, so it reads one snapshot. Net size about +34% over today (the prefix index +70%,
+  ids back inside the same SELECT, so it reads one snapshot. Net size about +46% over today (the prefix index +70%,
   the folder ids back a fifth), build time about 2x. #1129's read connection and lock order are unchanged.
 - `_SCHEMA_VERSION` 2. `_open()` reads the table's stored CREATE statement; an index made before drops and recreates
   `entries` in the same transaction as the CREATE, says so once, and sets `_rebuild_pending`, so the held lists come
