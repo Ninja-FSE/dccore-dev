@@ -354,7 +354,11 @@ def reset_config(**overrides):
                         # queue's timestamp forward by the whole time since the
                         # earlier test - minutes - so a queue that test expects
                         # to expire is kept.
-                        ("freeze_clock_paused_at", None)):
+                        ("freeze_clock_paused_at", None),
+                        # #1182: one test's background audio reading, or
+                        # its result, is not the next one's.
+                        ("audio_reading", None), ("audio_reading_last", None),
+                        ("audio_retry_waiting", False)):
         setattr(runtime, name, value)
 
     # A FRESH OUTBOUND CLOCK PER TEST. runtime.outbound_pacer is a
