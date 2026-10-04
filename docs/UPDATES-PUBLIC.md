@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.15.0 — The Bot Gets Faster
 
 - **Changed: with track lengths and quality on (`LIST_SHOW_AUDIO_INFO`), the list is published first and the lengths are read afterwards, in the background.** No rebuild waits for them, there is no time limit any more (`LIST_AUDIO_INFO_MINUTES` is no longer used), and when they are read the list is updated with them - keeping its date, so other bots do not fetch it twice. One rebuild or reading runs at a time, and a rebuild stops a reading in progress without losing what it read. `update_list.py` run by hand publishes and says how to read the lengths; `update_list.py --read-audio-info` reads them in the foreground. The @DCCore window, the dashboard and the bot's own window show how far the reading has got (and `audioinfo` in the console, asked while one runs), and **Read audio info** on the Tools page or under Library in the mIRC menu starts one by hand. Update `dccore.mrc` (1.12) for the menu and the progress.
 - **Faster: the List Browser turns pages at once.** Every page re-read the whole list - seconds each on a big list, and gigabytes of memory on a very big one of your own. A page now reads only its own folders, and looks exactly the same.
