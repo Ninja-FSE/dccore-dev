@@ -15,6 +15,7 @@ record's fill helper wrote its rows one transaction at a time. About 50 s of eve
   thaws the user, checks the countdown ends, and asks again once its threads have settled whether anyone was promoted.
 - `fill_many()` builds its rows through `record_sent()` and writes them in one transaction.
 - Tests: `tests/test_the_suite_waits_on_no_fixed_timers.py`.
+
 ### 🧪 The suite runs in four processes (#1146)
 
 Performance audit 2026-10-03 T1, on top of #1147 and #1149. The suite ran in one process: 5-10 minutes, on CI and in
@@ -71,6 +72,7 @@ start - the Ctrl-C tests in `test_the_bot_can_be_stopped_without_its_window` tim
   leaves there and fails it. One entry is expected: the fixed sink for a write from a thread that outlived its test.
 - Tests: `tests/test_a_test_leaves_the_temp_folder_as_it_found_it.py`, and the dev-only
   `tests/test_preflight_names_what_a_pass_leaves_in_temp.py` (on the public strip list).
+
 ### ⚡ A bigger send block keeps the slow-link floor, and 256 KB is on the menu (#1139)
 
 Performance audit 2026-10-03 P17. Every block of a send costs a read, a `sendall()` and an ack check, so a bigger
@@ -92,6 +94,7 @@ survived was block / 60 s: 1.1 KB/s at 64 KB, 2.2 KB/s at the 128 KB the menu al
 - Tests: `tests/test_a_bigger_send_block_keeps_the_slow_link_floor.py` - the timeout at every size, the floor, real
   loopback sends at the default, 128 KB and 256 KB, the menu and its label, the default held to the fallback;
   `test_rehash_config_window.py` and `test_size_settings_have_units.py` gain 256 KB in the menu.
+
 ### 🐛 A pasted size hint matches the list's own rows (#1121)
 
 Performance audit 2026-10-03 B1. The list writes every row's size with two decimals (`::INFO:: 7.30MB`, the
@@ -109,6 +112,7 @@ scan, about three seconds a row on a million-row list, for every track of an alb
   of awkward sizes and checks every row's own hint against its file, and the #886 folder memory end to end; plus the
   other formats. The seven size formatters in the code base are left as they are - one owner for them is a separate
   tidy-up.
+
 ### ⚡ The frozen-queue sweep reads the channel lists once (#1140)
 
 Performance audit 2026-10-03 P18. Step 1 of `check_queue_and_send()` - every finished transfer, every fallback trigger,
@@ -123,6 +127,7 @@ nicks, with requests and the dispatcher waiting on the lock.
   already does. The snapshot is taken once per sweep, so it can be a few milliseconds older for the last nick checked.
 - Tests: `tests/test_the_frozen_sweep_reads_the_channel_lists_once.py` - one read for 20 frozen nicks and for 2, the
   per-nick scan for one, mixed case on either side, and 40 randomised trials against `user_is_present_in_ram()`.
+
 ### ⚡ The List Browser's filter highlight groups the bots once per call (#1141)
 
 Performance audit 2026-10-03 P19. While a filter was active, `applyFilterHighlight()` called `entriesForNick()` for
@@ -135,6 +140,7 @@ again on every 4 s sidebar poll and every filter answer. About a second a pass w
 - The rows, their order and the classes the filter puts on them are unchanged.
 - Tests: `tests/test_the_filter_highlight_groups_the_bots_once_per_call.py`; two pinned source tests follow the new
   statement.
+
 ### ⚡ Views that are not on screen are not polled (#1142)
 
 Performance audit 2026-10-03 P20. Every open dashboard tab fetched `/api/fetch/status` every 4 s and
@@ -147,6 +153,7 @@ view draws the first - with 2,000 pending rows about 1 MB a poll - and only the 
 - The always-visible status card and connection dot are fed by the `/api/queue` tick, which is unchanged; so is the
   console log poll, which keeps running on every view on purpose.
 - Tests: `tests/test_views_off_screen_are_not_polled.py`.
+
 ### ⚡ The dashboard's JSON keeps its keys in built order (#1143)
 
 Performance audit 2026-10-03 P21. `create_app()` left Flask's JSON provider at `sort_keys=True`, so every dict in
@@ -161,6 +168,7 @@ every answer was sorted key by key - most of what `/api/fetch/status` cost to se
   as before. Everything else looks fields up by name.
 - Tests: `tests/test_the_dashboard_json_keeps_its_keys_in_built_order.py`, including the surrogate filename and both
   Flask generations.
+
 ### ⚡ The list rebuild's threaded walk takes each finished folder in constant time (#1124)
 
 Performance audit 2026-10-03 P2. `update_list.walk_with_sizes()` waited with `concurrent.futures.wait()` on every
@@ -175,6 +183,7 @@ folders took 47 times as long.
 - Tests: `tests/test_the_walk_schedules_directories_in_linear_time.py` - lock acquisitions per finished folder stay
   constant with 300 outstanding (the old `wait()` took tens of thousands), the result matches `workers=1`, and stopping
   early leaves no worker running.
+
 ### ⚡ The list rows are written without a per-character pass (#1125)
 
 Performance audit 2026-10-03 P3. `update_list._one_line()` round-tripped every name through UTF-8 and rebuilt it a
@@ -190,6 +199,7 @@ character at a time, the nick was looked up per row, and every row was its own `
   library (accents, emoji, NUL, tab, DEL, a newline, lone surrogates, case-twin folders) byte-identical to rebuilds with
   the old function, for the music, `!rar` and film lists; and nick lookups and `write()` calls that do not grow with
   the rows.
+
 ### ⚡ The day's statistics rollover is checked once a day, not once a message (#1132)
 
 Performance audit 2026-10-03 P10. Every channel line reached `db.check_and_rotate_day()`, which takes
@@ -207,6 +217,7 @@ a slow `record_download()` holding it stalled the IRC read thread on the next li
 - Tests: `tests/test_the_day_rollover_is_checked_once_a_day_not_once_a_message.py`;
   `test_a_failed_midnight_rotation_does_not_stop_every_command.test_recovery_clears_the_failure` now pins one check for
   the rest of that day.
+
 ### ⚡ The read loop's line patterns are compiled once, not per question (#1144)
 
 Performance audit 2026-10-03 P22, the skeptic's smaller fix only. The read loop asks `is_server_numeric()` and
@@ -222,6 +233,7 @@ it up in `re`'s cache; `parse_privmsg()`, `parse_kick()` and `parse_notice()` ra
   dispatch and is not done.
 - Tests: `tests/test_reading_a_server_line_does_not_rebuild_its_patterns.py` - the old helpers against the new on real
   lines, forged ones (user events forged inside a message body) and 4,000 generated lines with tab separators.
+
 ### ⚡ A netjoin does not sort the chat rate table per JOIN or log every departure (#1145)
 
 Performance audit 2026-10-03 P23. Two costs on JOIN, PART and QUIT in `serverschat.py`:
@@ -235,6 +247,7 @@ Performance audit 2026-10-03 P23. Two costs on JOIN, PART and QUIT in `serversch
   console log: at a few departures a second it rotated half a day's diagnostics away. It now prints only under
   `DEBUG_MODE`; a known peer's departure is said as before.
 - Tests: `tests/test_a_netjoin_does_not_sort_per_join_or_log_every_departure.py`.
+
 ### ⚡ The audio cache rewrites only the rows that changed (#1137)
 
 Performance audit 2026-10-03 P15. `audio_info.Cache.publish()` deleted every row of its scope and inserted them all
@@ -251,6 +264,7 @@ searches were still held.
 - Tests: `tests/test_the_audio_cache_rewrites_only_what_changed.py` - the old `publish()` kept and compared on a seeded
   database holding every kind of row (unchanged, changed, failed read, gone, new, left unread by the time budget,
   another list's scope), the changes SQLite reports, nothing written on an unchanged rebuild, and pending released.
+
 ### ⚡ The rebuild's scan lower-cases each name once and slices each folder's path (#1138)
 
 Performance audit 2026-10-03 P16. For every file the scan called `is_listed_file()`, `is_packable_file()`,
@@ -270,6 +284,7 @@ joined whether it would be read or not. 9.9 s for a million files in 71,429 fold
   split on and off, each extension list empty, string-form settings): the same rows, packable folders, totals and audio
   paths read; `relative_folder()` against `relpath()` under both ntpath and posixpath rules.
   `test_what_the_scan_does_to_every_file.py` now pins the `relative_folder()` call.
+
 ### ⚡ hard_bans.txt is parsed once per version of the file, not per message (#1131)
 
 Performance audit 2026-10-03 P9. `security.check_user_status()` runs on every channel message, before anything knows
@@ -290,6 +305,7 @@ message at 20 bans, 64 ms at 600, 270 ms at 2,000 - about four messages a second
   random files (CRLF, CR and LF endings, metacharacters, NEL), open and parse counts, the same-mtime rewrite, both
   writers and the fail-open path. `test_bans_and_flood.test_star_only_pattern_is_refused` expects the warning on the
   first check and not the second.
+
 ### ⚡ The filter bar reads beside a list being indexed (#1129)
 
 Performance audit 2026-10-03 P7. `list_index.index_bot_list()` holds `runtime.list_index_lock` for the whole write of a
@@ -312,6 +328,7 @@ lock and connection: the List Browser's filter froze for as long as a fetch took
   write sits uncommitted, the lock order instrumented, the reader closed before the rename and on every close path,
   schema-first opening, read-only. In `test_crosslist_search.py` two failure-injection tests patch the new `_reader()`
   seam instead of `_connect()`, and the handle test expects three opens instead of two.
+
 ### ⚡ Installing a fetched list streams its rows into the index (#1134)
 
 Performance audit 2026-10-03 P12, on top of #1136 and #1126 (the same scan) and #1122 (the same `backfill_missing()`).
