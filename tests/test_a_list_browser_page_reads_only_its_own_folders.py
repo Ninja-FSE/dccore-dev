@@ -128,12 +128,12 @@ class OwnListCase(DCCoreTestCase):
 
     def whole_list_payload(self, *args, **kwargs):
         """build_filelists_payload() as it was: the whole list parsed."""
-        real = list_mod.page_of_own_lists
-        list_mod.page_of_own_lists = lambda *a, **k: None
+        real = list_mod.page_of_list_files
+        list_mod.page_of_list_files = lambda *a, **k: None
         try:
             return webserver.build_filelists_payload(*args, **kwargs)
         finally:
-            list_mod.page_of_own_lists = real
+            list_mod.page_of_list_files = real
 
     def spy(self, name):
         real = getattr(list_mod, name)
@@ -180,7 +180,7 @@ class EveryPageIsTheSameAsTheWholeListParse(OwnListCase):
     def test_every_page_at_every_size(self):
         total = self.whole_list_payload()["total"]
         self.assertGreater(total, 40)
-        answered = self.spy("page_of_own_lists")
+        answered = self.spy("page_of_list_files")
         for limit in (1, 2, 7, 50, 200, None, 0):
             step = limit or total
             for offset in list(range(0, total + 2, step)) + [total + 50]:
@@ -267,7 +267,7 @@ class APageParsesOnlyItsOwnFolders(OwnListCase):
         self.assertLessEqual(len(split), list_mod.FILELISTS_MAX_PAGE_ROWS + 45)
 
     def test_a_search_still_reads_the_whole_list(self):
-        used = self.spy("page_of_own_lists")
+        used = self.spy("page_of_list_files")
         payload = webserver.build_filelists_payload(0, 50, q="abba")
         self.assertEqual(used, [])
         self.assertEqual(payload, self.whole_list_payload(0, 50, q="abba"))
@@ -329,7 +329,7 @@ class AChangedListIsReadAgain(OwnListCase):
         with open(self.master, "ab") as handle:
             handle.write(b"\n" + RULE.encode() + b"\rD:\\MEDIA\\Odd\\\r" + RULE.encode()
                          + b"\r!SomeBot Odd One.flac  ::INFO:: 1.00MB\n")
-        self.assertIsNone(list_mod.page_of_own_lists(
+        self.assertIsNone(list_mod.page_of_list_files(
             list_mod.all_list_paths(), 0, 5, "SomeBot",
             max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS))
         total = self.whole_list_payload()["total"]

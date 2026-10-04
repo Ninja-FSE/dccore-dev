@@ -250,7 +250,8 @@ list_count_lock = threading.Lock()
 
 # list.py's folder tables for the List Browser's pages of our own list
 # (#1128). Here for the same reason as list_count_lock just above; the dict
-# stays in list.py, where a reload costs one rebuild of a table.
+# stays in list.py, where a reload costs one rebuild of a table. Taken INSIDE
+# list_fetch's own lock for a fetched list's page, never around it.
 list_folder_table_lock = threading.Lock()
 
 # The automatic list refresh's start guard (#625). list_fetch.ensure_auto_

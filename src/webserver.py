@@ -1213,7 +1213,7 @@ def build_filelists_payload(offset=0, limit=None, name=None, q=""):
 
     Issue #76, option 3: what gets returned is a page, `[offset:offset+limit]`
     in folders, plus the `total` counts, never the whole list. Unfiltered, the
-    page comes from list.page_of_own_lists() (#1128): a table of where each
+    page comes from list.page_of_list_files() (#1128): a table of where each
     folder is, built once per version of the lists, so a page parses only its
     own folders - it used to parse the ENTIRE list for every page, 31 s and
     2.1 GB at two million rows. A `q` search, and any list the table cannot
@@ -1235,7 +1235,7 @@ def build_filelists_payload(offset=0, limit=None, name=None, q=""):
     source = getattr(config, "NICKNAME", "?")
     answer = None
     if not search_words:
-        answer = list_mod.page_of_own_lists(
+        answer = list_mod.page_of_list_files(
             list_mod.all_list_paths(name), offset, limit, source,
             max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
     if answer is None:
@@ -2326,8 +2326,9 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None, list_marker="", q
 
     Issue #76, options 2 and 3 together: the fetched bot's rows are no longer
     kept in memory at all (see list_fetch.process_fetched_list_zip()) - this
-    re-parses the stored list_path FRESH on every call, via
-    list_fetch.get_fetched_bot_page(), then returns one page of the result.
+    reads one page of the stored list_path on every call, via
+    list_fetch.get_fetched_bot_page(), which parses only that page's folders
+    (#1128).
     "entries" is in the EXACT same row shape build_filelists_payload() returns
     for this bot's own list (both go through list.entries_to_filelist_rows()),
     so the frontend's File Lists table rendering needs no changes to display

@@ -1382,10 +1382,11 @@ def page_folder_groups(groups, offset, limit, max_rows=None):
     return page, total_folders, total_rows, row_capped
 
 
-# THE OWN LIST'S FOLDER TABLE (#1128). The List Browser asks for one page of
-# folders at a time, and every page re-read the whole of our own lists to
-# answer it: a dict per row, a second dict per row, every row grouped, and
-# then 200 folders kept - 31 s and 2.1 GB per page at two million rows, paid
+# THE FOLDER TABLE (#1128). The List Browser asks for one page of folders at
+# a time, and every page re-read the whole list to answer it - our own lists
+# here, a fetched one in list_fetch.get_fetched_bot_page(): a dict per row,
+# a second dict per row, every row grouped, and then 200 folders kept - 31 s
+# and 2.1 GB per page at two million rows of our own list, paid
 # again on every page change. So the first page of a list builds this table
 # instead: where each folder's rows are in the files, how many there are, and
 # which of them dedup drops. A page then seeks to its own folders and parses
@@ -1403,19 +1404,25 @@ def page_folder_groups(groups, offset, limit, max_rows=None):
 #  - a group exists only if one of its rows survived dedup, so the table is
 #    grouped after dedup, as group_rows_by_folder() is;
 #  - rows before any heading are the '' group;
-#  - our own list is the master list AND the video list, read as one.
+#  - our own list is the master list AND the video list, read as one; a
+#    fetched list is one file, read the same way.
 #
 # Keyed on every file's (path, mtime, size), as count_request_lines() is, so
 # a rebuilt list is read again; commands.py also drops the tables when a
 # rebuild finishes. A page checks each file it opens against that key and
 # each run's rows against a checksum, so a rewrite landing between the stat
 # and the read, or a same-size one inside one mtime tick, costs a fallback to
-# the whole-list parse, never wrong rows.
+# the whole-list parse, never wrong rows. A refetch and a purge drop the
+# tables of that bot's files by name as well (forget_folder_tables(under=)).
 # The lock is runtime.py's; the dict starts empty after a !rehash, which
 # costs one rebuild of the table.
+#
+# At most _FOLDER_TABLES_KEPT, the least recently used dropped first: our own
+# list and the few fetched lists somebody is paging through. A fetched list
+# is rarely more than a few tens of thousands of folders, about 1 MB of table.
 _folder_table_lock = runtime.list_folder_table_lock
 _folder_tables = {}   # signature -> _FolderTable, or None when unusable
-_FOLDER_TABLES_KEPT = 4
+_FOLDER_TABLES_KEPT = 8
 
 
 class _StaleFolderTable(Exception):
@@ -1629,7 +1636,10 @@ def _folder_table(paths):
         return None
     with _folder_table_lock:
         if signature in _folder_tables:
-            return _folder_tables[signature]
+            # To the back of the line: the dict's order is the use order.
+            table = _folder_tables.pop(signature)
+            _folder_tables[signature] = table
+            return table
         try:
             table = _build_folder_table(paths, signature)
         except _StaleFolderTable:
@@ -1646,10 +1656,24 @@ def _folder_table(paths):
         return table
 
 
-def forget_folder_tables():
-    """Drop every folder table. Called when a list rebuild finishes."""
+def forget_folder_tables(under=None):
+    """Drop the folder tables: every one, or those reading a file in `under`.
+
+    Every one when a rebuild of our own lists finishes; `under` a bot's
+    extract directory when its list is fetched again or purged, which
+    rewrites or removes files in place (#1128). Compared as long paths, the
+    form a fetched list's path is read in, so either spelling matches."""
     with _folder_table_lock:
-        _folder_tables.clear()
+        if under is None:
+            _folder_tables.clear()
+            return
+        prefix = os.path.normcase(platform_compat.long_path(
+            os.path.abspath(str(under)))).rstrip("\\/") + os.sep
+        for signature in list(_folder_tables):
+            if any(os.path.normcase(platform_compat.long_path(
+                    os.path.abspath(path))).startswith(prefix)
+                   for path, _mtime, _size in signature):
+                del _folder_tables[signature]
 
 
 def _forget_folder_table(signature):
@@ -1657,7 +1681,7 @@ def _forget_folder_table(signature):
         _folder_tables.pop(signature, None)
 
 
-def page_of_own_lists(paths, offset, limit, source, max_rows=None):
+def page_of_list_files(paths, offset, limit, source, max_rows=None):
     """page_folder_groups() of the whole of `paths`, from the folder table.
 
     The same (page, total_folders, total_rows, row_capped), parsing only the
