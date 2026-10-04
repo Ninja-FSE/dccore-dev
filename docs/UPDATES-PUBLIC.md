@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **New (mIRC): the DCCore windows open by themselves when mIRC starts.** `@DCCore` opens minimised, its button at the end of the switchbar, and its title says what it is waiting for (not connected to the network yet, the bot not answering yet, or no bot paired) until the console connects. Chat and Downloads can open at start too: tick them under "Open when mIRC starts" in `/dccore options`. Update `dccore.mrc` (1.13) and reload it with `/reload -rs dccore.mrc`.
+
 ## v1.15.0 — The Bot Gets Faster
 
 - **Changed: with track lengths and quality on (`LIST_SHOW_AUDIO_INFO`), the list is published first and the lengths are read afterwards, in the background.** No rebuild waits for them, there is no time limit any more (`LIST_AUDIO_INFO_MINUTES` is no longer used), and when they are read the list is updated with them - keeping its date, so other bots do not fetch it twice. One rebuild or reading runs at a time, and a rebuild stops a reading in progress without losing what it read. `update_list.py` run by hand publishes and says how to read the lengths; `update_list.py --read-audio-info` reads them in the foreground. The @DCCore window, the dashboard and the bot's own window show how far the reading has got (and `audioinfo` in the console, asked while one runs), and **Read audio info** on the Tools page or under Library in the mIRC menu starts one by hand. Update `dccore.mrc` (1.12) for the menu and the progress.
