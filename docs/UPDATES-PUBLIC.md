@@ -10,6 +10,7 @@
 - **Faster: a list rebuild writes the list about four times faster.** Each row's name was cleaned up a character at a time; almost none needs it, and only those are touched now. The list comes out exactly the same.
 - **Quieter: the console no longer logs every user who leaves a channel.** A line meant for testing DCCore Chat said so for every ordinary departure, and on a busy channel it pushed the useful lines out of the log. It shows only with debug mode on; a Chat peer leaving is still logged.
 - **Faster: the end of a list rebuild on a big library.** The cache of track lengths and quality was rewritten whole on every rebuild - about 15 seconds for a million tracks while searches waited. Only what changed is written now.
+- **Faster: a bot with many hard bans keeps up with a busy channel.** The ban list was read and worked out again for every message in the channel - at 2,000 bans the bot could handle about four messages a second. It is read again only when it changes.
 
 ## v1.14.0 — The Bot Keeps a Record
 
