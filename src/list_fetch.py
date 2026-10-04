@@ -1069,7 +1069,9 @@ def process_fetched_list_zip(bot, zip_path):
     only that count afterward. get_fetched_bot_page() below reads each later
     page from `list_path` on disk - no rows of a fetched list are retained in
     memory between views, only this small summary dict and, since #1128, a
-    table of where each folder starts (about 35 bytes per folder).
+    table of where each folder starts (about 38 bytes per folder, and never
+    more than half the list's size or 1 MB, whichever is more: past that the
+    pages read the list whole).
 
     Returns (success, reason): reason is None on success, otherwise a short
     human-readable string suitable for logging/dashboard display. Never
@@ -1564,6 +1566,12 @@ def get_fetched_bot_page(entry, offset, limit, search_words=None):
         # Under the lock, the table's build and the stat that keys it too: a
         # same-bot refetch rewrites this path in place, and a table built
         # from a half-written file would be filed under the new file's key.
+        # A crafted list cannot hold the lock long with it: its build stops
+        # at the table's budget (list._folder_table_budget()) and the page is
+        # read whole, as before the table. Building outside this lock would
+        # not let a fetch install meanwhile either: the build holds the
+        # table lock, and an install drops tables under that lock while it
+        # holds this one.
         if not search_words:
             answer = list_mod.page_of_list_files(
                 [resolved_path], offset, limit, bot,
