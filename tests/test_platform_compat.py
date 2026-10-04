@@ -205,6 +205,10 @@ class MissingRarBinaryTests(unittest.TestCase):
         self.sock = RecordingSocket()
         self.tree = TempTree()
         self.addCleanup(self.tree.cleanup)
+        # Put back when the test ends: left set, every later test read the
+        # paths of a tree this one had already deleted.
+        for name in ("FILE_DIRECTORY", "TMP_ZIP_DIR"):
+            self.addCleanup(setattr, self.config, name, getattr(self.config, name))
         self.config.FILE_DIRECTORY = self.tree.music
         self.config.TMP_ZIP_DIR = os.path.join(self.tree.root, "tmp_zips")
 
@@ -353,9 +357,12 @@ class WiringTests(unittest.TestCase):
         30-second accept()."""
         import socket
         import dcc
-        from tests.support import RecordingSocket, reset_config
+        from tests.support import RecordingSocket, hold_send_follow_ups, reset_config
 
         config = reset_config()
+        # The refused send schedules a retry 45 s out (delayed_port_retry),
+        # which swept whatever queue a test was running by then.
+        hold_send_follow_ups(self)
         calls = []
         real = platform_compat.prepare_listener
 
@@ -378,6 +385,11 @@ class WiringTests(unittest.TestCase):
         with io.open(track, "w", encoding="utf-8") as handle:
             handle.write("x" * 4096)
 
+        # Put back when the test ends. Left set, the whole DCC range was this
+        # one OS-assigned port for the rest of the process: outside the
+        # shard's own window (#1146), with room for one listener at a time.
+        for name in ("DCC_PORT_START", "DCC_PORT_END", "MY_IP_OR_DOCK"):
+            self.addCleanup(setattr, config, name, getattr(config, name))
         config.DCC_PORT_START = busy
         config.DCC_PORT_END = busy
         # 8.8.8.8, not a TEST-NET address: Python classes 203.0.113.x as

@@ -274,6 +274,9 @@ class NoDebugChannelMeansNoneIsJoined(unittest.TestCase):
         """
         import irc
 
+        # Put back: a plain TestCase, so nothing else does.
+        for name in ("CHANNEL", "DEBUG_CHANNEL"):
+            self.addCleanup(setattr, config, name, getattr(config, name))
         config.CHANNEL = "#alpha,#beta"
         config.DEBUG_CHANNEL = ""
 
