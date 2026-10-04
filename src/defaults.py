@@ -358,7 +358,9 @@ LIST_INDEX_FILE: str = "./data/list_index.db"
 # is published with what is already known, then the files not read yet are
 # read in the background, with no time limit, and their lengths written into
 # the published list once at the end - its date kept, so other bots do not
-# fetch it again. Tools > Read audio info (and the console's `audioinfo`)
+# fetch it again. Searches and requests pause only for that swap, as for a
+# rebuild's. A rebuild run by hand (not by the bot) publishes and leaves the
+# reading to the bot or to `update_list.py --read-audio-info`. Tools > Read audio info (and the console's `audioinfo`)
 # runs that reading on its own. What it read is kept in LIST_AUDIO_INFO_CACHE,
 # checked against each file's size, so later rebuilds open only new or changed
 # files. Read with the standard library (audio_info.py); a file it cannot read
@@ -965,6 +967,10 @@ RAR_TIMEOUT: int    = 1800     # Longest a rar packing run may take, in seconds,
 # drive takes hours. Losing it at the thirty-minute mark costs the whole run
 # and leaves the old list in place, every time, with no setting an operator
 # could reasonably be expected to guess right.
+#
+# The same rule stops a background audio reading (#1182) that has gone silent:
+# it reports only when a read completes, so a mount that stopped answering is
+# silence. What it read is already saved.
 #
 # The child reports what it is doing to LIST_PROGRESS_FILE roughly twice a
 # second while scanning. So the question worth asking is not "how long has

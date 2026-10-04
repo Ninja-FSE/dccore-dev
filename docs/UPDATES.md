@@ -11,8 +11,10 @@ With `LIST_SHOW_AUDIO_INFO` on, a rebuild read every new or changed audio file b
 running or how far it had got. Agreed in #1181, design in #1182.
 
 - **Publish first** (`update_list.py`): the rebuild reads no audio before it publishes; the files not read yet become
-  jobs, and the same process runs `run_audio_reading()` after every list is published. A failed rebuild reads
-  nothing.
+  jobs, and - in a rebuild the bot started - the same process runs `run_audio_reading()` after every list is
+  published. A failed rebuild reads nothing. Run by hand (a terminal, cron, `configure.py`) it publishes and prints
+  how many files are left and how to read them, instead of blocking for hours; `--read-audio-info` by hand reads in
+  the foreground with a progress line every 30 s.
 - **Read in the background, no time limit** (`read_audio_info()`): `Cache.read_pending()` takes a `stop` callable and
   saves every 200 files, so a stop keeps what was read; `publish()` (#1137) and `_one_line()`'s fast path (#1125) are
   unchanged. `LIST_AUDIO_INFO_MINUTES` is still accepted and shown, marked as no longer used.
@@ -20,28 +22,46 @@ running or how far it had got. Agreed in #1181, design in #1182.
   endings kept, the archive built again the way a rebuild builds it, the same atomic swap, and the list's and the
   archive's modification time put back, so the advertised date - and other bots' refetch decision - stays the same.
   Nothing is swapped when no row changed, when a stop was asked, or when the list on disk changed meanwhile. Byte for
-  byte what a full rebuild with the same cache publishes. Searches, requests and the list archive pause only for its
-  packing and publishing phases, as for a rebuild's swap.
-- **Rebuild versus reading**: the daemon hands over when its own child (by pid) reports "reading" - the rebuild is
-  announced done and `update_inprogress` released, and a thread follows the reading. A new rebuild stops a reading
-  through a stop file beside the progress file (60 s, then kill), losing nothing read; a reading-only run is refused
-  during a rebuild. State in `runtime.py` (`audio_reading`, `audio_reading_lock`, `audio_reading_last`); shutdown asks
-  a reading to stop, up to 10 s.
+  byte what a full rebuild with the same cache publishes. Searches and requests pause only for its packing and
+  publishing phases, as for a rebuild's swap; the list archive waits in every phase of a reading but the reading
+  itself, and the swap is tried again for up to 10 minutes while a list download that was already running holds
+  the old list (Windows). If it still cannot be swapped, the result names the list, and the bot starts a
+  reading-only run once no list download is running. The rewrite stages under `.audio.new`, never a rebuild's
+  `.new`.
+- **Rebuild versus reading**: the daemon hands over when its own child reports "reading", recognised by a token the
+  bot passes in `DCCORE_RUN_TOKEN` and the child writes into the progress file (not by pid: a Windows venv's
+  `python.exe` runs the script as a second process) - the rebuild is announced done and `update_inprogress`
+  released, and a thread follows the reading. **One run at a time, across processes**: every `update_list.py` holds
+  an OS lock beside the progress file (`platform_compat.take_file_lock()`); a rebuild that finds a reading holding
+  it - the bot's, a terminal's, or one whose bot died - asks it to stop through the stop file and waits up to 60 s;
+  a second rebuild, or a reading-only run that finds anything, is refused. A reading stops by itself when the bot
+  that started it (`DCCORE_DAEMON_PID`) is gone, and the bot's start asks a reading left running to stop. A new
+  rebuild in the bot stops its own reading first (60 s, then kill), losing nothing read. State in `runtime.py`
+  (`audio_reading`, `audio_reading_lock`, `audio_reading_last`, `audio_retry_waiting`); shutdown asks a reading to
+  stop, up to 10 s.
 - **On demand**: `update_list.py --read-audio-info`, started by the console's `audioinfo`, a **Read audio info** card
   on the Tools page (`POST /api/tools/audio-info`, the status payload carries `audio`) and **Library > Read audio
-  info** in `dccore.mrc`, now 1.12. Each says "nothing new to read" when there is nothing; with `LIST_SHOW_AUDIO_INFO`
-  off they say it is off.
+  info** in `dccore.mrc`, now 1.12. The run also writes in every length the cache holds and the list does not show
+  yet (a swap that failed or was stopped). Each says "nothing new to read" when there is nothing; with
+  `LIST_SHOW_AUDIO_INFO` off they say it is off.
 - **Progress**: console and debug lines ("Audio info: reading N files in the background", "3,200 of 12,000 read,
-  230/s" every 60 s, "done: 11,980 read, 20 unreadable, list updated"); `DCCORE REBUILD reading|rewriting` to scripts
-  of 1.12 and later, with an Audio info section in the @DCCore panel; a progress bar on the dashboard card, in three
-  languages. A failed or stalled reading raises a notice (`NOTICE_EVENTS`). The progress file records the writer's
-  pid and a rate; the rebuild's old "audio" phase is gone.
+  230/s" every 60 s, "done: 11,980 read, 20 unreadable, list updated"); `DCCORE REBUILD reading|finding|rewriting`
+  to scripts of 1.12 and later, with an Audio info section in the @DCCore panel ("finding what to read" while a
+  reading started alone reads the list - it said "writing the list" before, #1189); an older script is never sent
+  the reading's phases, not even in the moments the rebuild flag is still up, but `publishing`; a progress bar on
+  the dashboard card, in three languages. The 60 s progress line goes to the bot's own window and log, not the
+  debug feed (an hours-long reading would post to the debug channel every minute); `audioinfo` asked while one
+  runs says how far it has got, and answers with what actually happened - started, already reading, refused during
+  a rebuild, or off - instead of "Reading ..." first. A failed or stalled reading raises a notice (`NOTICE_EVENTS`). The progress file records
+  the writer's token, pid and a rate, and a forced "reading" write after each list's swap keeps "publishing" from
+  outliving it; the rebuild's old "audio" phase is gone.
 - Tests: `tests/test_the_list_publishes_first_and_reads_audio_afterwards.py` (18) and
   `tests/test_a_rebuild_hands_the_audio_reading_to_the_background.py` (39) - publish-first order, the rewrite byte for
   byte against a full rebuild (the txt list and the archive's members), no re-publish when nothing changed, a stopped
   reading keeps what it read, a rebuild during a reading, a reading-only run refused during a rebuild, the progress
   lines and phases, the Tools route, the mrc menu, a `settings.conf` still setting `LIST_AUDIO_INFO_MINUTES`. Four
-  pinned tests follow the new phases and menu.
+  pinned tests follow the new phases and menu. The audit's findings are pinned in
+  `tests/test_the_audio_reading_runs_once_and_always_gets_written_in.py`.
 
 ### ⚡ A List Browser page reads only its own folders (#1128)
 

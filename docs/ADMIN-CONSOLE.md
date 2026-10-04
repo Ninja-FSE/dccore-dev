@@ -245,7 +245,7 @@ prefix.
 | `clearqueue <nick>` | force-clear another user's queue |
 | `rehash` | reload modules in place |
 | `update` | rebuild the MasterList |
-| `audioinfo` | read the length and quality of the audio files the list has none for yet, and write them in - no new scan; "nothing new to read" when there is nothing, refused while a rebuild runs (it reads by itself once it has published). Only with `LIST_SHOW_AUDIO_INFO` on (#1182) |
+| `audioinfo` | read the length and quality of the audio files the list has none for yet, and write them in - no new scan; "nothing new to read" when there is nothing, refused while a rebuild or another reading runs (a rebuild reads by itself once it has published). Only with `LIST_SHOW_AUDIO_INFO` on (#1182) |
 | `lists` | the bots' lists we hold, whether each has changed since we took our copy, how big and how old |
 | `fetch [<bot>]` | ask every held bot whose list has changed (up to 10 at a time, skipping offline ones), or one bot whatever its freshness |
 | `downloads on [<rows>]` / `downloads off` | the mIRC Downloads window opened (with how many finished and failed rows it wants, 1-15) or closed; the bot sends its `DLBEGIN` snapshots only in between (#1022) |
@@ -275,7 +275,11 @@ receives the daemon's runtime log alongside the debug channel. With
 published; the audio files it has no length for yet are then read in the
 background (`Audio info: reading 12,000 files in the background`), and its end
 arrives the same way (`Audio info: done: 11,980 read, 20 unreadable, list
-updated`). `audioinfo` runs that reading on its own.
+updated`). How far it has got is in the @DCCore panel (dccore.mrc 1.12 and
+later), on the dashboard and in the bot's own window, not in the session:
+`audioinfo` asked while a reading runs says it. `audioinfo` runs that reading
+on its own, and answers with what happened - started, already reading, refused
+while a rebuild runs, or off.
 
 ### Your nick does not matter here
 
@@ -532,7 +536,7 @@ have been replaced with spaces.
 | `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
 | `DCCORE FETCHING <bot> <received> <total> <bps> <name>` | one per file the bot is receiving from another bot right now (#1019), in the status burst after the QUEUE lines - the panel's Downloading section. Sent only to a script that said it is 1.8 or later in `HELLO` | the name (a list shows as "<bot>'s file list") |
 | `DCCORE DLBEGIN` / `DCCORE DLROW <id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>` / `DCCORE DLEND <waiting_total> <complete_total> <failed_total>` | the Downloads window's snapshot (#1022): one `DLROW` per download - `kind` is `d` (coming in), `w` (waiting), `c` (finished) or `f` (failed, a rejected list included), at most 15 of each of the last two, `note` one token (why it waits, or how it ended), `when` the epoch a finished one ended. Whole or not sent; every 3 seconds at most and only when it changed, only after `downloads on`. Sent only to a script that said 1.10 or later in `HELLO` | the Downloads window |
-| `DCCORE REBUILD <phase> <folder_index> <folder_count> <files> <elapsed>` | a master-list rebuild is running, however it was started (#1024): in the status burst and every 5 seconds between; `DCCORE REBUILD end` once when it stops. The phase is `starting`, `scanning`, `writing`, `packing` or `publishing`. Sent only to a script that said it is 1.9 or later in `HELLO`. The background audio reading (#1182), once the rebuild has published or when `audioinfo` started it alone, comes the same way to a script of 1.12 or later: `DCCORE REBUILD reading <read> <to_read> <files_a_second> <elapsed>`, then `rewriting 0 0 0 <elapsed>` while it writes the lengths into the list | the phase |
+| `DCCORE REBUILD <phase> <folder_index> <folder_count> <files> <elapsed>` | a master-list rebuild is running, however it was started (#1024): in the status burst and every 5 seconds between; `DCCORE REBUILD end` once when it stops. The phase is `starting`, `scanning`, `writing`, `packing` or `publishing`. Sent only to a script that said it is 1.9 or later in `HELLO`. The background audio reading (#1182), once the rebuild has published or when `audioinfo` started it alone, comes the same way to a script of 1.12 or later: `DCCORE REBUILD reading <read> <to_read> <files_a_second> <elapsed>`, `finding 0 0 0 <elapsed>` while a reading started alone reads the list to find what to read, then `rewriting 0 0 0 <elapsed>` while it writes the lengths into the list | the phase |
 | `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20 in the order they are served: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
 | `DCCORE TOKEN <name>` | the reply to `pair` | the token, shown once |
 | `DCCORE PING` | stands in for a status burst the bot could not compute in time; a client treats it as any other line and shows nothing | |

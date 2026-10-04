@@ -505,9 +505,10 @@
 #LIST_INDEX_FILE = ./data/list_index.db
 
 # Add each MP3 and FLAC file's length and quality after its size in your list,
-# e.g. 10.3MB 4m31s 320/44.1/JS. Every audio file is read once, after the list
-# is published and in the background, so nothing waits for it; the lengths are
-# written in when it is done. Tools, Read audio info runs it on its own.
+# e.g. 10.3MB 4m31s 320/44.1/JS. Every audio file is read once, in the
+# background after the list is published; searches and downloads pause only
+# for the seconds the lengths take to swap in. Tools, Read audio info runs it
+# alone.
 #
 # Duration and quality after the size on the list's MP3 and FLAC rows (#567):
 # "::INFO:: 10.3MB 4m31s 320/44.1/JS" - the spelling other servers' lists use.
@@ -516,7 +517,9 @@
 # is published with what is already known, then the files not read yet are
 # read in the background, with no time limit, and their lengths written into
 # the published list once at the end - its date kept, so other bots do not
-# fetch it again. Tools > Read audio info (and the console's `audioinfo`)
+# fetch it again. Searches and requests pause only for that swap, as for a
+# rebuild's. A rebuild run by hand (not by the bot) publishes and leaves the
+# reading to the bot or to `update_list.py --read-audio-info`. Tools > Read audio info (and the console's `audioinfo`)
 # runs that reading on its own. What it read is kept in LIST_AUDIO_INFO_CACHE,
 # checked against each file's size, so later rebuilds open only new or changed
 # files. Read with the standard library (audio_info.py); a file it cannot read
@@ -1495,6 +1498,10 @@
 # and leaves the old list in place, every time, with no setting an operator
 # could reasonably be expected to guess right.
 # 
+# The same rule stops a background audio reading (#1182) that has gone silent:
+# it reports only when a read completes, so a mount that stopped answering is
+# silence. What it read is already saved.
+# 
 # The child reports what it is doing to LIST_PROGRESS_FILE roughly twice a
 # second while scanning. So the question worth asking is not "how long has
 # this taken" but "when did it last do anything" - which is what
@@ -1508,7 +1515,8 @@
 
 # If a list rebuild reports no progress for this many seconds, it is treated
 # as stuck and stopped. 15 minutes is generous on purpose so a slow network
-# drive is not cut off.
+# drive is not cut off. A silent background audio reading is stopped the same
+# way, keeping what it read.
 #
 # How long the rebuild may report NOTHING before it is treated as wedged.
 # 
