@@ -4,6 +4,31 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚡ The search index gets a prefix index and stores each folder once (#1130, #1135)
+
+Performance audit 2026-10-03 P8 and P13, in one schema change so the index is rebuilt once on upgrade. The filter bar
+searches the cross-list index by prefix as the operator types, and with no prefix index FTS5 scanned every term for
+the short ones: 128 ms for "al", 1.3 s for "love m", 3.3 s for one 21-keystroke search on 2.64M rows. And every row
+stored its whole folder heading.
+
+- The FTS5 table has `prefix='1 2 3 4'` and `columnsize=0`: "al" 1.2 ms, "love m" 17 ms, the 21 keystrokes 57 ms,
+  every answer identical. Folder headings are stored once per list in a new `folders(id, bot, folder)` table and each
+  row holds the id; `index_bot_list()` and `drop_bot()` clear a list's folders with its rows, and `search()` maps the
+  ids back inside the same SELECT, so it reads one snapshot. Net size about +34% over today (the prefix index +70%,
+  the folder ids back a fifth), build time about 2x. #1129's read connection and lock order are unchanged.
+- `_SCHEMA_VERSION` 2. `_open()` reads the table's stored CREATE statement; an index made before drops and recreates
+  `entries` in the same transaction as the CREATE, says so once, and sets `_rebuild_pending`, so the held lists come
+  back through the startup backfill or before the first filter query answers - the path the damaged-file repair
+  already takes. On a big set of held lists that is about a minute per million files, before the bot connects, once.
+  After it, rows inside one page of results can come in a different order; the same rows match.
+- Going back to an earlier version: delete `data/list_index.db` first - an older one would show folder ids as folder
+  names. INSTALL.md says so, and the `defaults.py` comment and the sample settings file give the new size.
+- Tests: `tests/test_the_rebuilt_search_index_answers_every_query_as_before.py` - the schema-1 table and queries
+  against the new on about 150 terms (1-4 letter prefixes, accented, Greek and CJK text, phrases, FTS5 syntax), at three
+  limits, five bot filters and through `bots_with_a_match()`; the upgrade through the first query, the startup
+  backfill and a fetch, a restart part-way, a failed rebuild leaving the old table intact, no second rebuild.
+  `tests/test_the_search_index_stores_each_folder_once.py`.
+
 ### 🧪 The suite no longer waits out two fixed timers (#1148)
 
 Performance audit 2026-10-03 T3. Two tests sat out real timers: an absent user's freeze countdown slept a fixed ten
