@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The stress harness ships, and its two open observations are explained (#1153)
+
+The release manager's stress run of a live test bot (#1153) left two numbers open. Both were measured in-process
+through the real `irc.irc_loop()`, and both are expected and bounded; no daemon code changes:
+
+- **About 7-8 ms of CPU per flood line.** The read loop itself costs 0.2-0.5 ms per line of any kind: a search it
+  starts, the line that mutes, a line from a banned nick (which never searches). The ban line costs 4 ms, nearly all
+  of it the fsync in `save_bans_to_file`, once per flooder. What scales is the searches: each nick gets up to
+  `MAX_REQUESTS` of them, they run one at a time, and a full scan of a 40,000-row list is 34 ms. A test server paces
+  each client after a short burst, so the flood reaches the bot over several seconds and one core scans back to back.
+  600 lines over 6 s cost 1.3 ms a line with no list, 2.0 ms at 10,000 rows and 3.7 ms at 40,000. The per-line figure
+  follows the list's size.
+- **+30 MB on the first advert storm.** The read loop's first storm grew traced Python memory by 0.38 MB, mostly
+  three lazy imports, and later storms by about 0.02 MB. The known-bot registry costs about 0.6 KB per bot and is capped
+  at `KNOWN_BOTS_MAX`. 600 dashboard requests grew RSS by 0.06 MB. The 30 MB is not a Python structure; on Linux it is
+  most likely glibc's per-thread malloc arenas, which plateau, as the run showed. `MALLOC_ARENA_MAX=2` in the bot's
+  environment is the check.
+- **`scripts/stress_test.py`** is the harness from #1153: 40 simulated clients flood, advertise, churn, quit together
+  and hit the dashboard while it samples the bot's CPU, memory and threads. A new "READING THE NUMBERS" section in its
+  docstring carries the findings above. It now imports on every platform, because `os.sysconf` is read only where it
+  exists, and refuses before any client connects when `/proc/<pid>` is missing. The warning to use only a test bot on a
+  private test server is kept word for word. README's Tests section points to it.
+- Tests: `tests/test_the_stress_harness_refuses_before_it_connects.py` checks that the warning stays, that the file
+  imports without `os.sysconf`, that a mistyped phase, a server without a port and a missing bot are each refused
+  before a socket is opened, and that the simulated nicks are distinct and letters only. All 9 mutations were caught.
+
 ### 🧪 The suite no longer waits out two fixed timers (#1148)
 
 Performance audit 2026-10-03 T3. Two tests sat out real timers: an absent user's freeze countdown slept a fixed ten
