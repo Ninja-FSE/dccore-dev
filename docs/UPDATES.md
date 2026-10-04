@@ -92,6 +92,23 @@ survived was block / 60 s: 1.1 KB/s at 64 KB, 2.2 KB/s at the 128 KB the menu al
 - Tests: `tests/test_a_bigger_send_block_keeps_the_slow_link_floor.py` - the timeout at every size, the floor, real
   loopback sends at the default, 128 KB and 256 KB, the menu and its label, the default held to the fallback;
   `test_rehash_config_window.py` and `test_size_settings_have_units.py` gain 256 KB in the menu.
+### 🐛 A pasted size hint matches the list's own rows (#1121)
+
+Performance audit 2026-10-03 B1. The list writes every row's size with two decimals (`::INFO:: 7.30MB`, the
+`format_total_size` nested in `generate_master_list`), but `dcc._matches_size_hint()` - the check behind the #886 folder
+memory - formatted the file's size with `update_list.format_size_human()`, which gives one (`7.3MB`), and compared the
+two as text. They never matched, so the folder memory never answered a pasted row: every one went to the full list
+scan, about three seconds a row on a million-row list, for every track of an album pasted in one go.
+
+- `dcc._size_fits_hint()` reads the hint as a number at its own unit and precision, and compares the file's size
+  rounded the same way, the float computed as the list writer computes it (a float divided by 1024.0 per step, exact,
+  so the rounding at a `.xx5` boundary goes the same way). So `7.30MB`, `7.3MB`, `7MB`, `1.0kb`, `6.32Mb` and lists from
+  older versions and other bots all match their file, and a different size does not. A first word that is not a size
+  matches nothing, as before.
+- Tests: `tests/test_a_pasted_size_hint_matches_the_list.py` builds a real list with `generate_master_list()` over files
+  of awkward sizes and checks every row's own hint against its file, and the #886 folder memory end to end; plus the
+  other formats. The seven size formatters in the code base are left as they are - one owner for them is a separate
+  tidy-up.
 
 ## 🟩 v1.14.0 (2026-10-03) - "The Bot Keeps a Record"
 
