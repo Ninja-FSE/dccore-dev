@@ -9,6 +9,7 @@
 - **Faster: a list rebuild scans a big library many times faster.** On a library with many folders the scan slowed down the more folders it had - 41 seconds for 137,000 files, slower with more threads than with one. It takes about 3 seconds now.
 - **Faster: a list rebuild writes the list about four times faster.** Each row's name was cleaned up a character at a time; almost none needs it, and only those are touched now. The list comes out exactly the same.
 - **Quieter: the console no longer logs every user who leaves a channel.** A line meant for testing DCCore Chat said so for every ordinary departure, and on a busy channel it pushed the useful lines out of the log. It shows only with debug mode on; a Chat peer leaving is still logged.
+- **Faster: the end of a list rebuild on a big library.** The cache of track lengths and quality was rewritten whole on every rebuild - about 15 seconds for a million tracks while searches waited. Only what changed is written now.
 
 ## v1.14.0 — The Bot Keeps a Record
 
