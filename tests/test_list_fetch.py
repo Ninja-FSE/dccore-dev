@@ -29,7 +29,7 @@ import list as list_module  # noqa: E402
 import list_fetch  # noqa: E402
 import list_index  # noqa: E402
 
-from tests.support import DCCoreTestCase  # noqa: E402
+from tests.support import DCCoreTestCase, parse_source  # noqa: E402
 
 
 def _zip_bytes(members):
@@ -1158,7 +1158,7 @@ class MalformedArchivesZipfileLeaks(SafeExtractionTests):
 
         with io.open(list_fetch.__file__, encoding="utf-8") as handle:
             source = handle.read()
-        tree = ast.parse(source)
+        tree = parse_source(source)
 
         bare = []
         for node in ast.walk(tree):

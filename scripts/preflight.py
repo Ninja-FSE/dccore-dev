@@ -16,14 +16,25 @@ So this runs the suite twice: once as-is, and once in a deliberately hostile
 environment with host-provided tools hidden. A test that passes in the first
 pass and fails in the second is depending on something incidental to the machine
 it runs on.
+
+The plain pass and the counting pass run the suite in four processes at once
+through scripts/run_tests_in_parallel.py, as CI does (#1146): about two
+minutes instead of six to ten each. The coverage pass and the hidden-tooling
+pass stay in one process - the profiler has to see every call in one place,
+and the hidden pass is the one that still proves the suite passes in the
+serial order a plain `python -m unittest discover` gives.
 """
 
+import atexit
 import re
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PARALLEL_RUNNER = os.path.join(REPO_ROOT, "scripts", "run_tests_in_parallel.py")
 
 # Environment variables that let the code discover optional host tooling. Blanking
 # them simulates a bare runner. Add to this list whenever a new optional
@@ -154,6 +165,73 @@ def report_state_writes(before, after):
     return False
 
 
+# The temp folder's version of the guard above (#1149). Tests that made a
+# temp directory and never removed it, or removed it with ignore_errors while
+# a sqlite file in it was still open on Windows, left about 236 entries in
+# the operator's temp folder on every run; 232,000 had built up on one
+# machine, and nothing said so because the guard above watches only the
+# repository. Every pass now runs with TEMP, TMP and TMPDIR pointed at a
+# fresh folder of preflight's own: what a pass leaves there is named and
+# fails it, and the folder goes when preflight ends, so the operator's own
+# temp folder is not written at all.
+#
+# One entry is left on purpose: tests/support.py's sink for a write from a
+# thread that outlived its test. It is one fixed name, not one per test.
+TEMP_LEFTOVERS_EXPECTED = ("dccore-orphaned-test-write",)
+
+
+def private_temp():
+    """A fresh temp folder for every pass, and this process's environment
+    pointed at it, so each child inherits it: the hostile pass copies
+    os.environ too. Removed when preflight exits."""
+    folder = tempfile.mkdtemp(prefix="dccore-preflight-")
+    atexit.register(shutil.rmtree, folder, True)
+    for name in ("TEMP", "TMP", "TMPDIR"):
+        os.environ[name] = folder
+    return folder
+
+
+def _family(name):
+    """dccore-list-index-ab12cd -> dccore-list-index-*, tmpab12cd -> tmp*."""
+    if "-" in name:
+        return name.rsplit("-", 1)[0] + "-*"
+    return "tmp*" if name.startswith("tmp") else name
+
+
+def report_temp_leftovers(folder):
+    """True if the pass left nothing in its temp folder.
+
+    Whatever it left is named, grouped by prefix, then removed, so the next
+    pass is judged on what it leaves itself.
+    """
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return True
+    left = [name for name in names if name not in TEMP_LEFTOVERS_EXPECTED]
+    for name in names:
+        path = os.path.join(folder, name)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    if not left:
+        return True
+    families = {}
+    for name in left:
+        families.setdefault(_family(name), []).append(name)
+    print()
+    print(f"  THE SUITE LEFT {len(left)} ENTRIES IN ITS TEMP FOLDER:")
+    for family, members in sorted(families.items(), key=lambda item: (-len(item[1]), item[0])):
+        print(f"    {len(members):4d}  {family}   e.g. {members[0]}")
+    print("  A test made a temp file or directory and did not remove it. Use")
+    print("  DCCoreTestCase.make_temp_dir() or tests.support.temp_dir(self) - see #1149.")
+    return False
+
+
 # How many skips the normal pass may carry before preflight refuses to call
 # it a pass. Skips are legitimate - a Windows box cannot exercise permission
 # bits, a POSIX box has no cmd.exe - and the ceiling is set well above what
@@ -195,7 +273,8 @@ def main():
          [py, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "check_imports.py")]),
         ("compile every source file", [py, "-m", "compileall", "-q", "."]),
-        ("full suite", [py, "-m", "unittest", "discover", "-s", "tests", "-t", "."]),
+        # In four processes, the way CI runs it (#1146).
+        ("full suite", [py, PARALLEL_RUNNER]),
         # The audit's first critical: a public daemon function nothing calls has
         # no regression protection at all, and the suite reports it as covered
         # anyway. This runs the suite a second time under a profiler, which
@@ -213,8 +292,13 @@ def main():
     # ProgramFiles stripped is exactly the kind of write only the hostile
     # pass would make, and it was the one pass never checked.
     state_before = state_snapshot()
+    suite_temp = private_temp()
     results = [run(label, argv) for label, argv in checks]
-    results.append(report_state_writes(state_before, state_snapshot()))
+    # Both guards report after each pass; the temp one first, so neither
+    # hides the other. One result per pass, as only_the_hidden_pass_failed()
+    # counts them.
+    left_nothing = report_temp_leftovers(suite_temp)
+    results.append(report_state_writes(state_before, state_snapshot()) and left_nothing)
 
     # A test file that silently becomes empty - a bad edit, a broken import - lets
     # the suite report success while testing less. Pin a floor so shrinkage is loud.
@@ -222,7 +306,9 @@ def main():
     # a skipped test is one that ran nothing, and until this nothing parsed
     # "skipped=N" - a pass that skipped a hundred tests printed PASS.
     MIN_TESTS = 165
-    counted = capture([py, "-m", "unittest", "discover", "-v", "-s", "tests", "-t", "."])
+    # In four processes too: the runner's report has one "Ran N tests" line
+    # and one summary, with every shard's per-test lines above them.
+    counted = capture([py, PARALLEL_RUNNER, "-v"])
     output = (counted.stderr or "") + (counted.stdout or "")
     match = re.search(r"Ran (\d+) tests", output)
     total = int(match.group(1)) if match else 0
@@ -236,7 +322,8 @@ def main():
         print("--- test count: PASS")
         results.append(True)
 
-    results.append(report_state_writes(state_before, state_snapshot()))
+    left_nothing = report_temp_leftovers(suite_temp)
+    results.append(report_state_writes(state_before, state_snapshot()) and left_nothing)
 
     skipped, reasons = skip_report(output)
     print("")
@@ -297,7 +384,8 @@ def main():
             [py, "-m", "unittest", "discover", "-s", "tests", "-t", "."],
             env=env,
         ))
-        results.append(report_state_writes(state_before, state_snapshot()))
+        left_nothing = report_temp_leftovers(suite_temp)
+        results.append(report_state_writes(state_before, state_snapshot()) and left_nothing)
 
     print()
     if all(results):

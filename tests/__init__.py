@@ -57,3 +57,59 @@ def _record_browser_open(url, *_args, **_kwargs):
 _webbrowser.open = _record_browser_open
 _webbrowser.open_new = _record_browser_open
 _webbrowser.open_new_tab = _record_browser_open
+
+
+# EVERY SHARD LISTENS ON PORTS OF ITS OWN (#1146).
+#
+# scripts/run_tests_in_parallel.py runs the suite in up to four processes at
+# once. Every one of them would scan the same DCC ports: the shipped
+# 55000-55010, and the ranges tests pin for themselves, one of which seven
+# modules share. Two shards could then reach for one port at the same moment.
+# On Linux both binds can succeed (SO_REUSEADDR, before either socket
+# listens) and the second listen() fails; elsewhere the loser moves on to the
+# next port, and a test that holds two ports, or counts the free ones, fails
+# on a busy machine and passes on a quiet one.
+#
+# So the runner gives each shard a DCCORE_TEST_PORT_SHIFT of its own (1000,
+# 2000, 3000 or 8000: see PORT_SHIFTS there), and every DCC port a test
+# listens on moves by it:
+#   - a range a test pins for itself is written as dcc_ports(start, end), and
+#     moved here;
+#   - the configured range, which every other test uses, is moved when this
+#     package is imported, and again after each reload of defaults (a !rehash
+#     test reloads it and gets the shipped numbers back).
+# tests/test_every_shard_listens_on_ports_of_its_own.py proves the moved
+# ranges of different shards never meet, and that none of them is the
+# shipped 55000-55010 that check-setup's own children still probe. A plain
+# run has no shift, and nothing below changes anything in it.
+PORT_SHIFT = int(_os.environ.get("DCCORE_TEST_PORT_SHIFT") or 0)
+
+
+def dcc_ports(start, end):
+    """(start, end) of a DCC port range a test pins for itself, moved into this
+    process's own window: unchanged in a plain run, moved by the shard's
+    shift in a parallel one."""
+    return start + PORT_SHIFT, end + PORT_SHIFT
+
+
+def _move_the_configured_range(config):
+    """Whatever range defaults resolved to, moved into this process's window."""
+    config.DCC_PORT_START, config.DCC_PORT_END = dcc_ports(config.DCC_PORT_START,
+                                                           config.DCC_PORT_END)
+
+
+if PORT_SHIFT:
+    import importlib as _importlib
+
+    import defaults as _defaults
+
+    _move_the_configured_range(_defaults)
+    _plain_reload = _importlib.reload
+
+    def _reload_into_the_shards_window(module):
+        reloaded = _plain_reload(module)
+        if getattr(reloaded, "__name__", None) == "defaults":
+            _move_the_configured_range(reloaded)
+        return reloaded
+
+    _importlib.reload = _reload_into_the_shards_window

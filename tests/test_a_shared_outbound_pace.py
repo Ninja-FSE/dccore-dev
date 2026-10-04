@@ -15,9 +15,9 @@ never exceed one interval's worth of traffic, however the two lanes
 interleave.
 """
 
-import contextlib
 import io
 import os
+import sys
 import threading
 import time
 import unittest
@@ -178,6 +178,14 @@ class TheCombinedOutboundRateIsCapped(DCCoreTestCase):
 
         self.queue_worker_thread = None
         self.debug_drain_thread = None
+        # The workers' chatter goes to one StringIO for the whole test, put
+        # in place here on the main thread. Each worker thread used to wrap
+        # itself in contextlib.redirect_stdout(), which is not thread-safe:
+        # two threads entering and leaving it out of order put back the other
+        # one's StringIO, and every later print in the process vanished -
+        # scripts/function_coverage.py's own report among them (#1146).
+        self.addCleanup(setattr, sys, "stdout", sys.stdout)
+        sys.stdout = io.StringIO()
 
     def tearDown(self):
         self.queue_shim.stopped.set()
@@ -193,11 +201,10 @@ class TheCombinedOutboundRateIsCapped(DCCoreTestCase):
 
     def start_queue_worker(self):
         def run():
-            with contextlib.redirect_stdout(io.StringIO()):
-                try:
-                    queue_mgr.queue_worker()
-                except SystemExit:
-                    pass
+            try:
+                queue_mgr.queue_worker()
+            except SystemExit:
+                pass
         self.queue_worker_thread = threading.Thread(target=run, daemon=True)
         self.queue_worker_thread.start()
 
@@ -210,11 +217,10 @@ class TheCombinedOutboundRateIsCapped(DCCoreTestCase):
         announce._debug_drain_id = "test-drain"
 
         def run():
-            with contextlib.redirect_stdout(io.StringIO()):
-                try:
-                    announce._debug_drain_worker("test-drain")
-                except SystemExit:
-                    pass
+            try:
+                announce._debug_drain_worker("test-drain")
+            except SystemExit:
+                pass
         self.debug_drain_thread = threading.Thread(target=run, daemon=True)
         self.debug_drain_thread.start()
 
@@ -273,6 +279,14 @@ class TheStandardLaneIsNoLongerStarvedByVip(DCCoreTestCase):
         self.queue_shim = _SleepShim()
         queue_mgr.time = self.queue_shim
         self.queue_worker_thread = None
+        # The workers' chatter goes to one StringIO for the whole test, put
+        # in place here on the main thread. Each worker thread used to wrap
+        # itself in contextlib.redirect_stdout(), which is not thread-safe:
+        # two threads entering and leaving it out of order put back the other
+        # one's StringIO, and every later print in the process vanished -
+        # scripts/function_coverage.py's own report among them (#1146).
+        self.addCleanup(setattr, sys, "stdout", sys.stdout)
+        sys.stdout = io.StringIO()
 
     def tearDown(self):
         self.queue_shim.stopped.set()
@@ -284,11 +298,10 @@ class TheStandardLaneIsNoLongerStarvedByVip(DCCoreTestCase):
 
     def start_queue_worker(self):
         def run():
-            with contextlib.redirect_stdout(io.StringIO()):
-                try:
-                    queue_mgr.queue_worker()
-                except SystemExit:
-                    pass
+            try:
+                queue_mgr.queue_worker()
+            except SystemExit:
+                pass
         self.queue_worker_thread = threading.Thread(target=run, daemon=True)
         self.queue_worker_thread.start()
 
