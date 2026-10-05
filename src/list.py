@@ -1099,6 +1099,30 @@ def rar_folder_of(title):
     return match.group(1).strip() if match else ""
 
 
+def pack_path_of(title, size=""):
+    """The folder an mxrarserver pack row asks for, or "" if the row is not
+    one (#1209).
+
+    mxrarserver's folder list has no "!rar": each row is "!<trigger>
+    <absolute Windows path>.rar" - "!Music E:\\Music\\Artist\\Album.rar" - and
+    asking for that line verbatim has the bot pack the folder and send it as
+    a RAR. Its own test for a folder request is the same: ends in ".rar" and
+    holds a path separator. A row with a size (an "::INFO::" or a "----"
+    suffix) is a file, which is how its file list writes every row, so that
+    is asked first and costs a row nothing else.
+
+    The path itself is the answer, unchanged: it is what goes back on the
+    wire, so it must survive exactly as the list wrote it.
+    """
+    if size:
+        return ""
+    text = str(title or "").strip()
+    if (not text or text.startswith("!") or "\\" not in text
+            or not text.lower().endswith(".rar")):
+        return ""
+    return text
+
+
 def entries_to_filelist_rows(entries, source):
     """Shape find_matching_entries() output into the File Lists view's row
     format: {"title", "size", "format", "source"}, deduping same
@@ -1260,8 +1284,15 @@ def _filelist_rows(entries, source):
             # Asked only of a title that starts with "!" (#1136): nothing
             # else can match rar_folder_of()'s anchored "^!rar", and running
             # the regex on every row of every list cost more than the answer.
+            #
+            # mxrarserver's folder rows (#1209) are the other shape of the
+            # same thing, "!<trigger> <path>.rar" with no "!rar", and are
+            # offered the same way: rar_folder is the path, which
+            # webserver.build_folder_rar_fetch_enqueue_result() recognises
+            # and sends back as the bot wrote it.
             "rar_folder": (rar_folder_of(filename)
-                           if filename.lstrip().startswith("!") else ""),
+                           if filename.lstrip().startswith("!")
+                           else pack_path_of(filename, size)),
             # What we have already asked this bot for: "requested",
             # "received", or "" for neither. Declared HERE, empty, rather
             # than added by whichever payload happens to know - both this

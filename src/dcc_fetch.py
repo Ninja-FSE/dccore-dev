@@ -60,6 +60,10 @@ since we cannot know what the target bot will name the resulting .rar), a
 longer FETCH_FOLDER_OFFER_TIMEOUT (packing a whole album takes real time on
 the other end), and a larger MAX_FETCH_FOLDER_FILE_SIZE cap (a packed
 archive is bigger than any single file).
+
+An mxrarserver folder row (#1209) is a "folder" row too, asked for as its
+list wrote it - "!<trigger> <path>.rar", no "!rar" - and admitted by the name
+the RAR will arrive under rather than on the bot alone (pack_offer_names()).
 """
 
 import ipaddress
@@ -682,8 +686,15 @@ def enqueue_fetch(bot, filename, request_type="file", trigger=None):
     trigger = _sendable_trigger(trigger) if trigger else None
     normalized_type = request_type if request_type in ("file", "list", "folder") else "file"
     request_id = uuid.uuid4().hex[:12]
+    pack = normalized_type == "folder" and bool(list_mod.pack_path_of(filename))
     with _fetch_lock():
-        if normalized_type in ("list", "folder") and _has_outstanding_bot_alone_request_locked(queue, bot):
+        # An mxrarserver pack row is admitted by name (#1209), so it only
+        # conflicts with what could take its RAR - see
+        # _pack_request_conflicts_locked(). Everything else as before.
+        if pack:
+            if _pack_request_conflicts_locked(queue, bot, filename):
+                return None
+        elif normalized_type in ("list", "folder") and _has_outstanding_bot_alone_request_locked(queue, bot):
             return None
         # Checked under the same lock that does the insert, so the count cannot
         # go stale between deciding there is room and taking it - two request
@@ -1413,7 +1424,9 @@ def check_fetch_queue():
             # filename is already the literal string "!rar <folder path>" at
             # this point (see webserver.build_folder_rar_fetch_enqueue_result()),
             # so it falls into the same wire line the plain "file" branch below
-            # builds - only the log line differs, purely cosmetic.
+            # builds - only the log line differs, purely cosmetic. An
+            # mxrarserver pack row (#1209) holds its row's "<path>.rar"
+            # instead, with no "!rar", and goes out as that bot wrote it.
             #
             # webserver.reject_if_unsafe_for_irc_line() already caps filename's
             # length at enqueue time (IRC_LINE_FIELD_MAX_LEN); fit_irc_line()
@@ -1854,6 +1867,97 @@ def _normalize_filename_for_match(name):
     return re.sub(r'[\s_]+', ' ', str(name).strip()).strip().lower()
 
 
+# WHAT MXRARSERVER CALLS THE RAR IT PACKS (#1209), from its mx.rar.make.name:
+# the folder's last component - or "<parent> - <last>" when the last one says
+# nothing on its own: CD1, Disc 2, Vol III, Side A, Part 2, Covers, Scans...
+# These are its own patterns, tried against the whole component.
+_GENERIC_PACK_LEAF_RE = re.compile(
+    r"(?:cd|disc|disk|disco|dvd|lp|singles|cover|covers|scan|scans|artwork)"
+    r"|(?:cd|disc|disk|disco|part|parte|vol|volume|volumen|dvd|lp)\s*0*\d+"
+    r"|(?:cd|disc|disk|disco|part|parte|vol|volume|volumen|dvd|lp)\s*(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)"
+    r"|(?:side|lado)\s*[ab]"
+    r"|(?:a|b)\s*(?:side|lado)"
+    r"|(?:pt|chapter|capitulo|session)\s*(?:0*\d+|i|ii|iii|iv|v|vi|vii|viii|ix|x)",
+    re.IGNORECASE)
+# The characters it replaces with "_" in that name.
+_PACK_NAME_UNSAFE_RE = re.compile(r'[\\/:*?<>|]')
+# mxrarserver's own lists arrive as "<name>-Files(<x>)-MX.rar" and the like.
+_MX_LIST_ARCHIVE_RE = re.compile(r"-MX\.rar$", re.IGNORECASE)
+
+
+def _pack_key(name):
+    """A name as pack names are compared: whitespace and underscores gone,
+    case folded. mxrarserver strips the spaces from the name it sends, and a
+    DCC client may turn any that are left into underscores."""
+    return re.sub(r"[\s_]+", "", str(name or "")).lower()
+
+
+def pack_offer_names(path):
+    """The names an mxrarserver bot may give the RAR it packs for `path`, a
+    pack row's "<folder>.rar" (#1209), as _pack_key()s.
+
+    Its "smart" name - "<parent> - <last>" for a generic last component - and
+    the plain last component, which is what it sends with smart naming off.
+    """
+    text = str(path or "").strip()
+    if text.lower().endswith(".rar"):
+        text = text[:-4]
+    parts = [part.strip() for part in re.split(r"[\\/]", text) if part.strip()]
+    if not parts:
+        return set()
+    last = parts[-1]
+    names = {last}
+    if len(parts) > 1 and _GENERIC_PACK_LEAF_RE.fullmatch(last):
+        names.add(f"{parts[-2]} - {last}")
+    return {_pack_key(_PACK_NAME_UNSAFE_RE.sub("_", name) + ".rar") for name in names}
+
+
+def _is_pack_row(row):
+    """Whether this is a request for an mxrarserver folder row (#1209): a
+    "folder" row whose request is the row's own "<path>.rar"."""
+    return (row.get("request_type") == "folder"
+            and bool(list_mod.pack_path_of(row.get("requested_filename") or "")))
+
+
+def _could_be_a_pack(filename):
+    """Whether an offer could be the RAR a pack row asked for, judged by its
+    name alone: a .rar, and not one of mxrarserver's own list archives."""
+    name = str(filename or "").strip()
+    return name.lower().endswith(".rar") and not _MX_LIST_ARCHIVE_RE.search(name)
+
+
+def _pack_request_conflicts_locked(queue, bot, path):
+    """True if a pack row for `path` cannot be told apart, when its RAR
+    arrives, from a request already outstanding for `bot`. Caller holds
+    _fetch_lock().
+
+    A list or "!rar" request is admitted on the bot alone, so either one
+    outstanding takes any offer and leaves no room for a pack beside it. Two
+    pack rows are told apart by the names their RARs will arrive under, so
+    they may wait together - unless those names could be the same: "Artist
+    A\\Album" and "Artist B\\Album" are both sent as "Album.rar".
+    """
+    wanted_bot = str(bot).strip().lower()
+    names = pack_offer_names(path)
+    for row in queue.values():
+        if (row.get("state") not in _UNRESOLVED_FETCH_STATES
+                or str(row.get("bot", "")).strip().lower() != wanted_bot):
+            continue
+        kind = row.get("request_type")
+        if kind == "list" or (kind == "folder" and not _is_pack_row(row)):
+            return True
+        if _is_pack_row(row) and pack_offer_names(row.get("requested_filename")) & names:
+            return True
+    return False
+
+
+def pack_request_conflicts(bot, path):
+    """_pack_request_conflicts_locked() for a caller without the lock -
+    webserver, to answer 409 before it tries to enqueue."""
+    with _fetch_lock():
+        return _pack_request_conflicts_locked(_ensure_fetch_queue(), bot, path)
+
+
 def _claim_matching_offer_locked(queue, from_nick, filename):
     """Find and claim (mark 'receiving') the 'offered' row this CTCP answers.
 
@@ -1952,6 +2056,28 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
         and row.get("request_type") == "folder"
         and str(row.get("bot", "")).strip().lower() == wanted_bot
     ]
+    # AN MXRARSERVER PACK ROW (#1209) is told apart by name. Its request is
+    # the row's own "<path>.rar" and the RAR comes back under a name that
+    # can be worked out from that path (pack_offer_names()), so several may
+    # wait on one bot together - enqueue_fetch() refuses one whose name
+    # could clash. The one that names this offer takes it. Failing that, a
+    # "!rar" row takes it on the bot alone, as it always has; and failing
+    # that, a lone pack row takes a RAR it did not predict, since a bot can
+    # name its packs its own way - but not one of mxrarserver's own list
+    # archives, which is a list arriving late, not a pack.
+    packs = [pair for pair in folder_candidates if _is_pack_row(pair[1])]
+    plain = [pair for pair in folder_candidates if not _is_pack_row(pair[1])]
+    offered = _pack_key(filename)
+    named = [pair for pair in packs
+             if offered in pack_offer_names(pair[1].get("requested_filename"))]
+    if named:
+        folder_candidates = named
+    elif plain:
+        folder_candidates = plain
+    elif len(packs) == 1 and _could_be_a_pack(filename):
+        folder_candidates = packs
+    else:
+        folder_candidates = []
     if folder_candidates:
         rid, row = min(folder_candidates, key=lambda pair: pair[1].get("requested_at", 0))
         # Same reasoning as the "list" branch above: the row was created with
@@ -2598,6 +2724,10 @@ def _offer_timeout_for(row, offer_timeout, folder_timeout, unadvertised_timeout)
     """
     if row.get("request_type") != "folder":
         return offer_timeout
+    # An mxrarserver pack row (#1209) came out of that bot's own list of the
+    # folders it packs: the strongest sign there is, carried by the request.
+    if _is_pack_row(row):
+        return folder_timeout
     try:
         import list_fetch
         if list_fetch.bot_publishes_a_rar_list(row.get("bot", "")):
