@@ -572,11 +572,12 @@ def _sanitize_rar_leaf_name(folder_leaf):
     in Python 3, unlike a literal a-zA-Z0-9 class) keeps real non-ASCII
     library names intact. Everything else, spaces included, becomes "_".
 
-    A folder named like a Windows device (AUX, NUL, COM1 - #1208) gets an
-    underscore after the name, "AUX_", because "AUX.rar" cannot be created
-    there, by the bot or by the person receiving it.
+    Deliberately NOT made Windows-safe (#1208): a folder called AUX is
+    offered as "AUX.rar", because AutoQ.mrc compares the received name with
+    the queued folder's own name and "AUX_.rar" would never match. Only the
+    archive's name ON DISK is made safe, in _rar_archive_disk_name().
     """
-    return platform_compat.windows_safe_name(_clean_rar_chars(folder_leaf), trim_end=False)
+    return _clean_rar_chars(folder_leaf)
 
 
 def _clean_rar_chars(text):

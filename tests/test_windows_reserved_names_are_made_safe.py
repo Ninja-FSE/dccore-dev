@@ -112,12 +112,12 @@ class ListEditorTests(unittest.TestCase):
 
 class ArchiveNameTests(unittest.TestCase):
 
-    def test_a_folder_named_like_a_device_is_offered_under_a_name_that_can_be_created(self):
+    def test_a_folder_named_like_a_device_is_offered_under_its_own_name(self):
+        """AutoQ matches the received name with the folder's own: "AUX_.rar"
+        would leave the request outstanding forever."""
         for leaf in RESERVED:
             with self.subTest(leaf=leaf):
-                shown = dcc._sanitize_rar_leaf_name(leaf) + ".rar"
-                self.assertFalse(platform_compat.is_windows_reserved(shown), shown)
-                self.assertEqual(shown, leaf + "_.rar")
+                self.assertEqual(dcc._sanitize_rar_leaf_name(leaf) + ".rar", leaf + ".rar")
 
     def test_the_name_on_disk_is_safe_for_a_top_level_device_folder(self):
         old = dcc.config.FILE_DIRECTORY
@@ -127,6 +127,7 @@ class ArchiveNameTests(unittest.TestCase):
             with self.subTest(leaf=leaf):
                 name = dcc._rar_archive_disk_name(os.path.join("lib", leaf))
                 self.assertFalse(platform_compat.is_windows_reserved(name), name)
+                self.assertEqual(name, leaf + "_.rar")
 
     def test_a_device_folder_below_another_keeps_the_name_it_had(self):
         """"Music_AUX.rar" was never a device name; nothing about it changes."""
@@ -139,7 +140,7 @@ class ArchiveNameTests(unittest.TestCase):
     def test_the_shown_name_and_the_queued_name_still_agree(self):
         """Both are _sanitize_rar_leaf_name(); the queue row's name is what the
         packer later compares against."""
-        self.assertEqual(dcc._sanitize_rar_leaf_name("NUL"), "NUL_")
+        self.assertEqual(dcc._sanitize_rar_leaf_name("NUL"), "NUL")
 
     def test_ordinary_names_are_exactly_what_they_were(self):
         for leaf, expected in (("Greatest Hits", "Greatest_Hits"),
