@@ -537,6 +537,16 @@ def list_problems(entries):
                          f"cannot be blank.")
             continue
 
+        if platform_compat.is_windows_reserved(name):
+            # Refused, not renamed behind the operator's back: list_slug() keeps
+            # a list of this name loading, but a name the operator typed and
+            # sees every day should be one that works as typed on Windows too.
+            found.append(f"{name!r}: Windows will not create a folder with that "
+                         f"name - CON, PRN, AUX, NUL, COM1-9 and LPT1-9 are "
+                         f"reserved, with or without an extension. Pick "
+                         f"another name.")
+            continue
+
         key = name.lower()
         if key in seen_names:
             # Case-insensitively, because list_by_name() matches that way and
