@@ -1887,6 +1887,31 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
         row["state"] = "receiving"
         return rid, row
 
+    # A LATE LIST (#1209), the same allowance a late file gets above. A list
+    # request gives up after FETCH_OFFER_TIMEOUT - a minute - and a bot that
+    # builds its list on request (mxrarserver packs it into a RAR first, and
+    # says "The list will be prepared and sent automatically") or one with a
+    # queue sends it later than that: it was refused as unsolicited. A list
+    # row has no name to match, so the bot alone decides, as it does for a
+    # list still waiting - and only after every row still waiting has had
+    # its chance at this offer, so a late list never takes what answers a
+    # request that has not given up. The newest such row takes it: it is the
+    # request this list most likely answers.
+    late_lists = [
+        (rid, row) for rid, row in queue.items()
+        if row.get("state") == "failed" and row.get("reason") == "no response"
+        and row.get("request_type") == "list"
+        and row.get("offered_at") is not None
+        and 0 <= now - row["offered_at"] <= _LATE_OFFER_GRACE
+        and str(row.get("bot", "")).strip().lower() == wanted_bot
+    ]
+    if late_lists:
+        rid, row = max(late_lists, key=lambda pair: pair[1].get("requested_at", 0))
+        row.pop("reason", None)
+        row["filename"] = filename
+        row["state"] = "receiving"
+        return rid, row
+
     return None, None
 
 
