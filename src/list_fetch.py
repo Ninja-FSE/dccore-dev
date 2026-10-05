@@ -1700,6 +1700,45 @@ def bot_publishes_a_rar_list(bot):
     return False
 
 
+# An mxrarserver list file: "<name>-MX.txt", "<name>-Files(<x>)-MX.txt",
+# "<name>-Folders(<x>)-MX.txt" (#1209). Every one ends in "-MX".
+_MX_LIST_NAME_RE = re.compile(r"-MX\.txt$", re.IGNORECASE)
+
+# How far into a list to look for its first request line. mxrarserver's
+# banner is an operator-written header of a few dozen lines.
+_TRIGGER_SCAN_LINES = 2000
+
+
+def _first_request_token(path):
+    """The word after "!" on the first request line of the list at `path`, or
+    None. Reads no further than _TRIGGER_SCAN_LINES lines."""
+    try:
+        with open(platform_compat.long_path(path), "r", encoding="utf-8",
+                  errors="replace") as handle:
+            for number, line in enumerate(handle):
+                if number >= _TRIGGER_SCAN_LINES:
+                    return None
+                text = list_mod.strip_control_codes(line).strip()
+                if text.startswith("!") and len(text) > 1:
+                    return text[1:].split(None, 1)[0]
+    except OSError:
+        return None
+    return None
+
+
+def _mx_list_trigger(kept_lists):
+    """The trigger the rows of the first mxrarserver list among `kept_lists`
+    are addressed to, or None - see _install_fetched_list()."""
+    import dcc_fetch
+    for info in kept_lists.values():
+        if not _MX_LIST_NAME_RE.search(str(info.get("file_name") or "")):
+            continue
+        trigger = dcc_fetch._sendable_trigger(_first_request_token(info.get("list_path")))
+        if trigger:
+            return trigger
+    return None
+
+
 def index_key(bot, marker):
     """How one list is named in the search index and on the wire.
 
@@ -1853,6 +1892,15 @@ def _install_fetched_list(bot, zip_path, extract_dir):
         # freshness LED nothing stable to compare against.
         "lists": kept_lists,
     }
+    # WHAT ITS ROWS ARE ADDRESSED TO (#1209). An mxrarserver bot answers to a
+    # trigger of the operator's choosing, every row of its list begins
+    # "!<trigger>", and in "request only" mode that list is the only place it
+    # is ever said. Only for an mxrarserver list: any other bot's rows carry
+    # the nick the list was built under, which is stale once it changes
+    # nick, and requests to it keep going to the nick it has now.
+    trigger = _mx_list_trigger(kept_lists)
+    if trigger:
+        store[str(bot).strip().lower()]["trigger"] = trigger
 
     # Persisted immediately, not on a timer: unlike the bot registry (updated
     # on every advert, throttled for exactly that reason), a list fetch

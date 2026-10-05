@@ -175,6 +175,73 @@ def _ensure_fetch_queue():
     return config.fetch_queue
 
 
+def _sendable_trigger(text):
+    """`text` if it may address a request line, else None. irc.py owns the
+    rule; asked lazily, since irc imports half the daemon."""
+    import irc
+    text = str(text or "").strip()
+    return text if text and irc.is_sendable_trigger(text) else None
+
+
+def request_trigger(bot, row=None):
+    """The word a request to `bot` is addressed to: "@<it>" for its list,
+    "!<it> <file>" for a file (#1209).
+
+    The nick, for nearly every bot - its trigger IS its nick. mxrarserver lets
+    the operator choose any word, and a request addressed to the nick goes
+    unanswered. Where we have it, in order:
+
+      * the row's own: the "!<trigger>" a pasted line was written with;
+      * the bot's advert (irc._parse_mx_advert() keeps it in known_bots);
+      * the bot's list we hold - the "!<trigger>" its rows begin with, kept
+        by list_fetch for an mxrarserver list, which is how a bot in
+        "request only" mode, which never advertises, is still addressed.
+
+    Who a reply or an offer is FROM is still the nick: only what we send is
+    addressed this way. A trigger that could not be sent safely is skipped.
+    """
+    key = str(bot or "").strip().lower()
+    candidates = [(row or {}).get("trigger")]
+    known = (getattr(runtime, "known_bots", None) or {}).get(key)
+    if isinstance(known, dict):
+        candidates.append(known.get("trigger"))
+    held = (getattr(config, "fetched_bot_lists", None) or {}).get(key)
+    if isinstance(held, dict):
+        candidates.append(held.get("trigger"))
+    for candidate in candidates:
+        trigger = _sendable_trigger(candidate)
+        if trigger:
+            return trigger
+    return str(bot or "").strip()
+
+
+def bot_for_trigger(word):
+    """The nick of the bot whose trigger is `word`, or None (#1209).
+
+    A line pasted out of an mxrarserver list starts "!<trigger>", and the
+    trigger need not be the nick. Answered from the same two places
+    request_trigger() reads - the bot's advert and its list we hold - and
+    only when exactly one bot answers to it: two bots with one trigger is a
+    question this cannot settle.
+    """
+    wanted = str(word or "").strip().lower()
+    if not wanted:
+        return None
+    found = set()
+    nicks = {}
+    for key, entry in list((getattr(runtime, "known_bots", None) or {}).items()):
+        if isinstance(entry, dict) and str(entry.get("trigger") or "").strip().lower() == wanted:
+            found.add(key)
+            nicks.setdefault(key, entry.get("nick") or key)
+    for key, entry in list((getattr(config, "fetched_bot_lists", None) or {}).items()):
+        if isinstance(entry, dict) and str(entry.get("trigger") or "").strip().lower() == wanted:
+            found.add(key)
+            nicks.setdefault(key, entry.get("bot") or key)
+    if len(found) != 1:
+        return None
+    return str(nicks[found.pop()]).strip() or None
+
+
 def new_fetch_row(bot, filename, now=None, request_type="file"):
     """Build a fresh `pending` row in the shape every reader of
     config.fetch_queue expects. Does not insert it - callers decide the key.
@@ -577,7 +644,7 @@ def has_any_outstanding_request(bot):
         )
 
 
-def enqueue_fetch(bot, filename, request_type="file"):
+def enqueue_fetch(bot, filename, request_type="file", trigger=None):
     """Append one `pending` row to config.fetch_queue and return its id, or
     None if the request was refused (see below) - callers must check for
     None, they can no longer assume this always succeeds.
@@ -606,8 +673,13 @@ def enqueue_fetch(bot, filename, request_type="file"):
     defense-in-depth reason as the check above, and additionally because it is
     the only place it CAN be exact: the count and the insert have to happen
     under one hold of the lock or two callers race.
+
+    `trigger` is the word the request is to be addressed to when it is not
+    the nick (#1209) - see request_trigger(). Kept on the row only when it is
+    given and sendable, so every other row keeps its shape.
     """
     queue = _ensure_fetch_queue()
+    trigger = _sendable_trigger(trigger) if trigger else None
     normalized_type = request_type if request_type in ("file", "list", "folder") else "file"
     request_id = uuid.uuid4().hex[:12]
     with _fetch_lock():
@@ -621,6 +693,8 @@ def enqueue_fetch(bot, filename, request_type="file"):
         while request_id in queue:  # practically never, but be certain
             request_id = uuid.uuid4().hex[:12]
         queue[request_id] = new_fetch_row(bot, filename, request_type=request_type)
+        if trigger:
+            queue[request_id]["trigger"] = trigger
     return request_id
 
 
@@ -1272,7 +1346,8 @@ def check_fetch_queue():
             row["offered_at"] = now
             load[key] = load.get(key, 0) + 1
             promoted += 1
-            to_dispatch.append((rid, row["bot"], row["filename"], row.get("request_type", "file")))
+            to_dispatch.append((rid, row["bot"], row["filename"], row.get("request_type", "file"),
+                                row.get("trigger")))
 
     for bot, filename in to_take_back:
         drop_our_request_at(bot, filename)
@@ -1292,7 +1367,10 @@ def check_fetch_queue():
     # batch.
     default_channel = (getattr(config, "BROADCAST_SEARCH_CHANNEL", None)
                        or str(getattr(config, "CHANNEL", "")).split(",")[0].strip())
-    for rid, bot, filename, request_type in to_dispatch:
+    for rid, bot, filename, request_type, row_trigger in to_dispatch:
+        # Addressed to the bot's trigger where it has one (#1209); the
+        # channel, the log and every match on what comes back stay the nick.
+        trigger = request_trigger(bot, {"trigger": row_trigger})
         # The bot's own channel wins when we can find one - a stale fallback
         # is exactly the bug above. Only a bot that left between enqueue and
         # this dispatch tick (bot_not_here_error() already refused any that
@@ -1313,7 +1391,7 @@ def check_fetch_queue():
         # message at all if either value is still unsafe for some future
         # reason, mirroring _serve_passive_offer()'s identical re-check
         # right before IT builds its own outbound CTCP line.
-        if contains_unsafe_ctcp_bytes(bot) or (
+        if contains_unsafe_ctcp_bytes(bot) or contains_unsafe_ctcp_bytes(trigger) or (
                 request_type != "list" and contains_unsafe_ctcp_bytes(filename)):
             _mark_failed_locked(queue[rid], "unsafe characters in bot/filename this late")
             print(f"[FETCH] Refusing to dispatch request {rid} "
@@ -1329,7 +1407,7 @@ def check_fetch_queue():
             # the same way: a DCC SEND of their own list zip, filename
             # unknown to us ahead of time (see _claim_matching_offer_locked()
             # for how admission control handles that).
-            message = f"PRIVMSG {channel} :@{bot}\r\n"
+            message = f"PRIVMSG {channel} :@{trigger}\r\n"
             log_desc = f"{bot}'s file list"
         elif request_type == "folder":
             # filename is already the literal string "!rar <folder path>" at
@@ -1343,11 +1421,11 @@ def check_fetch_queue():
             # posture as the contains_unsafe_ctcp_bytes() re-check just above
             # (#162 finding #13).
             import announce
-            message = announce.fit_irc_line(lambda v: f"PRIVMSG {channel} :!{bot} {v}\r\n", filename)
+            message = announce.fit_irc_line(lambda v: f"PRIVMSG {channel} :!{trigger} {v}\r\n", filename)
             log_desc = f"{filename!r} (folder pack) from {bot}"
         else:
             import announce
-            message = announce.fit_irc_line(lambda v: f"PRIVMSG {channel} :!{bot} {v}\r\n", filename)
+            message = announce.fit_irc_line(lambda v: f"PRIVMSG {channel} :!{trigger} {v}\r\n", filename)
             log_desc = f"{filename!r} from {bot}"
         if oserve and hasattr(oserve, "queue_message"):
             # A request still waiting to go out is replaced, never added to

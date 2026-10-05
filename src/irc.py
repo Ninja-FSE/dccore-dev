@@ -1742,6 +1742,14 @@ _RAR_RE = re.compile(
 # line budget is 512 bytes.
 _TRIGGER_RE = re.compile(r"^[^\s,\x00-\x1f]{1,64}$")
 
+
+def is_sendable_trigger(text):
+    """Whether `text` may be put in a request line as another bot's trigger.
+    The one test, for a trigger out of an advert, out of a fetched list's rows
+    or out of a pasted line alike (#1209). fullmatch(), because the "$" in
+    the pattern also matches before a final line ending."""
+    return isinstance(text, str) and bool(_TRIGGER_RE.fullmatch(text))
+
 # nick.lower() -> [first_seen, text_so_far] for an advert that may still be
 # continued on a following line. Module level rather than in runtime.py because
 # it is worth seconds and nothing else: !rehash reloads what is named in
@@ -1929,7 +1937,7 @@ def _parse_mx_advert(clean):
         advert["rar_folders"] = _as_int(folders.group(1))
 
     trigger = found.group(1)
-    if _TRIGGER_RE.match(trigger):
+    if is_sendable_trigger(trigger):
         advert["trigger"] = trigger
     else:
         print(f"[ADVERT] Ignoring a trigger that cannot be sent safely: "

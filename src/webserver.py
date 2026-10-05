@@ -2568,6 +2568,18 @@ def build_fetch_enqueue_result(payload):
         if not bot or not filename:
             errors.append({"error": "Both 'bot' and 'filename' are required.", "item": raw})
             continue
+        # A TRIGGER IS NOT A NICK (#1209). A line pasted out of an
+        # mxrarserver list begins "!<trigger>", a word its operator chose, so
+        # the "bot" the paste box split off may be that word and not anybody
+        # in the channel. When it is not a bot we know and exactly one known
+        # bot answers to it, the request is that bot's - matched by its nick
+        # as every request is - and still addressed to the trigger it was
+        # written with.
+        trigger = None
+        if not dcc_fetch.bot_is_known(bot):
+            owner = dcc_fetch.bot_for_trigger(bot)
+            if owner:
+                bot, trigger = owner, bot
         # PER ITEM, not per request: a bulk paste is routinely several bots at
         # once, and one of them having signed off is no reason to refuse the
         # rest. It joins `errors`, which this route already reports beside
@@ -2579,7 +2591,7 @@ def build_fetch_enqueue_result(payload):
         if absent and not dcc_fetch.bot_is_known(bot):
             errors.append({"error": absent, "item": raw})
             continue
-        request_id = dcc_fetch.enqueue_fetch(bot, filename)
+        request_id = dcc_fetch.enqueue_fetch(bot, filename, trigger=trigger)
         if request_id is None:
             # Only reachable via the queue cap: enqueue_fetch()'s other refusal
             # is for "list"/"folder" rows and this route only creates "file"
