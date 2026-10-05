@@ -850,7 +850,15 @@ def persist_fetch_history():
 # -> announce.send_dcc_error(user, "rar_disabled"): "Error: Folder packing
 # (!rar) is disabled on this bot.") and the OmenServe-family wording
 # ("Rar Server is currently disabled.") - both contain "rar" and "disabled".
+#
+# AS WORDS, not as substrings (#1209). "temporarily disabled" contains both
+# "rar" and "disabled", so mxrarserver's "Files list build in progress ...
+# temporarily disabled" - and any bot that says something is temporarily
+# disabled - failed every folder request waiting on that bot. "(!rar)" and
+# "Rar Server" still hold the word.
 _RAR_REFUSAL_MARKERS = ("disabled", "rar")
+_RAR_REFUSAL_WORD_RES = tuple(re.compile(r"\b" + re.escape(marker) + r"\b")
+                              for marker in _RAR_REFUSAL_MARKERS)
 
 
 def handle_refusal_notice(bot, notice_text):
@@ -871,10 +879,11 @@ def handle_refusal_notice(bot, notice_text):
     is not this wording and is left to its own timeout), and the notice
     text must contain every marker in _RAR_REFUSAL_MARKERS - a false match
     here would fail a row a moment before its real DCC SEND arrived, with
-    no way back for that request.
+    no way back for that request. Each marker must be a whole word (#1209):
+    "temporarily" is not "rar".
     """
     text_lower = str(notice_text).lower()
-    if not all(marker in text_lower for marker in _RAR_REFUSAL_MARKERS):
+    if not all(word.search(text_lower) for word in _RAR_REFUSAL_WORD_RES):
         return False
     wanted_bot = str(bot).strip().lower()
     queue = _ensure_fetch_queue()
