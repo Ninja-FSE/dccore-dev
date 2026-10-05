@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **New (mIRC): the DCCore windows open by themselves when mIRC starts.** `@DCCore` opens minimised, its button at the end of the switchbar, and its title says what it is waiting for (not connected to the network yet, the bot not answering yet, or no bot paired) until the console connects. Chat and Downloads can open at start too: tick them under "Open when mIRC starts" in `/dccore options`. Update `dccore.mrc` (1.13) and reload it with `/reload -rs dccore.mrc`.
+- **Fixed: a list another bot sends as a .rar replaced the list you already held with nothing.** It was taken as a text list, came out with no files (or a few garbage ones), was reported as fetched, and the good list you had for that bot was thrown away. A .rar list is now opened with your `rar` program (the one `!rar` packing uses), with the same safety checks as a .zip list; without rar it is refused and your old list is kept. Any other file that is not a list - a .7z, or anything binary - is refused the same way.
 
 ## v1.15.0 — The Bot Gets Faster
 
