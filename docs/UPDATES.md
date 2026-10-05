@@ -2,6 +2,40 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🐛 A list that arrives as a RAR is opened, and binary is never installed as a list (#1200)
+
+A list another bot sent as a RAR or 7z was installed as that bot's list, and **the good list already held for it was
+thrown away**. The route for lists that aren't a ZIP decided "is this a list?" by reading the first 64 KB with
+`errors="replace"` and passing if any `str.splitlines()` line started with `!`. `splitlines()` also breaks on `\x0b`,
+`\x0c`, `\x1c`-`\x1e` and `\x85`, so compressed data passed nearly always: 64 KB of random bytes passed 50 times
+out of 50. The result was 0 or garbage rows, reported as "list arrived". DCCore's own `LIST_FORMAT = "rar"` triggered
+it between two DCCore bots.
+
+- **Binary is refused.** The check reads raw bytes and refuses a NUL, or control bytes no text list holds making up
+  over a 32nd of the head. Tab, line ends, form feed, `\x1a` and IRC formatting codes don't count, so a banner
+  copied from IRC still passes. Lines are split the way the list parser splits them, not with `splitlines()`. A 7z
+  is refused and named. Every refusal leaves the held list and its record untouched.
+- **RAR lists are opened,** when the file starts with `Rar!\x1a\x07`:
+  1. **The listing first:** `rar lt` lists the archive (the comment excluded, at most 301 entries read, lines
+     capped at 16 KB).
+  2. **The ZIP route's guards:** the members go through `_validate_zip_members()` (now also used for RAR): entry
+     count, declared size budget, absolute paths, drive letters and traversal. RAR-only checks refuse wildcard or
+     switch-like names, duplicates, and members that aren't a file or a folder.
+  3. **The unpack:** each `.txt` member is printed through a pipe with `rar p`, written by DCCore to a path built
+     from the checked name, and stopped one byte past its declared size. rar never writes to disk itself.
+  4. **The rest is the same:** the list is picked with `_pick_list_file()` and the text ceiling applies as before.
+  - rar is found with `platform_compat.rar_command(RAR_BINARY)`, the same lookup `!rar` packing uses. Without it
+    the list is refused, with a reason that says to install rar.
+  - Each rar child has a 300 s watchdog and is killed by its own process handle, never by name.
+- **One behaviour change:** a UTF-16 list without a BOM, sent as a plain .txt, is now refused (it holds NULs).
+  Inside a ZIP it is unaffected.
+- `RAR_BINARY`'s help says it is also used to open RAR lists.
+- **Tests:** `tests/test_a_rar_list_is_opened_and_a_binary_list_is_refused.py` (39 tests; 38/38 mutations caught).
+  A fake rar runs on every runner. The tests needing a real rar (store, compressed, a non-ASCII name, a damaged
+  archive) skip without one. `test_the_bot_window_setting.py`'s list of subprocess call sites includes the new one.
+
 ## 🟩 v1.15.0 (2026-10-04) - "The Bot Gets Faster"
 
 ### 🧪 Preflight's skip ceiling is above what a Linux box legitimately skips
