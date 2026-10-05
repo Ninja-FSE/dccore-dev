@@ -732,18 +732,41 @@ def _matching_lines(search_words, list_path):
         return
 
     with open(current_list_path, "r", encoding="utf-8", errors="replace") as f:
-        yield from _scan_lines(f, plain_words, phrase_patterns)
+        yield from _scan_lines(f, plain_words, phrase_patterns,
+                               banner_first=is_mxrarserver_list(current_list_path))
 
 
-def _scan_lines(lines, plain_words, phrase_patterns, state="none", on_heading=None):
+# An mxrarserver list file (#1209): "<name>-MX.txt", "<name>-Files(<x>)-MX.txt",
+# "<name>-Folders(<x>)-MX.txt". Every one it writes ends in "-MX".
+_MXRARSERVER_LIST_RE = re.compile(r"-MX\.txt$", re.IGNORECASE)
+
+
+def is_mxrarserver_list(path):
+    """Whether the list at `path` is one mxrarserver wrote, by its name."""
+    return bool(_MXRARSERVER_LIST_RE.search(os.path.basename(str(path or ""))))
+
+
+def _scan_lines(lines, plain_words, phrase_patterns, state="none", on_heading=None,
+                banner_first=False):
     """_matching_lines()'s parser, over any source of lines.
 
     The List Browser's folder table (#1128) reads the same lists in binary,
     to know where each folder is, and starts this part-way through a file -
     at a heading, in the "open" state - so there is one parser and not two
     that could drift. `on_heading` is called as each heading is taken.
+
+    `banner_first` (#1209) is for an mxrarserver list, whose rows have no
+    folder headings and which opens with its operator's banner: blocks of
+    text between "=" rules, which this parser takes for headings - the last
+    one, "> Overview" or the bot's name, then filed every row in the list.
+    In such a list nothing before the first row is a heading. Only when the
+    scan starts at the top of the file: one started at a heading (the folder
+    table's "open") is past that point already. Every other list is read
+    exactly as before - DCCore's own put a summary line under each heading,
+    which is why "text after a heading" cannot be the test.
     """
     current_folder = None
+    in_banner = banner_first and state == "none"
     # "none" -> saw the opening rule line, now expecting the folder line ("open")
     # -> saw the folder line, now expecting the closing rule line ("folder_seen")
     for line in lines:
@@ -797,6 +820,11 @@ def _scan_lines(lines, plain_words, phrase_patterns, state="none", on_heading=No
 
         if not line_strip.startswith("!"):
             continue
+        if in_banner:
+            # The first row: what was taken for a heading above it was the
+            # banner (#1209).
+            current_folder = None
+            in_banner = False
 
         line_lower = line_strip.lower()
         # Plain loops, not all() over a generator (#1126): the generator
@@ -1663,7 +1691,7 @@ def _build_folder_table_within(paths, signature, budget):
             crc = 0
             for line_strip, folder in _scan_lines(
                     _binary_lines(handle, 0, None, at, raw), [], [],
-                    on_heading=on_heading):
+                    on_heading=on_heading, banner_first=is_mxrarserver_list(path)):
                 if run_folder is _NO_RUN or folder != run_folder:
                     if run_folder is not _NO_RUN:
                         table.seg_rows.append(position)
@@ -1806,7 +1834,8 @@ def _run_lines(table, run, handles):
     crc = 0
     lines = _binary_lines(handle, table.seg_start[run], table.seg_end[run], at, raw)
     for line_strip, folder in _scan_lines(
-            lines, [], [], state="open" if table.seg_open[run] else "none"):
+            lines, [], [], state="open" if table.seg_open[run] else "none",
+            banner_first=is_mxrarserver_list(table.signature[file_index][0])):
         crc = zlib.crc32(raw[0], crc)
         yield line_strip, folder
     if crc != table.seg_crc[run]:
