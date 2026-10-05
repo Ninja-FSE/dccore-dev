@@ -36,6 +36,10 @@ def list_slug(name):
     case and the readable one: "Films" is the "Films" directory. Two such
     names cannot collide, because they are equal.
 
+    A name Windows will not create ("NUL", "COM1", #1208) counts as one that
+    needed changing: it takes the digest too, so it is not made safe by a
+    suffix that another list's own name could already be using.
+
     Stable across restarts and across reordering the lists: it depends on that
     one name and nothing else. hashlib rather than hash(), which is randomised
     per process and would rename every directory on each start.
@@ -43,7 +47,7 @@ def list_slug(name):
     raw = str(name or "").strip()
     cleaned = "".join(ch if (ch.isalnum() or ch in "-_ ") else "_" for ch in raw)
     cleaned = cleaned.strip(" ")
-    if cleaned == raw and cleaned:
+    if cleaned == raw and cleaned and not platform_compat.is_windows_reserved(cleaned):
         return cleaned
     digest = hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:6]
     return f"{cleaned or 'list'}-{digest}"

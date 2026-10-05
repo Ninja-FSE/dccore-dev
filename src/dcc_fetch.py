@@ -2138,7 +2138,7 @@ def _sanitize_offer_filename(raw_name):
     name = name.strip().strip('.').strip()
     if not name:
         name = "fetched_file"
-    return name
+    return platform_compat.windows_safe_name(name)
 
 
 # One path COMPONENT, in bytes. NTFS allows 255 characters per name and ext4

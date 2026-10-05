@@ -230,7 +230,7 @@ def _sanitize_bot_dir_name(bot):
     name = name.replace('..', '')
     name = _BOT_DIR_CHARSET_RE.sub('_', name)
     name = name.strip().strip('.').strip()
-    return name or "unknown_bot"
+    return platform_compat.windows_safe_name(name) or "unknown_bot"
 
 
 def list_extract_dir(bot):

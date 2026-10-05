@@ -571,8 +571,17 @@ def _sanitize_rar_leaf_name(folder_leaf):
     all three ("[WEB] [192K]", "A Winter's Tale") - and \\w (Unicode-aware
     in Python 3, unlike a literal a-zA-Z0-9 class) keeps real non-ASCII
     library names intact. Everything else, spaces included, becomes "_".
+
+    A folder named like a Windows device (AUX, NUL, COM1 - #1208) gets an
+    underscore after the name, "AUX_", because "AUX.rar" cannot be created
+    there, by the bot or by the person receiving it.
     """
-    cleaned = re.sub(r"[^\w\-\.\(\)\[\]']", "_", str(folder_leaf))
+    return platform_compat.windows_safe_name(_clean_rar_chars(folder_leaf), trim_end=False)
+
+
+def _clean_rar_chars(text):
+    """The character rules of _sanitize_rar_leaf_name(), nothing else."""
+    cleaned = re.sub(r"[^\w\-\.\(\)\[\]']", "_", str(text))
     return cleaned.replace(" ", "_")
 
 
@@ -598,8 +607,8 @@ def _rar_archive_disk_name(source_dir):
     except ValueError:
         rel = os.path.basename(str(source_dir).rstrip("/\\"))
     rel = rel.replace("\\", "/").strip("/")
-    segments = [_sanitize_rar_leaf_name(part) for part in rel.split("/") if part]
-    return f"{'_'.join(segments) or 'album'}.rar"
+    segments = [_clean_rar_chars(part) for part in rel.split("/") if part]
+    return f"{platform_compat.windows_safe_name('_'.join(segments) or 'album', trim_end=False)}.rar"
 
 
 def _is_temp_zip_cache_file(path):
