@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪟 dccore.mrc: the windows open, minimised, when mIRC starts (#1201)
+
+Starting mIRC used to show no DCCore window at all. `on *:START` only loaded the settings. `@DCCore` opened from
+`on *:CONNECT` 8 s later, and only with `wantopen` (cleared by closing the window) and `auto` on. Chat and Downloads
+opened only on demand. With the bot down, or the window closed last time, nothing ever appeared.
+
+- **Three settings** in `/dccore options`, in a new box "Open when mIRC starts (minimised)": `start.main` (on),
+  `start.chat` and `start.downloads` (off). They are set with `dccore.default`, so an upgrade keeps saved choices.
+- **`on *:START`** runs the new `dccore.atstart`, which calls each window's own opener with a `start` argument.
+  That opens the window minimised with its button at the end of the switchbar (`-nz`), and otherwise exactly as
+  before: the font, background, panel and title set-up are unchanged. A Downloads window that is already open is
+  left where it is (START also fires on a reload).
+- **Until the first dial,** `@DCCore`'s title (and one line written at start) says what it waits for. The new
+  `dccore.waiting` gives one of:
+  - "no bot paired yet: /dccore pair <botnick>"
+  - "Waiting for the bot: not connected to <network> yet"
+  - "Waiting for the bot: it is not answering yet"
+  - "Waiting for the bot: the console is not open - /dccore connect opens it"
+
+  `on *:CONNECT` refreshes the title.
+- **Opening is not connecting:** nothing on the start path sets `wantopen` or dials, and the auto-connect on CONNECT
+  is unchanged.
+- `dccore.ver` is 1.13. `docs/ADMIN-CONSOLE.md` describes the setting.
+- **Tests:** `tests/test_the_mirc_windows_open_at_start.py` (26 tests; 41/41 mutations caught). The options-dialog
+  box count and the audio-reading test's version pin ("at least", like the other feature tests) follow the change.
+
 ### 🐛 A list that arrives as a RAR is opened, and binary is never installed as a list (#1200)
 
 A list another bot sent as a RAR or 7z was installed as that bot's list, and **the good list already held for it was
