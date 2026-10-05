@@ -4,6 +4,65 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔗 The grabber understands bots running mxrarserver (#1209)
+
+A bot running the mIRC script mxrarserver 2.x was nearly invisible to DCCore's grabber. Checked against v1.15.0, step
+by step:
+- its advert matched none of the three parsers;
+- its list arrives as a RAR (fixed in #1200);
+- none of its notices were understood;
+- its folder rows read as files, and the RAR they produced was refused;
+- requests went to its nick, not its trigger;
+- its "temporarily disabled" notice failed any pending folder row.
+
+Each of these is fixed, and OmenServe, SPQR, RAR-folder and DCCore bots parse exactly as before.
+
+- **Its advert is read** (`irc._parse_mx_advert`, family "mx"): `Type: @<trigger> to get list(s) of Files:(N) +
+  Folders:(N) ...`, with either list alone, comma counts and any of its separator glyphs. Like the RAR-folder parser
+  it returns no nick, so the sender stays the registry key.
+  - Files go to `files`, Folders to `rar_folders`. Slots, queue, speed, "Updated" and the software name are kept,
+    and so is the trigger.
+  - Its SLOTS CTCP is matched against Files+Folders, or Folders alone, for that software only.
+- **Requests go to the trigger.** `dcc_fetch.request_trigger()` picks it in this order: the row's own trigger, the
+  advert's, then the trigger of the held list (only for an `-MX.txt` list, since OmenServe lists carry a nick that
+  goes stale), else the nick. Replies and offers are still matched by sender nick.
+  - Bulk paste resolves a word that names one known bot's trigger to that bot.
+  - The trigger is saved with the known bot, the held list and the fetch row.
+  - `irc.is_sendable_trigger()` is the one check: no whitespace, comma or control character, 1-64 characters.
+  - `-remove` is still sent only to DCCore peers; mxrarserver's would clear our whole queue there.
+- **Its replies are understood** (rules added last in `fetch_replies`):
+  - queued, with position, for files, lists and Complete lists;
+  - already queued;
+  - the request limit, and a list build in progress (busy, retry);
+  - not found, compression failed, timed out or cancelled (refused);
+  - "Compression completed" keeps the request waiting.
+
+  A list offer arriving after its row failed with "no response" is now taken within the existing 30-minute grace,
+  after every row still waiting has had its chance.
+- **Folder rows are fetched as folders.** `list.pack_path_of()` recognises `!<trigger> X:\path\Album.rar` with no
+  size, so the List Browser offers "Get folder as RAR". It is requested verbatim as a folder row, with the folder
+  size cap and timeouts. The RAR that comes back is admitted:
+  - by the name mxrarserver gives it (`Parent - CD1` for a generic subfolder, spaces removed, `\/:*?<>|` as `_`);
+  - else as before for a `!rar` row;
+  - else by a lone pending pack row (never a `-MX.rar` list).
+
+  Several pack rows may wait on one bot. A clash with a list, a `!rar` or a same-named pack is 409
+  `PACK_FETCH_CONFLICT_ERROR`.
+- **"temporarily disabled" is no longer a rar refusal.** The check matched the substrings "disabled" and "rar"; it
+  matches whole words now, and DCCore's and OmenServe's real refusals still fail the row.
+- **Its lists are named and read as meant.** Markers drop `(...)` and `-MX`, giving "Files" and "Folders". A Folders
+  list is never the main list, and holding one counts as a sign the bot packs. In an `-MX.txt` list the banner above
+  the first row is no longer taken as a folder heading. The folder table follows the same rule.
+- **Tests:** six new modules (`test_an_mxrarserver_advert_is_read`, `test_mxrarserver_replies_are_understood`,
+  `test_temporarily_disabled_is_not_a_rar_refusal`, `test_a_request_is_addressed_to_the_bot_s_trigger`,
+  `test_an_mxrarserver_folder_row_is_fetched_as_a_folder`,
+  `test_an_mxrarserver_list_is_named_and_read_as_its_bot_meant`). 120 of 121 mutations caught; the survivor is the
+  dashboard's pack-conflict pre-check, which `enqueue_fetch` repeats. No existing test changed.
+- **Not done:**
+  - Auto-grab still skips a Folders-only bot (no file count).
+  - `list_grab`'s "someone else asked" check matches `@nick`, not `@trigger`.
+  - A pack row has no late-offer grace after its 1800 s.
+
 ### 🪟 Windows device names (CON, NUL, COM1 ...) no longer break a list or an archive (#1208)
 
 Windows refuses to create a file or folder named `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9` or `LPT1`-`LPT9`, in any case
