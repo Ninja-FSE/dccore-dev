@@ -16,6 +16,8 @@ import os
 import threading
 import unittest
 
+from tests import support
+
 from tests.support import (DCCoreTestCase, no_disk_writes, silence_debug,
                            RecordingSocket)
 
@@ -415,7 +417,6 @@ class PoisonedQueueRowTests(PathSecurityBase):
         # Stub the packer engine: reaching it at all is the failure this class
         # is about, and a real "rar" binary must never be required by the suite.
         self.rar_calls = []
-        self._real_run = dcc.subprocess.run
 
         class FakeCompleted:
             returncode = 1
@@ -426,8 +427,7 @@ class PoisonedQueueRowTests(PathSecurityBase):
             self.rar_calls.append(cmd)
             return FakeCompleted()
 
-        dcc.subprocess.run = fake_run
-        self.addCleanup(lambda: setattr(dcc.subprocess, "run", self._real_run))
+        support.fake_rar_runs(self, dcc.subprocess, fake_run)
 
         # dcc.py now resolves the rar binary through platform_compat BEFORE calling
         # subprocess.run, and raises if it cannot find one. CI runners have no rar

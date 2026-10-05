@@ -4,6 +4,35 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A running folder pack can be seen and cancelled (#1202)
+
+`rar` ran inside a blocking `subprocess.run` and no handle was kept. The user being packed for read "queued" for as
+long as it ran, the operator saw nothing, and only `RAR_TIMEOUT` (or stopping the bot) ended a pack that held the one
+pack interlock for every other user.
+
+- **The pack is a `Popen` the packer keeps** on `runtime.pack_job` (user, folder name - never a path - archive,
+  start, folder size, process, cancelled, kill timer), guarded by `runtime.pack_lock`. It is registered before the
+  process starts, so a cancel that comes early is not lost.
+- **`dcc.pack_status()`** says who, which folder, how long, and the archive's size so far against the folder's
+  (measured once, 0 until then). **`dcc.cancel_pack()`** marks the job and terminates THAT process (a kill after 5 s
+  if it will not stop); the packer thread then deletes the partial archive, settles the row with no charge to the
+  retry budget, tells the user without any path, and the wrapper's `finally` releases the interlock and starts the next
+  waiting pack. `RAR_TIMEOUT` stays as the backstop.
+- **Dashboard:** the user's Queue row reads **packing** with the folder, a bar of archive against folder size and the
+  time, and a **Cancel pack** button (`POST /api/queue/pack/cancel`: 200, or 404 when nothing is packing). The route
+  sits behind the same login and origin check as every other `/api/` route. Translated (en, fr, es).
+- **Admin console:** `packing` and `packcancel`. Pack start and cancel go to the console feed as category
+  `PACK`.
+- **dccore.mrc 1.14:** a `DCCORE PACKING` line (every status burst and every 3 s between, `end` when it stops) draws a
+  **Packing** section in the panel, a title-bar part when the panel is hidden, and **Control → Cancel the running
+  pack...** asks, then sends `packcancel`. A bot talking to an older script sends no PACKING line.
+- **Not built:** "recorded as cancelled" in the failure statistics - those are #1203. The cancelled pack is logged and
+  told to the user, nothing more.
+- **Tests:** `tests/test_a_running_pack_can_be_seen_and_cancelled.py` (a real slow fake `rar` process, so the
+  terminate is real on every platform) and `tests/test_the_operator_sees_a_running_pack_everywhere.py` (26). The tests
+  that faked `subprocess.run` for the pack use `support.fake_rar_runs` now, which behaves like the `Popen`.
+- The mIRC side was written without a mIRC to run it in: it needs a manual test.
+
 ### 🪟 dccore.mrc: the windows open, minimised, when mIRC starts (#1201)
 
 Starting mIRC used to show no DCCore window at all. `on *:START` only loaded the settings. `@DCCore` opened from

@@ -558,10 +558,22 @@ def script_draws_fetching(version):
     return theirs is not None and theirs >= ours
 
 
+# The first script that draws the pack that is running (#1202). An older one
+# would print a PACKING line as text every status burst.
+PACKING_SCRIPT_VERSION = "1.14"
+
+
+def script_draws_packing(version):
+    ours = _version_tuple(PACKING_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is not None and theirs >= ours
+
+
 # The first script that draws a list rebuild's progress (#1024). An older one
 # would print a REBUILD line as text.
 REBUILD_SCRIPT_VERSION = "1.9"
 REBUILD_INTERVAL = 5.0        # seconds between REBUILD lines while one runs, between bursts
+PACKING_INTERVAL = 3.0        # seconds between PACKING lines while a pack runs, between bursts
 
 
 def script_draws_rebuild(version):
@@ -815,7 +827,24 @@ def fetching_lines(now=None):
     return lines
 
 
-def status_lines(now=None, fetching=False, rebuild=False, reading=False):
+def packing_lines(now=None):
+    """`DCCORE PACKING <nick> <done> <total> <elapsed> <folder>` while a folder
+    pack runs (#1202): who it is for, the archive's size so far, the folder's
+    size (0 until measured), seconds, and the folder as the list shows it -
+    the last field, so it may hold spaces. Nothing when none runs."""
+    try:
+        import dcc
+        pack = dcc.pack_status(now)
+    except Exception as err:
+        print(f"[ADMINCHAT] The running pack is unavailable for the status burst: {err}")
+        return []
+    if pack is None:
+        return []
+    return [f"DCCORE PACKING {_clean(pack['user'], token=True)} {_num(pack['done'])} "
+            f"{_num(pack['total'])} {_num(pack['elapsed'])} {_clean(pack['name'])}"]
+
+
+def status_lines(now=None, fetching=False, rebuild=False, reading=False, packing=False):
     """The STATUS burst (#550, step 3): what the client's title bar and side
     panel are drawn from, read from what the daemon already holds.
 
@@ -893,6 +922,8 @@ def status_lines(now=None, fetching=False, rebuild=False, reading=False):
         lines.extend(fetching_lines(now))
     if rebuild:
         lines.extend(rebuild_lines(now, reading=reading))
+    if packing:
+        lines.extend(packing_lines(now))
     return lines
 
 
@@ -945,8 +976,11 @@ class Session:
         self.draws_fetching = False   # the script said it can draw FETCHING lines (#1019)
         self.draws_rebuild = False    # ... and REBUILD lines (#1024)
         self.draws_audio = False      # ... and the background audio reading in them (#1182)
+        self.draws_packing = False    # ... and the pack that is running (#1202)
         self._rebuild_sent_at = 0.0
         self._rebuild_shown = False   # a REBUILD line is on the script's panel
+        self._packing_sent_at = 0.0
+        self._packing_shown = False   # a PACKING line is on the script's panel
         self.draws_downloads = False  # ... and the Downloads window's rows (#1022)
         self.reads_peers = False      # ... and PEERS and CONSOLEFEED lines (#1045)
         self.downloads_finished = 0   # > 0 while that window is open: how many finished rows it wants
@@ -1029,7 +1063,8 @@ class Session:
                 try:
                     lines.extend(status_lines(fetching=self.draws_fetching,
                                               rebuild=self.draws_rebuild,
-                                              reading=self.draws_audio))
+                                              reading=self.draws_audio,
+                                              packing=self.draws_packing))
                 except Exception as err:
                     print(f"[ADMINCHAT] Status burst failed: {err}")
 
@@ -1045,6 +1080,8 @@ class Session:
             self.send(line)
         self._rebuild_shown = any(line.startswith("DCCORE REBUILD ") for line in job[1])
         self._rebuild_sent_at = time.time()
+        self._packing_shown = any(line.startswith("DCCORE PACKING ") for line in job[1])
+        self._packing_sent_at = time.time()
 
     def send_rebuild_progress(self):
         """A REBUILD line between bursts while a rebuild runs, and one
@@ -1062,6 +1099,24 @@ class Session:
         self._rebuild_sent_at = now
         self._rebuild_shown = bool(lines)
         self.send(lines[0] if lines else "DCCORE REBUILD end")
+
+    def send_packing_progress(self):
+        """A PACKING line between bursts while a folder pack runs, and one
+        `DCCORE PACKING end` when it stops (#1202) - the same shape as
+        send_rebuild_progress, so the panel's bar moves with the archive and
+        clears the moment the pack is over. Reads the running job only; no
+        lock, so it is safe on the writer thread."""
+        if not (self.draws_packing and self.structured and self.authenticated):
+            return
+        now = time.time()
+        if now - self._packing_sent_at < PACKING_INTERVAL:
+            return
+        lines = packing_lines(now)
+        if not lines and not self._packing_shown:
+            return
+        self._packing_sent_at = now
+        self._packing_shown = bool(lines)
+        self.send(lines[0] if lines else "DCCORE PACKING end")
 
     def request_downloads(self):
         """The Downloads window's next snapshot goes on the writer's next pass,
@@ -1134,6 +1189,7 @@ class Session:
                     self.send_status()
                     continue
                 self.send_rebuild_progress()
+                self.send_packing_progress()
                 self.send_downloads()
                 self._wake.wait(0.5)
                 self._wake.clear()
@@ -1468,6 +1524,36 @@ def _cmd_queue(session, args):
     for user_key in queue:
         session.send(f"  {user_key:<20} {len(queue[user_key]):>4} file(s)"
                      f"{'  FROZEN' if user_key in frozen else ''}")
+
+
+def _pack_progress_text(pack):
+    from announce import format_size_human
+    sizes = format_size_human(pack["done"])
+    if pack["total"]:
+        sizes += " of " + format_size_human(pack["total"])
+    return f"{pack['name']} for {pack['user']}: {sizes} so far, {format_uptime(pack['elapsed'])}"
+
+
+def _cmd_packing(session, args):
+    """The folder pack that is running, if one is (#1202)."""
+    import dcc
+    pack = dcc.pack_status()
+    if pack is None:
+        session.send("Nothing is being packed.")
+        return
+    session.send("Packing " + _pack_progress_text(pack)
+                 + (" - being cancelled" if pack.get("cancelled") else ""))
+
+
+def _cmd_packcancel(session, args):
+    """Stop the folder pack that is running (#1202)."""
+    import dcc
+    cancelled = dcc.cancel_pack()
+    if cancelled is None:
+        session.send("Nothing is being packed.")
+        return
+    session.send(f"Cancelling the pack of {cancelled['name']} for {cancelled['user']}. "
+                 "They are told it was cancelled, and the next request starts.")
 
 
 def _cmd_status(session, args):
@@ -1901,6 +1987,7 @@ def _cmd_hello(session, args):
     session.draws_fetching = script_draws_fetching(version)
     session.draws_rebuild = script_draws_rebuild(version)
     session.draws_audio = script_draws_audio(version)
+    session.draws_packing = script_draws_packing(version)
     session.draws_downloads = script_draws_downloads(version)
     session.reads_peers = script_reads_peers(version)
     session.send(hello_line())
@@ -2067,6 +2154,8 @@ COMMANDS = {
     "status":     (_cmd_status,     "everything at a glance",            "status"),
     "queue":      (_cmd_queue,      "queued files, all or one user",     "queue [nick]"),
     "slots":      (_cmd_slots,      "what is sending right now",         "slots"),
+    "packing":    (_cmd_packing,    "the folder pack that is running",   "packing"),
+    "packcancel": (_cmd_packcancel, "stop the folder pack that is running", "packcancel"),
     "bans":       (_cmd_bans,       "permanent and timed bans",          "bans"),
     "uptime":     (_cmd_uptime,     "how long the daemon has run",       "uptime"),
     "version":    (_cmd_version,    "build and platform",                "version"),

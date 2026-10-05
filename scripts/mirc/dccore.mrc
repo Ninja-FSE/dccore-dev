@@ -90,7 +90,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.13 }
+alias dccore.ver { return 1.14 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -674,6 +674,17 @@ alias dccore.structured {
     dccore.panel.soon
     return
   }
+  ; <nick> <done> <total> <elapsed> <folder>: a folder pack is running (#1202);
+  ; `end` when it stops. <done> is the archive's size so far, <total> the
+  ; folder's (0 until measured), the folder last as it may hold spaces. Kept in
+  ; dccore.live and cleared by every STATUS, like REBUILD.
+  if (%type == PACKING) {
+    if ($2 == end) { hdel dccore.live packing }
+    else { hadd dccore.live packing $2- }
+    dccore.title
+    dccore.panel.soon
+    return
+  }
   ; The Downloads window's snapshot (#1022): DLBEGIN, one DLROW per download
   ; (<id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>),
   ; DLEND <waiting_total> <complete_total> <failed_total>. Drawn at DLEND only, so a window
@@ -794,6 +805,7 @@ alias dccore.status {
   hdel -w dccore.live queue.*
   hdel -w dccore.live fetch.*
   hdel dccore.live rebuild
+  hdel dccore.live packing
   hadd dccore.live nslots 1
   hadd dccore.live nfetch 1
   dccore.title
@@ -1015,7 +1027,8 @@ alias dccore.title {
   if ($dccore.st(state) != in) { titlebar $dccore.win %bot $dccore.dot $iif($dccore.st(state),$dccore.st(state),not connected) | return }
   if (!$dccore.opt(titlebar)) || ($dccore.st(mode) != structured) { titlebar $dccore.win %bot on %net | return }
   var %rb = $iif(($dccore.st(rebuild) != $null) && (!$dccore.opt(panel)),$dccore.dot $dccore.rebuild.short,)
-  titlebar $dccore.win %bot on %net %rb $dccore.dot slots $dccore.st(st.used) $+ / $+ $dccore.st(st.slots) $dccore.dot queue $dccore.st(st.qusers) $dccore.dot today $dccore.st(st.sent) files / $dccore.bytes($dccore.st(st.bytes)) $dccore.dot $dccore.speed($dccore.st(st.bps))
+  var %pk = $iif(($dccore.st(packing) != $null) && (!$dccore.opt(panel)),$dccore.dot packing $gettok($dccore.st(packing),5-,32))
+  titlebar $dccore.win %bot on %net %rb %pk $dccore.dot slots $dccore.st(st.used) $+ / $+ $dccore.st(st.slots) $dccore.dot queue $dccore.st(st.qusers) $dccore.dot today $dccore.st(st.sent) files / $dccore.bytes($dccore.st(st.bytes)) $dccore.dot $dccore.speed($dccore.st(st.bps))
 }
 
 ; What @DCCore is waiting for before its first dial of the session (#1201):
@@ -1116,6 +1129,17 @@ alias dccore.panel {
       else { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,4,32)) files }
     }
     if ($gettok(%r,5,32) > 0) { aline -l 14 $dccore.win $dccore.nbsp $+ $dccore.nbsp running $dccore.dur($gettok(%r,5,32)) }
+    aline -l 14 $dccore.win $dccore.nbsp
+  }
+  ; Packing (#1202): the folder being packed into an archive, for whom, and how
+  ; far the archive has got of the folder's size. Only drawn while one runs.
+  if ($dccore.st(packing) != $null) {
+    var %pk = $dccore.st(packing)
+    aline -l %head $dccore.win Packing
+    aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $gettok(%pk,5-,32)
+    if ($gettok(%pk,3,32) > 0) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp for $gettok(%pk,1,32) $dccore.dot $dccore.bytes($gettok(%pk,2,32)) of $dccore.bytes($gettok(%pk,3,32)) $dccore.dot $int($calc(100 * $gettok(%pk,2,32) / $gettok(%pk,3,32))) $+ $chr(37) }
+    else { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp for $gettok(%pk,1,32) $dccore.dot $dccore.bytes($gettok(%pk,2,32)) }
+    if ($gettok(%pk,4,32) > 0) { aline -l 14 $dccore.win $dccore.nbsp $+ $dccore.nbsp running $dccore.dur($gettok(%pk,4,32)) }
     aline -l 14 $dccore.win $dccore.nbsp
   }
   aline -l %head $dccore.win Queue $dccore.st(st.qusers) $iif($dccore.st(st.qfiles) > 0,( $+ $dccore.st(st.qfiles) files))
@@ -1391,6 +1415,11 @@ alias dccore.askraw {
   var %v = $input(Console command (see help),eo,DCCore)
   if (%v != $null) { dccore.send %v }
 }
+; Control > Cancel the running pack (#1202): named, so the prompt can say whose.
+alias dccore.packcancel {
+  if ($dccore.st(packing) == $null) { return }
+  if ($input(Cancel the pack of $gettok($dccore.st(packing),5-,32) for $gettok($dccore.st(packing),1,32) $+ ? The partial archive is deleted and the user is told.,yq,DCCore)) { dccore.send packcancel }
+}
 ; Yes or no first, for the ones that change something or take a while.
 alias dccore.confirm {
   if ($input($2-,yq,DCCore)) { dccore.send $1 }
@@ -1430,6 +1459,7 @@ menu @DCCore {
   .Check for a new version:dccore.send checkversion
   .Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
   .Console feed $iif($dccore.st(consolefeed) == on,off,on):dccore.send consolefeed $iif($dccore.st(consolefeed) == on,off,on)
+  .$iif($dccore.st(packing) != $null,Cancel the running pack...):dccore.packcancel
   .-
   .Reload the bot (rehash)...:dccore.confirm rehash Reload the bot's code and settings?
   .Stop the bot...:if ($input(Stop the bot? It leaves IRC and ends; start it again with start-dccore.,yq,DCCore)) { dccore.send shutdown now }
