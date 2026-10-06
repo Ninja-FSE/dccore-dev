@@ -324,6 +324,7 @@ def reset_config(**overrides):
         fetch_module._back_since.clear()
         fetch_module._paused.clear()
         fetch_module._connect_failures.clear()
+        fetch_module._fetch_failures.clear()
         fetch_module._disk_was_low[0] = False
 
     # The dashboard's failed-login counts. A test that posts a wrong password
