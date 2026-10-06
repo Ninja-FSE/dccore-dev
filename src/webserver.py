@@ -1072,6 +1072,16 @@ def build_queue_payload(user=None):
     for tx in active:
         active_by_user.setdefault(str(tx.get("user", "")).lower(), tx)
 
+    # The user a folder is being packed for (#1202): without it their row read
+    # "queued" for as long as rar ran. The folder's name, never its path.
+    pack = None
+    try:
+        import dcc
+        pack = dcc.pack_status()
+    except Exception as err:
+        print(f"[WEBSERVER] The running pack could not be read for the queue: {err}")
+    packing_user = str(pack["user"]).lower() if pack else ""
+
     def _progress_fields(user_key):
         # None, not 0, when there is nothing sending or the size is not
         # known yet (dcc.start_dcc_send() writes "size" onto the row the
@@ -1090,6 +1100,8 @@ def build_queue_payload(user=None):
         entries = queue.get(user_key, [])
         if user_key in sending_users:
             status = "sending"
+        elif user_key == packing_user:
+            status = "packing"
         elif user_key in frozen:
             status = "frozen"
         elif entries:
@@ -1098,8 +1110,11 @@ def build_queue_payload(user=None):
             status = "empty"
         files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
         current_file, bytes_sent, size = _progress_fields(user_key)
-        return {"user": user_key, "status": status, "count": len(entries), "files": files,
-                "current_file": current_file, "bytes_sent": bytes_sent, "size": size}
+        result = {"user": user_key, "status": status, "count": len(entries), "files": files,
+                  "current_file": current_file, "bytes_sent": bytes_sent, "size": size}
+        if status == "packing":
+            result["pack"] = _pack_fields(pack)
+        return result
 
     # #220: a user sent with a free slot and nothing already queued never
     # enters dcc_queue at all - dcc.py's admission check appends straight to
@@ -1110,7 +1125,7 @@ def build_queue_payload(user=None):
     # single-user branch above already got this right by checking
     # sending_users regardless of whether entries exist; this does the same.
     rows = []
-    for user_key in dict.fromkeys(list(queue.keys()) + list(sending_users)):
+    for user_key in dict.fromkeys(list(queue.keys()) + list(sending_users) + ([packing_user] if packing_user else [])):
         # sending_users comes from active_transfers, whose rows are built by
         # dcc.py rather than keyed by it - an entry missing its "user" field
         # contributes "" to that set and used to reach the page as a blank row
@@ -1120,7 +1135,12 @@ def build_queue_payload(user=None):
         if not user_key:
             continue
         entries = queue.get(user_key, [])
-        status = "sending" if user_key in sending_users else ("frozen" if user_key in frozen else "queued")
+        if user_key in sending_users:
+            status = "sending"
+        elif user_key == packing_user:
+            status = "packing"
+        else:
+            status = "frozen" if user_key in frozen else "queued"
         files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
         first = entries[0] if entries else None
         if first is not None:
@@ -1130,10 +1150,34 @@ def build_queue_payload(user=None):
         else:
             preview = ""
         current_file, bytes_sent, size = _progress_fields(user_key)
-        rows.append({"user": user_key, "preview": preview, "count": len(entries), "status": status,
-                     "files": files, "current_file": current_file,
-                     "bytes_sent": bytes_sent, "size": size})
+        row = {"user": user_key, "preview": preview, "count": len(entries), "status": status,
+               "files": files, "current_file": current_file,
+               "bytes_sent": bytes_sent, "size": size}
+        if status == "packing":
+            row["pack"] = _pack_fields(pack)
+        rows.append(row)
     return rows
+
+
+def _pack_fields(pack):
+    """The running pack as the Queue page draws it: the folder as the list
+    shows it, how long, and the archive so far against the folder's size."""
+    import announce
+    return {"name": pack["name"], "elapsed": pack["elapsed"],
+            "done": pack["done"], "total": pack["total"],
+            "done_text": announce.format_size_human(pack["done"]),
+            "total_text": announce.format_size_human(pack["total"]) if pack["total"] else "",
+            "cancelling": bool(pack.get("cancelled"))}
+
+
+def build_pack_cancel_result():
+    """POST /api/queue/pack/cancel (#1202): stop the folder pack that is
+    running. 200 with who and what it was; 404 when nothing is packing."""
+    import dcc
+    cancelled = dcc.cancel_pack()
+    if cancelled is None:
+        return 404, {"error": "Nothing is being packed."}
+    return 200, {"cancelled": {"user": cancelled["user"], "name": cancelled["name"]}}
 
 
 def split_list_search_words(query):
@@ -4712,6 +4756,7 @@ class _WebConsoleSession:
     # prose - it used to be missing, so `pair` wrote the new token to disk and
     # then raised before showing it.
     structured = False
+    draws_dlqueue = False
     client = "web"
 
     def __init__(self, nick):
@@ -4875,6 +4920,11 @@ if HAVE_FLASK:
         @app.route("/api/queue")
         def api_queue():
             return jsonify(build_queue_payload(user=request.args.get("user")))
+
+        @app.route("/api/queue/pack/cancel", methods=["POST"])
+        def api_queue_pack_cancel():
+            status, result = build_pack_cancel_result()
+            return jsonify(result), status
 
         @app.route("/api/stats/import/variables")
         def api_stats_import_variables():

@@ -939,7 +939,7 @@ class _ShortSend(Exception):
     """
 
 
-def release_queue_entry(user, next_file, delivered, reason=""):
+def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, shown_name=None):
     """Settle the queue row for a finished attempt. Returns True if the row was kept.
 
     Removal is by IDENTITY, never by position. start_dcc_send's finally used to do
@@ -970,6 +970,11 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         row BEFORE the cleanup and keeps the archive for a row it kept;
       * a legacy non-dict row, which has nowhere to store a counter.
     Both are settled on their first failure.
+
+    `cancelled` is the operator stopping a folder pack (#1202): not a failure
+    of the row, so nothing is charged to its retry budget. The row is removed
+    - the user asks again if they still want it - and the notice says so in
+    place of "Could not send", naming `shown_name` and no path.
     """
     import defaults as config
     import db
@@ -1054,6 +1059,9 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         if delivered:
             removed = _remove_by_identity()
             outcome = "delivered, " + str(removed) + " row(s) removed"
+        elif cancelled:
+            removed = _remove_by_identity()
+            outcome = "cancelled, " + str(removed) + " row(s) removed"
         elif not retryable:
             removed = _remove_by_identity()
             if consumed_temp:
@@ -1079,7 +1087,22 @@ def release_queue_entry(user, next_file, delivered, reason=""):
     except Exception as save_err:
         print("[DCC QUEUE ERROR] Could not persist the queue: " + str(save_err))
 
-    if gave_up or (not delivered and not retained):
+    if cancelled:
+        try:
+            oserve_mod = sys.modules.get("oserve")
+            if oserve_mod:
+                import announce as announce_mod
+                shown = str(shown_name or (next_file.get("file") if is_row else "") or "your folder")
+
+                def _build_cancelled(shown_name):
+                    return ("NOTICE " + str(user) + " :Your folder request " + config.C_BOLD + shown_name +
+                            config.C_RESET + " was cancelled by the operator. "
+                            "Please ask again if you still want it.\r\n")
+
+                oserve_mod.queue_message(user, announce_mod.fit_irc_line(_build_cancelled, shown))
+        except Exception as notify_err:
+            print("[DCC QUEUE] Could not notify " + str(user) + ": " + str(notify_err))
+    elif gave_up or (not delivered and not retained):
         # Tell the user their file was dropped. Silently discarding it is how the old
         # positional pop hid this class of failure in the first place.
         try:
@@ -1773,6 +1796,7 @@ def check_queue_and_send(irc_sock, completed_user):
                                   f"{target_rar_path}: {unlink_err}")
 
                     print(f"[LINEAR RAR] Starting to pack: {true_source_dir} -> {target_rar_path}")
+                    announce_mod.send_debug(f"Packing {folder_leaf} for {completed_user}", category="PACK")
 
 
                     # Arguments are passed as a list, never through a shell:
@@ -1793,12 +1817,14 @@ def check_queue_and_send(irc_sock, completed_user):
                     # filename in its error output is decoded here or
                     # nowhere, and a pack that failed for a nameable
                     # reason must not become a pack that failed silently.
+                    #
+                    # Run as a process this module holds a handle to (#1202),
+                    # so the operator can see how far it has got and stop
+                    # THAT process. The timeout stays: it is the backstop for
+                    # a rar nobody is watching.
+                    job = _begin_pack_job(completed_user, folder_leaf, true_source_dir, target_rar_path)
                     try:
-                        process = subprocess.run(cmd, capture_output=True,
-                                                 text=True, encoding="utf-8",
-                                                 errors="replace",
-                                                 timeout=rar_timeout,
-                                                 **platform_compat.no_console_window())
+                        process = _run_rar(job, cmd, rar_timeout)
                     except subprocess.TimeoutExpired:
                         # rar was killed mid-write: whatever it wrote sits at
                         # the target path, and nothing else ever names that
@@ -1806,7 +1832,18 @@ def check_queue_and_send(irc_sock, completed_user):
                         # the failure is unchanged.
                         _discard_partial_archive(target_rar_path, "timed out")
                         raise
-                    
+                    finally:
+                        _end_pack_job(job)
+
+                    if job["cancelled"]:
+                        _discard_partial_archive(target_rar_path, "was cancelled")
+                        announce_mod.send_debug(
+                            f"Pack for {completed_user} cancelled: {folder_leaf}", category="PACK")
+                        release_queue_entry(completed_user, next_file, delivered=False,
+                                            reason="cancelled by the operator", cancelled=True,
+                                            shown_name=rar_filename)
+                        return False
+
                     if process.returncode == 0 and os.path.exists(target_rar_path):
                         print(f"[LINEAR RAR] Compression succeeded. Waiting 2.0s for the disk to sync...")
                         time.sleep(2.0)
@@ -2507,6 +2544,145 @@ def a_pack_is_running():
     """
     thread = runtime.packer_thread
     return thread is not None and thread.is_alive()
+
+
+def _folder_total_bytes(path):
+    total = 0
+    for here, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(here, name))
+            except OSError:
+                pass
+    return total
+
+
+def _begin_pack_job(user, folder_name, source, archive):
+    """Register the pack about to start (#1202) and return its job.
+
+    Registered BEFORE rar is started, so a cancel that arrives in the gap
+    still finds something to mark. The folder's size is added by a thread of
+    its own: walking a big album must not delay the pack, and the status is
+    honest about a total it does not have yet (0).
+    """
+    job = {"user": str(user), "name": str(folder_name), "archive": archive,
+           "started": time.time(), "total": 0, "process": None, "cancelled": False}
+    with runtime.pack_lock:
+        runtime.pack_job = job
+
+    def measure():
+        total = _folder_total_bytes(source)
+        job["total"] = total
+
+    threading.Thread(target=measure, daemon=True).start()
+    return job
+
+
+def _end_pack_job(job):
+    with runtime.pack_lock:
+        if runtime.pack_job is job:
+            runtime.pack_job = None
+        job["process"] = None
+        timer = job.pop("kill_timer", None)
+    if timer is not None:
+        timer.cancel()
+
+
+def _run_rar(job, cmd, timeout):
+    """Run rar for `job` and return a CompletedProcess, as subprocess.run did.
+
+    The Popen handle is kept on the job while rar runs, which is what
+    cancel_pack() terminates. A timeout kills it and is raised, as before.
+    """
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, encoding="utf-8", errors="replace",
+                               **platform_compat.no_console_window())
+    with runtime.pack_lock:
+        job["process"] = process
+        stop_now = job["cancelled"]
+    if stop_now:
+        job["kill_timer"] = _stop_process(process)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        raise
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+
+
+def _stop_process(process):
+    """Ask a process to stop, and make sure it does: terminate now, kill
+    five seconds later if it is still there. The caller is a web request or
+    a console command, so the second step is a timer, not a wait. The timer
+    is returned for the packer to cancel once rar is gone."""
+    try:
+        process.terminate()
+    except OSError:
+        return None
+
+    def make_sure():
+        try:
+            if process.poll() is None:
+                process.kill()
+        except OSError:
+            pass
+
+    timer = threading.Timer(5.0, make_sure)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+def pack_status(now=None):
+    """The pack that is running, or None: {user, name, elapsed, done, total}.
+
+    `name` is the folder's name as the list shows it, never its path. `done`
+    is the size of the archive so far, `total` the folder's size - rar
+    compresses, so the two are a guide, not a fraction of the work, and
+    `total` is 0 until the folder has been measured.
+    """
+    job = runtime.pack_job
+    if job is None:
+        return None
+    return _pack_status_of(job, now)
+
+
+def _pack_status_of(job, now=None):
+    now = time.time() if now is None else now
+    try:
+        done = os.path.getsize(platform_compat.long_path(job["archive"]))
+    except OSError:
+        done = 0
+    return {"user": job["user"], "name": job["name"],
+            "elapsed": max(0, int(now - job["started"])),
+            "done": done, "total": int(job["total"]),
+            "cancelled": bool(job["cancelled"])}
+
+
+def cancel_pack():
+    """Stop the pack that is running. Returns its status as it was, or None
+    when nothing is packing - a cancel of nothing changes nothing (#1202).
+
+    Only marks the job and terminates ITS process; the packer thread sees the
+    mark when rar returns, removes the partial archive, settles the queue row
+    without charging the retry budget, tells the user and lets the next
+    request start.
+    """
+    with runtime.pack_lock:
+        job = runtime.pack_job
+        if job is None or job["cancelled"]:
+            return None
+        job["cancelled"] = True
+        process = job["process"]
+    status = _pack_status_of(job)
+    if process is not None:
+        timer = _stop_process(process)
+        with runtime.pack_lock:
+            job["kill_timer"] = timer
+            if runtime.pack_job is not job and timer is not None:
+                timer.cancel()
+    return status
 
 
 def wait_for_transfers_to_finish(timeout=None, poll=0.5, sleep=None,

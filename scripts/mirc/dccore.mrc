@@ -90,7 +90,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.13 }
+alias dccore.ver { return 1.15 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -674,6 +674,17 @@ alias dccore.structured {
     dccore.panel.soon
     return
   }
+  ; <nick> <done> <total> <elapsed> <folder>: a folder pack is running (#1202);
+  ; `end` when it stops. <done> is the archive's size so far, <total> the
+  ; folder's (0 until measured), the folder last as it may hold spaces. Kept in
+  ; dccore.live and cleared by every STATUS, like REBUILD.
+  if (%type == PACKING) {
+    if ($2 == end) { hdel dccore.live packing }
+    else { hadd dccore.live packing $2- }
+    dccore.title
+    dccore.panel.soon
+    return
+  }
   ; The Downloads window's snapshot (#1022): DLBEGIN, one DLROW per download
   ; (<id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>),
   ; DLEND <waiting_total> <complete_total> <failed_total>. Drawn at DLEND only, so a window
@@ -681,6 +692,9 @@ alias dccore.structured {
   if (%type == DLBEGIN) { hdel -w dccore.live dl.* | hadd dccore.live dln 1 | return }
   if (%type == DLROW) { hadd dccore.live dl. $+ $dccore.st(dln) $2- | hinc dccore.live dln | return }
   if (%type == DLEND) { hadd dccore.live dlwait $2 | hadd dccore.live dlfin $3 | hadd dccore.live dlfail $4 | hadd dccore.live dlend 1 | dccore.dl.draw | return }
+  if (%type == DQBEGIN) { hdel -w dccore.live dq.* | hdel dccore.live dqend | hadd dccore.live dqn 1 | return }
+  if (%type == DQROW) { hadd dccore.live dq. $+ $dccore.st(dqn) $2- | hinc dccore.live dqn | return }
+  if (%type == DQEND) { hadd dccore.live dqcount $2 | hadd dccore.live dqend 1 | dccore.dq.draw | return }
   if (%type == OUT) { dccore.out $2- | return }
   if (%type == LISTFETCH) {
     ; <bot> <auto|arrived|unusable> <text>: a held bot list asked for again,
@@ -794,6 +808,7 @@ alias dccore.status {
   hdel -w dccore.live queue.*
   hdel -w dccore.live fetch.*
   hdel dccore.live rebuild
+  hdel dccore.live packing
   hadd dccore.live nslots 1
   hadd dccore.live nfetch 1
   dccore.title
@@ -1015,7 +1030,8 @@ alias dccore.title {
   if ($dccore.st(state) != in) { titlebar $dccore.win %bot $dccore.dot $iif($dccore.st(state),$dccore.st(state),not connected) | return }
   if (!$dccore.opt(titlebar)) || ($dccore.st(mode) != structured) { titlebar $dccore.win %bot on %net | return }
   var %rb = $iif(($dccore.st(rebuild) != $null) && (!$dccore.opt(panel)),$dccore.dot $dccore.rebuild.short,)
-  titlebar $dccore.win %bot on %net %rb $dccore.dot slots $dccore.st(st.used) $+ / $+ $dccore.st(st.slots) $dccore.dot queue $dccore.st(st.qusers) $dccore.dot today $dccore.st(st.sent) files / $dccore.bytes($dccore.st(st.bytes)) $dccore.dot $dccore.speed($dccore.st(st.bps))
+  var %pk = $iif(($dccore.st(packing) != $null) && (!$dccore.opt(panel)),$dccore.dot packing $gettok($dccore.st(packing),5-,32))
+  titlebar $dccore.win %bot on %net %rb %pk $dccore.dot slots $dccore.st(st.used) $+ / $+ $dccore.st(st.slots) $dccore.dot queue $dccore.st(st.qusers) $dccore.dot today $dccore.st(st.sent) files / $dccore.bytes($dccore.st(st.bytes)) $dccore.dot $dccore.speed($dccore.st(st.bps))
 }
 
 ; What @DCCore is waiting for before its first dial of the session (#1201):
@@ -1116,6 +1132,17 @@ alias dccore.panel {
       else { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,4,32)) files }
     }
     if ($gettok(%r,5,32) > 0) { aline -l 14 $dccore.win $dccore.nbsp $+ $dccore.nbsp running $dccore.dur($gettok(%r,5,32)) }
+    aline -l 14 $dccore.win $dccore.nbsp
+  }
+  ; Packing (#1202): the folder being packed into an archive, for whom, and how
+  ; far the archive has got of the folder's size. Only drawn while one runs.
+  if ($dccore.st(packing) != $null) {
+    var %pk = $dccore.st(packing)
+    aline -l %head $dccore.win Packing
+    aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $gettok(%pk,5-,32)
+    if ($gettok(%pk,3,32) > 0) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp for $gettok(%pk,1,32) $dccore.dot $dccore.bytes($gettok(%pk,2,32)) of $dccore.bytes($gettok(%pk,3,32)) $dccore.dot $int($calc(100 * $gettok(%pk,2,32) / $gettok(%pk,3,32))) $+ $chr(37) }
+    else { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp for $gettok(%pk,1,32) $dccore.dot $dccore.bytes($gettok(%pk,2,32)) }
+    if ($gettok(%pk,4,32) > 0) { aline -l 14 $dccore.win $dccore.nbsp $+ $dccore.nbsp running $dccore.dur($gettok(%pk,4,32)) }
     aline -l 14 $dccore.win $dccore.nbsp
   }
   aline -l %head $dccore.win Queue $dccore.st(st.qusers) $iif($dccore.st(st.qfiles) > 0,( $+ $dccore.st(st.qfiles) files))
@@ -1337,6 +1364,86 @@ menu @DCCore-Downloads {
 }
 
 ; ---------------------------------------------------------------------
+;  Download queues (#1217): the requests the bot has made that have not started
+; ---------------------------------------------------------------------
+;
+;  A dialog with every request still waiting - a file, a !rar folder or a
+;  bot's list - asked for, queued at the other bot or held back here. Select
+;  some and remove them, or remove all of them; a download that has started is
+;  never touched. The bot sends the rows when asked (`dlqueue`), and asked
+;  again after each removal. dqmap.<line> remembers which request a line is.
+
+alias dccore.queues {
+  if ($dccore.st(mode) != structured) { dccore.sys Download queues needs the structured link to the bot. | return }
+  if ($dialog(dccore.dq)) { dialog -v dccore.dq | dccore.dq.ask | return }
+  dialog -m dccore.dq dccore.dq
+}
+alias dccore.dq.ask {
+  hdel dccore.live dqend
+  dccore.dq.draw
+  if ($chat($dccore.bot)) { .msg $+(=,$dccore.bot) dlqueue }
+}
+alias dccore.dq.draw {
+  if (!$dialog(dccore.dq)) { return }
+  did -r dccore.dq 2
+  hdel -w dccore.live dqmap.*
+  if ($dccore.st(mode) != structured) { did -ra dccore.dq 1 (not connected to the bot) | return }
+  if (!$dccore.st(dqend)) { did -ra dccore.dq 1 (asking the bot...) | return }
+  var %n = $calc($dccore.st(dqn) - 1), %i = 1
+  while (%i <= %n) {
+    var %l = $dccore.st(dq. $+ %i)
+    ; <id> <kind> <state> <bot> <note> <name>
+    var %name = $gettok(%l,6-,32)
+    if ($gettok(%l,2,32) == r) { %name = [!rar] %name }
+    did -a dccore.dq 2 $gettok(%l,4,32) $dccore.dot %name $dccore.dot $replace($gettok(%l,5,32),_,$chr(32))
+    hadd dccore.live $+(dqmap.,$did(dccore.dq,2).lines) $gettok(%l,1,32)
+    inc %i
+  }
+  did -ra dccore.dq 1 $iif($dccore.st(dqcount) == 0,Nothing is waiting.,$dccore.st(dqcount) waiting - select the ones to remove (Ctrl or Shift for several))
+}
+; Up to 20 ids to a line, so a long selection stays inside one IRC line.
+alias dccore.dq.cancel {
+  var %ids = $1-, %batch = $null, %k = 0, %i = 1
+  while (%i <= $numtok(%ids,32)) {
+    %batch = %batch $gettok(%ids,%i,32)
+    inc %k
+    if (%k == 20) || (%i == $numtok(%ids,32)) { .msg $+(=,$dccore.bot) dlcancel %batch | %batch = $null | %k = 0 }
+    inc %i
+  }
+}
+alias dccore.dq.remove {
+  var %n = $did(dccore.dq,2,0).sel, %i = 1, %ids = $null
+  if (%n == 0) { did -ra dccore.dq 1 Select the requests to remove first. | return }
+  while (%i <= %n) {
+    var %id = $hget(dccore.live,$+(dqmap.,$did(dccore.dq,2,%i).sel))
+    if (%id != $null) { %ids = %ids %id }
+    inc %i
+  }
+  if (%ids == $null) { return }
+  dccore.dq.cancel %ids
+  dccore.dq.ask
+}
+
+dialog dccore.dq {
+  title "DCCore - Download queues"
+  size -1 -1 330 200
+  option dbu
+  text "", 1, 5 4 320 8
+  list 2, 5 14 320 160, extsel hsbar vsbar
+  button "Remove selected", 3, 5 181 62 12
+  button "Remove all...", 4, 70 181 52 12
+  button "Refresh", 5, 125 181 40 12
+  button "Close", 6, 285 181 40 12, cancel
+}
+on *:dialog:dccore.dq:init:0: { dccore.dq.ask }
+on *:dialog:dccore.dq:sclick:3: { dccore.dq.remove }
+on *:dialog:dccore.dq:sclick:4: {
+  if ($dccore.st(dqcount) == 0) || (!$dccore.st(dqend)) { return }
+  if ($input(Remove all $dccore.st(dqcount) waiting requests? Downloads that have started are left alone.,yq,DCCore)) { .msg $+(=,$dccore.bot) dlcancel all | dccore.dq.ask }
+}
+on *:dialog:dccore.dq:sclick:5: { dccore.dq.ask }
+
+; ---------------------------------------------------------------------
 ;  What you type in the window goes to the bot
 ; ---------------------------------------------------------------------
 
@@ -1391,6 +1498,11 @@ alias dccore.askraw {
   var %v = $input(Console command (see help),eo,DCCore)
   if (%v != $null) { dccore.send %v }
 }
+; Cancel the running pack (#1202): top of the right-click menu while one runs; named, so the prompt can say whose.
+alias dccore.packcancel {
+  if ($dccore.st(packing) == $null) { return }
+  if ($input(Cancel the pack of $gettok($dccore.st(packing),5-,32) for $gettok($dccore.st(packing),1,32) $+ ? The partial archive is deleted and the user is told.,yq,DCCore)) { dccore.send packcancel }
+}
 ; Yes or no first, for the ones that change something or take a while.
 alias dccore.confirm {
   if ($input($2-,yq,DCCore)) { dccore.send $1 }
@@ -1402,6 +1514,7 @@ alias dccore.askfont {
 
 ; Every /dccore command, and every console command worth a click, is here.
 menu @DCCore {
+  $iif($dccore.st(packing) != $null,Cancel the running pack...):dccore.packcancel
   Script Settings:dccore.options
   Console command:dccore.askraw
   -
@@ -1409,6 +1522,7 @@ menu @DCCore {
   .Status:dccore.send status
   .Slots:dccore.send slots
   .Queue:dccore.send queue
+  .Download queues...:dccore.queues
   .Uptime:dccore.send uptime
   .Version:dccore.send version
   .-
@@ -1465,6 +1579,7 @@ menu status,channel {
   .Open the window:dccore window
   .Open DCCore Chat:dccore chat
   .Open the Downloads window:dccore downloads
+  .Download queues...:dccore.queues
   .Show the lists:dccore lists
   .Fetch the changed lists:dccore fetch
   .Command list:dccore
