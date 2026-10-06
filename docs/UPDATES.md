@@ -4,6 +4,31 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏱️ Users are told when the next slot is likely to free up (#1207)
+
+The commonest question in a busy channel is "when do I get a slot?", and nothing answered it: the CTCP SLOTS "next"
+field is a literal `NOW` or `0`, and `-que` and `-stats` gave counts but no time.
+
+- **The estimate:** `stats_mgr.next_slot_estimate()`.
+  - `"now"` while a slot is free.
+  - Otherwise, the minimum over the active sends of (size − sent) / speed, rounded up to whole minutes and at least 1
+    while every slot is busy.
+  - `None` when no send has a usable speed and size yet. Malformed rows are skipped.
+  - `format_next_slot()` gives `now`, `~4 min`, `~2h 10m`, `~1d 3h` or `not known yet`.
+- **One speed measure:** the per-send speed is the one the DCC console's SLOT line already used (bytes this
+  connection moved, #746, divided by the time since it started). It is moved into `stats_mgr.send_speed()`, which
+  the console and the estimate both call. The console's output is unchanged.
+- **Shown in:**
+  - `@nick-que`: "Next free slot: ~4 min" in both replies;
+  - `@nick-stats`: "next free slot ~4 min" beside the free slots;
+  - the dashboard's Live Transfers page: a "Next free slot" card. `/api/stats` gains `next_slot` and
+    `next_slot_text`.
+
+  It is the next free slot, not the asker's turn, and the wording says so.
+- **The CTCP SLOTS line is unchanged byte for byte,** because other scripts parse it. A test pins it with every
+  slot busy and with one free.
+- **Tests:** `tests/test_users_are_told_when_the_next_slot_frees.py` (33 tests; 34/34 mutations caught).
+
 ### 🔁 A file is not requested twice from the same bot (#1218)
 
 `enqueue_fetch()` refused a second outstanding `list` / `folder` row for a bot but let any number of identical `file`
