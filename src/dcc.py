@@ -869,6 +869,102 @@ def _report_transfer_failure(user, file_name, reason, acked=None, total=None, ch
         print(f"[DEBUG-FAIL ERROR] Could not report the failed transfer: {debug_err}")
 
 
+# HOW A SEND ENDED, IN THE RECORD (#1203). The record kept completed sends
+# only, so an operator could not tell "users never accept my offers" from "my
+# ports are broken". Every attempt now writes one row when it ends - a retry
+# is a second attempt and a second row - and an attempt that is put back
+# without being charged to the row's retries (no connection to IRC, no free
+# port) has not ended and writes nothing.
+
+
+def _transfer_outcome_identity(file_path, file_name):
+    """(key, display name, kind) of a send, as its completed row would have
+    them. Never raises: the record must not cost the transfer anything."""
+    try:
+        return download_count_identity(file_path, file_name)
+    except Exception:
+        return None, file_name, transfer_log.KIND_FILE
+
+
+def _claim_transfer_outcome(holder):
+    """True for the one caller that writes how this transfer ended.
+
+    Two can try: the transfer's own thread, and a stop that cuts it off
+    (record_transfers_cut_off()). `holder` is the transfer's row in
+    active_transfers or the pack's job; None has no one to race with."""
+    if holder is None:
+        return True
+    with queue_lock:
+        if holder.get("transfer_outcome_recorded"):
+            return False
+        holder["transfer_outcome_recorded"] = True
+        return True
+
+
+def _record_send_outcome(holder, status, identity, size, reached, nick):
+    """One send that ended without completing, in the record. Never raises."""
+    try:
+        if not _claim_transfer_outcome(holder):
+            return False
+        key, shown, kind = identity
+        return transfer_log.record_unfinished(transfer_log.SENT, status, kind, size, reached,
+                                              nick=nick, item_key=key, name=shown)
+    except Exception as record_err:
+        print(f"[TRANSFER-LOG ERROR] Could not record how the send ended: {record_err}")
+        return False
+
+
+def _pack_identity(folder_name):
+    """The (key, display name) an album's send is recorded under, from the
+    folder's name: the archive name the packer gives it."""
+    leaf = os.path.basename(str(folder_name or "").strip().rstrip("/\\"))
+    if not leaf:
+        return None, None
+    archive = f"{_sanitize_rar_leaf_name(leaf)}.rar"
+    return archive, archive[:-4]
+
+
+def _record_pack_outcome(user, next_file, status, job=None):
+    """A folder pack that ended with nothing to send (#1203): it failed, timed
+    out or was cancelled. Recorded as an album, with the folder's size when
+    it was measured and no bytes sent. Never raises."""
+    try:
+        if not _claim_transfer_outcome(job):
+            return False
+        folder = next_file.get("path") if isinstance(next_file, dict) else None
+        key, shown = _pack_identity(folder)
+        return transfer_log.record_unfinished(
+            transfer_log.SENT, status, transfer_log.KIND_ALBUM,
+            int(job["total"]) if job else 0, 0, nick=user, item_key=key, name=shown)
+    except Exception as record_err:
+        print(f"[TRANSFER-LOG ERROR] Could not record how the pack ended: {record_err}")
+        return False
+
+
+def record_transfers_cut_off():
+    """At a stop or a restart (#1203): every send still running, and the pack
+    still being made, ends with the bot. Each is written to the record as
+    cancelled - the bot stopped it, not the network. A send that was handed
+    a slot but had not offered anything yet has not begun, and is left out.
+    Returns how many were written."""
+    written = 0
+    with queue_lock:
+        running = list(getattr(config, "active_transfers", []) or [])
+    for tx in running:
+        identity = tx.get("transfer_outcome_identity")
+        if not identity:
+            continue
+        reached = int(tx.get("bytes_sent") or 0) - int(tx.get("resume_offset") or 0)
+        if _record_send_outcome(tx, transfer_log.STATUS_CANCELLED, tuple(identity),
+                                tx.get("size") or 0, max(0, reached), tx.get("user")):
+            written += 1
+    job = runtime.pack_job
+    if job is not None and _record_pack_outcome(job["user"], {"path": job["name"]},
+                                                transfer_log.STATUS_CANCELLED, job=job):
+        written += 1
+    return written
+
+
 def accept_timeout():
     """Seconds the listener waits for the receiver after the offer (#879).
 
@@ -1684,6 +1780,9 @@ def check_queue_and_send(irc_sock, completed_user):
                             pass
                         release_queue_entry(completed_user, next_file, delivered=False,
                                             reason="pack failed: " + str(packer_err))
+                        # A pack that raised - rar missing, a timeout, a full
+                        # disk - is a request that ended unsent (#1203).
+                        _record_pack_outcome(completed_user, next_file, transfer_log.STATUS_PACK_FAILED)
                     finally:
                         # The pack itself is over either way (#651): what is
                         # handed off is the SEND, which active_transfers
@@ -1843,6 +1942,7 @@ def check_queue_and_send(irc_sock, completed_user):
                         release_queue_entry(completed_user, next_file, delivered=False,
                                             reason="cancelled by the operator", cancelled=True,
                                             shown_name=rar_filename)
+                        _record_pack_outcome(completed_user, next_file, transfer_log.STATUS_CANCELLED, job=job)
                         return False
 
                     if process.returncode == 0 and os.path.exists(target_rar_path):
@@ -1908,6 +2008,7 @@ def check_queue_and_send(irc_sock, completed_user):
                         # the interlocks that new thread had just claimed.
                         release_queue_entry(completed_user, next_file, delivered=False,
                                             reason="rar exited " + str(process.returncode))
+                        _record_pack_outcome(completed_user, next_file, transfer_log.STATUS_PACK_FAILED, job=job)
                         return False
 
                 # At exactly the right level, so it wakes the function above immediately
@@ -3758,9 +3859,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         # Whatever name the transfer is filed under NOW - the lock moved with it.
         return str((_row or {}).get('user') or user).lower()
 
+    # What this send is, for the row its ending writes (#1203). Worked out
+    # once, here, and kept on the transfer's row too, so a stop that cuts
+    # the send off (record_transfers_cut_off()) can say what it was.
+    outcome_identity = _transfer_outcome_identity(file_path, file_name)
     for tx in config.active_transfers:
         if _mine(tx):
             tx['size'] = file_size
+            tx['transfer_outcome_identity'] = outcome_identity
     ip_long = get_public_ip_long()
     start_time = time.time()
     offered_at = start_time   # start_time is reset once the receiver connects; the queue wait ends here
@@ -3889,6 +3995,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
 
         release_queue_entry(user, next_file, delivered=False,
                             reason="file missing or empty")
+        # A list that is gone was replaced by a rebuild while it waited
+        # (#1203): the bot's doing, so cancelled. A file that is gone failed.
+        _record_send_outcome(
+            _row, transfer_log.STATUS_CANCELLED if outcome_identity[2] == transfer_log.KIND_LIST
+            else transfer_log.STATUS_FAILED, outcome_identity, file_size, 0, user)
 
         time.sleep(3.0)
         check_queue_and_send(irc_sock, user)
@@ -3971,6 +4082,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
     # Set by the accept branch below and read by the finally, so the notice
     # the user gets can say what happened rather than "did not complete".
     never_connected = False
+    # How the send ended when it did not complete (#1203); set where that is
+    # known, and FAILED wherever nothing more is.
+    outcome_status = transfer_log.STATUS_FAILED
     try:
         # settimeout() and listen() USED TO SIT ABOVE this try - the one whose
         # finally is the only thing that releases the slot and closes this
@@ -4165,6 +4279,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         # the speed record, the advert and the counters are a record of.
         short_read = bytes_sent < file_size
         if short_read:
+            # The file got shorter under the send. For a list that is a
+            # rebuild replacing it (#1203) - the bot's doing, so cancelled.
+            if outcome_identity[2] == transfer_log.KIND_LIST:
+                outcome_status = transfer_log.STATUS_CANCELLED
             report_failure(user, file_name,
                 f"sent {bytes_sent:,} of {file_size:,} bytes before the file ended. "
                 f"Recorded as a failure rather than a completed transfer.",
@@ -4182,6 +4300,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
                     "cannot be told apart from one that got nothing.)",
                     acked=0, total=file_size)
             elif acks.eof:
+                # The receiver closed it: in DCC that is how a user stops a
+                # transfer, so cancelled (#1203).
+                outcome_status = transfer_log.STATUS_CANCELLED
                 report_failure(user, file_name,
                     f"the receiver closed the connection having acknowledged "
                     f"{acks.acked:,} of {file_size:,} bytes. Not counted.",
@@ -4270,11 +4391,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             _seconds = transfer_finished_at - start_time
             if _seconds <= 0:
                 _seconds = 0.1
-            transfer_log.record_sent(
-                _kind, _key, _shown, file_size, _wire_bytes, _seconds,
-                _wire_bytes / _seconds if stats_mgr.speed_is_measurable(_seconds, file_size) else None,
-                (offered_at - _queued_at) if isinstance(_queued_at, (int, float)) else None,
-                nick=user)
+            # Claimed first (#1203): a stop that cut this send off has
+            # written it as cancelled already.
+            if _claim_transfer_outcome(_row):
+                transfer_log.record_sent(
+                    _kind, _key, _shown, file_size, _wire_bytes, _seconds,
+                    _wire_bytes / _seconds if stats_mgr.speed_is_measurable(_seconds, file_size) else None,
+                    (offered_at - _queued_at) if isinstance(_queued_at, (int, float)) else None,
+                    nick=user)
         except _ShortSend:
             print(f"[DB COUNTER] Not counted: {file_name} for {user} ended "
                   f"short at {bytes_sent} of {file_size} bytes. A partial send "
@@ -4288,6 +4412,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         except: pass
 
     except _ReceiverGone as gone:
+        # Closed mid-transfer by the receiver: a user stopping it (#1203).
+        outcome_status = transfer_log.STATUS_CANCELLED
         report_failure(user, file_name,
             f"closed the connection mid-transfer, having acknowledged "
             f"{gone.acked:,} of {file_size:,} bytes.",
@@ -4393,6 +4519,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
                 stats_mgr_mod.update_speed_record(final_calc_speed, acute_duration)
             except Exception as record_err:
                 print(f"[STATS ERROR] Could not update the speed record: {record_err}")
+        else:
+            # How it ended, in the record (#1203), while the row is still in
+            # active_transfers: a stop cutting it off now finds it claimed.
+            # What reached the receiver is what it acknowledged, less what it
+            # already held before a resume.
+            _acked = acks.acked if 'acks' in locals() else 0
+            _record_send_outcome(_row, outcome_status, outcome_identity, file_size,
+                                 max(0, _acked - _skipped), user)
 
         # 1. Clean up the transfer and the slot immediately
         try:

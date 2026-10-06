@@ -2449,11 +2449,34 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
             row["state"] = "listening"
             row["listening_since"] = time.time()
 
-    if is_passive:
-        _serve_passive_offer(irc_sock, from_nick, row, offer, dest_dir, stored_name)
-        return
+    try:
+        if is_passive:
+            _serve_passive_offer(irc_sock, from_nick, row, offer, dest_dir, stored_name)
+        else:
+            _run_transfer(row, offer, dest_dir, stored_name)
+    finally:
+        _record_a_failed_fetch(row)
 
-    _run_transfer(row, offer, dest_dir, stored_name)
+
+def _record_a_failed_fetch(row):
+    """A download that was offered, admitted and then failed, in the transfer
+    record (#1203), as a completed one is: the bot it came from, its kind, its
+    size and what had arrived, never its name.
+
+    Only from here: an offer refused before anything was opened (too big, an
+    unsafe name) never became a transfer, and one put back to wait for disk
+    space has not ended. Never raises."""
+    try:
+        if row.get("state") != "failed":
+            return False
+        return transfer_log.record_unfinished(
+            transfer_log.RECEIVED, transfer_log.STATUS_FAILED,
+            {"list": transfer_log.KIND_LIST, "folder": transfer_log.KIND_ALBUM}.get(
+                row.get("request_type"), transfer_log.KIND_FILE),
+            row.get("total_size") or 0, row.get("bytes_received") or 0, nick=row.get("bot"))
+    except Exception as record_err:
+        print(f"[TRANSFER-LOG ERROR] Could not record the failed download: {record_err}")
+        return False
 
 
 def _open_fetch_listener():
