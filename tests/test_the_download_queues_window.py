@@ -9,6 +9,7 @@ download that has started is left alone.
 
 import io
 import os
+import re
 import sys
 import unittest
 
@@ -196,11 +197,17 @@ class TheScript(unittest.TestCase):
         self.assertIn("Remove all", self.text)
         self.assertIn("$input(Remove all", self.text)
 
-    def test_the_menu_item_is_in_the_lists_group_and_is_not_under_info_queue(self):
-        self.assertIn(".Download queues...:dccore.queues", self.text)
+    def test_the_menu_item_is_in_the_info_group_beside_the_other_views(self):
         menu = self.text.split("menu @DCCore", 1)[1]
-        self.assertLess(menu.index("Lists"), menu.index(".Download queues...:dccore.queues"))
+        info, lists = menu.index("\n  Info\n"), menu.index("\n  Lists\n")
+        self.assertLess(info, menu.index(".Download queues...:dccore.queues"))
+        self.assertLess(menu.index(".Download queues...:dccore.queues"), lists)
 
+    def test_every_control_in_the_dialog_has_an_id_of_its_own(self):
+        body = self.text.split("dialog dccore.dq {", 1)[1].split("\n}", 1)[0]
+        ids = re.findall(r'^\s*(?:text|list|button|edit|check|radio|box|combo)\s+(?:"[^"]*"\s*,\s*)?(\d+)\s*,', body, re.M)
+        self.assertGreaterEqual(len(ids), 5)
+        self.assertEqual(len(ids), len(set(ids)), ids)
 
 if __name__ == "__main__":
     unittest.main()

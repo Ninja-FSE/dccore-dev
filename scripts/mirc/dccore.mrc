@@ -1433,7 +1433,7 @@ dialog dccore.dq {
   button "Remove selected", 3, 5 181 62 12
   button "Remove all...", 4, 70 181 52 12
   button "Refresh", 5, 125 181 40 12
-  button "Close", 2, 285 181 40 12, cancel
+  button "Close", 6, 285 181 40 12, cancel
 }
 on *:dialog:dccore.dq:init:0: { dccore.dq.ask }
 on *:dialog:dccore.dq:sclick:3: { dccore.dq.remove }
@@ -1522,6 +1522,7 @@ menu @DCCore {
   .Status:dccore.send status
   .Slots:dccore.send slots
   .Queue:dccore.send queue
+  .Download queues...:dccore.queues
   .Uptime:dccore.send uptime
   .Version:dccore.send version
   .-
@@ -1530,7 +1531,6 @@ menu @DCCore {
   .Show the lists:dccore lists
   .Fetch the changed lists:dccore fetch
   .Ask a bot for its list...:dccore.ask fetch Ask which bot for its list
-  .Download queues...:dccore.queues
   Library
   .Find duplicate filenames:dccore.send verify
   .Rebuild the list...:dccore.confirm update Rebuild the list? It walks the whole library and can take minutes.
