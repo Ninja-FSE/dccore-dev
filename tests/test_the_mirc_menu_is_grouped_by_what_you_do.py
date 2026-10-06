@@ -73,12 +73,18 @@ class TheTopLevel(unittest.TestCase):
         top, _ = parse()
         loose = [label for label, action in top if action is not None]
         self.assertEqual([label for label in loose if not label.startswith("$iif($dccore.sel")],
-                         ["Script Settings", "Console command", "Clear finished..."])
+                         ["$iif($dccore.st(packing) != $null,Cancel the running pack...)", "Script Settings", "Console command", "Clear finished..."])
 
     def test_the_settings_and_the_console_command_come_first(self):
         top, _ = parse()
-        self.assertEqual(names(top)[:3], ["Script Settings", "Console command", SEPARATOR])
+        rest = [item for item in top if not item[0].startswith("$iif($dccore.st(packing)")]
+        self.assertEqual(names(rest)[:3], ["Script Settings", "Console command", SEPARATOR])
         self.assertEqual(dict(top)["Script Settings"], "dccore.options")
+
+    def test_cancelling_a_running_pack_is_on_the_top_level_and_only_while_one_runs(self):
+        top, groups = parse()
+        self.assertEqual(top[0], ("$iif($dccore.st(packing) != $null,Cancel the running pack...)", "dccore.packcancel"))
+        self.assertFalse(any("packcancel" in (action or "") for items in groups.values() for _, action in items))
 
     def test_the_two_tools_are_named_without_dots_and_the_window_is_last_but_one(self):
         top, _ = parse()
