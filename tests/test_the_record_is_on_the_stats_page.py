@@ -186,8 +186,9 @@ class TheExport(Case):
 
     def test_a_header_and_every_row_in_the_order_written(self):
         rows = self.read()
+        # status last (#1203), so every column before it is where it was.
         self.assertEqual(rows[0], ["time", "direction", "nick", "kind", "name", "size", "bytes",
-                                   "seconds", "speed", "waited"])
+                                   "seconds", "speed", "waited", "status"])
         self.assertEqual(len(rows), 7)
         self.assertEqual([r[2] for r in rows[1:]],
                          ["listener", "listener", "listener", "otherone", "otherone", "peerbot"])
