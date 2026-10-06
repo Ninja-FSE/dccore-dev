@@ -186,5 +186,168 @@ class OneSpeedMeasureNotTwo(DCCoreTestCase):
             stats_mgr.send_speed({"bytes_sent": 5, "started_at": "abc"}, NOW)
 
 
+class UserNoticeCase(DCCoreTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(NICKNAME="SomeBot", MAX_DCC_SLOTS=2)
+        self.patch(list_mod, "get_file_count_date_size_and_raw_bytes",
+                   lambda *a, **k: (1234, "2026-01-01", "1.0GB", 1073741824))
+
+    def patch(self, owner, name, value):
+        self.addCleanup(setattr, owner, name, getattr(owner, name))
+        setattr(owner, name, value)
+
+    def busy(self, *rows):
+        """Every row a running send; active_downloads follows, as dcc.py keeps it."""
+        config.active_transfers[:] = list(rows)
+        self.oserve.active_downloads = len(rows)
+
+    def both_slots_busy_three_minutes_out(self):
+        now = time.time()
+        self.busy(send(10_000_000, 4_000_000, 100, now=now, user="a"),
+                  send(100_000_000, 1_000_000, 100, now=now, user="b"))
+
+    def answers(self, handler, user="dave"):
+        self.oserve.queued.clear()
+        handler(None, user, CHANNEL)
+        return [message for _user, message, _vip in self.oserve.queued]
+
+
+class TheQueueCommand(UserNoticeCase):
+
+    def que(self):
+        lines = self.answers(commands.handle_queue_check)
+        self.assertEqual(len(lines), 1)
+        return lines[0]
+
+    def test_with_files_queued_it_says_when_the_next_slot_frees(self):
+        config.dcc_queue["dave"] = [{"file": "a.flac"}, {"file": "b.flac"}]
+        self.both_slots_busy_three_minutes_out()
+
+        line = self.que()
+
+        self.assertTrue(line.startswith("NOTICE dave :"), line)
+        self.assertIn("You have 2 files in queue. Next free slot: ~3 min. To remove your entire queue",
+                      plain(line))
+        self.assertIn(f"Next free slot: {config.C_BOLD}{config.C_GREEN}~3 min{config.C_RESET}. ", line)
+
+    def test_with_nothing_queued_it_says_so_too(self):
+        self.both_slots_busy_three_minutes_out()
+
+        text = plain(self.que())
+
+        self.assertIn("You have 0 files in queue.", text)
+        self.assertIn("Slots 0/2. Next free slot: ~3 min. Queue ", text)
+
+    def test_a_free_slot_is_now(self):
+        self.busy(send(10_000_000, 4_000_000, 100, now=time.time()))
+
+        self.assertIn("Slots 1/2. Next free slot: now. Queue ", plain(self.que()))
+
+    def test_no_speed_yet_is_said_plainly(self):
+        config.dcc_queue["dave"] = [{"file": "a.flac"}]
+        self.busy({"user": "a", "file": "x", "bytes_sent": 0},
+                  {"user": "b", "file": "y", "bytes_sent": 0})
+
+        self.assertIn("files in queue. Next free slot: not known yet. To remove", plain(self.que()))
+
+    def test_it_never_promises_the_asker_a_turn(self):
+        config.dcc_queue["dave"] = [{"file": "a.flac"}]
+        self.both_slots_busy_three_minutes_out()
+
+        text = plain(self.que()).lower()
+
+        self.assertNotIn("your turn", text)
+        self.assertNotIn("your slot", text)
+
+
+class TheStatsCommand(UserNoticeCase):
+
+    def setUp(self):
+        super().setUp()
+        self.patch(stats_mgr, "get_total_sent", lambda: 3)
+        self.patch(stats_mgr, "get_total_sent_bytes", lambda: 3_000_000)
+        self.patch(stats_mgr, "live_speed", lambda now=None: 0)
+        self.patch(db, "get_speed_record", lambda: 0)
+        self.patch(db, "load_advanced_stats_rolled",
+                   lambda: [3, 3_000_000, 1, 1_000_000, 2, 2_000_000, "2026-01-01"])
+
+    def slots_line(self):
+        lines = [plain(line) for line in self.answers(commands.handle_stats_request)]
+        found = [line for line in lines if " :Slots " in line]
+        self.assertEqual(len(found), 1, lines)
+        return found[0]
+
+    def test_the_next_free_slot_sits_next_to_the_free_slots(self):
+        self.both_slots_busy_three_minutes_out()
+
+        self.assertIn(":Slots 0/2 free, next free slot ~3 min, 0 queued. Speed ", self.slots_line())
+
+    def test_a_free_slot_is_now(self):
+        self.busy(send(10_000_000, 4_000_000, 100, now=time.time()))
+
+        self.assertIn(":Slots 1/2 free, next free slot now, 0 queued.", self.slots_line())
+
+    def test_no_speed_yet(self):
+        self.busy({"user": "a", "file": "x", "bytes_sent": 0},
+                  {"user": "b", "file": "y", "bytes_sent": 0})
+
+        self.assertIn("next free slot not known yet, 0 queued.", self.slots_line())
+
+    def test_the_figure_has_the_same_colour_as_the_others(self):
+        self.both_slots_busy_three_minutes_out()
+        lines = self.answers(commands.handle_stats_request)
+
+        self.assertTrue(any(f"next free slot {config.C_BOLD}{config.C_GREEN}~3 min{config.C_RESET}, "
+                            in line for line in lines), lines)
+
+
+class TheCtcpSlotsLineIsUnchanged(UserNoticeCase):
+    """Other scripts parse the SLOTS line. One real advert cycle, every slot
+    busy with a known estimate, and the line must be exactly what it was
+    before the estimate existed: the "next" field stays 0 (NOW with a slot
+    free), never minutes."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(CHANNEL=CHANNEL, ANNOUNCE_INTERVAL=0.01, SCRIPT_VERSION="DCCore-test")
+        self.patch(announce, "current_worker_id", announce.current_worker_id)
+        self.patch(announce, "is_ready", announce.is_ready)
+        self.patch(library, "list_name_for_request", lambda channel=None: "main")
+        self.patch(stats_mgr, "live_speed", lambda now=None: 5000)
+        self.patch(stats_mgr, "get_total_sent_bytes", lambda: 3 * 1024 * 1024)
+        self.patch(db, "get_speed_record", lambda: 0)
+        self.patch(announce, "get_formatted_stats_strings", lambda: ("3", "1", "2"))
+
+    def slots_line(self):
+        announce.is_ready = True
+        thread = threading.Thread(target=announce.announce_worker, daemon=True)
+        thread.start()
+        try:
+            def found():
+                return [m for _u, m, _v in self.oserve.queued if "\x01SLOTS " in m]
+            self.assertTrue(wait_for(found), f"no SLOTS line was sent: {self.oserve.queued!r}")
+            return found()[0]
+        finally:
+            announce.current_worker_id = object()
+            thread.join(5)
+
+    def test_every_slot_busy_with_a_known_estimate(self):
+        self.both_slots_busy_three_minutes_out()
+        self.assertEqual(stats_mgr.next_slot_estimate(), 3)    # there IS an estimate
+
+        self.assertEqual(
+            self.slots_line(),
+            f"PRIVMSG {CHANNEL} :\x01SLOTS 2 0 0 0 999 5000 1234 1073741824 0 3 3145728 DCCore-test\x01\r\n")
+
+    def test_a_free_slot(self):
+        self.busy(send(10_000_000, 4_000_000, 100, now=time.time()))
+
+        self.assertEqual(
+            self.slots_line(),
+            f"PRIVMSG {CHANNEL} :\x01SLOTS 2 1 NOW 0 999 5000 1234 1073741824 0 3 3145728 DCCore-test\x01\r\n")
+
+
 if __name__ == "__main__":
     unittest.main()
