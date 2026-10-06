@@ -90,7 +90,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.14 }
+alias dccore.ver { return 1.15 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -692,6 +692,9 @@ alias dccore.structured {
   if (%type == DLBEGIN) { hdel -w dccore.live dl.* | hadd dccore.live dln 1 | return }
   if (%type == DLROW) { hadd dccore.live dl. $+ $dccore.st(dln) $2- | hinc dccore.live dln | return }
   if (%type == DLEND) { hadd dccore.live dlwait $2 | hadd dccore.live dlfin $3 | hadd dccore.live dlfail $4 | hadd dccore.live dlend 1 | dccore.dl.draw | return }
+  if (%type == DQBEGIN) { hdel -w dccore.live dq.* | hdel dccore.live dqend | hadd dccore.live dqn 1 | return }
+  if (%type == DQROW) { hadd dccore.live dq. $+ $dccore.st(dqn) $2- | hinc dccore.live dqn | return }
+  if (%type == DQEND) { hadd dccore.live dqcount $2 | hadd dccore.live dqend 1 | dccore.dq.draw | return }
   if (%type == OUT) { dccore.out $2- | return }
   if (%type == LISTFETCH) {
     ; <bot> <auto|arrived|unusable> <text>: a held bot list asked for again,
@@ -1361,6 +1364,86 @@ menu @DCCore-Downloads {
 }
 
 ; ---------------------------------------------------------------------
+;  Download queues (#1217): the requests the bot has made that have not started
+; ---------------------------------------------------------------------
+;
+;  A dialog with every request still waiting - a file, a !rar folder or a
+;  bot's list - asked for, queued at the other bot or held back here. Select
+;  some and remove them, or remove all of them; a download that has started is
+;  never touched. The bot sends the rows when asked (`dlqueue`), and asked
+;  again after each removal. dqmap.<line> remembers which request a line is.
+
+alias dccore.queues {
+  if ($dccore.st(mode) != structured) { dccore.sys Download queues needs the structured link to the bot. | return }
+  if ($dialog(dccore.dq)) { dialog -v dccore.dq | dccore.dq.ask | return }
+  dialog -m dccore.dq dccore.dq
+}
+alias dccore.dq.ask {
+  hdel dccore.live dqend
+  dccore.dq.draw
+  if ($chat($dccore.bot)) { .msg $+(=,$dccore.bot) dlqueue }
+}
+alias dccore.dq.draw {
+  if (!$dialog(dccore.dq)) { return }
+  did -r dccore.dq 2
+  hdel -w dccore.live dqmap.*
+  if ($dccore.st(mode) != structured) { did -ra dccore.dq 1 (not connected to the bot) | return }
+  if (!$dccore.st(dqend)) { did -ra dccore.dq 1 (asking the bot...) | return }
+  var %n = $calc($dccore.st(dqn) - 1), %i = 1
+  while (%i <= %n) {
+    var %l = $dccore.st(dq. $+ %i)
+    ; <id> <kind> <state> <bot> <note> <name>
+    var %name = $gettok(%l,6-,32)
+    if ($gettok(%l,2,32) == r) { %name = [!rar] %name }
+    did -a dccore.dq 2 $gettok(%l,4,32) $dccore.dot %name $dccore.dot $replace($gettok(%l,5,32),_,$chr(32))
+    hadd dccore.live $+(dqmap.,$did(dccore.dq,2).lines) $gettok(%l,1,32)
+    inc %i
+  }
+  did -ra dccore.dq 1 $iif($dccore.st(dqcount) == 0,Nothing is waiting.,$dccore.st(dqcount) waiting - select the ones to remove (Ctrl or Shift for several))
+}
+; Up to 20 ids to a line, so a long selection stays inside one IRC line.
+alias dccore.dq.cancel {
+  var %ids = $1-, %batch = $null, %k = 0, %i = 1
+  while (%i <= $numtok(%ids,32)) {
+    %batch = %batch $gettok(%ids,%i,32)
+    inc %k
+    if (%k == 20) || (%i == $numtok(%ids,32)) { .msg $+(=,$dccore.bot) dlcancel %batch | %batch = $null | %k = 0 }
+    inc %i
+  }
+}
+alias dccore.dq.remove {
+  var %n = $did(dccore.dq,2,0).sel, %i = 1, %ids = $null
+  if (%n == 0) { did -ra dccore.dq 1 Select the requests to remove first. | return }
+  while (%i <= %n) {
+    var %id = $hget(dccore.live,$+(dqmap.,$did(dccore.dq,2,%i).sel))
+    if (%id != $null) { %ids = %ids %id }
+    inc %i
+  }
+  if (%ids == $null) { return }
+  dccore.dq.cancel %ids
+  dccore.dq.ask
+}
+
+dialog dccore.dq {
+  title "DCCore - Download queues"
+  size -1 -1 330 200
+  option dbu
+  text "", 1, 5 4 320 8
+  list 2, 5 14 320 160, extsel hsbar vsbar
+  button "Remove selected", 3, 5 181 62 12
+  button "Remove all...", 4, 70 181 52 12
+  button "Refresh", 5, 125 181 40 12
+  button "Close", 2, 285 181 40 12, cancel
+}
+on *:dialog:dccore.dq:init:0: { dccore.dq.ask }
+on *:dialog:dccore.dq:sclick:3: { dccore.dq.remove }
+on *:dialog:dccore.dq:sclick:4: {
+  if ($dccore.st(dqcount) == 0) || (!$dccore.st(dqend)) { return }
+  if ($input(Remove all $dccore.st(dqcount) waiting requests? Downloads that have started are left alone.,yq,DCCore)) { .msg $+(=,$dccore.bot) dlcancel all | dccore.dq.ask }
+}
+on *:dialog:dccore.dq:sclick:5: { dccore.dq.ask }
+
+; ---------------------------------------------------------------------
 ;  What you type in the window goes to the bot
 ; ---------------------------------------------------------------------
 
@@ -1447,6 +1530,7 @@ menu @DCCore {
   .Show the lists:dccore lists
   .Fetch the changed lists:dccore fetch
   .Ask a bot for its list...:dccore.ask fetch Ask which bot for its list
+  .Download queues...:dccore.queues
   Library
   .Find duplicate filenames:dccore.send verify
   .Rebuild the list...:dccore.confirm update Rebuild the list? It walks the whole library and can take minutes.

@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗂️ A "Download queues" window: what the bot is waiting to download, with Remove (#1217)
+
+The bot's requests to other bots (files, `!rar` folders and lists) that have not started could only be seen as rows in
+the Downloads window or the dashboard, and let go one at a time. They also are not what **Info → Queue** shows - that is
+what users queued on this bot.
+
+- **`dlqueue`** sends every request that has not started (waiting, asked, queued there) as one snapshot - `DQBEGIN`,
+  a `DQROW <id> <f|r|l> <state> <bot> <note> <name>` per request, `DQEND <count>` - to a script that said 1.15 or
+  later in `HELLO`; a console without the window gets the same list as text with the ids.
+- **`dlcancel <id> [<id> ...]` and `dlcancel all`** let several requests go in one command. Each is judged on its own:
+  one that has started since (listening, receiving) or is gone is left alone and counted in the answer, and a bad id
+  stops the whole command before anything is cancelled. `dlcancel <id>` behaves as before.
+- **mIRC (`dccore.mrc` 1.15):** *Lists → Download queues...* opens a window with one line per request (bot, `!rar` for a
+  folder, name, why it waits), **Remove selected**, **Remove all...** (asks first) and **Refresh**. Running transfers
+  and packs are never touched.
+
 ### 📦 A running folder pack can be seen and cancelled (#1202)
 
 `rar` ran inside a blocking `subprocess.run` and no handle was kept. The user being packed for read "queued" for as

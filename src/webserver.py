@@ -4751,6 +4751,7 @@ class _WebConsoleSession:
     # prose - it used to be missing, so `pair` wrote the new token to disk and
     # then raised before showing it.
     structured = False
+    draws_dlqueue = False
     client = "web"
 
     def __init__(self, nick):
