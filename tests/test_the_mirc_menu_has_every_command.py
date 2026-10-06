@@ -73,11 +73,11 @@ class TheWindowMenu(unittest.TestCase):
         # dlcancel and dlagain act on one row's id: they live in the
         # Downloads window's own right-click menu (see test_dccore_downloads_window).
         # dlqueue feeds the Download queues window, whose menu item is
-        # dccore.queues. ignore and unignore (#1206) reach the menu with the
+        # dccore.queues. ignore, unignore, queuemove and queueremove (#1206) reach the menu with the
         # mIRC part of that issue, which also bumps dccore.ver; until then they
         # are the console's and the dashboard's.
         plumbing = {"hello", "help", "quit", "pair", "unpair", "dlcancel", "dlagain", "dlqueue",
-                    "ignore", "unignore"}
+                    "ignore", "unignore", "queuemove", "queueremove"}
         for command in adminchat.COMMANDS:
             if command in plumbing:
                 continue

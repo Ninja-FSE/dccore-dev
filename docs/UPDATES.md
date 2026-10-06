@@ -13,8 +13,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 - **What it drops:** the nick's pending replies, as a flood ban does. Its queued files stay; "Clear user" (part 2) removes them.
 - **`unignore` also ends a flood ban.** Nothing could before, short of waiting.
 - **Dashboard, Queue page:** a new Actions column. *Ignore* asks for the minutes and calls `POST /api/ignore`; a nick under an ignore or a ban reads "Ignored, 29m 12s left" with *Lift* (`POST /api/unignore`). `/api/queue` rows carry `ignored_seconds`.
-- **Not yet:** the mIRC nicklist items and "clear and ignore" (part 3), queue move up/down, remove one item and clear user (part 2).
+- **Not yet:** the mIRC nicklist items and "clear and ignore" (part 3).
 - **Tests:** `test_a_nick_can_be_ignored_for_a_while` (29): dropped while it runs, free after, kept across a restart, refusals, lifting, console, dashboard.
+
+### 🔀 Move, remove and clear in the queue (#1206, part 2 of 3)
+
+The operator could clear a whole queue and nothing else: no way to let one nick go first, to change which of a nick's files comes next, or to drop a single file.
+
+- **Who goes next.** The dispatcher gives a free slot to the nick that has waited longest (#1032). `queuemove <nick> up|down` swaps two nicks' wait stamps - every waiting nick is re-stamped in its new place, since after a restart none has a stamp and a swap of two zeros would change nothing. `queue` and the Queue page now list the nicks in that order (the console used to list dict order, which is arrival order only until someone finishes a send). The order is kept in memory only, as the stamps are: a restart puts it back to first-come.
+- **Which file next.** `queuemove <nick> <number> up|down` swaps a file with its neighbour in the nick's own queue; the dispatcher sends a queue from the top. A file being sent, or the folder being packed, is not moved and nothing is moved past it: the send settles its row by identity and a user could otherwise be left with the wrong file in flight.
+- **Remove one file.** `queueremove <nick> <number>` takes the same route as the nick's own `@<bot>-remove <file>` - one function, `_take_rows_out()`, now does the removal for both - so a packed folder's temp archive goes with its row, a frozen nick unfreezes with its last file, and the nick gets the same `Removed "<file>" from your queue.` notice. A refused change sends nothing. `queue <nick>` numbers the files.
+- **Dashboard, Queue page:** each nick has *earlier* / *later* arrows and *Clear* (it asks first, with the count, then calls the same function as `clearqueue`); each file has *earlier* / *later* / remove. A page remembers which nicks' file lists were open across its refresh - they used to shut every few seconds, which would have made the buttons inside them unusable. Routes: `POST /api/queue/move-user`, `/move-file`, `/remove-file`, `/clear`. A move or remove sends the file's place **and its name**; if the queue changed since the page was drawn the answer is "The queue has changed - look again" instead of acting on whatever slid into that place.
+- **Not yet:** the mIRC nicklist items and "clear and ignore" (part 3).
+- **Tests:** `test_the_queue_can_be_controlled` (50): the order and the dispatcher's walk, the ends, stale names, a file being sent or packed, duplicate names, the notice matching `@<bot>-remove`, temp archives, frozen nicks, the console, the routes, the page wiring and strings.
 
 ### 🔁 A file is not requested twice from the same bot (#1218)
 
