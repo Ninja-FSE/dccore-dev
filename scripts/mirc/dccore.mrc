@@ -1579,6 +1579,7 @@ menu status,channel {
   .Open the window:dccore window
   .Open DCCore Chat:dccore chat
   .Open the Downloads window:dccore downloads
+  .Download queues...:dccore.queues
   .Show the lists:dccore lists
   .Fetch the changed lists:dccore fetch
   .Command list:dccore

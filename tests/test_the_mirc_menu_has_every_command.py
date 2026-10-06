@@ -158,6 +158,9 @@ class TheOtherMenus(unittest.TestCase):
             self.assertIn(entry, menu)
         self.assertIn(".Open the window:dccore window", menu)
 
+    def test_the_status_and_channel_menu_opens_the_download_queues_too(self):
+        self.assertIn(".Download queues...:dccore.queues", block("menu status,channel {"))
+
     def test_the_nicklist_menu_is_unchanged(self):
         menu = block("menu nicklist {")
         self.assertIn(".Queue of $1:dccore.send queue $1", menu)

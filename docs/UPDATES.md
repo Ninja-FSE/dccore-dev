@@ -16,7 +16,7 @@ what users queued on this bot.
 - **`dlcancel <id> [<id> ...]` and `dlcancel all`** let several requests go in one command. Each is judged on its own:
   one that has started since (listening, receiving) or is gone is left alone and counted in the answer, and a bad id
   stops the whole command before anything is cancelled. `dlcancel <id>` behaves as before.
-- **mIRC (`dccore.mrc` 1.15):** *Info → Download queues...* opens a window with one line per request (bot, `!rar` for a
+- **mIRC (`dccore.mrc` 1.15):** *Info → Download queues...* (and *DCCore → Download queues...* in a channel or status window's right-click menu) opens a window with one line per request (bot, `!rar` for a
   folder, name, why it waits), **Remove selected**, **Remove all...** (asks first) and **Refresh**. Running transfers
   and packs are never touched.
 
