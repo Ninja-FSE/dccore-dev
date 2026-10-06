@@ -219,6 +219,7 @@
     stSpeed:               document.getElementById("st-speed"),
     stRecord:              document.getElementById("st-record"),
     stSending:             document.getElementById("st-sending"),
+    stNextSlot:            document.getElementById("st-next-slot"),
     stQueued:              document.getElementById("st-queued"),
     stQueuedLabel:         document.getElementById("st-queued-label"),
     stUptime:              document.getElementById("st-uptime"),
@@ -6304,6 +6305,16 @@
     setStat(el.stFoot, data.version || "");
   }
 
+  // When the first busy slot is likely to free up (#1207): the next FREE
+  // slot, not anybody's turn. "now" and "not known yet" are words, so they
+  // are translated here; a time ("~4 min", "~2h 10m") is the server's own
+  // rendering, the one the -que and -stats notices print.
+  function nextSlotText(tr) {
+    if (tr.next_slot === "now") { return t("stats.nextSlotNow"); }
+    if (tr.next_slot === null || tr.next_slot === undefined) { return t("stats.nextSlotUnknown"); }
+    return tr.next_slot_text || t("stats.nextSlotUnknown");
+  }
+
   // The Live Transfers figures. Every one is rendered server-side by the same
   // helpers the channel advert and the admin console use, so the page cannot
   // disagree with the advert about how the same number reads.
@@ -6312,6 +6323,7 @@
     setStat(el.stSpeed, tr.speed_now_text || "0k/s");
     setStat(el.stRecord, tr.record_text || "0k/s");
     setStat(el.stSending, (tr.sending || 0) + " / " + (tr.slots || 0));
+    setStat(el.stNextSlot, nextSlotText(tr));
     setStat(el.stQueued, (tr.queued_files || 0).toLocaleString());
     setStat(el.stQueuedLabel,
             t("sidebar.queued") + (tr.queued_users

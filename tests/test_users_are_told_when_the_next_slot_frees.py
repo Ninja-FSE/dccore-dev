@@ -349,5 +349,60 @@ class TheCtcpSlotsLineIsUnchanged(UserNoticeCase):
             f"PRIVMSG {CHANNEL} :\x01SLOTS 2 1 NOW 0 999 5000 1234 1073741824 0 3 3145728 DCCore-test\x01\r\n")
 
 
+class TheLiveTransfersPage(DCCoreTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(MAX_DCC_SLOTS=1)
+
+    def transfer(self):
+        return webserver.build_stats_payload(parts=("transfer",))["transfer"]
+
+    def test_minutes(self):
+        config.active_transfers[:] = [send(10_000_000, 4_000_000, 100, now=time.time())]
+
+        tr = self.transfer()
+
+        self.assertEqual((tr["next_slot"], tr["next_slot_text"]), (3, "~3 min"))
+
+    def test_now(self):
+        config.active_transfers[:] = []
+        self.assertEqual(self.transfer()["next_slot"], "now")
+
+    def test_unknown(self):
+        config.active_transfers[:] = [{"user": "a", "file": "x", "bytes_sent": 0}]
+        tr = self.transfer()
+        self.assertIsNone(tr["next_slot"])
+        self.assertEqual(tr["next_slot_text"], "not known yet")
+
+
+class ThePageDrawsIt(unittest.TestCase):
+
+    @staticmethod
+    def read(*parts):
+        with io.open(os.path.join(REPO_ROOT, *parts), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_a_card_on_live_transfers(self):
+        html = self.read("web", "index.html")
+        live = html.split('id="view-live"', 1)[1].split('<section class="view"', 1)[0]
+        self.assertIn('<div class="stat-value" id="st-next-slot">&mdash;</div>'
+                      '<div class="stat-label" data-i18n="stats.nextSlotLabel">Next free slot</div>', live)
+
+    def test_the_transfer_figures_fill_it(self):
+        js = self.read("web", "app.js")
+        render = js.split("function renderTransfer(tr) {", 1)[1].split("\n  }\n", 1)[0]
+        self.assertIn("setStat(el.stNextSlot, nextSlotText(tr));", render)
+        self.assertIn('stNextSlot:            document.getElementById("st-next-slot"),', js)
+
+    def test_now_and_unknown_are_translated_and_a_time_is_the_servers(self):
+        js = self.read("web", "app.js")
+        body = js.split("function nextSlotText(tr) {", 1)[1].split("\n  }\n", 1)[0]
+        self.assertIn('if (tr.next_slot === "now") { return t("stats.nextSlotNow"); }', body)
+        self.assertIn('if (tr.next_slot === null || tr.next_slot === undefined) '
+                      '{ return t("stats.nextSlotUnknown"); }', body)
+        self.assertIn('return tr.next_slot_text || t("stats.nextSlotUnknown");', body)
+
+
 if __name__ == "__main__":
     unittest.main()

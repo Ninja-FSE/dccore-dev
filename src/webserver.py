@@ -964,6 +964,14 @@ def build_stats_payload(parts=None):
     except Exception:
         uptime = 0
 
+    # When the first busy slot is likely to free up (#1207), from the same
+    # copy of active_transfers the Sending card counts, so the two cannot
+    # disagree about whether a slot is free. "now", whole minutes, or None.
+    try:
+        next_slot = stats_mgr.next_slot_estimate(transfers=active)
+    except Exception:
+        next_slot = None
+
     # The 7-column row: total files, total bytes, yesterday's pair, today's
     # pair, and the date the day last rolled over. Read through
     # load_advanced_stats_rolled(), which rolls a COPY, so a bot that has sent
@@ -1024,6 +1032,8 @@ def build_stats_payload(parts=None):
             "record_text": stats_mgr.format_speed(record),
             "sending": len(active),
             "slots": int(getattr(config, "MAX_DCC_SLOTS", 0) or 0),
+            "next_slot": next_slot,
+            "next_slot_text": stats_mgr.format_next_slot(next_slot),
             "queued_files": sum(len(entries) for entries in queue.values()),
             "queued_users": len(queue),
             "uptime_seconds": uptime,
