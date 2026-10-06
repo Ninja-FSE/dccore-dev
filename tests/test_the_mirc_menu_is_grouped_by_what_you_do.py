@@ -106,7 +106,7 @@ class TheGroups(unittest.TestCase):
 
     def test_info_holds_the_questions_and_ends_with_the_command_list(self):
         self.assertEqual(names(self.groups["Info"]),
-                         ["Status", "Slots", "Queue", "Uptime", "Version", SEPARATOR, "Command list"])
+                         ["Status", "Slots", "Queue", "Download queues...", "Uptime", "Version", SEPARATOR, "Command list"])
         self.assertEqual(dict(self.groups["Info"])["Command list"], "dccore")
 
     def test_window_holds_the_two_windows_then_the_look_of_this_one(self):

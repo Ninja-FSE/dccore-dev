@@ -569,6 +569,17 @@ def script_draws_packing(version):
     return theirs is not None and theirs >= ours
 
 
+# The first script with the Download queues window (#1217). An older one has no
+# handler for the DQROW lines, so it is sent the list as plain text instead.
+DLQUEUE_SCRIPT_VERSION = "1.15"
+
+
+def script_draws_dlqueue(version):
+    ours = _version_tuple(DLQUEUE_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is not None and theirs >= ours
+
+
 # The first script that draws a list rebuild's progress (#1024). An older one
 # would print a REBUILD line as text.
 REBUILD_SCRIPT_VERSION = "1.9"
@@ -714,6 +725,70 @@ def _download_waiting_note(row):
     return template.format(bot=row.get("bot") or "the bot") if template else "asking shortly"
 
 
+def _fetch_rows_snapshot():
+    """[(id, row copy)] of the fetch queue, or None when the lock is not free
+    in time. The caller is the session writer, which is also the link's
+    heartbeat, so the lock is tried for a moment and not waited for."""
+    try:
+        import dcc_fetch
+        queue = dcc_fetch._ensure_fetch_queue()
+        lock = dcc_fetch._fetch_lock()
+        if not lock.acquire(timeout=DOWNLOADS_LOCK_WAIT):
+            return None
+        try:
+            return [(rid, dict(row)) for rid, row in queue.items()]
+        finally:
+            lock.release()
+    except Exception as err:
+        print(f"[ADMINCHAT] Downloads unavailable for the window: {err}")
+        return None
+
+
+def _by_bot(items):
+    """One bot's rows together, bots in the order each first appears, so a
+    window can head each group with the bot's nick."""
+    groups = {}
+    for item in items:
+        groups.setdefault(item[1].get("bot") or "?", []).append(item)
+    return [item for group in groups.values() for item in group]
+
+
+# What a request is, for the Download queues window: a file, a folder (!rar) or a list.
+_DLQUEUE_KINDS = {"file": "f", "folder": "r", "list": "l"}
+_DLQUEUE_STATES = ("pending", "offered", "queued")
+
+
+def dlqueue_requests():
+    """[(id, row)] of every request that has not started, oldest first within
+    each bot, or None when the fetch queue could not be read in time. These are
+    the ones that can be let go: nothing is coming in for them yet."""
+    rows = _fetch_rows_snapshot()
+    if rows is None:
+        return None
+    waiting = [item for item in rows if item[1].get("state") in _DLQUEUE_STATES]
+    waiting.sort(key=lambda item: item[1].get("requested_at", 0))
+    return _by_bot(waiting)
+
+
+def dlqueue_lines(requests):
+    """The Download queues window's snapshot (#1217):
+
+        DCCORE DQBEGIN
+        DCCORE DQROW <id> <kind> <state> <bot> <note> <name>
+        DCCORE DQEND <count>
+
+    kind is f (file), r (folder, asked as !rar) or l (a bot's list); <note> is
+    one token, why the request waits. Whole or not sent: the window redraws at DQEND.
+    """
+    lines = ["DCCORE DQBEGIN"]
+    for rid, row in requests:
+        lines.append(f"DCCORE DQROW {rid} {_DLQUEUE_KINDS.get(row.get('request_type', 'file'), 'f')} "
+                     f"{row.get('state')} {_clean(row.get('bot'), token=True)} "
+                     f"{_clean(_download_waiting_note(row), token=True)} {_clean(_download_name(row))}")
+    lines.append(f"DCCORE DQEND {len(requests)}")
+    return lines
+
+
 def downloads_lines(finished_rows=DOWNLOADS_FINISHED_DEFAULT, now=None):
     """The Downloads window's snapshot, or None when the fetch queue could not
     be read in time (the caller tries again on its next pass):
@@ -733,18 +808,8 @@ def downloads_lines(finished_rows=DOWNLOADS_FINISHED_DEFAULT, now=None):
     """
     import time as _time
     now = _time.time() if now is None else now
-    try:
-        import dcc_fetch
-        queue = dcc_fetch._ensure_fetch_queue()
-        lock = dcc_fetch._fetch_lock()
-        if not lock.acquire(timeout=DOWNLOADS_LOCK_WAIT):
-            return None
-        try:
-            rows = [(rid, dict(row)) for rid, row in queue.items()]
-        finally:
-            lock.release()
-    except Exception as err:
-        print(f"[ADMINCHAT] Downloads unavailable for the window: {err}")
+    rows = _fetch_rows_snapshot()
+    if rows is None:
         return None
 
     coming, waiting, finished = [], [], []
@@ -766,13 +831,7 @@ def downloads_lines(finished_rows=DOWNLOADS_FINISHED_DEFAULT, now=None):
     done = sorted((i for i in finished if not failed_row(i[1])), key=by_ended, reverse=True)
     failed = sorted((i for i in finished if failed_row(i[1])), key=by_ended, reverse=True)
 
-    def by_bot(items):
-        """One bot's rows together, bots in the order each first appears, so the
-        window can head each group with the bot's nick."""
-        groups = {}
-        for item in items:
-            groups.setdefault(item[1].get("bot") or "?", []).append(item)
-        return [item for group in groups.values() for item in group]
+    by_bot = _by_bot
 
     def line(rid, kind, state, row, bps=0, when=0, note="-"):
         return (f"DCCORE DLROW {rid} {kind} {state} {_clean(row.get('bot'), token=True)} "
@@ -982,6 +1041,7 @@ class Session:
         self._packing_sent_at = 0.0
         self._packing_shown = False   # a PACKING line is on the script's panel
         self.draws_downloads = False  # ... and the Downloads window's rows (#1022)
+        self.draws_dlqueue = False    # ... and the Download queues window's rows (#1217)
         self.reads_peers = False      # ... and PEERS and CONSOLEFEED lines (#1045)
         self.downloads_finished = 0   # > 0 while that window is open: how many finished rows it wants
         self._downloads_sent_at = 0.0
@@ -1854,19 +1914,69 @@ def _download_row(session, args, usage):
 
 def _cmd_dlcancel(session, args):
     """`dlcancel <id>`: let a request go that has not started - what the
-    dashboard's Cancel does. A transfer under way cannot be stopped (#1022)."""
+    dashboard's Cancel does. A transfer under way cannot be stopped (#1022).
+    Several ids, or `all`, let a number of them go in one go (#1217): each is
+    judged on its own, so one that has started since is left running."""
+    words = args.split()
+    if len(words) > 1 or (words and words[0].lower() == "all"):
+        _cancel_many(session, words)
+        return
     found = _download_row(session, args, "dlcancel <id>")
     if found is None:
         return
     import webserver
     request_id, row = found
     status, result = webserver.build_fetch_delete_result(
-        request_id, only_states=("pending", "offered", "queued"))
+        request_id, only_states=_DLQUEUE_STATES)
     if status == 200:
         session.send(f"Cancelled {_download_name(row)} from {row.get('bot')}.")
         _refresh_downloads(session)
     else:
         session.send(result.get("error", "Could not cancel that download."))
+
+
+def _cancel_many(session, words):
+    import webserver
+    if words[0].lower() == "all":
+        waiting = dlqueue_requests()
+        if waiting is None:
+            session.send("The download queue could not be read - try again.")
+            return
+        ids = [rid for rid, _ in waiting]
+    else:
+        ids = [word.lower() for word in words]
+        if not all(_REQUEST_ID.fullmatch(rid) for rid in ids):
+            session.send("Usage: dlcancel <id> [<id> ...] | dlcancel all")
+            return
+    cancelled = started = 0
+    for rid in dict.fromkeys(ids):
+        status, _ = webserver.build_fetch_delete_result(rid, only_states=_DLQUEUE_STATES)
+        if status == 200:
+            cancelled += 1
+        else:
+            started += 1
+    note = f" {started} had started or were gone already and were left." if started else ""
+    session.send(f"Cancelled {cancelled} request(s).{note}")
+    _refresh_downloads(session)
+
+
+def _cmd_dlqueue(session, args):
+    """`dlqueue`: every request that has not started, to the Download queues
+    window as DQROW lines, or as text to a client that cannot draw them (#1217)."""
+    requests = dlqueue_requests()
+    if requests is None:
+        session.send("The download queue could not be read - try again.")
+        return
+    if session.structured and session.draws_dlqueue:
+        for text in dlqueue_lines(requests):
+            session.send(text)
+        return
+    if not requests:
+        session.send("No request is waiting.")
+        return
+    session.send(f"{len(requests)} request(s) waiting, remove one with dlcancel <id>:")
+    for rid, row in requests:
+        session.send(f"  {rid}  {row.get('bot')}: {_download_name(row)}  ({_download_waiting_note(row)})")
 
 
 def _cmd_dlagain(session, args):
@@ -1989,6 +2099,7 @@ def _cmd_hello(session, args):
     session.draws_audio = script_draws_audio(version)
     session.draws_packing = script_draws_packing(version)
     session.draws_downloads = script_draws_downloads(version)
+    session.draws_dlqueue = script_draws_dlqueue(version)
     session.reads_peers = script_reads_peers(version)
     session.send(hello_line())
     if script_is_too_old(version):
@@ -2172,7 +2283,8 @@ COMMANDS = {
     "lists":      (_cmd_lists,      "held bot lists, and which have changed", "lists"),
     "fetch":      (_cmd_fetch,      "ask the bots whose lists changed",  "fetch [bot]"),
     "downloads":  (_cmd_downloads,  "the Downloads window opening or closing", "downloads on [rows]|off"),
-    "dlcancel":   (_cmd_dlcancel,   "cancel a download that has not started", "dlcancel <id>"),
+    "dlcancel":   (_cmd_dlcancel,   "cancel downloads that have not started", "dlcancel <id>... | all"),
+    "dlqueue":    (_cmd_dlqueue,    "requests waiting to start, with their ids", "dlqueue"),
     "dlagain":    (_cmd_dlagain,    "ask again for a download that failed", "dlagain <id>"),
     "dlclear":    (_cmd_dlclear,    "forget the finished downloads",     "dlclear"),
     "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan|*|nick text]"),

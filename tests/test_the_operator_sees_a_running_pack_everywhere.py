@@ -239,7 +239,7 @@ class TheScriptAndTheFeed(unittest.TestCase):
 
     def test_the_script_version_is_the_one_the_bot_gates_on(self):
         script = read("scripts", "mirc", "dccore.mrc")
-        self.assertIn("alias dccore.ver { return " + adminchat.PACKING_SCRIPT_VERSION + " }", script)
+        self.assertIn("alias dccore.ver { return " + adminchat.DLQUEUE_SCRIPT_VERSION + " }", script)
 
     def test_the_script_handles_and_clears_the_line(self):
         script = read("scripts", "mirc", "dccore.mrc")
