@@ -36,6 +36,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+import adminchat  # noqa: E402
 import announce  # noqa: E402
 import dcc_fetch  # noqa: E402
 import defaults as config  # noqa: E402
@@ -439,6 +440,47 @@ class ResumeNow(CooldownCase):
         dcc_fetch.resume_bot("SomeBot")
         self.fail_by_silence(1)
         self.assertIsNone(self.cooldown())
+
+
+class WhatThePagesSay(CooldownCase):
+    def cooled_row(self):
+        self.fail_by_silence(3)
+        rid = self.ask("SomeBot", "Later")
+        dcc_fetch.check_fetch_queue()
+        return rid, self.row(rid)
+
+    def test_the_console_says_until_when_and_after_how_many(self):
+        _rid, row = self.cooled_row()
+        clock = time.strftime("%H:%M", time.localtime(row["cooldown_until"]))
+        self.assertEqual(adminchat._download_waiting_note(row), f"paused until {clock} after 3 failures")
+
+    def test_the_download_queues_row_keeps_its_fields_in_order(self):
+        rid, row = self.cooled_row()
+        clock = time.strftime("%H:%M", time.localtime(row["cooldown_until"]))
+        (line,) = [text for text in adminchat.dlqueue_lines([(rid, row)]) if " DQROW " in text]
+        fields = line.split(" ")
+        self.assertEqual(fields[:7], ["DCCORE", "DQROW", rid, "f", "pending", "SomeBot",
+                                      f"paused_until_{clock}_after_3_failures"])
+        self.assertEqual(" ".join(fields[7:]), "Later.flac")
+
+    def test_the_downloads_page_says_it_and_offers_resume_now(self):
+        with io.open(os.path.join(REPO_ROOT, "web", "app.js"), encoding="utf-8") as handle:
+            code = handle.read()
+        self.assertIn('if (row.waiting === "cooldown") { label = fetchCooldownLabel(row); }', code)
+        branch = code.index('} else if (state === "pending" && row.waiting === "cooldown") {')
+        self.assertIn('t("download.fetchCooldownResumeNow")', code[branch:branch + 400])
+        self.assertIn("fetch-resume-btn", code[branch:branch + 400])
+        for lang in ("en", "es", "fr"):
+            with io.open(os.path.join(REPO_ROOT, "web", "lang", f"{lang}.json"), encoding="utf-8") as handle:
+                strings = json.load(handle)
+            self.assertIn("{time}", strings["download.waiting.fetchCooldown"])
+            self.assertIn("{failures}", strings["download.waiting.fetchCooldown"])
+            self.assertTrue(strings["download.fetchCooldownResumeNow"])
+
+    def test_both_settings_are_on_the_settings_page(self):
+        categories = {cid: keys for cid, _title, keys in webserver.SETTINGS_CATEGORIES}
+        self.assertIn("FETCH_BOT_MAX_FAILS", categories["fetch-queue"])
+        self.assertIn("FETCH_BOT_COOLDOWN_MINUTES", categories["fetch-queue"])
 
 
 if __name__ == "__main__":

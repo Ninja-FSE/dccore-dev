@@ -807,8 +807,21 @@
     offline: "download.waiting.offline", "just-back": "download.waiting.justBack",
     retry: "download.waiting.retry", "their-turn": "download.waiting.theirTurn",
     slots: "download.waiting.slots", paused: "download.waiting.paused",
+    cooldown: "download.waiting.fetchCooldown",
     "disk-full": "download.waiting.diskFull", joining: "download.waiting.joining"
   };
+
+  // #1210: "Paused until 14:32 after 3 failures" - a bot that kept failing,
+  // paused until a time, told apart from one paused by hand. The time is the
+  // viewer's own clock; the row carries when, in epoch seconds.
+  function fetchCooldownLabel(row) {
+    var until = new Date(Number(row.cooldown_until) * 1000);
+    var clock = isNaN(until.getTime()) ? "?" :
+      ("0" + until.getHours()).slice(-2) + ":" + ("0" + until.getMinutes()).slice(-2);
+    return t("download.waiting.fetchCooldown")
+      .replace("{time}", clock)
+      .replace("{failures}", String(row.cooldown_failures || "?"));
+  }
 
   // Nothing has been downloaded for it yet: waiting here, or waiting in the
   // other bot's queue (#977). A queued row was given the "Delete this
@@ -1151,6 +1164,7 @@
       // back, it has enough of ours, it was busy, or every slot is taken.
       if (state === "pending" && DOWNLOAD_WAITING_LABELS[row.waiting]) {
         label = t(DOWNLOAD_WAITING_LABELS[row.waiting]).replace("{bot}", row.bot || "");
+        if (row.waiting === "cooldown") { label = fetchCooldownLabel(row); }
       }
       var progress = row.total_size
         ? Math.round(100 * (row.bytes_received || 0) / row.total_size) + "%"
@@ -1206,6 +1220,10 @@
         // #926: a paused bot's requests wait here; one click resumes it.
         action = "<button type=\"button\" class=\"btn btn-small fetch-resume-btn\" data-request-id=\"" +
           encodeURIComponent(row.id) + "\">" + t("download.resumeBot") + "</button> " + deleteBtn;
+      } else if (state === "pending" && row.waiting === "cooldown") {
+        // #1210: the same resume, sooner than the pause would end by itself.
+        action = "<button type=\"button\" class=\"btn btn-small fetch-resume-btn\" data-request-id=\"" +
+          encodeURIComponent(row.id) + "\">" + t("download.fetchCooldownResumeNow") + "</button> " + deleteBtn;
       } else if (state === "pending") {
         action = deleteBtn;
       } else if (state === "queued" || state === "offered") {
