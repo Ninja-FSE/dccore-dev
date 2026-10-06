@@ -1297,7 +1297,7 @@
       })
       .catch(function (err) {
         markConnection(false);
-        el.queueBody.innerHTML = emptyRow(4, "Could not load the queue: " + err.message);
+        el.queueBody.innerHTML = emptyRow(5, "Could not load the queue: " + err.message);
       });
   }
 
@@ -1342,7 +1342,23 @@
   if (el.queueBody) {
     el.queueBody.addEventListener("click", function (evt) {
       var target = evt.target;
-      if (!target || !target.classList || !target.classList.contains("pack-cancel-btn")) { return; }
+      if (!target || !target.classList) { return; }
+      if (target.classList.contains("ignore-btn")) {
+        var nick = target.getAttribute("data-user");
+        var answer = window.prompt(t("queue.ignorePrompt").replace("{user}", nick), "30");
+        if (answer === null) { return; }
+        postJson("/api/ignore", { nick: nick, minutes: answer.trim() }).then(function (res) {
+          if (!res.ok) { window.alert(t("queue.ignoreFailed").replace("{error}", (res.data && res.data.error) || res.status)); }
+          loadQueue();
+        });
+        return;
+      }
+      if (target.classList.contains("lift-btn")) {
+        target.disabled = true;
+        postJson("/api/unignore", { nick: target.getAttribute("data-user") }).then(function () { loadQueue(); });
+        return;
+      }
+      if (!target.classList.contains("pack-cancel-btn")) { return; }
       target.disabled = true;
       postJson("/api/queue/pack/cancel", {}).then(function () { loadQueue(); });
     });
@@ -1365,9 +1381,23 @@
       "</ul></details>";
   }
 
+  // Ignore (#1206): a nick's requests dropped for some minutes. A nick under
+  // one - or under a flood ban - reads how long is left, and Lift ends it.
+  function queueIgnorePart(row) {
+    var nick = escapeHtml(row.user);
+    if (row.ignored_seconds > 0) {
+      return "<span class=\"col-dim\">" +
+        escapeHtml(t("queue.ignoredLeft").replace("{left}", describeDuration(row.ignored_seconds))) + "</span> " +
+        "<button type=\"button\" class=\"btn btn-small lift-btn\" data-user=\"" + nick + "\">" +
+        escapeHtml(t("queue.lift")) + "</button>";
+    }
+    return "<button type=\"button\" class=\"btn btn-small btn-danger ignore-btn\" data-user=\"" + nick + "\">" +
+      escapeHtml(t("queue.ignore")) + "</button>";
+  }
+
   function renderQueueTable(rows) {
     if (!rows.length) {
-      el.queueBody.innerHTML = emptyRow(4, t("queue.empty"));
+      el.queueBody.innerHTML = emptyRow(5, t("queue.empty"));
       return;
     }
     el.queueBody.innerHTML = rows.map(function (row) {
@@ -1392,6 +1422,7 @@
         "<td class=\"col-dim col-mono\">" + sendingPart + queuedPart + "</td>" +
         "<td class=\"col-mono\">" + escapeHtml(row.count) + "</td>" +
         "<td><span class=\"status-pill status-" + escapeHtml(status) + "\">" + escapeHtml(label) + "</span></td>" +
+        "<td>" + queueIgnorePart(row) + "</td>" +
         "</tr>";
     }).join("");
   }

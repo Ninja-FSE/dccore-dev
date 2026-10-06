@@ -1039,6 +1039,13 @@ def build_stats_payload(parts=None):
     return payload
 
 
+def _security_seconds_left(user_key):
+    """How long a timed ignore or ban on this nick has to run, 0 for none -
+    what turns a Queue row's Ignore button into "Ignored ... Lift" (#1206)."""
+    import security
+    return security.ban_seconds_left(user_key)
+
+
 def build_queue_payload(user=None):
     """The Queue view's data.
 
@@ -1111,7 +1118,8 @@ def build_queue_payload(user=None):
         files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
         current_file, bytes_sent, size = _progress_fields(user_key)
         result = {"user": user_key, "status": status, "count": len(entries), "files": files,
-                  "current_file": current_file, "bytes_sent": bytes_sent, "size": size}
+                  "current_file": current_file, "bytes_sent": bytes_sent, "size": size,
+                  "ignored_seconds": _security_seconds_left(user_key)}
         if status == "packing":
             result["pack"] = _pack_fields(pack)
         return result
@@ -1152,7 +1160,8 @@ def build_queue_payload(user=None):
         current_file, bytes_sent, size = _progress_fields(user_key)
         row = {"user": user_key, "preview": preview, "count": len(entries), "status": status,
                "files": files, "current_file": current_file,
-               "bytes_sent": bytes_sent, "size": size}
+               "bytes_sent": bytes_sent, "size": size,
+               "ignored_seconds": _security_seconds_left(user_key)}
         if status == "packing":
             row["pack"] = _pack_fields(pack)
         rows.append(row)
@@ -1178,6 +1187,29 @@ def build_pack_cancel_result():
     if cancelled is None:
         return 404, {"error": "Nothing is being packed."}
     return 200, {"cancelled": {"user": cancelled["user"], "name": cancelled["name"]}}
+
+
+def build_ignore_result(body):
+    """POST /api/ignore (#1206): ignore a nick for some minutes. 200 with
+    how long, 400 with the reason when security.ignore_user() refuses."""
+    import security
+    nick = str(body.get("nick") or "").strip()
+    ok, message = security.ignore_user(nick, body.get("minutes"))
+    if not ok:
+        return 400, {"error": message}
+    return 200, {"user": nick.lower(), "message": message,
+                 "seconds_left": security.ban_seconds_left(nick)}
+
+
+def build_unignore_result(body):
+    """POST /api/unignore (#1206): end a timed ignore or ban now. 404 when
+    the nick has none."""
+    import security
+    nick = str(body.get("nick") or "").strip()
+    ok, message = security.lift_ban(nick)
+    if not ok:
+        return 404, {"error": message}
+    return 200, {"user": nick.lower(), "message": message}
 
 
 def split_list_search_words(query):
@@ -4978,6 +5010,16 @@ if HAVE_FLASK:
         @app.route("/api/queue/pack/cancel", methods=["POST"])
         def api_queue_pack_cancel():
             status, result = build_pack_cancel_result()
+            return jsonify(result), status
+
+        @app.route("/api/ignore", methods=["POST"])
+        def api_ignore():
+            status, result = build_ignore_result(json_object(request.get_json(silent=True)))
+            return jsonify(result), status
+
+        @app.route("/api/unignore", methods=["POST"])
+        def api_unignore():
+            status, result = build_unignore_result(json_object(request.get_json(silent=True)))
             return jsonify(result), status
 
         @app.route("/api/stats/import/variables")
