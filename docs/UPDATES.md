@@ -73,8 +73,10 @@ called `AUX` failed on Windows at the last step.
   are trimmed where nothing is appended after them. The same on every platform, so what is made on Linux opens on the
   Windows machine it is copied to. Ordinary names (`CONCERT`, `Console`, `COM10`) are returned as they came.
 - **Used by** `list.list_slug()` (a reserved list name takes the digest like any other name that had to change, so it
-  cannot collide with a list really called `CON_`), `dcc._sanitize_rar_leaf_name()` and the archive's name on disk
-  (`AUX` is offered as `AUX_.rar`; `Music/AUX` is still `Music_AUX.rar`), `dcc_fetch._sanitize_offer_filename()` (a file
+  cannot collide with a list really called `CON_`), the archive's name on disk
+  (`AUX` is stored as `AUX_.rar`; `Music/AUX` is still `Music_AUX.rar`). The name a user is OFFERED stays the folder's
+  own (`AUX.rar`) - AutoQ.mrc matches the received name with the queued folder's, so `AUX_.rar` would never match
+  (the first #1208 change did that and was corrected), `dcc_fetch._sanitize_offer_filename()` (a file
   another bot offers as `NUL.txt`) and `list_fetch._sanitize_bot_dir_name()` (a bot nicked `Con`).
 - **The list editor refuses** a reserved list name with a message naming it, instead of renaming it silently. A list
   that already has such a name still loads; the refusal comes when the lists are next saved.
