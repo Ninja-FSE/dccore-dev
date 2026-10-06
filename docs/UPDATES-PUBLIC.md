@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Changed: asking a bot for its list (`@nick`) no longer waits behind everyone's files.** The list takes the next free slot ahead of queued files (and goes at once if a slot is free), so a newcomer sees what the bot has straight away; the notice says "Your list is next". Only one list at a time can jump ahead, so a flood of list requests cannot hold up file sends, and asking for the list does not cost anyone their place for the files they already queued.
 - **Fixed: a file is no longer requested twice from the same bot.** Pasting the same line twice, repeating a search, or double-clicking Download made a second request, and the other bot saw the same `!bot file` several times. A file that is already waiting, asked for, queued there or coming in is now asked for once; the dashboard says it is already requested. Asking again after it finished or failed still works.
 - **New: DCCore can fetch from bots running mxrarserver.** They now appear in the List Browser and are grabbed like other bots; requests go to their trigger word even when it is not their nick; their replies (queued and at what position, already queued, not found, compression failed) are understood; a list that takes a while to arrive is still taken; and their folders can be fetched with "Get folder as RAR", the packed folder being accepted under the name such a bot gives it.
 - **Fixed: a bot saying its list was "temporarily disabled" failed every folder download waiting on it.** Only a real refusal of folder requests does now.
