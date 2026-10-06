@@ -1489,14 +1489,44 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
     if absent:
         return 409, {"error": absent}
 
-    if dcc_fetch.has_outstanding_bot_alone_request(bot):
-        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
+    return _enqueue_folder_request(dcc_fetch, bot, folder)
 
-    request_id = dcc_fetch.enqueue_fetch(bot, f"!rar {folder}", request_type="folder")
+
+# An mxrarserver pack row that could not be told apart from a request already
+# waiting on that bot (#1209) - see dcc_fetch._pack_request_conflicts_locked().
+PACK_FETCH_CONFLICT_ERROR = (
+    "A list request, or a folder that would arrive under the same name, is "
+    "already in progress for this bot - wait for it to finish before asking "
+    "for this one."
+)
+
+
+def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None):
+    """Enqueue one folder request: (http_status, payload_dict).
+
+    TWO SHAPES (#1209). A "!rar" folder - DCCore's and its relatives' - is
+    asked for as "!<bot> !rar <folder>" and admitted on the bot alone, so
+    only one may be outstanding per bot. An mxrarserver pack row is asked for
+    exactly as its list wrote it, "!<trigger> <path>.rar", with no "!rar",
+    and its RAR is admitted by the name it will arrive under, so several may
+    wait together as long as those names cannot clash.
+    """
+    import list as list_mod
+
+    if list_mod.pack_path_of(folder):
+        if dcc_fetch.pack_request_conflicts(bot, folder):
+            return 409, {"error": PACK_FETCH_CONFLICT_ERROR}
+        request, conflict = folder, PACK_FETCH_CONFLICT_ERROR
+    else:
+        if dcc_fetch.has_outstanding_bot_alone_request(bot):
+            return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
+        request, conflict = f"!rar {folder}", BOT_ALONE_FETCH_CONFLICT_ERROR
+
+    request_id = dcc_fetch.enqueue_fetch(bot, request, request_type="folder", trigger=trigger)
     if request_id is None:
         # Defense in depth - see build_list_fetch_enqueue_result()'s
         # identical comment above.
-        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
+        return 409, {"error": conflict}
     return 200, {"created": [request_id]}
 
 
@@ -2573,6 +2603,7 @@ def build_fetch_enqueue_result(payload):
     if unavailable:
         return 503, {"error": unavailable}
     import dcc_fetch
+    import list as list_mod
 
     items = [payload] if isinstance(payload, dict) else payload
     if not isinstance(items, list) or not items:
@@ -2612,6 +2643,18 @@ def build_fetch_enqueue_result(payload):
         if not bot or not filename:
             errors.append({"error": "Both 'bot' and 'filename' are required.", "item": raw})
             continue
+        # A TRIGGER IS NOT A NICK (#1209). A line pasted out of an
+        # mxrarserver list begins "!<trigger>", a word its operator chose, so
+        # the "bot" the paste box split off may be that word and not anybody
+        # in the channel. When it is not a bot we know and exactly one known
+        # bot answers to it, the request is that bot's - matched by its nick
+        # as every request is - and still addressed to the trigger it was
+        # written with.
+        trigger = None
+        if not dcc_fetch.bot_is_known(bot):
+            owner = dcc_fetch.bot_for_trigger(bot)
+            if owner:
+                bot, trigger = owner, bot
         # PER ITEM, not per request: a bulk paste is routinely several bots at
         # once, and one of them having signed off is no reason to refuse the
         # rest. It joins `errors`, which this route already reports beside
@@ -2623,12 +2666,23 @@ def build_fetch_enqueue_result(payload):
         if absent and not dcc_fetch.bot_is_known(bot):
             errors.append({"error": absent, "item": raw})
             continue
+        # AN MXRARSERVER FOLDER ROW (#1209), ticked in the List Browser or
+        # pasted: "<path>.rar" is a folder for that bot to pack, and the RAR
+        # comes back under another name, so as a file request it could never
+        # be admitted. It goes the folder route instead.
+        if list_mod.pack_path_of(filename):
+            folder_status, result = _enqueue_folder_request(dcc_fetch, bot, filename, trigger)
+            if folder_status == 200:
+                created.extend(result["created"])
+            else:
+                errors.append({"error": result["error"], "item": raw})
+            continue
         if dcc_fetch.request_already_waiting(bot, filename):
             errors.append({"error": f"Already requested from {bot} and not finished - "
                                     "it is not asked for twice.",
                            "item": raw})
             continue
-        request_id = dcc_fetch.enqueue_fetch(bot, filename)
+        request_id = dcc_fetch.enqueue_fetch(bot, filename, trigger=trigger)
         if request_id is None:
             # Only reachable via the queue cap: enqueue_fetch()'s other refusal
             # is for "list"/"folder" rows and this route only creates "file"

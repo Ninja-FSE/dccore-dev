@@ -420,6 +420,15 @@ _LIST_DATE_RE = re.compile(r"[\(\[\-_ ]?\d{4}[-_.]\d{2}[-_.]\d{2}[\)\]]?")
 # the list, not which list it is.
 _LIST_TRAILER_RE = re.compile(r"[-_ ]*(?:OS|OmenServe)\s*$", re.IGNORECASE)
 
+# mxrarserver's (#1209): "-Files(<x>)-MX", "-Folders(<x>)-MX". The "-MX" says
+# who built it and the parenthesis changes from one build to the next, so
+# both come off. A separator before "MX" is required: "TOPMX" keeps its MX.
+_MX_LIST_TRAILER_RE = re.compile(r"\s*(?:\([^)]*\))?\s*[-_ ]+MX\s*$", re.IGNORECASE)
+
+# An mxrarserver FOLDERS list: one row per folder it packs into a RAR on
+# request - its pack list, the counterpart of DCCore's "-RAR-" list.
+_MX_FOLDERS_LIST_RE = re.compile(r"-Folders\s*(?:\([^)]*\))?\s*-MX\.txt$", re.IGNORECASE)
+
 # How many lists to keep out of one archive. A peer's zip is untrusted, and
 # "keep exactly one" was what bounded this before - without a ceiling, an
 # archive of five hundred small .txt files becomes five hundred parses, five
@@ -464,6 +473,7 @@ def list_marker(file_name, shared_prefix=""):
         stem = stem[len(shared_prefix):]
     stem = _LIST_DATE_RE.sub("", stem)
     stem = _LIST_TRAILER_RE.sub("", stem)
+    stem = _MX_LIST_TRAILER_RE.sub("", stem)
     return stem.strip("-_ .")
 
 
@@ -603,8 +613,11 @@ def _pick_list_file(extract_dir):
     # what this function returns and to the size ceiling that guards it; it is
     # recorded in docs/FUTURE.md rather than smuggled in here.
     skip = ("-rar-", f"-{list_mod.VIDEO_LIST_MARKER.lower()}-")
+    # mxrarserver's Folders list is its pack list, as "-RAR-" is ours (#1209):
+    # in a "Complete" archive beside its Files list, Files is the main one.
     candidates = [p for p in txt_files
-                  if not any(m in os.path.basename(p).lower() for m in skip)]
+                  if not any(m in os.path.basename(p).lower() for m in skip)
+                  and not _MX_FOLDERS_LIST_RE.search(os.path.basename(p))]
     if not candidates:
         candidates = txt_files
 
@@ -1689,8 +1702,14 @@ def bot_publishes_a_rar_list(bot):
     entry = (getattr(config, "fetched_bot_lists", {}) or {}).get(key)
     held = entry.get("lists") if isinstance(entry, dict) else None
     if isinstance(held, dict):
-        for marker in held:
+        for marker, info in held.items():
             if str(marker).strip().lower() in _RAR_MARKERS:
+                return True
+            # mxrarserver's Folders list (#1209), by its file's name: as the
+            # only list in a Folders-only archive it is the main one and has
+            # no marker at all.
+            if (isinstance(info, dict)
+                    and _MX_FOLDERS_LIST_RE.search(str(info.get("file_name") or ""))):
                 return True
 
     advert = runtime.known_bots.get(key)
@@ -1698,6 +1717,41 @@ def bot_publishes_a_rar_list(bot):
         if advert.get("rar_folders") is not None or advert.get("rar_trigger"):
             return True
     return False
+
+
+# How far into a list to look for its first request line. mxrarserver's
+# banner is an operator-written header of a few dozen lines.
+_TRIGGER_SCAN_LINES = 2000
+
+
+def _first_request_token(path):
+    """The word after "!" on the first request line of the list at `path`, or
+    None. Reads no further than _TRIGGER_SCAN_LINES lines."""
+    try:
+        with open(platform_compat.long_path(path), "r", encoding="utf-8",
+                  errors="replace") as handle:
+            for number, line in enumerate(handle):
+                if number >= _TRIGGER_SCAN_LINES:
+                    return None
+                text = list_mod.strip_control_codes(line).strip()
+                if text.startswith("!") and len(text) > 1:
+                    return text[1:].split(None, 1)[0]
+    except OSError:
+        return None
+    return None
+
+
+def _mx_list_trigger(kept_lists):
+    """The trigger the rows of the first mxrarserver list among `kept_lists`
+    are addressed to, or None - see _install_fetched_list()."""
+    import dcc_fetch
+    for info in kept_lists.values():
+        if not list_mod.is_mxrarserver_list(info.get("file_name")):
+            continue
+        trigger = dcc_fetch._sendable_trigger(_first_request_token(info.get("list_path")))
+        if trigger:
+            return trigger
+    return None
 
 
 def index_key(bot, marker):
@@ -1853,6 +1907,15 @@ def _install_fetched_list(bot, zip_path, extract_dir):
         # freshness LED nothing stable to compare against.
         "lists": kept_lists,
     }
+    # WHAT ITS ROWS ARE ADDRESSED TO (#1209). An mxrarserver bot answers to a
+    # trigger of the operator's choosing, every row of its list begins
+    # "!<trigger>", and in "request only" mode that list is the only place it
+    # is ever said. Only for an mxrarserver list: any other bot's rows carry
+    # the nick the list was built under, which is stale once it changes
+    # nick, and requests to it keep going to the nick it has now.
+    trigger = _mx_list_trigger(kept_lists)
+    if trigger:
+        store[str(bot).strip().lower()]["trigger"] = trigger
 
     # Persisted immediately, not on a timer: unlike the bot registry (updated
     # on every advert, throttled for exactly that reason), a list fetch
