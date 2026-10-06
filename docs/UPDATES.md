@@ -33,6 +33,25 @@ pack interlock for every other user.
   that faked `subprocess.run` for the pack use `support.fake_rar_runs` now, which behaves like the `Popen`.
 - The mIRC side was written without a mIRC to run it in: it needs a manual test.
 
+### 🪟 Windows device names (CON, NUL, COM1 ...) no longer break a list or an archive (#1208)
+
+Windows refuses to create a file or folder named `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9` or `LPT1`-`LPT9`, in any case
+and with any extension (`aux.rar` too). Nothing in `src/` knew that, so a list called `NUL` or a `!rar` of a folder
+called `AUX` failed on Windows at the last step.
+
+- **One shared helper**, `platform_compat.is_windows_reserved()` / `windows_safe_name()`. A reserved name gets an
+  underscore after its base, before any extension (`CON` -> `CON_`, `aux.txt` -> `aux_.txt`); trailing dots and spaces
+  are trimmed where nothing is appended after them. The same on every platform, so what is made on Linux opens on the
+  Windows machine it is copied to. Ordinary names (`CONCERT`, `Console`, `COM10`) are returned as they came.
+- **Used by** `list.list_slug()` (a reserved list name takes the digest like any other name that had to change, so it
+  cannot collide with a list really called `CON_`), `dcc._sanitize_rar_leaf_name()` and the archive's name on disk
+  (`AUX` is offered as `AUX_.rar`; `Music/AUX` is still `Music_AUX.rar`), `dcc_fetch._sanitize_offer_filename()` (a file
+  another bot offers as `NUL.txt`) and `list_fetch._sanitize_bot_dir_name()` (a bot nicked `Con`).
+- **The list editor refuses** a reserved list name with a message naming it, instead of renaming it silently. A list
+  that already has such a name still loads; the refusal comes when the lists are next saved.
+
+Tests: `tests/test_windows_reserved_names_are_made_safe.py`.
+
 ### 🪟 dccore.mrc: the windows open, minimised, when mIRC starts (#1201)
 
 Starting mIRC used to show no DCCore window at all. `on *:START` only loaded the settings. `@DCCore` opened from
