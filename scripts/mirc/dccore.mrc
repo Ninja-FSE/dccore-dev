@@ -1415,7 +1415,7 @@ alias dccore.askraw {
   var %v = $input(Console command (see help),eo,DCCore)
   if (%v != $null) { dccore.send %v }
 }
-; Control > Cancel the running pack (#1202): named, so the prompt can say whose.
+; Cancel the running pack (#1202): top of the right-click menu while one runs; named, so the prompt can say whose.
 alias dccore.packcancel {
   if ($dccore.st(packing) == $null) { return }
   if ($input(Cancel the pack of $gettok($dccore.st(packing),5-,32) for $gettok($dccore.st(packing),1,32) $+ ? The partial archive is deleted and the user is told.,yq,DCCore)) { dccore.send packcancel }
@@ -1431,6 +1431,7 @@ alias dccore.askfont {
 
 ; Every /dccore command, and every console command worth a click, is here.
 menu @DCCore {
+  $iif($dccore.st(packing) != $null,Cancel the running pack...):dccore.packcancel
   Script Settings:dccore.options
   Console command:dccore.askraw
   -
@@ -1459,7 +1460,6 @@ menu @DCCore {
   .Check for a new version:dccore.send checkversion
   .Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
   .Console feed $iif($dccore.st(consolefeed) == on,off,on):dccore.send consolefeed $iif($dccore.st(consolefeed) == on,off,on)
-  .$iif($dccore.st(packing) != $null,Cancel the running pack...):dccore.packcancel
   .-
   .Reload the bot (rehash)...:dccore.confirm rehash Reload the bot's code and settings?
   .Stop the bot...:if ($input(Stop the bot? It leaves IRC and ends; start it again with start-dccore.,yq,DCCore)) { dccore.send shutdown now }

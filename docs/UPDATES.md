@@ -24,7 +24,7 @@ pack interlock for every other user.
 - **Admin console:** `packing` and `packcancel`. Pack start and cancel go to the console feed as category
   `PACK`.
 - **dccore.mrc 1.14:** a `DCCORE PACKING` line (every status burst and every 3 s between, `end` when it stops) draws a
-  **Packing** section in the panel, a title-bar part when the panel is hidden, and **Control → Cancel the running
+  **Packing** section in the panel, a title-bar part when the panel is hidden, and **Cancel the running
   pack...** asks, then sends `packcancel`. A bot talking to an older script sends no PACKING line.
 - **Not built:** "recorded as cancelled" in the failure statistics - those are #1203. The cancelled pack is logged and
   told to the user, nothing more.
