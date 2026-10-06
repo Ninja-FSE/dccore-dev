@@ -2579,6 +2579,11 @@ def build_fetch_enqueue_result(payload):
         if absent and not dcc_fetch.bot_is_known(bot):
             errors.append({"error": absent, "item": raw})
             continue
+        if dcc_fetch.request_already_waiting(bot, filename):
+            errors.append({"error": f"Already requested from {bot} and not finished - "
+                                    "it is not asked for twice.",
+                           "item": raw})
+            continue
         request_id = dcc_fetch.enqueue_fetch(bot, filename)
         if request_id is None:
             # Only reachable via the queue cap: enqueue_fetch()'s other refusal

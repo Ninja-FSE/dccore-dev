@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 A file is not requested twice from the same bot (#1218)
+
+`enqueue_fetch()` refused a second outstanding `list` / `folder` row for a bot but let any number of identical `file`
+rows in. A bulk paste with a repeated line, a second search that showed the same result, or a double click each made
+another row, and the dispatcher sent the bot one `!bot file` per row - the other bot's log showed the same request
+several times in a few seconds.
+
+- **`enqueue_fetch()` returns the existing row** when the same bot and file is already `pending`, `offered`, `queued`,
+  `listening` or `receiving`, under the same lock as the insert. Case, space/underscore and a copied `::INFO::` size do
+  not make a request another one. A `complete` or `failed` row does not count: asking again later still works.
+- **The dashboard says so**: a request that is already waiting comes back as an error in the enqueue answer ("Already
+  requested ... it is not asked for twice") instead of a second row.
+
 ### 🪟 Windows device names (CON, NUL, COM1 ...) no longer break a list or an archive (#1208)
 
 Windows refuses to create a file or folder named `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9` or `LPT1`-`LPT9`, in any case
