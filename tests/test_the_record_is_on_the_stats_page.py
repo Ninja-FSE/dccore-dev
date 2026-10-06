@@ -313,7 +313,9 @@ function node(tag) {
 const document = { createElement: node };
 const el = {};
 ["recordStatus", "recordBody", "recordSent", "recordPeriodBox", "recordCards", "recordTopSent",
- "recordTopReceived", "recordImported"].forEach(function (k) { el[k] = node("div"); });
+ "recordTopReceived", "recordImported", "transferOutcomeRows", "transferOutcomeNote"].forEach(function (k) {
+  el[k] = node("div");
+});
 const state = {};
 const t = function (key) { return key; };
 // The Most downloaded tables are drawn by renderTopDownloads(), which escapes
@@ -324,6 +326,8 @@ const renderTopDownloads = function (top) { drawn.push(top); };
 const make = new Function("document", "el", "state", "t", "renderTopDownloads",
   fn("function recordNote(") + "\n" + fn("function recordCell(") + "\n" +
   fn("function recordTable(") + "\n" + fn("function recordIsOn(") + "\n" +
+  // renderRecord() draws the outcomes table too (#1203).
+  fn("function fillIn(") + "\n" + fn("function renderTransferOutcomes(") + "\n" +
   fn("function renderRecord(") + "\nreturn renderRecord;");
 const renderRecord = make(document, el, state, t, renderTopDownloads);
 

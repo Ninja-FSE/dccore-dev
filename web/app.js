@@ -255,6 +255,8 @@
     recordNickShow:        document.getElementById("record-nick-show"),
     recordNickResult:      document.getElementById("record-nick-result"),
     recordExport:          document.getElementById("record-export"),
+    transferOutcomeRows:   document.getElementById("transfer-outcome-rows"),
+    transferOutcomeNote:   document.getElementById("transfer-outcome-note"),
     recordForgetAll:       document.getElementById("record-forget-all"),
     importApply:           document.getElementById("import-apply"),
     importCancel:          document.getElementById("import-cancel"),
@@ -6447,6 +6449,40 @@
     });
   }
 
+  // How the period's transfers ended (#1203): a row per kind sent and one
+  // for everything received. Failed albums include those whose folder could
+  // not be packed, which the note under the table counts on their own.
+  function renderTransferOutcomes(outcomes, albumsEnabled) {
+    var labels = { file: "stats.outcome.files", album: "stats.outcome.albums",
+                   list: "stats.outcome.lists" };
+    var body = el.transferOutcomeRows;
+    body.textContent = "";
+    var packFailed = 0;
+    ((outcomes && outcomes.rows) || []).forEach(function (item) {
+      // No albums can be sent with packing off: their row only while the
+      // period still holds some from before.
+      if (item.kind === "album" && !albumsEnabled && !item.attempts) { return; }
+      packFailed += item.pack_failed || 0;
+      var row = document.createElement("tr");
+      recordCell(row, t(item.direction === "received" ? "stats.outcome.received" : labels[item.kind]), false);
+      [item.attempts, item.completed, item.failed, item.cancelled].forEach(function (count) {
+        recordCell(row, (count || 0).toLocaleString(), true);
+      });
+      recordCell(row, item.success_text || "—", true);
+      body.appendChild(row);
+    });
+    var notes = [];
+    if (packFailed) {
+      notes.push(fillIn(t("stats.outcome.packFailed"), { count: packFailed.toLocaleString() }));
+    }
+    if (outcomes && outcomes.since) {
+      notes.push(fillIn(t("stats.outcome.since"),
+                        { date: new Date(outcomes.since * 1000).toLocaleDateString() }));
+    }
+    el.transferOutcomeNote.textContent = notes.join(" ");
+    el.transferOutcomeNote.hidden = !notes.length;
+  }
+
   // False until the record has answered, and while it is off: then the
   // Most downloaded tables show /api/stats' all-time lists instead.
   function recordIsOn() {
@@ -6493,6 +6529,7 @@
       box.appendChild(label);
       el.recordCards.appendChild(box);
     });
+    renderTransferOutcomes(data.outcomes, data.albums_enabled);
     var nickColumns = [
       function (r) { return r.nick; },
       function (r) { return (r.files || 0).toLocaleString(); },

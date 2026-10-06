@@ -703,6 +703,25 @@
       <div id="record-sent" hidden>
         <div class="stat-group-label" data-i18n="stats.sent">Sent</div>
         <div class="stat-row is-eight" id="record-cards"></div>
+        <!-- How the period's transfers ended (#1203): every attempt, completed,
+             failed or cancelled, per kind sent and for everything received,
+             with a success rate. Rows drawn by renderTransferOutcomes(). -->
+        <div class="stat-group-label" data-i18n="stats.outcome.title">How transfers ended</div>
+        <div class="table-wrap transfer-outcome-wrap">
+          <table class="stat-top-table transfer-outcome-table">
+            <thead><tr>
+              <th data-i18n="stats.outcome.kind">Kind</th>
+              <th class="col-num" data-i18n="stats.outcome.attempts">Attempts</th>
+              <th class="col-num" data-i18n="stats.outcome.completed">Completed</th>
+              <th class="col-num" data-i18n="stats.outcome.failed">Failed</th>
+              <th class="col-num" data-i18n="stats.outcome.cancelled">Cancelled</th>
+              <th class="col-num" data-i18n="stats.outcome.success">Success</th>
+            </tr></thead>
+            <tbody id="transfer-outcome-rows"></tbody>
+          </table>
+        </div>
+        <p class="stat-foot" data-i18n="stats.outcome.foot">Success is completed out of completed and failed: a transfer cancelled by you, by the user, or by a restart or a list rebuild is left out. Every try counts, so a send retried after a failure counts again.</p>
+        <p class="stat-foot" id="transfer-outcome-note" hidden></p>
       </div>
 
       <div class="stat-group-label" data-i18n="stats.library">Library</div>
