@@ -65,6 +65,15 @@ import time
 # it cannot say whether a pack is still running or merely left a stale flag.
 packer_thread = None
 
+# The folder pack that is running, while one runs (#1202): a dict with the
+# `rar` process handle (what a cancel terminates - that process, never an
+# image name), who it is for, the folder's name as the list shows it, the
+# archive's path, when it started and the folder's size. dcc.py owns the
+# fields; the lock is here for the same reason the thread is - a !rehash
+# reloads dcc.py and the new copy must see the pack the old one started.
+pack_job = None
+pack_lock = threading.Lock()
+
 # The stop-file watcher (#1065, stopping.py): one per process, kept here so a
 # !rehash cannot start a second.
 stop_watcher_thread = None

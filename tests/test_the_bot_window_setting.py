@@ -238,7 +238,7 @@ class ChildrenGetNoWindowOfTheirOwn(unittest.TestCase):
 
     def test_every_console_child_the_daemon_starts_asks_for_it(self):
         sites = {
-            "src/dcc.py": "process = subprocess.run(cmd, capture_output=True,",
+            "src/dcc.py": "process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,",
             "src/commands.py": "process = subprocess.Popen(argv, stdout=subprocess.PIPE,",
             "update_list.py": "result = subprocess.run(cmd, capture_output=True, text=True,",
             # A RAR list another bot sent is opened with rar (#1200).

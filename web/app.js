@@ -1283,6 +1283,7 @@
   // views{} above.
   var STATUS_LABELS = {
     sending: "queue.status.sending", frozen: "queue.status.frozen",
+    packing: "queue.status.packing",
     queued: "sidebar.queued", empty: "queue.status.empty"
   };
 
@@ -1310,6 +1311,41 @@
     var pct = Math.max(0, Math.min(100, Math.round(100 * (row.bytes_sent || 0) / row.size)));
     return "<div class=\"progress-bar queue-progress\">" +
       "<div class=\"progress-bar-fill\" style=\"width:" + pct + "%\"></div></div>";
+  }
+
+  // The pack being built for this user (#1202): the folder as the list shows
+  // it, the archive's size so far against the folder's (rar compresses, so a
+  // guide, and held under 100% until rar says it is done), and the one button
+  // that stops that process. Nothing is drawn for the bar until the folder
+  // has been measured.
+  function queuePackPart(row) {
+    var pack = row.pack;
+    if (!pack) { return ""; }
+    var bar = "";
+    if (pack.total) {
+      var pct = Math.max(0, Math.min(99, Math.round(100 * (pack.done || 0) / pack.total)));
+      bar = "<div class=\"progress-bar queue-progress\">" +
+        "<div class=\"progress-bar-fill\" style=\"width:" + pct + "%\"></div></div>";
+    }
+    var sizes = pack.total ? (pack.done_text + " / " + pack.total_text) : pack.done_text;
+    var button = pack.cancelling
+      ? "<span class=\"col-dim\">" + escapeHtml(t("queue.cancelling")) + "</span>"
+      : "<button type=\"button\" class=\"btn btn-small btn-danger pack-cancel-btn\">" +
+        escapeHtml(t("common.cancel")) + "</button>";
+    return "<div class=\"queue-current\">" +
+      escapeHtml(t("queue.packingFolder").replace("{folder}", pack.name)) + "</div>" + bar +
+      "<div class=\"queue-pack-line\">" +
+      escapeHtml(t("queue.packingSoFar").replace("{sizes}", sizes).replace("{elapsed}", describeDuration(pack.elapsed))) +
+      " " + button + "</div>";
+  }
+
+  if (el.queueBody) {
+    el.queueBody.addEventListener("click", function (evt) {
+      var target = evt.target;
+      if (!target || !target.classList || !target.classList.contains("pack-cancel-btn")) { return; }
+      target.disabled = true;
+      postJson("/api/queue/pack/cancel", {}).then(function () { loadQueue(); });
+    });
   }
 
   // What is WAITING - never includes whatever is currently sending, because
@@ -1344,6 +1380,7 @@
           t("queue.sendingFile").replace("{file}", escapeHtml(row.current_file)) +
           "</div>" + queueProgressBar(row);
       }
+      if (status === "packing") { sendingPart = queuePackPart(row); }
       // With nothing queued behind an in-flight send, "preview" already
       // equals current_file - showing it a second time would be a
       // duplicate, not new information.

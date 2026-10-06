@@ -453,6 +453,46 @@ class DeadSocket:
         pass
 
 
+class FakeRarProcess:
+    """Stands in for the Popen of a rar run: communicate() calls `run(cmd,
+    timeout=...)`, which returns something with returncode/stdout/stderr (as
+    subprocess.run's result does) or raises, as a timeout does."""
+
+    def __init__(self, cmd, run):
+        self.cmd = cmd
+        self._run = run
+        self.returncode = None
+        self.killed = False
+
+    def communicate(self, timeout=None):
+        if self.returncode is not None:
+            return "", ""
+        try:
+            done = self._run(self.cmd, timeout=timeout)
+        except BaseException:
+            self.returncode = -9
+            raise
+        self.returncode = done.returncode
+        return done.stdout, done.stderr
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.killed = True
+
+    kill = terminate
+
+
+def fake_rar_runs(test, subprocess_module, run):
+    """Make every Popen on `subprocess_module` a FakeRarProcess of `run`, until
+    the test ends. The packer starts rar with Popen (#1202) so it can stop it;
+    these tests stand in for the binary, never for the packer."""
+    real = subprocess_module.Popen
+    subprocess_module.Popen = lambda cmd, *a, **kw: FakeRarProcess(cmd, run)
+    test.addCleanup(setattr, subprocess_module, "Popen", real)
+
+
 def install_fake_oserve(irc_connection=None):
     """Install a stub ``oserve`` module and return it.
 
