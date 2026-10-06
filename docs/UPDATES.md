@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 A file is not requested twice from the same bot (#1218)
+
+`enqueue_fetch()` refused a second outstanding `list` / `folder` row for a bot but let any number of identical `file`
+rows in. A bulk paste with a repeated line, a second search that showed the same result, or a double click each made
+another row, and the dispatcher sent the bot one `!bot file` per row - the other bot's log showed the same request
+several times in a few seconds.
+
+- **`enqueue_fetch()` returns the existing row** when the same bot and file is already `pending`, `offered`, `queued`,
+  `listening` or `receiving`, under the same lock as the insert. Case, space/underscore and a copied `::INFO::` size do
+  not make a request another one. A `complete` or `failed` row does not count: asking again later still works.
+- **The dashboard says so**: a request that is already waiting comes back as an error in the enqueue answer ("Already
+  requested ... it is not asked for twice") instead of a second row.
+
 ### 🔗 The grabber understands bots running mxrarserver (#1209)
 
 A bot running the mIRC script mxrarserver 2.x was nearly invisible to DCCore's grabber. Checked against v1.15.0, step
@@ -119,8 +132,10 @@ called `AUX` failed on Windows at the last step.
   are trimmed where nothing is appended after them. The same on every platform, so what is made on Linux opens on the
   Windows machine it is copied to. Ordinary names (`CONCERT`, `Console`, `COM10`) are returned as they came.
 - **Used by** `list.list_slug()` (a reserved list name takes the digest like any other name that had to change, so it
-  cannot collide with a list really called `CON_`), `dcc._sanitize_rar_leaf_name()` and the archive's name on disk
-  (`AUX` is offered as `AUX_.rar`; `Music/AUX` is still `Music_AUX.rar`), `dcc_fetch._sanitize_offer_filename()` (a file
+  cannot collide with a list really called `CON_`), the archive's name on disk
+  (`AUX` is stored as `AUX_.rar`; `Music/AUX` is still `Music_AUX.rar`). The name a user is OFFERED stays the folder's
+  own (`AUX.rar`) - AutoQ.mrc matches the received name with the queued folder's, so `AUX_.rar` would never match
+  (the first #1208 change did that and was corrected), `dcc_fetch._sanitize_offer_filename()` (a file
   another bot offers as `NUL.txt`) and `list_fetch._sanitize_bot_dir_name()` (a bot nicked `Con`).
 - **The list editor refuses** a reserved list name with a message naming it, instead of renaming it silently. A list
   that already has such a name still loads; the refusal comes when the lists are next saved.
