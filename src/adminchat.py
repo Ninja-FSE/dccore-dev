@@ -1703,6 +1703,26 @@ def _cmd_unban(session, args):
         session.nick, CONSOLE_SOURCE, f"!unban {pattern}", authorised=True))
 
 
+def _cmd_ignore(session, args):
+    import security
+    parts = args.split()
+    if len(parts) != 2:
+        session.send("Usage: ignore <nick> <minutes>   e.g. ignore someone 30")
+        return
+    ok, message = security.ignore_user(parts[0], parts[1])
+    session.send(message)
+
+
+def _cmd_unignore(session, args):
+    import security
+    nick = args.strip()
+    if not nick or " " in nick:
+        session.send("Usage: unignore <nick>")
+        return
+    ok, message = security.lift_ban(nick)
+    session.send(message)
+
+
 def _cmd_bans(session, args):
     import db
     patterns = db.load_hard_bans()
@@ -1716,8 +1736,10 @@ def _cmd_bans(session, args):
             session.send(f"  {pattern}")
     if timed:
         session.send(f"Timed ({len(timed)}):")
+        import security
         for user_key in sorted(timed):
-            session.send(f"  {user_key}")
+            left = security.ban_seconds_left(user_key)
+            session.send(f"  {user_key}  ({security.format_ban_duration(left)} left)")
 
 
 def _cmd_clearqueue(session, args):
@@ -2274,6 +2296,8 @@ COMMANDS = {
     "checkupdates": (_cmd_checkupdates, "turn the daily update check on/off, or report it", "checkupdates [on|off]"),
     "consolefeed": (_cmd_consolefeed, "turn the console/dccore.mrc feed on/off, or report it", "consolefeed [on|off]"),
     "ban":        (_cmd_ban,        "add a permanent wildcard ban",      "ban <pattern>"),
+    "ignore":     (_cmd_ignore,     "ignore a nick for some minutes (drops its requests)", "ignore <nick> <minutes>"),
+    "unignore":   (_cmd_unignore,   "end a timed ignore or ban now",     "unignore <nick>"),
     "unban":      (_cmd_unban,      "remove a permanent wildcard ban",   "unban <pattern>"),
     "clearqueue": (_cmd_clearqueue, "force-clear another user's queue",  "clearqueue <nick>"),
     "rehash":     (_cmd_rehash,     "reload modules in place",           "rehash"),
