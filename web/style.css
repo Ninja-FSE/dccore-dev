@@ -952,6 +952,7 @@ html, body {
 }
 
 .status-pill.status-sending { color: var(--status-sending); }
+.status-pill.status-packing { color: var(--status-sending); }
 .status-pill.status-frozen  { color: var(--status-frozen); }
 .status-pill.status-queued  { color: var(--status-queued); }
 .status-pill.status-empty   { color: var(--status-empty); }
@@ -1888,6 +1889,14 @@ mark.filter-hit {
 .queue-progress {
   margin: 4px 0 0;
   width: 140px;
+}
+
+.queue-pack-line {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .queue-files summary {

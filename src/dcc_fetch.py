@@ -577,10 +577,40 @@ def has_any_outstanding_request(bot):
         )
 
 
+def _find_unresolved_file_request_locked(queue, bot, filename):
+    """The id of a "file" row for this bot and file that is still on its way
+    (any unresolved state), or None. The name is compared the way an offer is
+    matched: case, space/underscore and a copied ::INFO:: size do not tell two
+    requests apart (#1218). Needs the fetch lock."""
+    import list as list_mod
+
+    wanted_bot = str(bot).strip().lower()
+    wanted_name = _normalize_filename_for_match(list_mod.strip_info_suffix(str(filename).strip())[0])
+    for rid, row in queue.items():
+        if (row.get("state") in _UNRESOLVED_FETCH_STATES
+                and row.get("request_type", "file") == "file"
+                and str(row.get("bot", "")).strip().lower() == wanted_bot
+                and _match_name(row) == wanted_name):
+            return rid
+    return None
+
+
+def request_already_waiting(bot, filename):
+    """True when this file is already asked for from this bot and has not
+    ended: what the dashboard says instead of making a second row (#1218)."""
+    queue = _ensure_fetch_queue()
+    with _fetch_lock():
+        return _find_unresolved_file_request_locked(queue, bot, filename) is not None
+
+
 def enqueue_fetch(bot, filename, request_type="file"):
     """Append one `pending` row to config.fetch_queue and return its id, or
     None if the request was refused (see below) - callers must check for
     None, they can no longer assume this always succeeds.
+
+    A "file" request for a bot and file that is already on its way (any state
+    short of complete or failed) returns THAT row's id and adds nothing, so
+    the bot is asked once however many times it is requested (#1218).
 
     Does NOT dispatch anything - check_fetch_queue() (the background
     dispatcher) is what promotes pending rows, so this is safe to call from
@@ -613,6 +643,10 @@ def enqueue_fetch(bot, filename, request_type="file"):
     with _fetch_lock():
         if normalized_type in ("list", "folder") and _has_outstanding_bot_alone_request_locked(queue, bot):
             return None
+        if normalized_type == "file":
+            existing = _find_unresolved_file_request_locked(queue, bot, filename)
+            if existing is not None:
+                return existing
         # Checked under the same lock that does the insert, so the count cannot
         # go stale between deciding there is room and taking it - two request
         # threads enqueueing at once cannot both read 999 and both create.
