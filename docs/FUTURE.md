@@ -22,7 +22,7 @@ What DCCore does today, and what it does not do yet.
 
 - **One master list**, rebuilt by `!update`, from the dashboard, or by itself on a schedule (`LIST_REBUILD_SCHEDULE`: daily, weekly, monthly or every N hours), published atomically so a failed scan never overwrites a good index.
 - **Three formats** — `.txt`, `.zip` and `.rar`, all built every time; `LIST_FORMAT` picks which one is offered.
-- **Search** — `@find <words>` against the master list, with results fitted to the IRC line limit. Words in quotes must appear together, in that order: `@find "metal church" 1986`.
+- **Search** — `@find <words>` against the master list, with results fitted to the IRC line limit. Words in quotes must appear together, in that order: `@find "metal church" 1986`. With `SEARCH_SHOW_FOLDER` on (off by default), the reply names each result's folder on a `From:` line of its own above its files: one line per folder, cut from the left past `SEARCH_FOLDER_MAX_CHARS`, with the result lines unchanged.
 - **Searching and downloading go on while the list rebuilds.** The new list is built beside the one people already have, and the bot pauses only for the few seconds it takes to swap it in (`PAUSE_ON_UPDATE`; `PAUSE_FOR_WHOLE_UPDATE` brings back the old whole-rebuild pause).
 - **Several folders scanned at once** (`LIST_SCAN_THREADS`, 16 by default), which is what makes a rebuild over a network drive shorter.
 - **Length and quality in the list, if you want them** (`LIST_SHOW_AUDIO_INFO`) — every MP3 and FLAC row gets its duration and bitrate after the size, `::INFO:: 10.3MB 4m31s 320/44.1/JS`, read once per file and remembered.
