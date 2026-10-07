@@ -4,6 +4,34 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏸️ A bot that keeps failing is paused for a cooldown (#1210)
+
+A bot that kept failing was asked again for every new request. Its requests went unanswered, its offers never
+connected, or its transfers broke off. Each request had its own retries and timeouts, but nothing noticed that this
+bot had failed many times in a row, so every new request repeated the wasted wait.
+
+- **The pause:** after `FETCH_BOT_MAX_FAILS` failures in a row (default 3), the bot is paused for
+  `FETCH_BOT_COOLDOWN_MINUTES` (default 15). Either set to 0 turns it off.
+  - It is the existing pause: the `_paused` entry gains `by: "cooldown"`, `until` and `failures`, and is saved in
+    `fetch_paused_bots.json`, so it survives a restart.
+  - There is no timer. `expire_cooldowns()` ends it lazily, at the start of every dispatcher tick and when
+    `paused_bots()` is read.
+  - Its waiting requests then go out oldest first.
+- **Counting:** the counts live in `dcc_fetch._fetch_failures`, in memory. A finished transfer resets a bot's count,
+  and failures while it is paused don't lengthen the pause.
+  - **Counted:** no answer after every ask (file, list and folder rows), still queued at the other bot at
+    `FETCH_QUEUED_TIMEOUT`, an offer we could not connect to, and a transfer that broke off.
+  - **Not counted:** refusals with a clear reason (not found, busy, the `!rar` refusal), operator cancels, offers we
+    turned down ourselves, a full disk, and passive offers nobody connected back to (#926: our side's problem).
+- **Shown:**
+  - The Downloads page reads "Paused until 14:32 after 3 failures" (in the viewer's clock), with **Resume now**. A
+    bot paused by hand still reads "Paused - resume it to carry on".
+  - The debug channel says when a pause starts.
+  - The `dlqueue` note reads `paused_until_14:32_after_3_failures`, with the DQROW and DLROW field order unchanged.
+- **#926's connect pause is unchanged:** three failed connections still pause the bot until the operator resumes it.
+- **Settings:** both are in the "fetch-queue" category, with labels and help in en, es and fr.
+  `tests/support.py` resets `_fetch_failures` between tests.
+- **Tests:** `tests/test_a_bot_that_keeps_failing_cools_down.py` (39 tests; 28/28 mutations caught).
 ### ⏱️ Users are told when the next slot is likely to free up (#1207)
 
 The commonest question in a busy channel is "when do I get a slot?", and nothing answered it: the CTCP SLOTS "next"

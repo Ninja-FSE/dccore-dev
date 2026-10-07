@@ -895,6 +895,9 @@ FETCH_OFFER_TIMEOUT: int    = 60       # Seconds an "offered" row waits for a DC
 # AutoGet's "active" mode did it. 0 = no limit.
 FETCH_MAX_PER_BOT: int = 3  # Files asked of one bot at once; the next goes when one finishes
 FETCH_QUEUED_TIMEOUT: int = 43200  # Seconds a request queued at another bot waits for the file (12 h); 0 = no limit
+# A bot that keeps failing is paused for a while (#1210).
+FETCH_BOT_MAX_FAILS: int = 3  # Failed requests in a row that pause a bot; 0 = never
+FETCH_BOT_COOLDOWN_MINUTES: int = 15  # Minutes such a pause lasts; 0 = no pause
 
 # A "folder" request_type row (dcc_fetch.py) asks another bot to pack a whole
 # folder/album as .rar via its own "!rar" convention and shares the same

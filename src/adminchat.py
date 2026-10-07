@@ -683,6 +683,8 @@ DOWNLOAD_WAITING_NOTES = {
     "their-turn": "waiting - {bot} has enough of ours",
     "slots": "waiting for a free slot",
     "paused": "paused - resume it on the dashboard",
+    # A bot that kept failing (#1210), paused until a time it ends by itself.
+    "cooldown": "paused until {until} after {failures} failures",
     "disk-full": "waiting for disk space",
     "joining": "waiting to join the channels",
 }
@@ -722,7 +724,13 @@ def _download_waiting_note(row):
     if state == "offered":
         return "asked - no answer yet"
     template = DOWNLOAD_WAITING_NOTES.get(row.get("waiting"))
-    return template.format(bot=row.get("bot") or "the bot") if template else "asking shortly"
+    if not template:
+        return "asking shortly"
+    until = row.get("cooldown_until")
+    clock = (time.strftime("%H:%M", time.localtime(until))
+             if isinstance(until, (int, float)) and not isinstance(until, bool) else "?")
+    return template.format(bot=row.get("bot") or "the bot", until=clock,
+                           failures=row.get("cooldown_failures") or "?")
 
 
 def _fetch_rows_snapshot():
