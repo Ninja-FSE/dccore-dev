@@ -635,6 +635,14 @@ def _shut_down():
             _commands_stop.stop_audio_reading(wait=10.0)
         except Exception:
             pass
+        # Every send and the pack still running end with the bot (#1203):
+        # each goes into the transfer record as cancelled, last, so one
+        # that finished while the steps above ran is recorded as it ended.
+        try:
+            import dcc as _dcc_stop
+            _dcc_stop.record_transfers_cut_off()
+        except Exception:
+            pass
     except KeyboardInterrupt:
         pass   # asked twice: still stopping, and still exit 0
     sys.exit(0)

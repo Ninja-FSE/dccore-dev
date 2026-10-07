@@ -788,10 +788,47 @@ def _record_tops(since):
     return out[0], out[1]
 
 
+def _record_outcomes(since):
+    """How the period's transfers ended (#1203), as the Stats page's outcomes
+    table shows them: sent files, albums and lists, and everything received.
+
+    `failed` includes the albums whose folder could not be packed, which
+    `pack_failed` also gives on its own. The success rate is completed out of
+    completed and failed: a cancelled transfer was stopped by the operator,
+    the user or the bot, not lost by the network, and counting it would
+    blame the network for it. Rounded down, so 100% means nothing failed.
+    "since" is set when the counting starts later than the period does,
+    because failures were not written before then."""
+    import transfer_log
+    found = transfer_log.outcomes(since)
+    lines = []
+    for direction, kind in ((transfer_log.SENT, transfer_log.KIND_FILE),
+                            (transfer_log.SENT, transfer_log.KIND_ALBUM),
+                            (transfer_log.SENT, transfer_log.KIND_LIST),
+                            (transfer_log.RECEIVED, None)):
+        counts = {}
+        for (row_direction, row_kind), by_status in found["rows"].items():
+            if row_direction == direction and (kind is None or row_kind == kind):
+                for status, count in by_status.items():
+                    counts[status] = counts.get(status, 0) + count
+        completed = counts.get(transfer_log.STATUS_COMPLETED, 0)
+        pack_failed = counts.get(transfer_log.STATUS_PACK_FAILED, 0)
+        failed = counts.get(transfer_log.STATUS_FAILED, 0) + pack_failed
+        cancelled = counts.get(transfer_log.STATUS_CANCELLED, 0)
+        decided = completed + failed
+        rate = (completed * 100) // decided if decided else None
+        lines.append({"direction": direction, "kind": kind or "all",
+                      "attempts": completed + failed + cancelled, "completed": completed,
+                      "failed": failed, "pack_failed": pack_failed, "cancelled": cancelled,
+                      "success_rate": rate, "success_text": f"{rate}%" if rate is not None else ""})
+    return {"since": found["since"], "rows": lines}
+
+
 def build_record_payload(period="all"):
     """GET /api/stats/record?period=: the record's figures for a period - the
-    totals, the most-sent files and the nicks sent to and received from most.
-    Every figure comes raw and as the page shows it, as in build_stats_payload."""
+    totals, the most-sent files, the nicks sent to and received from most, and
+    how the transfers ended (#1203). Every figure comes raw and as the page
+    shows it, as in build_stats_payload."""
     import stats_mgr
     import transfer_log
     since, error = _record_since(period)
@@ -824,6 +861,7 @@ def build_record_payload(period="all"):
         "albums_enabled": bool(getattr(config, "RAR_ENABLED", True)),
         "top_sent": _nick_rows(transfer_log.top_nicks(transfer_log.SENT, 10, since)),
         "top_received": _nick_rows(transfer_log.top_nicks(transfer_log.RECEIVED, 10, since)),
+        "outcomes": _record_outcomes(since),
         # Said on the page: all time holds figures from before the record began -
         # the bot's own totals, a nick's, or both (#1102 review: a per-nick import
         # alone left the note hidden while the tables counted it).

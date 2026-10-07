@@ -1994,6 +1994,15 @@ mark.filter-hit {
   width: 72px;
 }
 
+/* How transfers ended (#1203): five figures beside the kind. */
+.transfer-outcome-wrap {
+  margin-bottom: 6px;
+}
+
+.transfer-outcome-table .col-num {
+  width: 96px;
+}
+
 .record-nick,
 .record-actions {
   display: flex;

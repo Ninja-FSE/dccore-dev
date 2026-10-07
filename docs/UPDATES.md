@@ -4,6 +4,46 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📊 Failed and cancelled transfers are recorded, with a success rate (#1203)
+
+The transfer record (`data/transfers.db`, #1068) kept only completed transfers, and the one failure counter lived
+in memory and appeared only in the CTCP SLOTS line. An operator could not tell "users never accept" from "my ports
+are broken".
+
+- **`transfer_log`:**
+  - The `transfers` table gains a `status` column (`completed`, `failed`, `cancelled`, `pack_failed`). An old file
+    gains it on first open, and every existing row reads as completed.
+  - A new `outcomes_began` table records when endings started being recorded. Success figures count only from
+    then, since older files hold completed rows with no failures beside them.
+  - A row is never timed before that stamp: its time is taken before the open that may write the stamp, so
+    `_record()` lifts an earlier one to the stamp. Otherwise the first failure after an upgrade could fall
+    out of every rate, which happened on Windows CI.
+  - New `record_unfinished()` and `outcomes()`. Every figure that existed before (totals, speeds, most sent, nick
+    tables) counts completed rows only.
+  - Export CSV gains `status` as its last column, and Forget removes failed rows too.
+- **What writes a row:** one row per attempt.
+  - **Sends (`dcc.py`):**
+    - **failed:** never connected, the offer could not be sent, a reset, a stall, a send timeout, or a file gone or
+      shrunk;
+    - **cancelled:** the receiver closed before the end, or a list a rebuild replaced.
+
+    Bytes reached is what the receiver acknowledged, minus any resume.
+  - **Packs:** rar failed, timed out or missing is `pack_failed`. The operator's cancel (#1202) is `cancelled`.
+  - **Stop and restart:** `dcc.record_transfers_cut_off()`, called last in the shutdown, writes running sends and the
+    running pack as cancelled. The send thread and the shutdown each claim the row first, so one finishing at that
+    moment is written once.
+  - **Downloads (`dcc_fetch.py`):** an accepted offer that then failed is one failed received row.
+  - **Not written:** an attempt put back without using a retry (no IRC connection, no free port, disk full).
+- **The Stats page:** a "How transfers ended" table under the Sent cards, for the chosen period.
+  - Columns: Attempts, Completed, Failed, Cancelled, Success. Rows: files, albums and lists sent, and everything
+    received.
+  - The success rate is completed out of completed + failed, rounded down. Cancelled is left out, so the bot's own
+    stops don't count against the network. `pack_failed` counts as failed, with a note of how many.
+  - Keys: `stats.outcome.*` in en, fr and es.
+- **Docs:** `TRANSFER_LOG_FILE`'s help (en, fr, es), `conf/settings.conf.sample`, INSTALL.md and FUTURE.md.
+- **Tests:** `tests/test_every_transfer_ending_is_recorded_with_how_it_ended.py` (44 tests; fake sockets and a real
+  fake-rar process; 46/47 mutations caught). The survivor is equivalent: the status filter on the speed query,
+  since unfinished rows have no speed. Two tests that list the columns and the CSV header include `status`.
 ### ⏸️ A bot that keeps failing is paused for a cooldown (#1210)
 
 A bot that kept failing was asked again for every new request. Its requests went unanswered, its offers never
