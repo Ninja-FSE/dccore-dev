@@ -814,6 +814,21 @@
 # Maximum result lines sent in reply to an @find
 #MAX_SEARCH_RESULTS = 5
 
+# In the reply to an @find, name each result's folder on a line of its own
+# above its files, e.g. From: D:\MEDIA\Rock\Some Band\1999 - Some Album. One
+# extra line per folder, not per file; the result lines stay exactly as they
+# are. Off by default: every line is paced, so it slows the reply.
+#
+# Name each @find result's folder on a From: line above its files
+#SEARCH_SHOW_FOLDER = false
+
+# The longest folder a From: line shows, in characters, so the line does not
+# wrap. A longer one is cut from the left and starts with ..., keeping its
+# end, where the album name is. At least 10.
+#
+# Longest folder a From: line shows; longer ones are cut from the left
+#SEARCH_FOLDER_MAX_CHARS = 80
+
 # How many seconds the bot waits between the lines it sends to the server.
 # Protects you from being disconnected for flooding. 5 is safe on Undernet;
 # lower is faster but riskier.
