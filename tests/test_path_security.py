@@ -312,7 +312,7 @@ class RarRequestTraversalTests(PathSecurityBase):
         self.request("Metallica/Black Album (1991)")
 
         self.assertNothingQueued("Metallica/Black Album (1991)")
-        self.assertIn(("error", ("dave", "rar_disabled")), self.notices,
+        self.assertIn(("error", ("dave", "rar_disabled", "#dccore-test")), self.notices,
                       "refused, but not for the reason this test is pinning")
 
     def test_rar_enabled_by_default(self):
@@ -532,7 +532,7 @@ class FileDirectoryUnsetRequestTests(PathSecurityBase):
         with quiet():
             dcc.handle_download_request(self.sock, "dave", "Song.flac", "#dccore-test")
 
-        self.assertIn(("error", ("dave", "not_configured")), self.notices)
+        self.assertIn(("error", ("dave", "not_configured", "#dccore-test")), self.notices)
         self.assertEqual(config.dcc_queue, {})
         self.assertEqual(self.dispatched_names(), [])
 
@@ -541,7 +541,7 @@ class FileDirectoryUnsetRequestTests(PathSecurityBase):
             dcc.handle_download_request(
                 self.sock, "dave", "!rar Metallica/Black Album (1991)", "#dccore-test")
 
-        self.assertIn(("error", ("dave", "not_configured")), self.notices)
+        self.assertIn(("error", ("dave", "not_configured", "#dccore-test")), self.notices)
         self.assertEqual(config.dcc_queue, {})
         self.assertEqual(self.dispatched_names(), [])
 
@@ -557,7 +557,7 @@ class FileDirectoryUnsetRequestTests(PathSecurityBase):
         with quiet():
             dcc.handle_download_request(self.sock, "dave", name, "#dccore-test")
 
-        self.assertNotIn(("error", ("dave", "not_configured")), self.notices)
+        self.assertNotIn(("error", ("dave", "not_configured", "#dccore-test")), self.notices)
         self.assertIn("sending", [kind for kind, _a in self.notices])
 
 

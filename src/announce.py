@@ -373,6 +373,16 @@ def build_transfer_complete_line(channel, user, shown_name, total_sent,
     )
 
 
+def _channel_may_be_told(channel, user):
+    """False for a channel whose mode says no unasked lines (#1204)."""
+    try:
+        import library
+        return library.mode_for_request(channel, user) == library.NORMAL
+    except Exception as err:
+        print(f"[ANNOUNCE] Could not read the channel mode for {channel!r}: {err}")
+        return True
+
+
 def send_transfer_complete(channel, user, file_name, file_size, start_time, actual_speed, duration=None):
     """Send the block-styled transfer notice once a file has finished.
 
@@ -440,7 +450,9 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     # goes out: an operator who does not want the channel told is not an
     # operator who wants their own log to stop saying what was sent, and the
     # figures this function reads are used by both.
-    if getattr(config, "ANNOUNCE_TRANSFERS", True):
+    # A Quiet or Request only channel is not told either (#1204): this line is
+    # the bot speaking in the channel unasked, which is what those modes are for.
+    if getattr(config, "ANNOUNCE_TRANSFERS", True) and _channel_may_be_told(channel, user):
         msg = fit_irc_line(_build, file_name)
         if oserve:
             oserve.queue_message("channel_announce", msg)
@@ -461,6 +473,19 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
                    bytes_per_s=actual_speed, name=file_name)
     except Exception as debug_err:
         print(f"[DEBUG-SENT ERROR] Could not send the closing notice to the debug channel: {debug_err}")
+
+def notices_allowed(user, channel=None):
+    """Whether this user may be sent a private notice for a request made in
+    `channel` (#1204): no, when that channel is Request only. A private
+    message takes the mode of the first list-bound channel the user shares with
+    the bot. Never raises - a notice is not worth losing to a lookup."""
+    try:
+        import library
+        return library.mode_for_request(channel, user) != library.REQUEST_ONLY
+    except Exception as err:
+        print(f"[ANNOUNCE] Could not read the channel mode for {channel!r}: {err}")
+        return True
+
 
 def send_dcc_sending_notice(user, file_name, path=None, channel=None):
     """Send the user a matching private NOTICE when a transfer starts or is queued.
@@ -491,6 +516,9 @@ def send_dcc_sending_notice(user, file_name, path=None, channel=None):
             size = 0
     feed_event("SENDING", f'Sending "{file_name}" to {user} (slot {busy}/{slots})',
                nick=user, channel=channel, slot=busy, slots=slots, bytes=size, name=file_name)
+
+    if not notices_allowed(user, channel):
+        return
     
     # ---------------------------------------------------------------------
     # Private notice block, framed exactly like the channel one
@@ -687,6 +715,13 @@ def announce_worker():
                         if wanted is None:
                             continue
 
+                        # THIS CHANNEL'S MODE (#1204). Quiet and Request only
+                        # say no advert here; Quiet still sends the CTCP SLOTS
+                        # line other bots read, Request only sends neither.
+                        mode = library.channel_mode(chan)
+                        if mode == library.REQUEST_ONLY:
+                            continue
+
                         # Read the live figures at this exact moment
                         file_count, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes(wanted)
 
@@ -755,7 +790,7 @@ def announce_worker():
                                 record_str, ts, config.SCRIPT_VERSION),
                             total_sent_str)
 
-                        if oserve:
+                        if oserve and mode == library.NORMAL:
                             oserve.queue_message("channel_announce", announce_msg)
 
                         raw_stats_bytes = stats_mgr.get_total_sent_bytes()
@@ -886,9 +921,11 @@ def forget_queue_full_notice(user):
             _told_queue_full.pop(key, None)
 
 
-def send_dcc_error(user, error_type):
+def send_dcc_error(user, error_type, channel=None):
     """Send the standard DCC error messages to the user."""
     oserve = sys.modules.get('oserve')
+    if not notices_allowed(user, channel):
+        return
     if error_type in QUEUE_FULL_KINDS and _already_told_queue_full(user, error_type):
         return
     errors = {
@@ -906,7 +943,7 @@ def send_dcc_error(user, error_type):
     if oserve:
         oserve.queue_message(user, msg)
 
-def send_dcc_already_queued_notice(user, file_name, position):
+def send_dcc_already_queued_notice(user, file_name, position, channel=None):
     """Tell a nick that what it asked for is already in its own queue (#1077),
     or, with no position, that it is already being sent to them (#1086).
 
@@ -918,6 +955,8 @@ def send_dcc_already_queued_notice(user, file_name, position):
     """
     import sys
     oserve = sys.modules.get('oserve')
+    if not notices_allowed(user, channel):
+        return
     if _already_told_queue_full(user, f"already_queued:{os.path.normcase(str(file_name))}"):
         return
     if oserve:
@@ -952,7 +991,7 @@ def send_dcc_queue_notice(user, file_name, position, channel=None, list_is_next=
     slots = getattr(config, "MAX_DCC_SLOTS", 0)
     feed_event("QUEUED", f'Queued "{file_name}" for {user} at #{position} ({busy}/{slots} slots busy)',
                nick=user, channel=channel, pos=position, busy=busy, slots=slots, name=file_name)
-    if oserve:
+    if oserve and notices_allowed(user, channel):
         # The mIRC colour blocks and separators
         BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
         
@@ -1477,10 +1516,13 @@ def start_announce_thread():
     threading.Thread(target=announce_worker, daemon=True).start()
     print("[ANNOUNCE] The advert and debug timer started in the background.")
 
-def send_pack_error_notice(irc_sock, user):
+def send_pack_error_notice(irc_sock, user, channel=None):
     """Send the user a private NOTICE, in the same colour theme, when a request is refused."""
     import defaults as config
     import sys
+
+    if not notices_allowed(user, channel):
+        return
     
     # Take the colour codes from the existing structure
     BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()

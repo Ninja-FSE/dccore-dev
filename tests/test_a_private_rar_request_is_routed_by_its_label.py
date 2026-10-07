@@ -72,7 +72,7 @@ class TwoListsOverTwoTrees(DCCoreTestCase):
         self.debug = silence_debug(announce)
         self.errors = []
         real_error = announce.send_dcc_error
-        announce.send_dcc_error = lambda user, kind: self.errors.append((user, kind))
+        announce.send_dcc_error = lambda user, kind, channel=None: self.errors.append((user, kind))
         self.addCleanup(setattr, announce, "send_dcc_error", real_error)
         InlineThread.dispatched = []
         self._real_thread = threading.Thread

@@ -5456,11 +5456,41 @@
   // not encode a double quote, which is the same rule every other row in this
   // file follows.
   function channelBoxHtml(index, name, checked, unconfigured) {
-    return '<label class="served-list-channel' +
+    return '<div class="served-list-channel-item">' +
+      '<label class="served-list-channel' +
       (unconfigured ? " is-unconfigured" : "") + '">' +
       '<input type="checkbox" class="served-list-channel-box"' +
       ' data-list-index="' + index + '"' + (checked ? " checked" : "") + ">" +
-      "<span></span></label>";
+      "<span></span></label>" +
+      channelModeHtml(checked) +
+      "</div>";
+  }
+
+  // How the bot behaves in a channel it serves (#1204). The values are the
+  // ones library.MODES stores. Only meaningful while the channel is ticked,
+  // so it is disabled otherwise - an untick has to take the mode with it,
+  // because the server refuses a mode on a channel the list does not serve.
+  function channelModeHtml(enabled) {
+    return '<select class="served-list-channel-mode"' + (enabled ? "" : " disabled") +
+      ' title="' + t("settings.channelModeTitle") + '">' +
+      '<option value="normal">' + t("settings.channelModeNormal") + "</option>" +
+      '<option value="quiet">' + t("settings.channelModeQuiet") + "</option>" +
+      '<option value="request_only">' + t("settings.channelModeRequestOnly") + "</option>" +
+      "</select>";
+  }
+
+  // {channel: mode} for what is ticked and not Normal, read off the DOM for
+  // the same reason tickedChannels() is.
+  function channelModes(block) {
+    var out = {};
+    block.querySelectorAll(".served-list-channel-item").forEach(function (item) {
+      var box = item.querySelector(".served-list-channel-box");
+      var select = item.querySelector(".served-list-channel-mode");
+      if (box && select && box.checked && box.dataset.channel && select.value !== "normal") {
+        out[box.dataset.channel.toLowerCase()] = select.value;
+      }
+    });
+    return out;
   }
 
   // Values as PROPERTIES, never concatenated into value="…": escapeHtml() is
@@ -5520,8 +5550,17 @@
         if (name === undefined) { return; }
         box.dataset.channel = name;
         label.querySelector("span").textContent = name;
+        var modeSelect = label.parentNode.querySelector(".served-list-channel-mode");
+        if (modeSelect) {
+          modeSelect.value = ((entry.modes || {})[name.toLowerCase()]) || "normal";
+          modeSelect.addEventListener("change", function () {
+            draft[index].modes = channelModes(block);
+          });
+        }
         box.addEventListener("change", function () {
           draft[index].channels = tickedChannels(block);
+          if (modeSelect) { modeSelect.disabled = !box.checked; }
+          draft[index].modes = channelModes(block);
         });
       });
       primaryInput.addEventListener("change", function () {
@@ -5624,6 +5663,7 @@
               name: entry.name,
               primary: !!entry.primary,
               channels: (entry.channels || []).slice(),
+              modes: Object.assign({}, entry.modes || {}),
               folders: (entry.folders || []).map(function (f) {
                 return { name: f.name, path: f.path };
               })

@@ -4,6 +4,30 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🤫 A channel can be Quiet or Request only (#1204)
+
+A bot always announced itself in every channel it served. An operator who wanted a channel served without the bot
+speaking in it had no setting for that.
+
+Each channel a list serves now has a mode, chosen in Settings → Served lists next to the channel's tick box:
+
+| Mode | Advert in the channel | Answers requests | Notices to the user |
+|---|---|---|---|
+| Normal | yes | yes | yes |
+| Quiet | no (the CTCP SLOTS line other bots read is still sent) | yes | yes |
+| Request only | no (no CTCP SLOTS line either) | yes | no - it serves silently |
+
+- Stored per channel on the list, in `data/lists.json` under `modes` (only the channels that are not Normal). An old
+  file has no `modes` and reads as Normal everywhere, so nothing changes on update.
+- "Notices" are the queue-position, sending, already-queued and error notices, and the replies to `@<nick>-que`,
+  `-help`, `-stats` and `-top`; `-remove` still removes, it just does not answer. The "Sent:" line the bot posts in
+  the channel when a transfer finishes counts as the bot speaking unasked, so Quiet and Request only drop it too.
+- A private-message request has no channel, so it takes the mode of the first channel the user shares with the bot
+  that is bound to a list.
+- Not changed: `@find` results and a `!list` reply, which the user asked for by name.
+- The editor drops a mode when its channel is unticked; the server refuses a mode on a channel the list does not serve
+  or one it does not know.
+
 ### 📊 Failed and cancelled transfers are recorded, with a success rate (#1203)
 
 The transfer record (`data/transfers.db`, #1068) kept only completed transfers, and the one failure counter lived
