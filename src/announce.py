@@ -931,8 +931,14 @@ def send_dcc_already_queued_notice(user, file_name, position):
         oserve.queue_message(user, fit_irc_line(_build, file_name))
 
 
-def send_dcc_queue_notice(user, file_name, position, channel=None):
-    """Send the user their queue position privately, in the same colour theme."""
+def send_dcc_queue_notice(user, file_name, position, channel=None, list_is_next=False):
+    """Send the user their queue position privately, in the same colour theme.
+
+    With list_is_next the row is the list (#1205), which goes out at the
+    next free slot ahead of the queued files: "position #N of
+    MAX_USER_QUEUE" would read as a wait behind everyone, so the words say
+    that instead. The console line and the colours are the same.
+    """
     import sys
     import defaults as config
     oserve = sys.modules.get('oserve')
@@ -958,6 +964,9 @@ def send_dcc_queue_notice(user, file_name, position, channel=None):
             # messages about the same limit disagreed whenever it was changed.
             text_content = (f"Added {shown_name} to your personal queue at "
                             f"position #{position} of {config.MAX_USER_QUEUE}.")
+            if list_is_next:
+                text_content = (f"Your list is next: {shown_name} will be sent when a slot frees "
+                                f"({busy}/{slots} slots busy).")
             block_msg = (f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} "
                          f"{text_content}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} ")
             return f"NOTICE {user} :{block_msg}\r\n"

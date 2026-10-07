@@ -365,16 +365,24 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False, user
         print(f"[ADMIN CLEARQUEUE] {user} tried to clear {target_nick}, but no queue or frozen entry was found.")
 
 def _queue_order_held():
-    """queue_order() for a caller that already holds queue_lock (it is not reentrant)."""
+    """queue_order() for a caller that already holds queue_lock (it is not reentrant).
+
+    Ranked with the dispatcher's own key, dcc.list_first_rank() (#1205): a nick
+    whose queue starts with a list that may go first is ahead, then the longest
+    wait. Sorting by the wait alone showed the line a slot is NOT given out in
+    whenever a list was waiting.
+    """
     import dcc
     waiting = [(key, rows) for key, rows in config.dcc_queue.items() if rows]
-    waiting.sort(key=lambda entry: dcc.queue_waiting_since(entry[0]))
+    lists_first = dcc.a_list_may_go_first()
+    waiting.sort(key=lambda entry: dcc.list_first_rank(entry[0], entry[1], lists_first))
     return [key for key, _rows in waiting]
 
 
 def queue_order():
     """The nicks that have something queued, in the order the dispatcher gives
-    out free slots: longest-waiting first (#1032), ties in arrival order."""
+    out free slots: a list that may go first (#1205), then longest-waiting
+    first (#1032), ties in arrival order."""
     import dcc
     with dcc.queue_lock:
         return _queue_order_held()

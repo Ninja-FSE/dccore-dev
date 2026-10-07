@@ -686,6 +686,67 @@ def a_slot_is_free_beyond_those_waiting(user_key):
     return free > len(nicks_waiting_for_a_slot(user_key, plain_files_only=True))
 
 
+# A LIST GOES FIRST (#1205). "@nick" used to queue like any file, so a newcomer
+# who only wanted to see what the bot has waited behind everyone's albums - and
+# the list is small, quick to send, and what leads anyone to ask for anything.
+# A list request now takes the next free slot ahead of the nicks waiting for
+# files and folders. It never interrupts a send, and the per-nick rule stands:
+# a nick still has one send at a time, so its list waits for its own send.
+#
+# THE CAP: only one list at a time may get its slot this way. A list that went
+# first carries "list_went_first" on its transfer row, and while one is being
+# sent the next list waits its turn like a file. A list that would have had the
+# slot anyway, because its nick had waited longest, does not count - so lists
+# hold at most one slot beyond what the fairness rule (#1032) gives them, and a
+# flood of list requests cannot starve the file sends.
+LIST_ROW_KEY = "is_list_request"
+
+
+def is_a_list_row(row):
+    """Is this queue row the list archive (#1205)? Only rows built by a list request carry the mark."""
+    return isinstance(row, dict) and row.get(LIST_ROW_KEY) is True
+
+
+def put_the_list_first(rows):
+    """Move the list row just appended to `rows` to the front, behind any list already there (#1205).
+
+    The dispatcher offers a slot to a list only while it heads its nick's
+    queue. Caller holds queue_lock. Returns the row's new 1-based place.
+    """
+    row = rows.pop()
+    row[LIST_ROW_KEY] = True
+    at = 0
+    while at < len(rows) and is_a_list_row(rows[at]):
+        at += 1
+    rows.insert(at, row)
+    return at + 1
+
+
+def a_list_may_go_first():
+    """May a list take the next free slot ahead of the waiting nicks? Caller holds queue_lock.
+
+    Not while another list that went first is still being sent (#1205).
+    """
+    return not any(tx.get("list_went_first") for tx in config.active_transfers)
+
+
+def list_first_rank(user_key, rows, lists_first):
+    """The order a freed slot is offered in: a list that may go first, then the longest wait.
+
+    `rows` is the nick's queue. Without a list at its head - or with
+    `lists_first` False - this is the wait alone, the #1032 order unchanged.
+    """
+    goes_first = bool(lists_first and rows and is_a_list_row(rows[0]))
+    return (0 if goes_first else 1, queue_waiting_since(user_key))
+
+
+def a_list_passes_a_longer_wait(user_key, packs_can_start):
+    """Would a nick that has waited longer get this slot if lists did not go first? Caller holds queue_lock."""
+    mine = queue_waiting_since(user_key)
+    return any(queue_waiting_since(key) < mine
+               for key in nicks_waiting_for_a_slot(user_key, plain_files_only=not packs_can_start))
+
+
 def queue_waiting_since(user_key):
     """When this nick began waiting for a slot; 0 for a nick nothing has stamped (queue restored from disk)."""
     return runtime.queue_waiting_since.get(str(user_key).lower(), 0.0)
@@ -729,13 +790,17 @@ def start_waiting(user_key):
         runtime.queue_waiting_since[user_key] = time.time()
 
 
-def go_to_the_back(nick_key):
+def go_to_the_back(nick_key, keep_place=False):
     """A nick's send is over: its next file waits from now, behind every nick that was already waiting.
 
     A nick with nothing left queued has no wait to record, so its stamp is dropped.
+    With keep_place the nick keeps the wait it has: a list is not the nick's
+    turn (#1205), so the files it was already waiting for keep their place.
     """
     with queue_lock:
         if config.dcc_queue.get(nick_key):
+            if keep_place and nick_key in runtime.queue_waiting_since:
+                return
             runtime.queue_waiting_since[nick_key] = time.time()
         else:
             runtime.queue_waiting_since.pop(nick_key, None)
@@ -1579,13 +1644,27 @@ def check_queue_and_send(irc_sock, completed_user):
     # A folder pack that has waited longer counts too (#1034), while no other
     # pack is being made: the sweep below now hands the slot to it. While one
     # is, the pack could not start anyway - the packer's own release wakes it.
+    #
+    # A list waiting at the head of a queue comes before all of them (#1205),
+    # while no other list that went first is being sent: list_first_rank()
+    # puts it ahead. A list of this nick's own that takes the slot from a nick
+    # that waited longer is marked as having gone first, which is what the cap
+    # counts.
+    list_went_first = False
     if next_file and not (isinstance(next_file, dict) and next_file.get('is_unpacked_rar_folder')):
         with queue_lock:
             packs_can_start = not getattr(config, 'rar_inprogress', False)
-            waited_longer = [k for k in nicks_waiting_for_a_slot(user_key, plain_files_only=not packs_can_start)
-                             if queue_waiting_since(k) < queue_waiting_since(user_key)]
+            lists_first = a_list_may_go_first()
+            my_rank = list_first_rank(user_key, config.dcc_queue.get(user_key), lists_first)
+            ranked = sorted((list_first_rank(k, config.dcc_queue.get(k), lists_first), k)
+                            for k in nicks_waiting_for_a_slot(user_key, plain_files_only=not packs_can_start))
+            waited_longer = [(rank, k) for rank, k in ranked if rank < my_rank]
+            if not waited_longer and my_rank[0] == 0:
+                list_went_first = a_list_passes_a_longer_wait(user_key, packs_can_start)
         if waited_longer:
-            print(f"[DCC QUEUE] {completed_user} goes to the back of the line; {waited_longer[0]} has waited longer.")
+            rank, ahead = waited_longer[0]
+            why = "has a list waiting" if rank[0] == 0 else "has waited longer"
+            print(f"[DCC QUEUE] {completed_user} goes to the back of the line; {ahead} {why}.")
             next_file = None
 
 
@@ -1957,13 +2036,27 @@ def check_queue_and_send(irc_sock, completed_user):
                         print(f"[DCC-BLOCK] {completed_user} is already claimed elsewhere; skipping duplicate dispatch.")
                         return
 
-                    if not hasattr(config, 'user_processing_lock'):
-                        config.user_processing_lock = set()
-                    config.user_processing_lock.add(completed_user.lower())
+                    # THE LIST CAP, READ AGAIN UNDER THE CLAIM (#1205). The rank
+                    # above was taken under an earlier hold of the lock, and a
+                    # concurrent trigger may have sent another list ahead since.
+                    list_cap_reached = list_went_first and not a_list_may_go_first()
+                    if not list_cap_reached:
+                        if not hasattr(config, 'user_processing_lock'):
+                            config.user_processing_lock = set()
+                        config.user_processing_lock.add(completed_user.lower())
 
-                    f_name = next_file['file'] if isinstance(next_file, dict) else os.path.basename(str(next_file))
-                    f_path = next_file['path'] if isinstance(next_file, dict) else str(next_file)
-                    config.active_transfers.append({"user": completed_user, "file": f_name, "bytes_sent": 0, "next_file_obj": f_name})
+                        f_name = next_file['file'] if isinstance(next_file, dict) else os.path.basename(str(next_file))
+                        f_path = next_file['path'] if isinstance(next_file, dict) else str(next_file)
+                        claim = {"user": completed_user, "file": f_name, "bytes_sent": 0, "next_file_obj": f_name}
+                        if list_went_first:
+                            claim["list_went_first"] = True
+                        config.active_transfers.append(claim)
+
+                if list_cap_reached:
+                    # The slot goes to whoever has waited longest instead.
+                    print(f"[DCC QUEUE] {completed_user}'s list waits: another list went first meanwhile.")
+                    check_queue_and_send(irc_sock, "system_next_trigger_fallback")
+                    return
 
                 print(f"[DCC QUEUE] Verified live in RAM for {target_chan}! Next file for {completed_user}: {f_name}")
                 if oserve: oserve.active_downloads = len(config.active_transfers)
@@ -2007,7 +2100,12 @@ def check_queue_and_send(irc_sock, completed_user):
                 return
 
             forget_stamps_of_empty_queues()
-            for waiting_user, user_files in sorted(config.dcc_queue.items(), key=lambda entry: queue_waiting_since(entry[0])):
+            # A list waiting at a queue's head is offered the slot first (#1205),
+            # while no other list that went first is being sent; then the
+            # longest wait, as before.
+            lists_first = a_list_may_go_first()
+            for waiting_user, user_files in sorted(config.dcc_queue.items(),
+                                                   key=lambda entry: list_first_rank(entry[0], entry[1], lists_first)):
                 # Use the dcc_queue dict key for every lock/queue operation. The old code
                 # tested the guards with one key and then rebound w_key to the display
                 # name further down, so the guard and the claim could disagree.
@@ -2124,7 +2222,13 @@ def check_queue_and_send(irc_sock, completed_user):
                         config.user_processing_lock = set()
                     config.user_processing_lock.add(queue_key)
 
-                    config.active_transfers.append({"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name})
+                    claim = {"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name}
+                    # Counted by the cap only when the list took the slot from
+                    # a nick that had waited longer (#1205).
+                    if (lists_first and is_a_list_row(g_next)
+                            and a_list_passes_a_longer_wait(queue_key, not getattr(config, 'rar_inprogress', False))):
+                        claim["list_went_first"] = True
+                    config.active_transfers.append(claim)
                     promoted = (real_username, g_path, g_name, g_chan, g_next)
                     break
 
@@ -3490,23 +3594,37 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             user_is_processing = user_key in config.user_processing_lock
             user_has_queue = len(config.dcc_queue.get(user_key, [])) > 0
 
+            # A list goes first (#1205): any free slot will do, the nicks
+            # waiting for files and the nick's own queued files notwithstanding,
+            # unless another list that went first is still being sent.
+            list_goes_first = is_master_zip and a_list_may_go_first()
+
             # Only a user who is clear in transfers, the queue AND the memory lock sends immediately
             # - and not while a rehash is quiescing (#668): this path does
             # not go through check_queue_and_send()'s gate, so a request
             # that reached here during the pause would have started a send
             # the reload then landed in the middle of. Read under the lock.
             sends_now = (not user_already_transferring and not user_is_processing
-                         and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS
+                         and len(config.active_transfers) < config.MAX_DCC_SLOTS
                          and not transfers_are_paused()
-                         and a_slot_is_free_beyond_those_waiting(user_key))
+                         and (list_goes_first
+                              or (not user_has_queue and a_slot_is_free_beyond_those_waiting(user_key))))
+            # It went first only if the rule for files would have queued it.
+            list_went_first = bool(sends_now and list_goes_first
+                                   and (user_has_queue or not a_slot_is_free_beyond_those_waiting(user_key)))
             if sends_now:
                 # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)
 
                 next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False,
                                   "queued_at": time.time()}
-                config.active_transfers.append({"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name,
-                                               "path": full_path})
+                claim = {"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name,
+                         "path": full_path}
+                if is_master_zip:
+                    next_file_fake[LIST_ROW_KEY] = True
+                if list_went_first:
+                    claim["list_went_first"] = True
+                config.active_transfers.append(claim)
             else:
                 # This user already has a track running; the row goes to dcc_queue.txt
                 start_waiting(user_key)
@@ -3515,6 +3633,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 config.dcc_queue[user_key].append({"file": file_name, "path": full_path, "channel": target_chan, "user_raw": user, "is_temporary_zip": False,
                                                    "queued_at": time.time()})
                 user_pos = len(config.dcc_queue[user_key])
+                if is_master_zip:
+                    user_pos = put_the_list_first(config.dcc_queue[user_key])
 
         # EVERYTHING THAT TOUCHES A DISK RUNS AFTER THE LOCK IS RELEASED (#605).
         # The claim above is what needs queue_lock. The SENDING notice
@@ -3544,7 +3664,10 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         import db
         db.save_dcc_queue()
 
-        announce.send_dcc_queue_notice(user, file_name, user_pos, channel=target_chan)
+        if is_master_zip:
+            announce.send_dcc_queue_notice(user, file_name, user_pos, channel=target_chan, list_is_next=True)
+        else:
+            announce.send_dcc_queue_notice(user, file_name, user_pos, channel=target_chan)
         return
 
     except Exception as e:
@@ -3799,7 +3922,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(_my_nick())
-            go_to_the_back(_my_nick())
+            go_to_the_back(_my_nick(), keep_place=is_a_list_row(next_file))
         with queue_lock:
             config.active_transfers[:] = [tx for tx in config.active_transfers
                                           if not _mine(tx)]
@@ -3848,7 +3971,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(_my_nick())
-            go_to_the_back(_my_nick())
+            go_to_the_back(_my_nick(), keep_place=is_a_list_row(next_file))
             
         with queue_lock:
             config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
@@ -3884,7 +4007,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
                   f"MY_IP_OR_DOCK is set.")
             if hasattr(config, 'user_processing_lock'):
                 config.user_processing_lock.discard(_my_nick())
-                go_to_the_back(_my_nick())
+                go_to_the_back(_my_nick(), keep_place=is_a_list_row(next_file))
             return
 
         release_queue_entry(user, next_file, delivered=False,
@@ -3932,7 +4055,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(_my_nick())
-            go_to_the_back(_my_nick())
+            go_to_the_back(_my_nick(), keep_place=is_a_list_row(next_file))
         # #162 finding #8: this branch's own comment above says the row
         # stays queued for the next completion trigger - deleting the
         # archive it still points at contradicted that in the same breath.
@@ -4499,9 +4622,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
                 # trigger below, and the finishing user stayed "already
                 # claimed elsewhere" until a rehash.
                 print("[DCC CLEANUP ERROR] Could not wake a waiting pack: " + str(wake_err))
+        # A list was not the nick's turn (#1205): files it was already waiting
+        # for keep their place in the line, here and at every exit above.
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(_my_nick())
-            go_to_the_back(_my_nick())
+            go_to_the_back(_my_nick(), keep_place=is_a_list_row(next_file))
 
         # 7. Wake the queue automatically after three seconds, thread-safely
         # A retained row means the attempt FAILED and will be retried. Reusing the flat
