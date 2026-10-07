@@ -4,6 +4,43 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📋 A list request goes ahead of queued files (#1205)
+
+`@nick` sent the list through `handle_download_request` like any file. With every slot busy, the list joined the
+end of that nick's queue and waited behind everyone's albums, though it is small and it is what leads people to
+request anything.
+
+- **The rule:** a list request means `@nick`, or the list archive asked for by name.
+  - **With a slot free,** it is sent at once, even past nicks waiting for files, unless the nick already has a send
+    running or is being packed for.
+  - **Otherwise** it goes to the front of that nick's own queue (`put_the_list_first()`), behind any list already
+    there.
+  - **When a slot frees,** both the section A trigger and the section B sweep rank the waiting nicks by
+    `list_first_rank()`: nicks whose queue starts with a list that may go first come first, then the #1032
+    longest-wait order. With no list queued, the order is #1032's exactly.
+- **The cap:** a list "goes first" only when it takes the slot from a nick that waited longer, and its transfer row
+  is then marked `list_went_first`. While a marked list is out, no other list may go first; those wait their turn
+  like files. So lists hold at most one slot beyond what fairness gives them. Section A ranks and claims under two
+  holds of `queue_lock`, so the cap is checked again at the claim, and if it was reached the slot goes to the sweep.
+- **A list is not a turn:** `go_to_the_back(..., keep_place=...)` keeps a nick's wait stamp when its list ends, so
+  files it was already waiting for keep their place.
+- **The shown order is the real one:** `commands.queue_order()`, behind #1206's Queue page, `queue` and move
+  up/down, ranks with the same `list_first_rank()`. A nick with a list waiting is shown first, as it is served.
+- **The notice:** "Your list is next: <name> will be sent when a slot frees", via `list_is_next=True` on
+  `send_dcc_queue_notice`.
+- **Unchanged:**
+  - Asking for a list that is already queued or being sent is refused as before.
+  - Rows queued before this change carry no list mark and are dispatched as plain files.
+  - No new setting, runtime container or lock.
+- **Tests:** `tests/test_a_list_request_goes_ahead_of_queued_files.py` (35 tests, through the real
+  `handle_download_request`, `check_queue_and_send` and `release_queue_entry`; 28/28 mutations caught). They cover:
+  - whichever trigger wakes the queue;
+  - a burst of four lists, with the exact service order pinned;
+  - the cap race, injected between the rank and the claim;
+  - frozen and absent nicks, a waiting pack, and one send per nick.
+
+  No existing test changed.
+
 ### ⏱️ Ignore a nick for a while (#1206, part 1 of 3)
 
 `ban` is permanent and the only timed bans came from flood escalation. The operator had no way to say "drop this nick's requests for half an hour".
