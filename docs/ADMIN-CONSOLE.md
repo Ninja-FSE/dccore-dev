@@ -591,7 +591,9 @@ lines, and a burst on top of a backlog would only push more of them off the
 500-line outbox, so the writer drains what is queued before the timer speaks.
 `bps_now` is the daemon's own live speed; a `SLOT` line's `bps` is that
 transfer's bytes over its own elapsed time, and reads `0` for the first half
-second. Today's figures are the rolled ones, the same the advert shows.
+second. It is the speed the next-slot estimate reads too (the one `-que`,
+`-stats` and Live Transfers show), so the two cannot disagree. Today's
+figures are the rolled ones, the same the advert shows.
 
 ### Pairing: a credential that is not the password
 

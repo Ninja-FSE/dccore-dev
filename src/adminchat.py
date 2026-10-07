@@ -964,15 +964,16 @@ def status_lines(now=None, fetching=False, rebuild=False, reading=False, packing
              f"{sum(len(rows) for rows in queue.values())} {len(queue)} "
              f"{sent_today} {bytes_today} {bps_now} {record} "
              f"{started} {failed} {searches}"]
+    # Imported here, not at module scope: webserver.py imports this module,
+    # and tests/test_import_graph.py pins that importing webserver pulls in
+    # none of the daemon - stats_mgr included.
+    import stats_mgr as _speeds
     for tx in transfers:
         sent = int(tx.get("bytes_sent") or 0)
-        started = float(tx.get("started_at") or 0)
-        # The speed is what THIS connection has moved, not what the receiver
-        # holds: a resumed send starts with bytes_sent already at the resume
-        # point, and dividing all of it by the seconds since it restarted
-        # showed 108 MB/s for a link doing 6 (#746).
-        moved = max(0, sent - int(tx.get("resume_offset") or 0))
-        bps = int(moved / (now - started)) if started and now > started + 0.5 else 0
+        # What THIS connection has moved per second (#746), through the one
+        # function the next-slot estimate reads too (#1207), so the console
+        # and the estimate cannot disagree about how fast a send is going.
+        bps = _speeds.send_speed(tx, now)
         lines.append(f"DCCORE SLOT {_clean(tx.get('user'), token=True)} {sent} "
                      f"{_num(tx.get('size'))} {bps} {_clean(tx.get('file'))}")
     # In the queue's own order, which is the order dcc.check_queue_and_send()

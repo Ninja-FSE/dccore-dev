@@ -177,11 +177,19 @@ def handle_queue_check(s, user, target):
     queued_count = dcc.get_total_queued_count()
     queue_str = f"{queued_count}/{config.MAX_QUEUE_LIMIT}" if hasattr(config, 'MAX_QUEUE_LIMIT') else f"{queued_count}"
 
+    # When the first busy slot is likely to free up (#1207) - the question a
+    # busy channel asks most. Worded as the next FREE SLOT on purpose: who
+    # gets that slot is the queue's business, not a promise to this user.
+    import stats_mgr
+    next_slot = stats_mgr.format_next_slot(stats_mgr.next_slot_estimate())
+    next_slot_str = f"Next free slot: {config.C_BOLD}{config.C_GREEN}{next_slot}{config.C_RESET}. "
+
     # 3. Pick the layout depending on whether the queue is empty
     if file_count > 0:
         # Layout when they do have files queued; only the number and trigger are bold
         msg = (
             f"NOTICE {user} :You have {config.C_BOLD}{config.C_RED}{file_count}{config.C_RESET} files in queue. "
+            f"{next_slot_str}"
             f"To remove your entire queue, type: {config.C_BOLD}{config.C_RED}@{config.NICKNAME}-remove{config.C_RESET} "
             f"or send CTCP: {config.C_BOLD}{config.C_GREEN}REMOVE{config.C_RESET}. "
             f"For just one file, add its name: {config.C_BOLD}{config.C_RED}@{config.NICKNAME}-remove <file>{config.C_RESET}\r\n"
@@ -194,6 +202,7 @@ def handle_queue_check(s, user, target):
             f"Download my list with {config.C_BOLD}{config.C_GREEN}@{config.NICKNAME}{config.C_RESET} "
             f"of {config.C_BOLD}{config.C_RED}{formatted_total_files}{config.C_RESET}. "
             f"Slots {config.C_BOLD}{config.C_GREEN}{slots_str}{config.C_RESET}. "
+            f"{next_slot_str}"
             f"Queue {config.C_BOLD}{config.C_GREEN}{queue_str}{config.C_RESET}. "
             f"List {config.C_BOLD}{config.C_RED}{list_date}{config.C_RESET}. "
             f"({config.SCRIPT_VERSION})\r\n"
@@ -356,16 +365,24 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False, user
         print(f"[ADMIN CLEARQUEUE] {user} tried to clear {target_nick}, but no queue or frozen entry was found.")
 
 def _queue_order_held():
-    """queue_order() for a caller that already holds queue_lock (it is not reentrant)."""
+    """queue_order() for a caller that already holds queue_lock (it is not reentrant).
+
+    Ranked with the dispatcher's own key, dcc.list_first_rank() (#1205): a nick
+    whose queue starts with a list that may go first is ahead, then the longest
+    wait. Sorting by the wait alone showed the line a slot is NOT given out in
+    whenever a list was waiting.
+    """
     import dcc
     waiting = [(key, rows) for key, rows in config.dcc_queue.items() if rows]
-    waiting.sort(key=lambda entry: dcc.queue_waiting_since(entry[0]))
+    lists_first = dcc.a_list_may_go_first()
+    waiting.sort(key=lambda entry: dcc.list_first_rank(entry[0], entry[1], lists_first))
     return [key for key, _rows in waiting]
 
 
 def queue_order():
     """The nicks that have something queued, in the order the dispatcher gives
-    out free slots: longest-waiting first (#1032), ties in arrival order."""
+    out free slots: a list that may go first (#1205), then longest-waiting
+    first (#1032), ties in arrival order."""
     import dcc
     with dcc.queue_lock:
         return _queue_order_held()
@@ -3011,6 +3028,9 @@ def handle_stats_request(s, user, target):
     active = oserve.active_downloads if oserve else 0
     free_slots = max(0, config.MAX_DCC_SLOTS - active)
     queued = dcc.get_total_queued_count()
+    # Next to the free slots (#1207): when the first busy one is likely to
+    # free up. The next FREE SLOT, not the asker's turn.
+    next_slot = stats_mgr.format_next_slot(stats_mgr.next_slot_estimate())
 
     speed_now = stats_mgr.format_speed(stats_mgr.live_speed())
     record = stats_mgr.format_speed(db.get_speed_record())
@@ -3039,6 +3059,7 @@ def handle_stats_request(s, user, target):
         f"{figure(yesterday_files, red)} yesterday, {figure(today_files, red)} today.",
 
         f"Slots {figure(f'{free_slots}/{config.MAX_DCC_SLOTS}')} free, "
+        f"next free slot {figure(next_slot)}, "
         f"{figure(queued)} queued. Speed {figure(speed_now)}, "
         f"record {figure(record)}. Up {figure(_format_uptime(stats_mgr.get_uptime_seconds()))}.",
     ]
