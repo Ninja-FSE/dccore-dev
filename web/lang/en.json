@@ -88,6 +88,7 @@
   "download.waiting.justBack": "{bot} is back - asking shortly",
   "download.waiting.retry": "Busy - asking again later",
   "download.waiting.theirTurn": "Waiting - {bot} has enough of ours",
+  "download.waiting.oneAtATime": "Waiting - {bot} is sending another folder or list first",
   "download.waiting.slots": "Waiting for a free slot",
   "download.waiting.paused": "Paused - resume it to carry on",
   "download.waiting.fetchCooldown": "Paused until {time} after {failures} failures",

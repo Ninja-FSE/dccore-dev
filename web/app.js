@@ -809,6 +809,7 @@
   var DOWNLOAD_WAITING_LABELS = {
     offline: "download.waiting.offline", "just-back": "download.waiting.justBack",
     retry: "download.waiting.retry", "their-turn": "download.waiting.theirTurn",
+    "one-at-a-time": "download.waiting.oneAtATime",
     slots: "download.waiting.slots", paused: "download.waiting.paused",
     cooldown: "download.waiting.fetchCooldown",
     "disk-full": "download.waiting.diskFull", joining: "download.waiting.joining"
@@ -3088,6 +3089,12 @@
           if (i >= boxes.length) { return; }
           boxes[i].dataset.bot = row.source;
           boxes[i].dataset.filename = row.title;
+          // A row of a RAR list asks for a folder (#1233): Download selected
+          // sends it the way "Get Folder as Rar" does, not as a file.
+          if (row.rar_folder) {
+            boxes[i].dataset.rarFolder = row.rar_folder;
+            boxes[i].dataset.folderBot = splitFetchedSource(group.bot || state.filelistsSource).nick;
+          }
           i += 1;
         });
       });
@@ -3156,17 +3163,37 @@
 
     el.filelistsDownloadSelectedBtn.addEventListener("click", function () {
       var checked = el.filelistsBody.querySelectorAll(".filelists-check:checked");
-      var items = Array.prototype.map.call(checked, function (box) {
-        return { bot: box.dataset.bot, filename: box.dataset.filename };
-      });
-      if (!items.length) { return; }
-      el.filelistsDownloadSelectedBtn.disabled = true;
-      postJson("/api/fetch/enqueue", items).then(function (res) {
-        if (!res.ok && !(res.data && res.data.created && res.data.created.length)) {
-          showFilelistsFetchStatus(t("download.couldNotQueue").replace("{error}",
-            (res.data.error || (res.data.errors && res.data.errors[0] && res.data.errors[0].error) || ("HTTP " + res.status))), true);
+      // A ticked row of a RAR list is a FOLDER to be packed, so it goes the way
+      // "Get Folder as Rar" does; the rest are files, one request each (#1233).
+      var items = [];
+      var folders = [];
+      Array.prototype.forEach.call(checked, function (box) {
+        if (box.dataset.rarFolder) {
+          folders.push({ bot: box.dataset.folderBot || box.dataset.bot, folder: box.dataset.rarFolder });
         } else {
-          showFilelistsFetchStatus(t("download.queuedForFetch").replace("{count}", res.data.created.length), false);
+          items.push({ bot: box.dataset.bot, filename: box.dataset.filename });
+        }
+      });
+      if (!items.length && !folders.length) { return; }
+      el.filelistsDownloadSelectedBtn.disabled = true;
+      var posts = [];
+      if (items.length) { posts.push(postJson("/api/fetch/enqueue", items)); }
+      if (folders.length) { posts.push(postJson("/api/filelists/fetch-folder-rar", folders)); }
+      Promise.all(posts).then(function (results) {
+        var queued = 0;
+        var failure = null;
+        results.forEach(function (res) {
+          var made = (res.data && res.data.created && res.data.created.length) || 0;
+          queued += made;
+          if (!made && !failure) {
+            failure = (res.data && (res.data.error ||
+              (res.data.errors && res.data.errors[0] && res.data.errors[0].error))) || ("HTTP " + res.status);
+          }
+        });
+        if (!queued) {
+          showFilelistsFetchStatus(t("download.couldNotQueue").replace("{error}", failure), true);
+        } else {
+          showFilelistsFetchStatus(t("download.queuedForFetch").replace("{count}", queued), false);
           Array.prototype.forEach.call(checked, function (box) { box.checked = false; });
           // Re-read the page so the rows just queued say so. The marks are
           // stamped server-side when a page is built, so without this they

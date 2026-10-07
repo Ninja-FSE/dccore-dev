@@ -681,6 +681,7 @@ DOWNLOAD_WAITING_NOTES = {
     "just-back": "{bot} is back - asking shortly",
     "retry": "busy - asking again later",
     "their-turn": "waiting - {bot} has enough of ours",
+    "one-at-a-time": "waiting - {bot} is sending another folder or list first",
     "slots": "waiting for a free slot",
     "paused": "paused - resume it on the dashboard",
     # A bot that kept failing (#1210), paused until a time it ends by itself.

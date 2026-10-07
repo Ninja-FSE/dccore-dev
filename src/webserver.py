@@ -1633,6 +1633,37 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
     return _enqueue_folder_request(dcc_fetch, bot, folder)
 
 
+def build_folder_rar_batch_enqueue_result(payload):
+    """POST /api/filelists/fetch-folder-rar with a LIST of {"bot","folder"}
+    objects (#1233): what Download selected sends for the ticked rows of a RAR
+    list. Every folder is queued, in the order given, and the dispatcher sends
+    them one at a time per bot. Returns (status, {"created": [ids], "errors":
+    [...]}); a body that created nothing carries the first error's status."""
+    if not isinstance(payload, list) or not payload:
+        return 400, {"error": 'Expected a non-empty list of {"bot": .., "folder": ..} objects.'}
+    if len(payload) > FETCH_ENQUEUE_MAX_ITEMS:
+        return 413, {"error": f"At most {FETCH_ENQUEUE_MAX_ITEMS} items per "
+                              f"request; this one had {len(payload)}."}
+    created = []
+    errors = []
+    first_status = 400
+    for raw in payload:
+        if not isinstance(raw, dict):
+            errors.append({"error": "Each item must be an object with bot/folder.", "item": raw})
+            continue
+        status, result = build_folder_rar_fetch_enqueue_result(
+            raw.get("bot", ""), raw.get("folder", ""))
+        if status == 200:
+            created.extend(result.get("created", []))
+        else:
+            if not errors:
+                first_status = status
+            errors.append({"error": result.get("error", ""), "item": raw})
+    if not created and errors:
+        return first_status, {"error": errors[0]["error"], "created": [], "errors": errors}
+    return 200, {"created": created, "errors": errors}
+
+
 # An mxrarserver pack row that could not be told apart from a request already
 # waiting on that bot (#1209) - see dcc_fetch._pack_request_conflicts_locked().
 PACK_FETCH_CONFLICT_ERROR = (
@@ -1659,7 +1690,7 @@ def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None):
             return 409, {"error": PACK_FETCH_CONFLICT_ERROR}
         request, conflict = folder, PACK_FETCH_CONFLICT_ERROR
     else:
-        if dcc_fetch.has_outstanding_bot_alone_request(bot):
+        if dcc_fetch.has_outstanding_non_folder_request(bot):
             return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
         request, conflict = f"!rar {folder}", BOT_ALONE_FETCH_CONFLICT_ERROR
 
@@ -5345,7 +5376,11 @@ if HAVE_FLASK:
 
         @app.route("/api/filelists/fetch-folder-rar", methods=["POST"])
         def api_filelists_fetch_folder_rar():
-            body = json_object(request.get_json(silent=True))
+            payload = request.get_json(silent=True)
+            if isinstance(payload, list):
+                status, result = build_folder_rar_batch_enqueue_result(payload)
+                return jsonify(result), status
+            body = json_object(payload)
             status, result = build_folder_rar_fetch_enqueue_result(
                 body.get("bot", ""), body.get("folder", ""))
             return jsonify(result), status

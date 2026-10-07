@@ -4,6 +4,30 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Download selected in a RAR list fetches folders, many at a time (#1233)
+
+A user ticked folders in another bot's RAR list and pressed Download selected. The folder never arrived, and the other
+bot logged the same request three times, one minute apart. "Get Folder as Rar" on the same row worked, but allowed only
+one folder per bot at a time.
+
+- **Download selected sends each ticked RAR-list row as a folder request,** the way "Get Folder as Rar" does. It used
+  to send it as a file named after the row's text, which the other bot never sends, so the offer was refused, the row
+  got no answer and asked again every minute. The choice is per row, so a list mixing folders and files still works;
+  a regular list queues files as before.
+- **Ticking 100 folders queues 100 folders.** `POST /api/filelists/fetch-folder-rar` also takes a list of
+  `{bot, folder}` objects (up to 500) and reports `created` and `errors` per item; a single object works as before.
+- **The dispatcher sends one list or `!rar` folder per bot at a time.** The offer is matched to its row by the bot
+  alone, because the sender names the `.rar`, so two waiting together could not be told apart. That is why a second
+  was refused at the door; now it waits as pending, shown as "Waiting - <bot> is sending another folder or list
+  first", and goes out when the one ahead has completed or failed. A failed folder does not stop the rest.
+- **The same folder asked for twice from one bot is one row,** as a file is (#1218).
+- Unchanged: a list still cannot be requested while a folder from that bot is on its way (nor the other way round), and
+  an mxrarserver pack row cannot queue beside a `!rar` folder. Other bots and plain files are not held up.
+- **Not changed (left open on the issue):** the serving bot still retries a send three times to a receiver that never
+  connects, and a folder still waits up to 30 minutes for its offer.
+- **Tests:** `tests/test_folders_are_queued_and_sent_one_at_a_time.py` (24 tests; the dispatcher rule was checked by
+  removing it - six tests fail).
+
 ### 🤫 A channel can be Quiet or Request only (#1204)
 
 A bot always announced itself in every channel it served. An operator who wanted a channel served without the bot
@@ -27,6 +51,7 @@ Each channel a list serves now has a mode, chosen in Settings → Served lists n
 - Not changed: `@find` results and a `!list` reply, which the user asked for by name.
 - The editor drops a mode when its channel is unticked; the server refuses a mode on a channel the list does not serve
   or one it does not know.
+
 ### 🔍 A search word matches the filename, not the whole row (#1199)
 
 `find_matching_entries()` tested every search word against the whole raw row,
