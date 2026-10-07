@@ -244,6 +244,8 @@ prefix.
 |---|---|
 | `ban <pattern>` | add a permanent wildcard ban |
 | `unban <pattern>` | remove one |
+| `ignore <nick> <minutes>` | drop one nick's requests for a while, 1 to 10080 minutes (#1206). It is a timed ban: kept across a restart, ends by itself, listed by `bans` with the time left. Its queued files stay; `clearqueue` removes them |
+| `unignore <nick>` | end a timed ignore - or a flood ban - now |
 | `clearqueue <nick>` | force-clear another user's queue |
 | `rehash` | reload modules in place |
 | `update` | rebuild the MasterList |

@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏱️ Ignore a nick for a while (#1206, part 1 of 3)
+
+`ban` is permanent and the only timed bans came from flood escalation. The operator had no way to say "drop this nick's requests for half an hour".
+
+- **`ignore <nick> <minutes>` and `unignore <nick>`** in the admin console (1 to 10080 minutes). An ignore is a timed ban set by hand: the same `config.banned_users` entry and the same `bans.txt`, so `check_user_status()` already drops the requests without a word, the sweep ends it, a restart keeps it (the END time is stored, not a timer) and `bans` lists it - now with the time left. Nothing new is stored or checked per request.
+- **Refused:** anything that is not a nick (a pattern is a `ban`), the bot's own nick, and a length outside the range. A second ignore replaces the first.
+- **What it drops:** the nick's pending replies, as a flood ban does. Its queued files stay; "Clear user" (part 2) removes them.
+- **`unignore` also ends a flood ban.** Nothing could before, short of waiting.
+- **Dashboard, Queue page:** a new Actions column. *Ignore* asks for the minutes and calls `POST /api/ignore`; a nick under an ignore or a ban reads "Ignored, 29m 12s left" with *Lift* (`POST /api/unignore`). `/api/queue` rows carry `ignored_seconds`.
+- **Not yet:** the mIRC nicklist items and "clear and ignore" (part 3), queue move up/down, remove one item and clear user (part 2).
+- **Tests:** `test_a_nick_can_be_ignored_for_a_while` (29): dropped while it runs, free after, kept across a restart, refusals, lifting, console, dashboard.
+
 ### 🔁 A file is not requested twice from the same bot (#1218)
 
 `enqueue_fetch()` refused a second outstanding `list` / `folder` row for a bot but let any number of identical `file`
