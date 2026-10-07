@@ -1369,6 +1369,23 @@
 # Seconds a request queued at another bot waits for the file (12 h); 0 = no limit
 #FETCH_QUEUED_TIMEOUT = 43200
 
+# How many of your requests to one bot may fail in a row - no answer, a
+# connection that could not be made, a download that broke off - before that
+# bot is paused for a while. A bot saying it does not have the file, or you
+# cancelling, does not count; a finished download starts the count again. 0
+# never pauses.
+#
+# A bot that keeps failing is paused for a while (#1210).
+# Failed requests in a row that pause a bot; 0 = never
+#FETCH_BOT_MAX_FAILS = 3
+
+# How many minutes such a bot stays paused. Its requests wait, and go out by
+# themselves when the time is up - also after a restart. The Downloads page
+# shows until when, with a Resume now button. 0 turns the pause off.
+#
+# Minutes such a pause lasts; 0 = no pause
+#FETCH_BOT_COOLDOWN_MINUTES = 15
+
 # When you request a whole folder (.rar) from another bot, how many seconds to
 # wait for its offer. Much longer than for a single file, because the other
 # bot has to pack the folder first.

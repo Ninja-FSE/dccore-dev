@@ -1002,6 +1002,14 @@ def build_stats_payload(parts=None):
     except Exception:
         uptime = 0
 
+    # When the first busy slot is likely to free up (#1207), from the same
+    # copy of active_transfers the Sending card counts, so the two cannot
+    # disagree about whether a slot is free. "now", whole minutes, or None.
+    try:
+        next_slot = stats_mgr.next_slot_estimate(transfers=active)
+    except Exception:
+        next_slot = None
+
     # The 7-column row: total files, total bytes, yesterday's pair, today's
     # pair, and the date the day last rolled over. Read through
     # load_advanced_stats_rolled(), which rolls a COPY, so a bot that has sent
@@ -1062,6 +1070,8 @@ def build_stats_payload(parts=None):
             "record_text": stats_mgr.format_speed(record),
             "sending": len(active),
             "slots": int(getattr(config, "MAX_DCC_SLOTS", 0) or 0),
+            "next_slot": next_slot,
+            "next_slot_text": stats_mgr.format_next_slot(next_slot),
             "queued_files": sum(len(entries) for entries in queue.values()),
             "queued_users": len(queue),
             "uptime_seconds": uptime,
@@ -3385,7 +3395,10 @@ SETTINGS_CATEGORIES = (
                                                 "FETCH_HISTORY_DAYS",
                                                 "FETCH_HISTORY_MAX_ROWS"]),
     # #926: how the fetch queue paces itself with another bot.
-    ("fetch-queue",   "Fetch queue",           ["FETCH_MAX_PER_BOT", "FETCH_QUEUED_TIMEOUT"]),
+    # #1210: a bot that keeps failing is paused for a while.
+    ("fetch-queue",   "Fetch queue",           ["FETCH_MAX_PER_BOT", "FETCH_QUEUED_TIMEOUT",
+                                                "FETCH_BOT_MAX_FAILS",
+                                                "FETCH_BOT_COOLDOWN_MINUTES"]),
     ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "ANNOUNCE_TRANSFERS",
                                                 "BROADCAST_SEARCH_CHANNEL",
                                                 "BROADCAST_SEARCH_COOLDOWN", "CTCP_VERSION_REPLY",
@@ -3485,6 +3498,8 @@ SETTINGS_LABELS = {
     # anybody made us.
     "FETCH_QUEUED_TIMEOUT": "Wait for a queued request (s)",
     "FETCH_MAX_PER_BOT": "Files asked of one bot at once",
+    "FETCH_BOT_MAX_FAILS": "Failed requests in a row that pause a bot",
+    "FETCH_BOT_COOLDOWN_MINUTES": "Minutes a failing bot stays paused",
     "FETCH_OFFER_TIMEOUT": "Wait for a reply to a fetch request (seconds)",
     "FETCH_FOLDER_OFFER_TIMEOUT": "Wait for a reply to a folder (.rar) request (seconds)",
     "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED":

@@ -219,6 +219,7 @@
     stSpeed:               document.getElementById("st-speed"),
     stRecord:              document.getElementById("st-record"),
     stSending:             document.getElementById("st-sending"),
+    stNextSlot:            document.getElementById("st-next-slot"),
     stQueued:              document.getElementById("st-queued"),
     stQueuedLabel:         document.getElementById("st-queued-label"),
     stUptime:              document.getElementById("st-uptime"),
@@ -809,8 +810,21 @@
     offline: "download.waiting.offline", "just-back": "download.waiting.justBack",
     retry: "download.waiting.retry", "their-turn": "download.waiting.theirTurn",
     slots: "download.waiting.slots", paused: "download.waiting.paused",
+    cooldown: "download.waiting.fetchCooldown",
     "disk-full": "download.waiting.diskFull", joining: "download.waiting.joining"
   };
+
+  // #1210: "Paused until 14:32 after 3 failures" - a bot that kept failing,
+  // paused until a time, told apart from one paused by hand. The time is the
+  // viewer's own clock; the row carries when, in epoch seconds.
+  function fetchCooldownLabel(row) {
+    var until = new Date(Number(row.cooldown_until) * 1000);
+    var clock = isNaN(until.getTime()) ? "?" :
+      ("0" + until.getHours()).slice(-2) + ":" + ("0" + until.getMinutes()).slice(-2);
+    return t("download.waiting.fetchCooldown")
+      .replace("{time}", clock)
+      .replace("{failures}", String(row.cooldown_failures || "?"));
+  }
 
   // Nothing has been downloaded for it yet: waiting here, or waiting in the
   // other bot's queue (#977). A queued row was given the "Delete this
@@ -1153,6 +1167,7 @@
       // back, it has enough of ours, it was busy, or every slot is taken.
       if (state === "pending" && DOWNLOAD_WAITING_LABELS[row.waiting]) {
         label = t(DOWNLOAD_WAITING_LABELS[row.waiting]).replace("{bot}", row.bot || "");
+        if (row.waiting === "cooldown") { label = fetchCooldownLabel(row); }
       }
       var progress = row.total_size
         ? Math.round(100 * (row.bytes_received || 0) / row.total_size) + "%"
@@ -1208,6 +1223,10 @@
         // #926: a paused bot's requests wait here; one click resumes it.
         action = "<button type=\"button\" class=\"btn btn-small fetch-resume-btn\" data-request-id=\"" +
           encodeURIComponent(row.id) + "\">" + t("download.resumeBot") + "</button> " + deleteBtn;
+      } else if (state === "pending" && row.waiting === "cooldown") {
+        // #1210: the same resume, sooner than the pause would end by itself.
+        action = "<button type=\"button\" class=\"btn btn-small fetch-resume-btn\" data-request-id=\"" +
+          encodeURIComponent(row.id) + "\">" + t("download.fetchCooldownResumeNow") + "</button> " + deleteBtn;
       } else if (state === "pending") {
         action = deleteBtn;
       } else if (state === "queued" || state === "offered") {
@@ -4837,6 +4856,8 @@
     FETCH_OFFER_TIMEOUT: "settings.field.FETCH_OFFER_TIMEOUT",
     FETCH_QUEUED_TIMEOUT: "settings.field.FETCH_QUEUED_TIMEOUT",
     FETCH_MAX_PER_BOT: "settings.field.FETCH_MAX_PER_BOT",
+    FETCH_BOT_MAX_FAILS: "settings.field.FETCH_BOT_MAX_FAILS",
+    FETCH_BOT_COOLDOWN_MINUTES: "settings.field.FETCH_BOT_COOLDOWN_MINUTES",
     FETCH_FOLDER_OFFER_TIMEOUT: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT",
     FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
     MAX_FETCH_FOLDER_FILE_SIZE: "settings.field.MAX_FETCH_FOLDER_FILE_SIZE",
@@ -6408,6 +6429,16 @@
     setStat(el.stFoot, data.version || "");
   }
 
+  // When the first busy slot is likely to free up (#1207): the next FREE
+  // slot, not anybody's turn. "now" and "not known yet" are words, so they
+  // are translated here; a time ("~4 min", "~2h 10m") is the server's own
+  // rendering, the one the -que and -stats notices print.
+  function nextSlotText(tr) {
+    if (tr.next_slot === "now") { return t("stats.nextSlotNow"); }
+    if (tr.next_slot === null || tr.next_slot === undefined) { return t("stats.nextSlotUnknown"); }
+    return tr.next_slot_text || t("stats.nextSlotUnknown");
+  }
+
   // The Live Transfers figures. Every one is rendered server-side by the same
   // helpers the channel advert and the admin console use, so the page cannot
   // disagree with the advert about how the same number reads.
@@ -6416,6 +6447,7 @@
     setStat(el.stSpeed, tr.speed_now_text || "0k/s");
     setStat(el.stRecord, tr.record_text || "0k/s");
     setStat(el.stSending, (tr.sending || 0) + " / " + (tr.slots || 0));
+    setStat(el.stNextSlot, nextSlotText(tr));
     setStat(el.stQueued, (tr.queued_files || 0).toLocaleString());
     setStat(el.stQueuedLabel,
             t("sidebar.queued") + (tr.queued_users

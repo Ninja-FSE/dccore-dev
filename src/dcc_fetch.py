@@ -362,6 +362,24 @@ CONNECT_FAILURES_TO_PAUSE = 3
 _paused = {}               # bot (lowercased) -> {"nick", "reason", "since", "by"}
 _connect_failures = {}     # bot (lowercased) -> consecutive active-connect failures
 
+# A BOT THAT KEEPS FAILING COOLS DOWN (#1210). Every request of ours to it got
+# its own asks and timeouts, but nothing noticed that this bot had failed
+# several in a row, so each new request waited out the same silence and the
+# channel saw the same requests again. FETCH_BOT_MAX_FAILS failed requests in a
+# row pause it for FETCH_BOT_COOLDOWN_MINUTES, through the same _paused entry a
+# pause by hand uses - so its requests wait, "pending", exactly as they do then
+# - with two more fields: "until", the time the pause ends, and "failures".
+# The end is a stored time, not a timer: it is saved with the other pauses,
+# survives a restart, and is checked whenever the dispatcher looks
+# (expire_cooldowns()). What counts as a failure is what says the bot did not
+# deliver: no answer, an offer we could not connect to, a transfer that broke
+# off. A refusal with a reason, a "busy", an operator's cancel and anything
+# that is our side's doing (no free port, a full disk, an oversized offer we
+# turned down) do not count. A finished transfer resets the count. Keyed by
+# the nick, lowercased, as the known-bot registry is: it does not treat a
+# "Bot^" or "Bot_" away-nick as the same bot, so neither does this.
+_fetch_failures = {}       # bot (lowercased) -> consecutive failed requests of ours
+
 # A FULL DISK (#926 item 4). No new fetch starts while FETCHED_FILES_DIR has
 # less than this free; a transfer that runs out of space mid-way goes back to
 # pending rather than failing, and everything resumes by itself once space is
@@ -401,9 +419,12 @@ def _save_paused_bots():
         print(f"[FETCH] Could not save the paused bots: {err}")
 
 
-def paused_bots():
-    """{bot (lowercased): {"nick", "reason", "since", "by"}}, a copy."""
-    return {key: dict(value) for key, value in _paused.items()}
+def paused_bots(now=None):
+    """{bot (lowercased): {"nick", "reason", "since", "by"}}, a copy. A
+    cooldown (#1210) also carries "until" and "failures"; one whose time has
+    come is over, and is not in it."""
+    expire_cooldowns(now)
+    return {key: dict(value) for key, value in list(_paused.items())}
 
 
 def pause_bot(bot, reason, by="operator"):
@@ -412,6 +433,7 @@ def pause_bot(bot, reason, by="operator"):
         return False
     _paused[nick.lower()] = {"nick": nick, "reason": str(reason), "since": time.time(), "by": by}
     _connect_failures.pop(nick.lower(), None)
+    _fetch_failures.pop(nick.lower(), None)
     _save_paused_bots()
     print(f"[FETCH] Paused fetching from {nick}: {reason}")
     return True
@@ -425,6 +447,96 @@ def resume_bot(bot):
     _save_paused_bots()
     print(f"[FETCH] Resumed fetching from {bot}.")
     return True
+
+
+def _cooldown_until(entry):
+    """When a cooldown pause ends (#1210), or None for a pause that waits for
+    the operator - by hand, or after failed connections."""
+    until = entry.get("until") if isinstance(entry, dict) else None
+    return float(until) if isinstance(until, (int, float)) and not isinstance(until, bool) else None
+
+
+def _pause_kind(key):
+    """Why a bot's requests wait, as row["waiting"] says it: "cooldown" for a
+    pause that ends by itself (#1210), "paused" for one the operator ends,
+    "" when it is not paused."""
+    entry = _paused.get(key)
+    if entry is None:
+        return ""
+    return "cooldown" if _cooldown_until(entry) is not None else "paused"
+
+
+def expire_cooldowns(now=None):
+    """End every cooldown whose stored time has come (#1210), and say so.
+    Lazy on purpose: there is no timer to lose in a restart, and the
+    dispatcher asks on every tick, so the bot's waiting requests go out, in
+    their order, on the first tick after the time. Returns the bots let go."""
+    now = time.time() if now is None else now
+    over = [key for key, entry in list(_paused.items())
+            if _cooldown_until(entry) is not None and _cooldown_until(entry) <= now]
+    ended = []
+    for key in over:
+        entry = _paused.pop(key, None)
+        if entry is not None:
+            ended.append(entry.get("nick") or key)
+    if ended:
+        _save_paused_bots()
+        for nick in ended:
+            print(f"[FETCH] The pause for {nick} is over; its requests go out again.")
+    return ended
+
+
+def _fetch_cooldown_settings():
+    """(FETCH_BOT_MAX_FAILS, FETCH_BOT_COOLDOWN_MINUTES), either 0 when the
+    setting cannot be read: off, rather than a pause nobody asked for."""
+    try:
+        max_fails = int(getattr(config, "FETCH_BOT_MAX_FAILS", 3) or 0)
+    except (TypeError, ValueError):
+        max_fails = 0
+    try:
+        minutes = float(getattr(config, "FETCH_BOT_COOLDOWN_MINUTES", 15) or 0)
+    except (TypeError, ValueError):
+        minutes = 0
+    return max_fails, minutes
+
+
+def _note_fetch_failure(bot, now=None):
+    """One more request of ours to this bot failed (#1210); the
+    FETCH_BOT_MAX_FAILS-th in a row pauses it for FETCH_BOT_COOLDOWN_MINUTES
+    and says so where the operator looks. A bot already paused is left as it
+    is: a request still out when the pause began does not lengthen it, and
+    the count starts again when it ends. Returns whether it paused the bot."""
+    nick = str(bot or "").strip()
+    key = nick.lower()
+    if not key or key in _paused:
+        return False
+    max_fails, minutes = _fetch_cooldown_settings()
+    if max_fails <= 0 or minutes <= 0:
+        return False
+    count = _fetch_failures.get(key, 0) + 1
+    if count < max_fails:
+        _fetch_failures[key] = count
+        return False
+    _fetch_failures.pop(key, None)
+    now = time.time() if now is None else now
+    until = now + minutes * 60
+    _paused[key] = {"nick": nick, "reason": f"{count} requests in a row failed",
+                    "since": now, "by": "cooldown", "until": until, "failures": count}
+    _save_paused_bots()
+    clock = time.strftime("%H:%M", time.localtime(until))
+    print(f"[FETCH] Paused fetching from {nick} until {clock}: {count} requests in a row failed.")
+    try:
+        import announce
+        announce.send_debug(f"Fetching from {nick} is paused until {clock}: {count} requests in a "
+                            f"row failed. Its requests wait and go out then; Resume now on the "
+                            f"Downloads page asks sooner.", category="INFO")
+    except Exception:
+        pass
+    return True
+
+
+def _note_fetch_success(bot):
+    _fetch_failures.pop(str(bot or "").strip().lower(), None)
 
 
 def _note_connect_failure(bot):
@@ -1255,13 +1367,20 @@ def check_fetch_queue():
     # Measured only while a row waits for room of its own (#964).
     free = _free_bytes() if held_for_space else None
     readiness = _bot_readiness(waiting_bots, now)
+    # A cooldown whose time has come ends here (#1210), before the pauses are
+    # read, so the bot's requests go out on this very tick.
+    expire_cooldowns(now)
     for bot in waiting_bots:
-        if bot in _paused:
-            readiness[bot] = "paused"
+        kind = _pause_kind(bot)
+        if kind:
+            readiness[bot] = kind
     disk_low = bool(waiting_bots) and _disk_is_low()
 
     to_dispatch = []
     to_take_back = []
+    # Bots one of whose requests failed on this tick (#1210), noted once the
+    # lock is let go: a pause writes a file and tells the console.
+    failed_bots = []
     with _fetch_lock():
         # Expire offers nobody ever answered. A row stuck in "offered" forever
         # would otherwise hold a slot open permanently and starve every other
@@ -1291,6 +1410,7 @@ def check_fetch_queue():
                                    reason=f"no response - asking again (attempt {row['silent_asks']} of {OFFER_ASKS})")
                     else:
                         _mark_failed_locked(row, "no response")
+                        failed_bots.append(row.get("bot"))
                         if row.get("request_type", "file") == "file":
                             to_take_back.append((row.get("bot"), row.get("requested_filename") or row.get("filename")))
 
@@ -1315,6 +1435,7 @@ def check_fetch_queue():
                         _mark_failed_locked(
                             row, f"still queued at {row.get('bot')} after "
                                  f"{int(queued_timeout // 3600)} h - nothing arrived")
+                        failed_bots.append(row.get("bot"))
 
         listen_timeout = PASSIVE_LISTEN_TIMEOUT * 3
         for row in queue.values():
@@ -1364,7 +1485,16 @@ def check_fetch_queue():
             # looked at properly on the next tick, a couple of seconds away.
             if key not in readiness:
                 continue
-            why = readiness[key] or ("paused" if key in _paused else "")
+            why = readiness[key] or _pause_kind(key)
+            if why == "cooldown":
+                # What the Downloads page and the console say (#1210):
+                # "paused until 14:32 after 3 failures".
+                entry = _paused.get(key) or {}
+                row["cooldown_until"] = _cooldown_until(entry)
+                row["cooldown_failures"] = entry.get("failures")
+            else:
+                row.pop("cooldown_until", None)
+                row.pop("cooldown_failures", None)
             if not why and disk_low:
                 why = "disk-full"
             # A file already known not to fit waits until it does (#964),
@@ -1396,6 +1526,8 @@ def check_fetch_queue():
 
     for bot, filename in to_take_back:
         drop_our_request_at(bot, filename)
+    for bot in failed_bots:
+        _note_fetch_failure(bot, now)
 
     if not to_dispatch:
         return
@@ -2865,6 +2997,10 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
             # not reach them. A passive offer that nobody connects back to is
             # about our side, not theirs.
             _note_connect_failure(row.get("bot"))
+            # And one failed request (#1210). After the line above, so three
+            # failed connections still pause the bot until it is resumed, as
+            # #926 decided; a cooldown never shortens that.
+            _note_fetch_failure(row.get("bot"))
             try:
                 sock.close()
             except Exception:
@@ -2954,6 +3090,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
         row["state"] = "complete"
         row["bytes_received"] = bytes_received
         _note_connect_success(row.get("bot"))
+        _note_fetch_success(row.get("bot"))
         transfer_log.record_received(
             {"list": transfer_log.KIND_LIST, "folder": transfer_log.KIND_ALBUM}.get(
                 row.get("request_type"), transfer_log.KIND_FILE),
@@ -2999,6 +3136,9 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     else:
         _mark_failed_locked(row, failure_reason)
         print(f"[FETCH] Failed ({failure_reason}): {stored_name}.")
+        # The transfer broke off: a failed request (#1210). A full disk,
+        # above, is ours and is asked again, so it does not count.
+        _note_fetch_failure(row.get("bot"))
     try:
         if os.path.exists(platform_compat.long_path(dest_path)):
             # Unwrapped, exists() answers False for a >260 path and the

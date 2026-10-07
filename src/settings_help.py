@@ -218,6 +218,8 @@ PLAIN_HELP = {
     'AUTO_REFETCH_MAX_PER_RUN': 'The most lists to re-fetch in one go. If many are out of date at once, the rest are picked up on later rounds, oldest first.',
     'FETCH_MAX_PER_BOT': 'How many files to ask one bot for at once. The next one is asked when one arrives. Servers allow each person only a few; asking for more gets "queue full". 0 means no limit.',
     'FETCH_QUEUED_TIMEOUT': 'When another bot puts your request in its queue, how long to wait for your turn before giving up. Busy servers take hours. 0 waits for ever.',
+    'FETCH_BOT_MAX_FAILS': 'How many of your requests to one bot may fail in a row - no answer, a connection that could not be made, a download that broke off - before that bot is paused for a while. A bot saying it does not have the file, or you cancelling, does not count; a finished download starts the count again. 0 never pauses.',
+    'FETCH_BOT_COOLDOWN_MINUTES': 'How many minutes such a bot stays paused. Its requests wait, and go out by themselves when the time is up - also after a restart. The Downloads page shows until when, with a Resume now button. 0 turns the pause off.',
     'FETCH_OFFER_TIMEOUT': 'When you request a file from another bot, how many seconds to wait for it to offer the file before giving up.',
     'FETCH_TRANSFER_TIMEOUT': 'The longest a file download from another bot may take in total, in seconds, before it is abandoned.',
     'FETCH_FOLDER_OFFER_TIMEOUT': 'When you request a whole folder (.rar) from another bot, how many seconds to wait for its offer. Much longer than for a single file, because the other bot has to pack the folder first.',
