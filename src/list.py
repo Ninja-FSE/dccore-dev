@@ -750,6 +750,31 @@ def is_mxrarserver_list(path):
     return bool(_MXRARSERVER_LIST_RE.search(os.path.basename(str(path or ""))))
 
 
+def _searched_part(line_strip):
+    """The part of one "!" row a search word is matched against, lower-cased (#1199).
+
+    The filename: what is between "!<nick> " and the "::INFO::" marker (or
+    the end of the row). Matching the whole row made "info" and "nfo" find
+    every file, and the bot's own nick find the whole list, because every row
+    carries both - and it disagreed with the cross-list search index, which
+    holds only the filename. A size, a length or a bitrate in the tail is not
+    searched either, as in the index.
+
+    The marker is looked for with str.find first: this runs on every row of
+    every list a search reads (#1126).
+    """
+    lowered = line_strip.lower()
+    start = lowered.find(" ") + 1
+    if not start:
+        return ""
+    end = lowered.find("::info::", start)
+    if end >= 0:
+        return lowered[start:end]
+    if "--" in lowered:
+        return strip_info_suffix(lowered[start:])[0]
+    return lowered[start:]
+
+
 def _scan_lines(lines, plain_words, phrase_patterns, state="none", on_heading=None,
                 banner_first=False):
     """_matching_lines()'s parser, over any source of lines.
@@ -830,7 +855,10 @@ def _scan_lines(lines, plain_words, phrase_patterns, state="none", on_heading=No
             current_folder = None
             in_banner = False
 
-        line_lower = line_strip.lower()
+        if not plain_words and not phrase_patterns:
+            yield line_strip, current_folder
+            continue
+        line_lower = _searched_part(line_strip)
         # Plain loops, not all() over a generator (#1126): the generator
         # was built afresh for every file line, and cost more than the
         # substring tests it ran. Same order, same early stop.
