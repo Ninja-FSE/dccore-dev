@@ -24,6 +24,8 @@ request anything.
   holds of `queue_lock`, so the cap is checked again at the claim, and if it was reached the slot goes to the sweep.
 - **A list is not a turn:** `go_to_the_back(..., keep_place=...)` keeps a nick's wait stamp when its list ends, so
   files it was already waiting for keep their place.
+- **The shown order is the real one:** `commands.queue_order()`, behind #1206's Queue page, `queue` and move
+  up/down, ranks with the same `list_first_rank()`. A nick with a list waiting is shown first, as it is served.
 - **The notice:** "Your list is next: <name> will be sent when a slot frees", via `list_is_next=True` on
   `send_dcc_queue_notice`.
 - **Unchanged:**

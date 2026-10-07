@@ -21,6 +21,7 @@ from unittest import mock
 
 from tests import support  # noqa: F401  (path setup)
 
+import commands  # noqa: E402
 import dcc  # noqa: E402
 import defaults as config  # noqa: E402
 import runtime  # noqa: E402
@@ -482,6 +483,40 @@ class ARealListSendKeepsThePlace(ack.ARealReceiver):
 for _name in [n for n in dir(ack.ARealReceiver) if n.startswith("test")]:
     setattr(ARealListSendKeepsThePlace, _name, None)
 
+
+
+class TheQueueIsShownInTheOrderSlotsGoOut(unittest.TestCase):
+    """commands.queue_order() - the Queue page, `queue` and what move up/down
+    moves against (#1206) - ranks with the dispatcher's key (#1205)."""
+
+    def setUp(self):
+        self._saved_queue = config.dcc_queue
+        self._saved_stamps = dict(runtime.queue_waiting_since)
+        self._saved_transfers = config.active_transfers
+        config.dcc_queue = {
+            "old": [{"file": "a.mp3", "path": "/x/a.mp3"}],
+            "newer": [{"file": "list.zip", "path": "/x/list.zip", dcc.LIST_ROW_KEY: True}],
+        }
+        runtime.queue_waiting_since.clear()
+        runtime.queue_waiting_since.update({"old": 100.0, "newer": 200.0})
+        config.active_transfers = []
+
+    def tearDown(self):
+        config.dcc_queue = self._saved_queue
+        runtime.queue_waiting_since.clear()
+        runtime.queue_waiting_since.update(self._saved_stamps)
+        config.active_transfers = self._saved_transfers
+
+    def test_a_waiting_list_is_shown_first(self):
+        self.assertEqual(commands.queue_order(), ["newer", "old"])
+
+    def test_while_a_list_that_went_first_is_out_the_wait_decides(self):
+        config.active_transfers = [{"user": "someone", "list_went_first": True}]
+        self.assertEqual(commands.queue_order(), ["old", "newer"])
+
+    def test_with_no_list_waiting_the_wait_decides(self):
+        config.dcc_queue["newer"] = [{"file": "b.mp3", "path": "/x/b.mp3"}]
+        self.assertEqual(commands.queue_order(), ["old", "newer"])
 
 if __name__ == "__main__":
     unittest.main()
