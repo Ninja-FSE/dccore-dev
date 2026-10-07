@@ -116,7 +116,8 @@ class TheGroups(unittest.TestCase):
         self.assertNotIn("Options...", names(self.groups["Window"]))
 
     def test_user_control_holds_the_bans_and_queues_of_nicks(self):
-        self.assertEqual(names(self.groups["User control"]), ["Bans", "Ban...", "Unban...", "Clear a queue..."])
+        self.assertEqual(names(self.groups["User control"]), ["Bans", "Ban...", "Unban...", "Clear a queue...", "Ignore a nick...",
+                          "Stop ignoring a nick...", "Move in the queue...", "Remove one queued file..."])
 
     def test_library_is_only_about_the_library(self):
         # Read audio info (#1182): the background reading of the list's
