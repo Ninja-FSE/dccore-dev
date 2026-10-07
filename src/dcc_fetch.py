@@ -710,6 +710,56 @@ def _has_outstanding_bot_alone_request_locked(queue, bot):
     )
 
 
+def _has_outstanding_non_folder_request_locked(queue, bot):
+    """True if `queue` has an unresolved row for `bot` that a "!rar" folder
+    cannot queue beside: a "list", or an mxrarserver pack row. Those two are
+    not sent one at a time with the folders, so the offer they bring could be
+    taken for a folder's. Other "!rar" folders do not count (#1233)."""
+    wanted_bot = str(bot).strip().lower()
+    return any(
+        row.get("state") in _UNRESOLVED_FETCH_STATES
+        and str(row.get("bot", "")).strip().lower() == wanted_bot
+        and row.get("request_type") in ("list", "folder")
+        and not (row.get("request_type") == "folder" and _is_bot_alone_row(row))
+        for row in queue.values()
+    )
+
+
+def has_outstanding_non_folder_request(bot):
+    """True if a list or an mxrarserver pack request for `bot` is still on its
+    way: the only things a "!rar" folder cannot be queued beside (#1233)."""
+    queue = _ensure_fetch_queue()
+    with _fetch_lock():
+        return _has_outstanding_non_folder_request_locked(queue, bot)
+
+
+def _is_bot_alone_row(row):
+    """True for a row whose offer is admitted on the bot alone: a "list", or a
+    "!rar" folder. An mxrarserver pack row is admitted by the name it arrives
+    under, so it is not one (#1209)."""
+    kind = row.get("request_type")
+    if kind == "list":
+        return True
+    if kind != "folder":
+        return False
+    import list as list_mod
+    return not list_mod.pack_path_of(str(row.get("requested_filename") or row.get("filename") or ""))
+
+
+def _find_unresolved_folder_request_locked(queue, bot, request):
+    """The id of an unresolved "!rar" folder row for this bot asking for this
+    same folder, or None (#1233). Needs the fetch lock."""
+    wanted_bot = str(bot).strip().lower()
+    wanted = str(request).strip().lower()
+    for rid, row in queue.items():
+        if (row.get("state") in _UNRESOLVED_FETCH_STATES
+                and row.get("request_type") == "folder"
+                and str(row.get("bot", "")).strip().lower() == wanted_bot
+                and str(row.get("requested_filename") or "").strip().lower() == wanted):
+            return rid
+    return None
+
+
 def has_outstanding_bot_alone_request(bot):
     """True if a "list" or "folder" fetch is already outstanding for `bot`
     (any state other than "complete"/"failed").
@@ -799,9 +849,12 @@ def enqueue_fetch(bot, filename, request_type="file", trigger=None):
     dispatcher) is what promotes pending rows, so this is safe to call from
     a Flask request thread without blocking on IRC pacing.
 
-    A "list" or "folder" request_type is refused (returns None, no row is
-    created) if a "list" or "folder" row is already outstanding for the
-    same bot - see has_outstanding_bot_alone_request()'s docstring for why.
+    A "list" request_type is refused (returns None, no row is created) if a
+    "list" or "folder" row is already outstanding for the same bot - see
+    has_outstanding_bot_alone_request()'s docstring for why. A "folder" is
+    refused only while a "list" is outstanding; several folders may wait, and
+    the dispatcher sends them one at a time (#1233). Asking for a folder that
+    is already on its way returns THAT row's id.
     This check is enforced HERE, not only in webserver.py's two callers, so
     the invariant holds no matter what calls this function in the future
     (defense in depth, the same reasoning this feature's CTCP-safety check
@@ -836,8 +889,17 @@ def enqueue_fetch(bot, filename, request_type="file", trigger=None):
         if pack:
             if _pack_request_conflicts_locked(queue, bot, filename):
                 return None
-        elif normalized_type in ("list", "folder") and _has_outstanding_bot_alone_request_locked(queue, bot):
+        elif normalized_type == "list" and _has_outstanding_bot_alone_request_locked(queue, bot):
             return None
+        elif normalized_type == "folder":
+            # Folders queue behind each other (#1233): the dispatcher sends
+            # one per bot at a time, so they never wait for an offer together.
+            # A list or a pack row cannot share the bot with them.
+            if _has_outstanding_non_folder_request_locked(queue, bot):
+                return None
+            existing = _find_unresolved_folder_request_locked(queue, bot, filename)
+            if existing is not None:
+                return existing
         if normalized_type == "file":
             existing = _find_unresolved_file_request_locked(queue, bot, filename)
             if existing is not None:
@@ -1474,6 +1536,9 @@ def check_fetch_queue():
                 load[key] = load.get(key, 0) + 1
         promoted = 0
         room = _room_left_locked(queue, free)
+        alone_busy = {str(row.get("bot", "")).strip().lower()
+                      for row in queue.values()
+                      if row.get("state") in _BOT_LOAD_STATES and _is_bot_alone_row(row)}
         for rid in pending_ids:
             row = queue[rid]
             key = str(row.get("bot", "")).strip().lower()
@@ -1506,6 +1571,11 @@ def check_fetch_queue():
                 why = "retry"
             if not why and max_per_bot > 0 and load.get(key, 0) >= max_per_bot:
                 why = "their-turn"
+            # A list or folder is matched to its offer by the bot alone, so a
+            # second one asked of the same bot would be indistinguishable from
+            # the first (#1233). It goes out when the first has ended.
+            if not why and key in alone_busy and _is_bot_alone_row(row):
+                why = "one-at-a-time"
             if not why and promoted >= free_slots:
                 why = "slots"
             if why:
@@ -1520,6 +1590,8 @@ def check_fetch_queue():
             row["state"] = "offered"
             row["offered_at"] = now
             load[key] = load.get(key, 0) + 1
+            if _is_bot_alone_row(row):
+                alone_busy.add(key)
             promoted += 1
             to_dispatch.append((rid, row["bot"], row["filename"], row.get("request_type", "file"),
                                 row.get("trigger")))

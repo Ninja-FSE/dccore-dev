@@ -88,6 +88,7 @@
   "download.waiting.justBack": "{bot} ha vuelto - se pedirá enseguida",
   "download.waiting.retry": "Ocupado - se volverá a pedir más tarde",
   "download.waiting.theirTurn": "Esperando - {bot} ya tiene bastantes nuestros",
+  "download.waiting.oneAtATime": "Esperando - {bot} envía antes otra carpeta o lista",
   "download.waiting.slots": "Esperando un hueco libre",
   "download.waiting.paused": "En pausa - reanúdelo para continuar",
   "download.waiting.fetchCooldown": "En pausa hasta las {time} tras {failures} fallos",
