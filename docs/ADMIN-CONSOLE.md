@@ -228,7 +228,7 @@ prefix.
 | Command | Effect |
 |---|---|
 | `status` | everything at a glance — slots, queue, bans, list, uptime |
-| `queue [nick]` | queued files, all users (in the order they are served) or one |
+| `queue [nick]` | queued files, all users (in the order they are served) or one nick's files, numbered |
 | `slots` | what is sending right now, and how far along |
 | `packing` | the folder pack that is running: for whom, which folder (its name, never its path), how long, and the archive's size so far against the folder's (#1202) |
 | `packcancel` | stop the folder pack that is running: `rar` is terminated, the partial archive is deleted, the user is told it was cancelled (no failure is counted against the request), and the next waiting pack starts. "Nothing is being packed." when none runs (#1202) |
@@ -244,6 +244,9 @@ prefix.
 |---|---|
 | `ban <pattern>` | add a permanent wildcard ban |
 | `unban <pattern>` | remove one |
+| `queuemove <nick> up\|down` | move a nick one place up or down the line for a free slot (#1206); `queue` lists the nicks in that order. The order is kept in memory only: a restart puts it back to first-come |
+| `queuemove <nick> <number> up\|down` | move one of a nick's queued files up or down in its own queue — the one at the top is sent first. A file being sent or packed stays put. The number is the one `queue <nick>` shows |
+| `queueremove <nick> <number>` | take one file out of a nick's queue, as if they had typed `@<bot>-remove <file>`: same notice to them, `clearqueue` removes the lot |
 | `ignore <nick> <minutes>` | drop one nick's requests for a while, 1 to 10080 minutes (#1206). It is a timed ban: kept across a restart, ends by itself, listed by `bans` with the time left. Its queued files stay; `clearqueue` removes them |
 | `unignore <nick>` | end a timed ignore - or a flood ban - now |
 | `clearqueue <nick>` | force-clear another user's queue |

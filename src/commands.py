@@ -213,18 +213,17 @@ def _same_file_name(a, b):
     return bool(norm(a)) and norm(a) == norm(b)
 
 
-def handle_queue_remove_file(s, user, target, filename):
-    """`@<nick>-remove <file>`: take that one file out of the user's queue and
-    leave the rest. Without a file, handle_queue_remove() clears the lot."""
-    user_key = user.lower()
-    oserve = sys.modules.get('oserve')
-    import dcc
-    import list as list_mod
+def _take_rows_out(user_key, choose):
+    """Take the rows `choose(rows)` names out of one nick's queue, under the
+    queue lock, and save. Returns (rows taken, temp archives removed with them).
 
-    wanted = list_mod.printable_text(str(filename)).strip()
-    shown = wanted[:120]
+    The one place a single queued file leaves a queue - for the user's own
+    `@<nick>-remove <file>` and for the operator's remove on the Queue page and
+    in the console - so the two cannot drift apart.
+    """
+    import dcc
+
     removed_archives = []
-    removed = 0
     with dcc.queue_lock:
         # dcc_queue alone holds rows. A frozen user's rows stay there too:
         # frozen_queues maps a nick to the time it froze (#1042), and walking it
@@ -233,8 +232,7 @@ def handle_queue_remove_file(s, user, target, filename):
         # disk still named.
         queues = getattr(config, 'dcc_queue', {})
         rows = queues.get(user_key) or []
-        gone = [r for r in rows if isinstance(r, dict)
-                and _same_file_name(r.get('file', ''), wanted)]
+        gone = choose(rows)
         if gone:
             removed_archives = dcc.discard_orphaned_temp_archives(user_key, rows=gone)
             queues[user_key] = [r for r in rows if not any(r is g for g in gone)]
@@ -242,8 +240,22 @@ def handle_queue_remove_file(s, user, target, filename):
                 del queues[user_key]
                 # Nothing left to keep frozen - as handle_queue_remove() does.
                 getattr(config, 'frozen_queues', {}).pop(user_key, None)
-            removed = len(gone)
             db.save_dcc_queue()
+    return gone, removed_archives
+
+
+def handle_queue_remove_file(s, user, target, filename):
+    """`@<nick>-remove <file>`: take that one file out of the user's queue and
+    leave the rest. Without a file, handle_queue_remove() clears the lot."""
+    user_key = user.lower()
+    oserve = sys.modules.get('oserve')
+    import list as list_mod
+
+    wanted = list_mod.printable_text(str(filename)).strip()
+    shown = wanted[:120]
+    gone, removed_archives = _take_rows_out(user_key, lambda rows: [
+        r for r in rows if isinstance(r, dict) and _same_file_name(r.get('file', ''), wanted)])
+    removed = len(gone)
 
     if removed:
         msg = f"NOTICE {user} :Removed \"{shown}\" from your queue. \r\n"
@@ -342,6 +354,140 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False, user
             f"Clearqueue: {config.C_BOLD}{target_nick}{config.C_RESET} had no queue or frozen entry to remove.",
             category="INFO")
         print(f"[ADMIN CLEARQUEUE] {user} tried to clear {target_nick}, but no queue or frozen entry was found.")
+
+def _queue_order_held():
+    """queue_order() for a caller that already holds queue_lock (it is not reentrant)."""
+    import dcc
+    waiting = [(key, rows) for key, rows in config.dcc_queue.items() if rows]
+    waiting.sort(key=lambda entry: dcc.queue_waiting_since(entry[0]))
+    return [key for key, _rows in waiting]
+
+
+def queue_order():
+    """The nicks that have something queued, in the order the dispatcher gives
+    out free slots: longest-waiting first (#1032), ties in arrival order."""
+    import dcc
+    with dcc.queue_lock:
+        return _queue_order_held()
+
+
+def move_waiting_user(nick, direction):
+    """Move a nick one place up or down the line for a free slot (#1206).
+    Returns (ok, message).
+
+    The dispatcher goes by who has waited longest, so the move is a swap of
+    the two nicks' wait stamps. Every waiting nick is re-stamped one after the
+    other in its new place: after a restart none has a stamp, and a swap of
+    two zeros would change nothing.
+    """
+    import dcc
+    import time
+    step = {"up": -1, "down": 1}.get(str(direction).strip().lower())
+    if step is None:
+        return False, "Say up or down."
+    key = str(nick).strip().lower()
+    with dcc.queue_lock:
+        order = _queue_order_held()
+        if key not in order:
+            return False, f"{nick} has nothing queued."
+        here = order.index(key)
+        there = here + step
+        if there < 0:
+            return False, f"{nick} is already first in line."
+        if there >= len(order):
+            return False, f"{nick} is already last in line."
+        order[here], order[there] = order[there], order[here]
+        stamps = [runtime.queue_waiting_since.get(k, 0.0) for k in order]
+        base = min([st for st in stamps if st > 0] or [time.time() - 1])
+        for place, waiting in enumerate(order):
+            runtime.queue_waiting_since[waiting] = base + place * 1e-4
+    return True, f"{nick} is now number {there + 1} of {len(order)} in line."
+
+
+def _queued_row(user_key, position, name):
+    """The row at 1-based `position` in a nick's queue, or an error text. Caller holds queue_lock.
+
+    `name`, when given, has to be the file the caller saw there: the queue moves
+    under a page that was loaded a minute ago, and "remove number 2" must never
+    remove whatever has slid into place 2 since.
+    """
+    rows = config.dcc_queue.get(user_key) or []
+    try:
+        index = int(position) - 1
+    except (TypeError, ValueError):
+        return None, "The position has to be a number."
+    if not 0 <= index < len(rows):
+        return None, f"{user_key} has no file number {position} queued."
+    row = rows[index]
+    if name and not (isinstance(row, dict) and _same_file_name(row.get('file', ''), name)):
+        return None, "The queue has changed - look again."
+    return (index, row), None
+
+
+def _being_sent_or_packed(user_key, row, index):
+    import dcc
+    if isinstance(row, dict) and row.get('path') and dcc.is_being_sent_to(user_key, row['path']):
+        return True
+    pack = dcc.pack_status()
+    return bool(pack and str(pack["user"]).lower() == user_key and index == 0)
+
+
+def move_queued_file(nick, position, direction, name=None):
+    """Move the file at `position` one place up or down in a nick's own queue
+    (#1206). Returns (ok, message). The dispatcher sends a nick's queue from
+    the top, so this is what decides which file they get next.
+
+    A file that is being sent, or packed, stays where it is - and nothing is
+    moved past it - because the send settles its row by the place it holds.
+    """
+    import dcc
+    step = {"up": -1, "down": 1}.get(str(direction).strip().lower())
+    if step is None:
+        return False, "Say up or down."
+    key = str(nick).strip().lower()
+    with dcc.queue_lock:
+        found, error = _queued_row(key, position, name)
+        if error:
+            return False, error
+        index, row = found
+        rows = config.dcc_queue[key]
+        other = index + step
+        if other < 0:
+            return False, "That file is already first."
+        if other >= len(rows):
+            return False, "That file is already last."
+        if _being_sent_or_packed(key, row, index) or _being_sent_or_packed(key, rows[other], other):
+            return False, "That file is being sent right now."
+        rows[index], rows[other] = rows[other], rows[index]
+        db.save_dcc_queue()
+    return True, f"Moved to place {other + 1} of {len(rows)}."
+
+
+def remove_queued_file(nick, position, name=None):
+    """Take the file at `position` out of a nick's queue, as if they had typed
+    `@<bot>-remove <file>` themselves - same removal, same notice to them
+    (#1206). Returns (ok, message)."""
+    import list as list_mod
+    key = str(nick).strip().lower()
+    import dcc
+    with dcc.queue_lock:
+        found, error = _queued_row(key, position, name)
+        if error:
+            return False, error
+        row = found[1]
+        shown = list_mod.printable_text(str(row.get('file', '?') if isinstance(row, dict) else row)).strip()[:120]
+        who = (row.get('user_raw') if isinstance(row, dict) else None) or nick
+    gone, removed_archives = _take_rows_out(key, lambda rows: [r for r in rows if r is row])
+    if not gone:
+        return False, "The queue has changed - look again."
+    oserve = sys.modules.get('oserve')
+    if oserve:
+        oserve.queue_message(who, f"NOTICE {who} :Removed \"{shown}\" from your queue. \r\n")
+    if removed_archives:
+        print(f"[COMMANDS] Removed {len(removed_archives)} orphaned temp archive(s) with {who}'s file.")
+    print(f"[COMMANDS] An operator removed {shown!r} from {who}'s queue.")
+    return True, f"Removed \"{shown}\" from {nick}'s queue."
+
 
 def diagnostics_are_for_the_admin(user, host=None):
     """Whether `user` may run the bot's diagnostics - !ping and !debugnames.
