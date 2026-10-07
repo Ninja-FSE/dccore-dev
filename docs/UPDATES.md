@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔍 A search word matches the filename, not the whole row (#1199)
+
+`find_matching_entries()` tested every search word against the whole raw row,
+`!<nick> <filename>  ::INFO:: <size> ...`. So `info` or `nfo` found every file (each row carries `::INFO::`), and
+the bot's own nick found the whole list; in a channel `@find info` answered with the first rows of the list.
+The cross-list search index already held only the filename, so the filter bar and `@find` disagreed.
+
+- **Now** the words are matched against the filename alone: what is between `!<nick> ` and `::INFO::` (any case),
+  or the end of the row for a bot that writes no marker. A dash-size tail (`---- 18.8Mb`) is cut off too. Quoted
+  phrases (#774) work as before, inside the filename.
+- **Decided:** the tail (size, length, bitrate) is no longer searched, as in the index. `flac` still works, since
+  the extension is in the name. A row with no space has no filename and matches nothing.
+- **Unchanged:** an empty search still lists every row; the scan keeps its cheap per-row cost (#1126), the marker
+  being found with `str.find`.
+- Tests: `tests/test_a_search_word_matches_the_filename_only.py`; the #1126 equivalence test now holds the fast
+  cut to a plain `strip_info_suffix()` reading of the filename.
+
 ### 📊 Failed and cancelled transfers are recorded, with a success rate (#1203)
 
 The transfer record (`data/transfers.db`, #1068) kept only completed transfers, and the one failure counter lived
