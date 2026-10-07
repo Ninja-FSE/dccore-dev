@@ -13,8 +13,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 - **What it drops:** the nick's pending replies, as a flood ban does. Its queued files stay; "Clear user" (part 2) removes them.
 - **`unignore` also ends a flood ban.** Nothing could before, short of waiting.
 - **Dashboard, Queue page:** a new Actions column. *Ignore* asks for the minutes and calls `POST /api/ignore`; a nick under an ignore or a ban reads "Ignored, 29m 12s left" with *Lift* (`POST /api/unignore`). `/api/queue` rows carry `ignored_seconds`.
-- **Not yet:** the mIRC nicklist items and "clear and ignore" (part 3).
+- **mIRC menus:** see part 3.
 - **Tests:** `test_a_nick_can_be_ignored_for_a_while` (29): dropped while it runs, free after, kept across a restart, refusals, lifting, console, dashboard.
+
+### 📋 Nicklist and menu items for ignore and queue order (#1206, part 3 of 3)
+
+The commands and the dashboard had them; the mIRC menus did not.
+
+- **Right-click a nick in any channel → DCCore:** *Ignore for...*, *Clear the queue of ... and ignore for...* and *Stop ignoring*. The first two ask for the minutes in an input box (30 filled in); Cancel, or anything that is not a whole number from 1 to 10080, sends nothing and the second case says why in the window. *Clear and ignore* sends `ignore` first and `clearqueue` second, so the nick's pending replies go with the ignore and the files with the clear.
+- **@DCCore window:** the selected queue row gets *Ignore ... for...*, *Clear the queue of ... and ignore for...*, and *Move ... earlier / later in line* (`queuemove <nick> up|down`). User control gets *Ignore a nick...*, *Stop ignoring a nick...*, *Move in the queue...* and *Remove one queued file...*, each a prompt for the arguments.
+- **`dccore.ver` is 1.16.** A bot answers an older script's `ignore` or `queuemove` with "unknown command"; there is no gate to add, since the script only sends what the operator clicks.
+- **Menu test:** `ignore`, `unignore`, `queuemove` and `queueremove` are no longer on the "console only" list, so the test now requires them in the menu. The two tests that pinned `dccore.ver` to the Download queues version (1.15) accept 1.15 or later.
+- **Tests:** `test_the_nicklist_can_ignore_and_move` (18): the items, the input box (no commas in the prompt text), the range and whole-number check, the order of the two sends, the version. mIRC is not available here, so the script is read, not run.
 
 ### 🔀 Move, remove and clear in the queue (#1206, part 2 of 3)
 
@@ -24,7 +34,7 @@ The operator could clear a whole queue and nothing else: no way to let one nick 
 - **Which file next.** `queuemove <nick> <number> up|down` swaps a file with its neighbour in the nick's own queue; the dispatcher sends a queue from the top. A file being sent, or the folder being packed, is not moved and nothing is moved past it: the send settles its row by identity and a user could otherwise be left with the wrong file in flight.
 - **Remove one file.** `queueremove <nick> <number>` takes the same route as the nick's own `@<bot>-remove <file>` - one function, `_take_rows_out()`, now does the removal for both - so a packed folder's temp archive goes with its row, a frozen nick unfreezes with its last file, and the nick gets the same `Removed "<file>" from your queue.` notice. A refused change sends nothing. `queue <nick>` numbers the files.
 - **Dashboard, Queue page:** each nick has *earlier* / *later* arrows and *Clear* (it asks first, with the count, then calls the same function as `clearqueue`); each file has *earlier* / *later* / remove. A page remembers which nicks' file lists were open across its refresh - they used to shut every few seconds, which would have made the buttons inside them unusable. Routes: `POST /api/queue/move-user`, `/move-file`, `/remove-file`, `/clear`. A move or remove sends the file's place **and its name**; if the queue changed since the page was drawn the answer is "The queue has changed - look again" instead of acting on whatever slid into that place.
-- **Not yet:** the mIRC nicklist items and "clear and ignore" (part 3).
+- **mIRC menus:** see part 3.
 - **Tests:** `test_the_queue_can_be_controlled` (50): the order and the dispatcher's walk, the ends, stale names, a file being sent or packed, duplicate names, the notice matching `@<bot>-remove`, temp archives, frozen nicks, the console, the routes, the page wiring and strings.
 
 ### 🔁 A file is not requested twice from the same bot (#1218)
