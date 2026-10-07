@@ -44,6 +44,7 @@ are broken".
 - **Tests:** `tests/test_every_transfer_ending_is_recorded_with_how_it_ended.py` (44 tests; fake sockets and a real
   fake-rar process; 46/47 mutations caught). The survivor is equivalent: the status filter on the speed query,
   since unfinished rows have no speed. Two tests that list the columns and the CSV header include `status`.
+
 ### ⏸️ A bot that keeps failing is paused for a cooldown (#1210)
 
 A bot that kept failing was asked again for every new request. Its requests went unanswered, its offers never
@@ -72,6 +73,7 @@ bot had failed many times in a row, so every new request repeated the wasted wai
 - **Settings:** both are in the "fetch-queue" category, with labels and help in en, es and fr.
   `tests/support.py` resets `_fetch_failures` between tests.
 - **Tests:** `tests/test_a_bot_that_keeps_failing_cools_down.py` (39 tests; 28/28 mutations caught).
+
 ### ⏱️ Users are told when the next slot is likely to free up (#1207)
 
 The commonest question in a busy channel is "when do I get a slot?", and nothing answered it: the CTCP SLOTS "next"
@@ -96,6 +98,7 @@ field is a literal `NOW` or `0`, and `-que` and `-stats` gave counts but no time
 - **The CTCP SLOTS line is unchanged byte for byte,** because other scripts parse it. A test pins it with every
   slot busy and with one free.
 - **Tests:** `tests/test_users_are_told_when_the_next_slot_frees.py` (33 tests; 34/34 mutations caught).
+
 ### 📋 A list request goes ahead of queued files (#1205)
 
 `@nick` sent the list through `handle_download_request` like any file. With every slot busy, the list joined the
