@@ -1039,6 +1039,13 @@ def build_stats_payload(parts=None):
     return payload
 
 
+def _security_seconds_left(user_key):
+    """How long a timed ignore or ban on this nick has to run, 0 for none -
+    what turns a Queue row's Ignore button into "Ignored ... Lift" (#1206)."""
+    import security
+    return security.ban_seconds_left(user_key)
+
+
 def build_queue_payload(user=None):
     """The Queue view's data.
 
@@ -1111,7 +1118,8 @@ def build_queue_payload(user=None):
         files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
         current_file, bytes_sent, size = _progress_fields(user_key)
         result = {"user": user_key, "status": status, "count": len(entries), "files": files,
-                  "current_file": current_file, "bytes_sent": bytes_sent, "size": size}
+                  "current_file": current_file, "bytes_sent": bytes_sent, "size": size,
+                  "ignored_seconds": _security_seconds_left(user_key)}
         if status == "packing":
             result["pack"] = _pack_fields(pack)
         return result
@@ -1125,7 +1133,15 @@ def build_queue_payload(user=None):
     # single-user branch above already got this right by checking
     # sending_users regardless of whether entries exist; this does the same.
     rows = []
-    for user_key in dict.fromkeys(list(queue.keys()) + list(sending_users) + ([packing_user] if packing_user else [])):
+    # In the order the dispatcher gives out free slots (#1206): the page shows
+    # who is next, and Move up/down on a row changes that.
+    try:
+        import dcc as _dcc
+        waiting_order = sorted(queue.keys(), key=_dcc.queue_waiting_since)
+    except Exception as err:
+        print(f"[WEBSERVER] The queue's order could not be read: {err}")
+        waiting_order = list(queue.keys())
+    for user_key in dict.fromkeys(waiting_order + list(sending_users) + ([packing_user] if packing_user else [])):
         # sending_users comes from active_transfers, whose rows are built by
         # dcc.py rather than keyed by it - an entry missing its "user" field
         # contributes "" to that set and used to reach the page as a blank row
@@ -1152,7 +1168,8 @@ def build_queue_payload(user=None):
         current_file, bytes_sent, size = _progress_fields(user_key)
         row = {"user": user_key, "preview": preview, "count": len(entries), "status": status,
                "files": files, "current_file": current_file,
-               "bytes_sent": bytes_sent, "size": size}
+               "bytes_sent": bytes_sent, "size": size,
+               "ignored_seconds": _security_seconds_left(user_key)}
         if status == "packing":
             row["pack"] = _pack_fields(pack)
         rows.append(row)
@@ -1178,6 +1195,82 @@ def build_pack_cancel_result():
     if cancelled is None:
         return 404, {"error": "Nothing is being packed."}
     return 200, {"cancelled": {"user": cancelled["user"], "name": cancelled["name"]}}
+
+
+def build_ignore_result(body):
+    """POST /api/ignore (#1206): ignore a nick for some minutes. 200 with
+    how long, 400 with the reason when security.ignore_user() refuses."""
+    import security
+    nick = str(body.get("nick") or "").strip()
+    ok, message = security.ignore_user(nick, body.get("minutes"))
+    if not ok:
+        return 400, {"error": message}
+    return 200, {"user": nick.lower(), "message": message,
+                 "seconds_left": security.ban_seconds_left(nick)}
+
+
+def build_unignore_result(body):
+    """POST /api/unignore (#1206): end a timed ignore or ban now. 404 when
+    the nick has none."""
+    import security
+    nick = str(body.get("nick") or "").strip()
+    ok, message = security.lift_ban(nick)
+    if not ok:
+        return 404, {"error": message}
+    return 200, {"user": nick.lower(), "message": message}
+
+
+def _queue_nick(body):
+    return str(body.get("nick") or "").strip()
+
+
+def build_queue_move_user_result(body):
+    """POST /api/queue/move-user (#1206): one place up or down the line for a
+    free slot. 200 with the new place, 400 with the reason."""
+    import commands
+    nick = _queue_nick(body)
+    ok, message = commands.move_waiting_user(nick, body.get("direction"))
+    if not ok:
+        return 400, {"error": message}
+    return 200, {"user": nick.lower(), "message": message}
+
+
+def build_queue_move_file_result(body):
+    """POST /api/queue/move-file (#1206): one place up or down inside the
+    nick's own queue. `position` is 1-based and `file` the name the page saw
+    there, so a queue that moved meanwhile is refused, not misread."""
+    import commands
+    nick = _queue_nick(body)
+    ok, message = commands.move_queued_file(nick, body.get("position"), body.get("direction"), body.get("file"))
+    if not ok:
+        return 400, {"error": message}
+    return 200, {"user": nick.lower(), "message": message}
+
+
+def build_queue_remove_file_result(body):
+    """POST /api/queue/remove-file (#1206): the one file out of the queue, with
+    the same notice to the nick as their own `@<bot>-remove <file>`."""
+    import commands
+    nick = _queue_nick(body)
+    ok, message = commands.remove_queued_file(nick, body.get("position"), body.get("file"))
+    if not ok:
+        return 400, {"error": message}
+    return 200, {"user": nick.lower(), "message": message}
+
+
+def build_queue_clear_result(body):
+    """POST /api/queue/clear (#1206): everything queued for the nick, as the
+    console's `clearqueue` does. 404 when nothing was queued."""
+    import commands
+    nick = _queue_nick(body)
+    if not nick or any(ch.isspace() for ch in nick):
+        return 400, {"error": "Give the nick."}
+    key = nick.lower()
+    count = len(getattr(config, "dcc_queue", {}).get(key) or [])
+    if not count:
+        return 404, {"error": f"{nick} has nothing queued."}
+    commands.handle_admin_clear_queue("dashboard", "", f"!clearqueue {nick}", authorised=True)
+    return 200, {"user": key, "removed": count, "message": f"Cleared {count} file(s) for {nick}."}
 
 
 def split_list_search_words(query):
@@ -4978,6 +5071,36 @@ if HAVE_FLASK:
         @app.route("/api/queue/pack/cancel", methods=["POST"])
         def api_queue_pack_cancel():
             status, result = build_pack_cancel_result()
+            return jsonify(result), status
+
+        @app.route("/api/queue/move-user", methods=["POST"])
+        def api_queue_move_user():
+            status, result = build_queue_move_user_result(json_object(request.get_json(silent=True)))
+            return jsonify(result), status
+
+        @app.route("/api/queue/move-file", methods=["POST"])
+        def api_queue_move_file():
+            status, result = build_queue_move_file_result(json_object(request.get_json(silent=True)))
+            return jsonify(result), status
+
+        @app.route("/api/queue/remove-file", methods=["POST"])
+        def api_queue_remove_file():
+            status, result = build_queue_remove_file_result(json_object(request.get_json(silent=True)))
+            return jsonify(result), status
+
+        @app.route("/api/queue/clear", methods=["POST"])
+        def api_queue_clear():
+            status, result = build_queue_clear_result(json_object(request.get_json(silent=True)))
+            return jsonify(result), status
+
+        @app.route("/api/ignore", methods=["POST"])
+        def api_ignore():
+            status, result = build_ignore_result(json_object(request.get_json(silent=True)))
+            return jsonify(result), status
+
+        @app.route("/api/unignore", methods=["POST"])
+        def api_unignore():
+            status, result = build_unignore_result(json_object(request.get_json(silent=True)))
             return jsonify(result), status
 
         @app.route("/api/stats/import/variables")

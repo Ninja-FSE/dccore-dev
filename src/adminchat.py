@@ -1570,9 +1570,9 @@ def _cmd_queue(session, args):
             return
         session.send(f"{target}: {len(rows)} file(s)"
                      f"{' (FROZEN)' if target in frozen else ''}")
-        for row in rows:
+        for place, row in enumerate(rows, start=1):
             name = row.get("file", "?") if isinstance(row, dict) else str(row)
-            session.send(f"  {name}")
+            session.send(f"  {place}. {name}")
         return
 
     if not queue:
@@ -1580,8 +1580,10 @@ def _cmd_queue(session, args):
         return
     total = sum(len(rows) for rows in queue.values())
     session.send(f"{total} file(s) queued for {len(queue)} user(s), in serving order:")
-    # The dispatcher's order, not alphabetical: the same walk dcc.py makes (#612).
-    for user_key in queue:
+    # The dispatcher's order, not alphabetical: the same walk dcc.py makes (#612),
+    # longest-waiting first - what queuemove changes (#1206).
+    import commands
+    for user_key in commands.queue_order():
         session.send(f"  {user_key:<20} {len(queue[user_key]):>4} file(s)"
                      f"{'  FROZEN' if user_key in frozen else ''}")
 
@@ -1703,6 +1705,50 @@ def _cmd_unban(session, args):
         session.nick, CONSOLE_SOURCE, f"!unban {pattern}", authorised=True))
 
 
+def _cmd_queuemove(session, args):
+    import commands
+    parts = args.split()
+    if len(parts) == 2:
+        ok, message = commands.move_waiting_user(parts[0], parts[1])
+    elif len(parts) == 3:
+        ok, message = commands.move_queued_file(parts[0], parts[1], parts[2])
+    else:
+        session.send("Usage: queuemove <nick> up|down   (a nick's place in line)")
+        session.send("       queuemove <nick> <number> up|down   (a file in its queue; numbers come from `queue <nick>`)")
+        return
+    session.send(message)
+
+
+def _cmd_queueremove(session, args):
+    import commands
+    parts = args.split()
+    if len(parts) != 2:
+        session.send("Usage: queueremove <nick> <number>   (numbers come from `queue <nick>`)")
+        return
+    ok, message = commands.remove_queued_file(parts[0], parts[1])
+    session.send(message)
+
+
+def _cmd_ignore(session, args):
+    import security
+    parts = args.split()
+    if len(parts) != 2:
+        session.send("Usage: ignore <nick> <minutes>   e.g. ignore someone 30")
+        return
+    ok, message = security.ignore_user(parts[0], parts[1])
+    session.send(message)
+
+
+def _cmd_unignore(session, args):
+    import security
+    nick = args.strip()
+    if not nick or " " in nick:
+        session.send("Usage: unignore <nick>")
+        return
+    ok, message = security.lift_ban(nick)
+    session.send(message)
+
+
 def _cmd_bans(session, args):
     import db
     patterns = db.load_hard_bans()
@@ -1716,8 +1762,10 @@ def _cmd_bans(session, args):
             session.send(f"  {pattern}")
     if timed:
         session.send(f"Timed ({len(timed)}):")
+        import security
         for user_key in sorted(timed):
-            session.send(f"  {user_key}")
+            left = security.ban_seconds_left(user_key)
+            session.send(f"  {user_key}  ({security.format_ban_duration(left)} left)")
 
 
 def _cmd_clearqueue(session, args):
@@ -2274,6 +2322,10 @@ COMMANDS = {
     "checkupdates": (_cmd_checkupdates, "turn the daily update check on/off, or report it", "checkupdates [on|off]"),
     "consolefeed": (_cmd_consolefeed, "turn the console/dccore.mrc feed on/off, or report it", "consolefeed [on|off]"),
     "ban":        (_cmd_ban,        "add a permanent wildcard ban",      "ban <pattern>"),
+    "queuemove":  (_cmd_queuemove,  "move a nick, or one of its files, up or down the queue", "queuemove <nick> [number] up|down"),
+    "queueremove": (_cmd_queueremove, "remove one queued file (the nick is told)", "queueremove <nick> <number>"),
+    "ignore":     (_cmd_ignore,     "ignore a nick for some minutes (drops its requests)", "ignore <nick> <minutes>"),
+    "unignore":   (_cmd_unignore,   "end a timed ignore or ban now",     "unignore <nick>"),
     "unban":      (_cmd_unban,      "remove a permanent wildcard ban",   "unban <pattern>"),
     "clearqueue": (_cmd_clearqueue, "force-clear another user's queue",  "clearqueue <nick>"),
     "rehash":     (_cmd_rehash,     "reload modules in place",           "rehash"),

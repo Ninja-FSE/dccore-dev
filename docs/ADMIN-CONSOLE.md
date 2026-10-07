@@ -228,7 +228,7 @@ prefix.
 | Command | Effect |
 |---|---|
 | `status` | everything at a glance — slots, queue, bans, list, uptime |
-| `queue [nick]` | queued files, all users (in the order they are served) or one |
+| `queue [nick]` | queued files, all users (in the order they are served) or one nick's files, numbered |
 | `slots` | what is sending right now, and how far along |
 | `packing` | the folder pack that is running: for whom, which folder (its name, never its path), how long, and the archive's size so far against the folder's (#1202) |
 | `packcancel` | stop the folder pack that is running: `rar` is terminated, the partial archive is deleted, the user is told it was cancelled (no failure is counted against the request), and the next waiting pack starts. "Nothing is being packed." when none runs (#1202) |
@@ -244,6 +244,11 @@ prefix.
 |---|---|
 | `ban <pattern>` | add a permanent wildcard ban |
 | `unban <pattern>` | remove one |
+| `queuemove <nick> up\|down` | move a nick one place up or down the line for a free slot (#1206); `queue` lists the nicks in that order. The order is kept in memory only: a restart puts it back to first-come |
+| `queuemove <nick> <number> up\|down` | move one of a nick's queued files up or down in its own queue — the one at the top is sent first. A file being sent or packed stays put. The number is the one `queue <nick>` shows |
+| `queueremove <nick> <number>` | take one file out of a nick's queue, as if they had typed `@<bot>-remove <file>`: same notice to them, `clearqueue` removes the lot |
+| `ignore <nick> <minutes>` | drop one nick's requests for a while, 1 to 10080 minutes (#1206). It is a timed ban: kept across a restart, ends by itself, listed by `bans` with the time left. Its queued files stay; `clearqueue` removes them |
+| `unignore <nick>` | end a timed ignore - or a flood ban - now |
 | `clearqueue <nick>` | force-clear another user's queue |
 | `rehash` | reload modules in place |
 | `update` | rebuild the MasterList |
@@ -702,7 +707,7 @@ Chat request** to auto-accept so it never asks again.
 | the side panel | **Sending n/m**: each running transfer with its size, percentage and speed; **Queue n**: who is waiting, in order, with `frozen m:ss` on a queue that is counting down; **Today**: files and bytes sent, the speed record; and what this window has seen since it opened |
 | the title bar | `MusicBot on Undernet · slots 2/3 · queue 14 · today 38 files / 12.4GB · 1.5MB/s`, updated with every status burst |
 | the editbox | anything you type is a console command - `status`, `queue helen`, `clearqueue ivan`, `ban *!*@bad.host` - and the reply comes back as `[CONSOLE]` lines, or into a second `@DCCore-console` window if you prefer |
-| right-click | **Cancel the running pack** at the very top while one runs, the common commands, **Script Settings** and **Console command** on top, then the groups **Info** (with **Download queues...**), **Lists**, **Library** (duplicate filenames, rebuild the list, **Read audio info**), **User control**, **Control** (update check, console feed, reload, **Stop the bot**), **Connection** and **Window** (DCCore Chat, Downloads window, panel, font); on a panel line, that user's queue or clearing it; in any channel's nick list, **DCCore → Queue of / Clear the queue of** that nick |
+| right-click | **Cancel the running pack** at the very top while one runs, the common commands, **Script Settings** and **Console command** on top, then the groups **Info** (with **Download queues...**), **Lists**, **Library** (duplicate filenames, rebuild the list, **Read audio info**), **User control**, **Control** (update check, console feed, reload, **Stop the bot**), **Connection** and **Window** (DCCore Chat, Downloads window, panel, font); on a panel line, that user's queue, clearing it, ignoring them for a while, clearing and ignoring, or moving them earlier or later in line; in any channel's nick list, **DCCore → Queue of / Clear the queue of / Ignore for... / Clear the queue of and ignore for... / Stop ignoring** that nick |
 | the window's button | on the switchbar or treebar, like any channel's: the **message** colour when there is new activity - a request, a queue position, a send, a search - and the **highlight** colour (the one mIRC uses when somebody says your nick) on a failed transfer or dropped lines, so a failure stands out. The `[STATUS]` line, joins, parts and bans do not light it, as they would not in a channel. mIRC 7 or later |
 | a beep | on a failed transfer, if you leave that on |
 
