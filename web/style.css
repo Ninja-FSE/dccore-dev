@@ -1243,6 +1243,16 @@ html, body {
   gap: 6px 14px;
 }
 
+.served-list-channel-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.served-list-channel-mode {
+  font-size: 11.5px;
+}
+
 .served-list-channel {
   display: flex;
   align-items: center;

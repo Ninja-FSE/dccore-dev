@@ -4300,6 +4300,7 @@ def build_lists_payload():
             "name": entry.name,
             "primary": entry.primary,
             "channels": list(entry.channels),
+            "modes": dict(getattr(entry, "modes", None) or {}),
             "folders": [{"name": f.name, "path": f.path} for f in entry.folders],
         })
     return {
@@ -4352,6 +4353,12 @@ def apply_list_changes(payload):
             raw_channels = []
         if not isinstance(raw_channels, list):
             return 400, {"error": f"{name or 'A list'}: 'channels' must be a list."}
+        raw_modes = row.get("modes")
+        if raw_modes is None:
+            raw_modes = {}
+        if not isinstance(raw_modes, dict):
+            return 400, {"error": f"{name or 'A list'}: 'modes' must be an object "
+                                  f"of channel -> mode."}
         raw_folders = row.get("folders")
         if raw_folders is None:
             raw_folders = []
@@ -4378,7 +4385,10 @@ def apply_list_changes(payload):
         entries.append(library.ServedList(
             name, bool(row.get("primary")),
             [str(c).strip() for c in raw_channels if str(c).strip()],
-            folders))
+            folders,
+            {str(c).strip().lower(): str(m or "").strip().lower()
+             for c, m in raw_modes.items()
+             if str(m or "").strip().lower() not in (library.NORMAL, "")}))
 
     if not entries:
         import os as os_mod

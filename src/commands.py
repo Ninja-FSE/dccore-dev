@@ -63,6 +63,14 @@ def is_admin(user, host=None):
     return adminchat.is_admin_host(host)
 
 
+def _silent_in(user, target):
+    """True when this reply is not to be sent: the request came in a channel
+    that is Request only (#1204). The channel's own commands still run; only
+    the notice back to the user is dropped."""
+    import announce
+    return not announce.notices_allowed(user, target)
+
+
 def handle_help_request(s, user, target):
     """Answer "@<nick>-help" with how to actually use this bot.
 
@@ -86,7 +94,7 @@ def handle_help_request(s, user, target):
     would be handing out the same instruction the album list stopped shipping.
     """
     oserve = sys.modules.get('oserve')
-    if not oserve:
+    if not oserve or _silent_in(user, target):
         return
 
     import list as list_mod
@@ -145,6 +153,8 @@ def handle_queue_check(s, user, target):
     handle_help_request()'s own comment for why a per-user reply does not
     belong in the lane channel adverts exist for.
     """
+    if _silent_in(user, target):
+        return
     user_key = user.lower()
     oserve = sys.modules.get('oserve')
     import list
@@ -270,7 +280,7 @@ def handle_queue_remove_file(s, user, target, filename):
         msg = f"NOTICE {user} :Removed \"{shown}\" from your queue. \r\n"
     else:
         msg = f"NOTICE {user} :\"{shown}\" is not in your queue. \r\n"
-    if oserve:
+    if oserve and not _silent_in(user, target):
         oserve.queue_message(user, msg)
     if removed_archives:
         print(f"[COMMANDS] Removed {len(removed_archives)} orphaned temp archive(s) with {user}'s file.")
@@ -301,7 +311,7 @@ def handle_queue_remove(s, user, target):
             del config.frozen_queues[user_key]
 
     msg = f"NOTICE {user} :Your queue has been completely removed. \r\n"
-    if oserve:
+    if oserve and not _silent_in(user, target):
         oserve.queue_message(user, msg)
     if removed_archives:
         print(f"[COMMANDS] Removed {len(removed_archives)} orphaned temp archive(s) with {user}'s queue.")
@@ -2993,7 +3003,7 @@ def _clamp_name(name, limit=None):
 def handle_stats_request(s, user, target):
     """Answer "@<nick>-stats" with what this bot has and what it has sent."""
     oserve = sys.modules.get('oserve')
-    if not oserve:
+    if not oserve or _silent_in(user, target):
         return
 
     import list as list_mod
@@ -3088,7 +3098,7 @@ def _format_uptime(seconds):
 def handle_top_request(s, user, target):
     """Answer "@<nick>-top" with the most-requested files and albums."""
     oserve = sys.modules.get('oserve')
-    if not oserve:
+    if not oserve or _silent_in(user, target):
         return
 
     import announce

@@ -1854,7 +1854,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     except Exception as packer_err:
                         print("[LINJAR RAR ERROR] Packing failed for " + str(completed_user) + ": " + str(packer_err))
                         try:
-                            announce_mod.send_pack_error_notice(sock, completed_user)
+                            announce_mod.send_pack_error_notice(sock, completed_user, next_file.get('channel') if isinstance(next_file, dict) else None)
                         except Exception:
                             pass
                         release_queue_entry(completed_user, next_file, delivered=False,
@@ -3006,7 +3006,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             if routed is None:
                 print(f"[DCC] {user}'s private request names a folder label that "
                       f"more than one list serves; asked them to use the channel.")
-                announce.send_dcc_error(user, "ambiguous_list")
+                announce.send_dcc_error(user, "ambiguous_list", target_chan)
                 return
             if routed != wanted_list:
                 print(f"[DCC] {user}'s private request is a {routed!r} row; "
@@ -3068,7 +3068,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             import announce as announce_mod
 
             if not getattr(config, 'RAR_ENABLED', True):
-                announce_mod.send_dcc_error(user, "rar_disabled")
+                announce_mod.send_dcc_error(user, "rar_disabled", target_chan)
                 return
 
             # FILE_DIRECTORY is deliberately not in settings_file.REQUIRED any
@@ -3080,7 +3080,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # None base and fall through to the bare except at the bottom of
             # this function, which told the requester nothing at all.
             if not library.folders(wanted_list):
-                announce_mod.send_dcc_error(user, "not_configured")
+                announce_mod.send_dcc_error(user, "not_configured", target_chan)
                 return
 
             raw_win_path = requested_file[5:].strip()
@@ -3097,7 +3097,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # in the containment check below before it could be refused (#578).
             if names_a_remote_or_absolute_path(win_path, windows=False):
                 print(f"[SECURITY] Refused {user}'s pack request: {win_path!r} names a remote location.")
-                announce_mod.send_pack_error_notice(irc_sock, user)
+                announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
                 return
 
             # This used to be a third, differently-shaped copy of the same
@@ -3137,7 +3137,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # configured folder at all, which is not safe by definition.
             if source_folder is None or not is_safe_path(source_folder.path, true_source_dir):
                 print(f"[SECURITY] Blocked a traversal attempt from {user}: {raw_win_path!r} -> {true_source_dir}")
-                announce_mod.send_pack_error_notice(irc_sock, user)
+                announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
                 announce_mod.send_debug(
                     f"Path traversal denied for {config.C_BOLD}{user}{config.C_RESET}: request resolved outside the music root.",
                     category="HARDBAN")
@@ -3150,7 +3150,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             relative_to_root = os.path.relpath(true_source_dir, source_folder.path)
             if os.sep not in relative_to_root:
                 print(f"[SECURITY] Blocked an attempt to pack the root folder from {user}: {relative_to_root}")
-                announce_mod.send_pack_error_notice(irc_sock, user)
+                announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
                 announce_mod.send_debug(f"Pack denied for {user}: {config.C_BOLD}{relative_to_root}{config.C_RESET} is an artist root folder.", category="PART")
                 return
             
@@ -3192,7 +3192,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 if not has_packable:
                     print(f"[PACK] Refused {relative_to_root!r} for {user}: "
                           f"it holds nothing in RAR_EXTENSIONS.")
-                    announce_mod.send_pack_error_notice(irc_sock, user)
+                    announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
                     announce_mod.send_debug(
                         f"Pack denied for {user}: "
                         f"{config.C_BOLD}{relative_to_root}{config.C_RESET} "
@@ -3214,7 +3214,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             if over:
                 print(f"[PACK] Refused {relative_to_root!r} for {user}: over "
                       f"{size_cap:,} bytes (measured at least {measured:,}).")
-                announce_mod.send_pack_error_notice(irc_sock, user)
+                announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
                 announce_mod.send_debug(
                     f"Pack denied for {user}: "
                     f"{config.C_BOLD}{relative_to_root}{config.C_RESET} is "
@@ -3229,18 +3229,18 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     print(f"[DCC QUEUE] {user} asked again for {os.path.basename(true_source_dir.rstrip('/'))!r}: "
                           f"already queued at #{already_at}, not added again.")
                     announce_mod.send_dcc_already_queued_notice(user, os.path.basename(true_source_dir.rstrip("/")),
-                                                                already_at)
+                                                                already_at, target_chan)
                     return
 
                 total_global_queued = get_total_queued_count()
                 user_queued_count = len(config.dcc_queue.get(user_key, []))
 
                 if total_global_queued >= config.MAX_GLOBAL_QUEUE:
-                    announce_mod.send_dcc_error(user, "global_full")
+                    announce_mod.send_dcc_error(user, "global_full", target_chan)
                     return
 
                 if user_queued_count >= config.MAX_USER_QUEUE:
-                    announce_mod.send_dcc_error(user, "user_full")
+                    announce_mod.send_dcc_error(user, "user_full", target_chan)
                     return
 
                 start_waiting(user_key)
@@ -3318,7 +3318,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # one. Refused on the text, before any file system call (#578).
         if names_a_remote_or_absolute_path(requested_file):
             print(f"[SECURITY] Refused {user}'s request: {requested_file!r} names a location, not a file in the library.")
-            announce.send_dcc_error(user, "invalid_path")
+            announce.send_dcc_error(user, "invalid_path", target_chan)
             return
         requested_file = requested_file.lstrip("/")
 
@@ -3363,7 +3363,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # os.path.abspath(None) raise into the bare except below, which
             # left the requester with no response of any kind.
             if not library.folders(wanted_list):
-                announce.send_dcc_error(user, "not_configured")
+                announce.send_dcc_error(user, "not_configured", target_chan)
                 return
             # Every configured folder, in the operator's order (#164). The
             # first is still where a bare filename is guessed to be, which is
@@ -3418,7 +3418,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # at a time and a few misses a minute (#969).
             miss_key = (str(wanted_list), str(requested_file).lower().strip())
             if _lookup_missed_recently(miss_key):
-                announce.send_dcc_error(user, "file_not_found")
+                announce.send_dcc_error(user, "file_not_found", target_chan)
                 return
             # This nick's share (#969): see LOOKUP_NICK_MISSES.
             nick_key = str(user).strip().lower()
@@ -3426,7 +3426,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 print(f"[DCC-LOOKUP] {user}'s request for {requested_file!r} refused: their last "
                       f"{LOOKUP_NICK_MISSES} lookups found nothing, within "
                       f"{LOOKUP_NICK_MISS_WINDOW_SECONDS:.0f}s.")
-                announce.send_dcc_error(user, "busy")
+                announce.send_dcc_error(user, "busy", target_chan)
                 return
             # WAITS, briefly, rather than refusing at once (#886). Nine rows
             # pasted together arrive within a second or two of each other;
@@ -3437,14 +3437,14 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             if not _take_a_scan_turn(nick_key, LOOKUP_SCAN_WAIT_SECONDS):
                 print(f"[DCC-LOOKUP] {user}'s request for {requested_file!r} refused: their "
                       f"previous lookup was still running after {LOOKUP_SCAN_WAIT_SECONDS:.0f}s.")
-                announce.send_dcc_error(user, "busy")
+                announce.send_dcc_error(user, "busy", target_chan)
                 return
             # What their previous lookup just learned - a sibling's folder,
             # or that this name is not there - answers this one without a
             # scan of its own.
             if _lookup_missed_recently(miss_key):
                 _end_scan_turn(nick_key)
-                announce.send_dcc_error(user, "file_not_found")
+                announce.send_dcc_error(user, "file_not_found", target_chan)
                 return
             recalled = _recall(wanted_list, requested_file, requested_size_hint, search_roots)
             if recalled is not None:
@@ -3455,7 +3455,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 print(f"[DCC-LOOKUP] {user}'s request for {requested_file!r} refused: "
                       f"{MAX_CONCURRENT_LIBRARY_SCANS} library scans were still running after "
                       f"{LOOKUP_SCAN_WAIT_SECONDS:.0f}s.")
-                announce.send_dcc_error(user, "busy")
+                announce.send_dcc_error(user, "busy", target_chan)
                 return
             try:
                 # EVERY list, not just the master one. This is the lookup that
@@ -3643,11 +3643,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # not how any one of them is tested. A path outside all of them is
         # still refused exactly as before.
         if not any(is_safe_path(root, full_path) for root in search_roots):
-            announce.send_dcc_error(user, "invalid_path")
+            announce.send_dcc_error(user, "invalid_path", target_chan)
             return
 
         if not os.path.exists(platform_compat.long_path(full_path)) or os.path.isdir(platform_compat.long_path(full_path)):
-            announce.send_dcc_error(user, "file_not_found")
+            announce.send_dcc_error(user, "file_not_found", target_chan)
             return
 
         file_name = os.path.basename(full_path)
@@ -3666,22 +3666,22 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             already_at = queued_position_of(user_key, full_path)
             if already_at is not None:
                 print(f"[DCC QUEUE] {user} asked again for {file_name!r}: already queued at #{already_at}, not added again.")
-                announce.send_dcc_already_queued_notice(user, file_name, already_at)
+                announce.send_dcc_already_queued_notice(user, file_name, already_at, target_chan)
                 return
             if is_being_sent_to(user_key, full_path):
                 print(f"[DCC QUEUE] {user} asked again for {file_name!r}: it is being sent to them now, not added again.")
-                announce.send_dcc_already_queued_notice(user, file_name, None)
+                announce.send_dcc_already_queued_notice(user, file_name, None, target_chan)
                 return
 
             total_global_queued = get_total_queued_count()
             user_queued_count = len(config.dcc_queue.get(user_key, []))
 
             if total_global_queued >= config.MAX_GLOBAL_QUEUE:
-                announce.send_dcc_error(user, "global_full")
+                announce.send_dcc_error(user, "global_full", target_chan)
                 return
 
             if user_queued_count >= config.MAX_USER_QUEUE:
-                announce.send_dcc_error(user, "user_full")
+                announce.send_dcc_error(user, "user_full", target_chan)
                 return
 
             # Check whether this nick ALREADY has a send running, in active_transfers
