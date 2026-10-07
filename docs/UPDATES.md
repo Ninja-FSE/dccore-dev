@@ -4,6 +4,34 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📁 Search replies can name each result's folder (#1228)
+
+An `@find` result named the file but not the folder it is in. With track-number-and-title file names, where the
+album lives only in the folder, a popular song's hits could not be told apart: a studio, a live and a tribute
+version read alike, and the size did not say which was which. The folder could not go on the result line, which
+people (and clients such as AutoQ) copy as a request.
+
+- **`SEARCH_SHOW_FOLDER`,** default **off**: off sends today's reply byte for byte. Only a real `True` turns it on.
+- **On:** the results are cut to `MAX_SEARCH_RESULTS` first, which still counts files only. They are then grouped
+  and sorted by folder (`list.group_search_entries_by_folder()`, stable, case-insensitive), and each distinct folder
+  gets **one** `From: <folder>` line before its first file, through `announce.fit_irc_line()`. Results with no
+  folder come first, without a From line. The result lines and the header are unchanged. Private replies only, as
+  the results already are.
+- **The folder** is the list's own heading, from `find_matching_entries()` (its `D:\MEDIA\...` prefix included,
+  never a real path), without the heading's trailing `\`.
+  - **The cap:** past `SEARCH_FOLDER_MAX_CHARS` (default 80) it is cut from the left and keeps its end:
+    `From: ...allica\1988 - ...And Justice for All`. 80 fits a common 120-column window beside the timestamp
+    and nick. A cap below `SEARCH_FOLDER_MIN_CHARS` (10) is raised to it, and one that is not a number is 80.
+  - **The line always begins `From: `,** so no theme or accent can make it start with `!`. The folder is coloured
+    with the theme's accent role after the label, and under `THEME=plain` there is no control code at all.
+- **Settings:** next to `MAX_SEARCH_RESULTS` in the sharing category, with help and labels in en, es and fr, and
+  the regenerated `conf/settings.conf.sample`.
+- **Tests:** `tests/test_a_search_reply_can_name_each_results_folder.py` (26 tests; 22/22 mutations caught).
+  - **Off:** compared byte for byte with a verbatim copy of the old reply code, for 5 searches × 3 caps, the
+    `without_audio_info` fallback, and the setting given as the string `"false"`.
+  - **On:** the exact reply; one From line per distinct folder; sorting; never `!` under any theme; files counted
+    alone; no reply on zero matches; never a real path; the left cut at and one past the cap; the IRC byte budget.
+
 ### 📦 Download selected in a RAR list fetches folders, many at a time (#1233)
 
 A user ticked folders in another bot's RAR list and pressed Download selected. The folder never arrived, and the other
