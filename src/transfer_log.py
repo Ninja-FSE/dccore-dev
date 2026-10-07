@@ -204,6 +204,11 @@ _INSERT_WITH_STATUS = ("INSERT INTO transfers (direction, nick, kind, ended_at, 
                        " size, bytes, seconds, speed, waited, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
 
 
+# How far before outcomes_began a row may be timed and still be one whose time
+# was taken just before the open that wrote the stamp (#1203).
+_STAMP_RACE_SECONDS = 2
+
+
 def _record(row):
     """Write one row: the columns in _INSERT's order, and a status after them
     for a transfer that did not complete."""
@@ -215,6 +220,19 @@ def _record(row):
         with runtime.transfer_log_lock:
             conn = _connect(path, WRITE_TIMEOUT, repair=True)
             try:
+                # NOT BEFORE THE RECORD OF OUTCOMES BEGAN (#1203). The row's
+                # time was taken by the caller, before this open - and the
+                # first open of an older file is what stamps outcomes_began,
+                # with its own, later clock. Across a second boundary the
+                # first failure written after an upgrade fell before the stamp
+                # and out of every success rate (seen on Windows CI, where
+                # that first open is slow). Only such a row - timed a moment
+                # before this very open - is lifted to the stamp, by a second
+                # or two at most; a row that really is older (an import, a
+                # test's backdated row) keeps its time.
+                began = conn.execute("SELECT MIN(at) FROM outcomes_began").fetchone()[0]
+                if began is not None and began - _STAMP_RACE_SECONDS <= row[3] < began:
+                    row = row[:3] + (int(began),) + row[4:]
                 try:
                     with conn:
                         conn.execute(insert, row)

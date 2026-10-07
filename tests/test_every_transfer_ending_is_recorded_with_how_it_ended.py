@@ -21,6 +21,7 @@ no listener is bound and nothing is dialled.
 
 import contextlib
 import io
+import itertools
 import json
 import os
 import shutil
@@ -235,6 +236,16 @@ class AnOldRecord(DCCoreTestCase):
         found = transfer_log.outcomes()
         self.assertEqual(found["rows"], {("sent", "file"): {FAILED: 1}})
         self.assertEqual(found["since"], transfer_log.outcomes_began())
+
+    def test_the_first_row_counts_when_the_upgrade_ends_in_the_next_second(self):
+        """The row's time is taken before the open that stamps outcomes_began;
+        a second ticking over in between used to leave that first failure out
+        of the rate. Forced here instead of hoping for a slow disk."""
+        start = int(time.time())
+        clock = itertools.chain([start + 0.9], itertools.repeat(start + 1.1))
+        with mock.patch.object(transfer_log.time, "time", side_effect=lambda: next(clock)):
+            self.assertTrue(transfer_log.record_unfinished(transfer_log.SENT, FAILED, "file", 100, 7))
+        self.assertEqual(transfer_log.outcomes()["rows"], {("sent", "file"): {FAILED: 1}})
 
     def test_two_connections_opening_it_do_not_trip_over_each_other(self):
         first = transfer_log._open(config.TRANSFER_LOG_FILE, 2)

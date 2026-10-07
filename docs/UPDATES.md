@@ -15,6 +15,9 @@ are broken".
     gains it on first open, and every existing row reads as completed.
   - A new `outcomes_began` table records when endings started being recorded. Success figures count only from
     then, since older files hold completed rows with no failures beside them.
+  - A row is never timed before that stamp: its time is taken before the open that may write the stamp, so
+    `_record()` lifts an earlier one to the stamp. Otherwise the first failure after an upgrade could fall
+    out of every rate, which happened on Windows CI.
   - New `record_unfinished()` and `outcomes()`. Every figure that existed before (totals, speeds, most sent, nick
     tables) counts completed rows only.
   - Export CSV gains `status` as its last column, and Forget removes failed rows too.
