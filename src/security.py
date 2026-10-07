@@ -1,4 +1,5 @@
 # security.py - Flood protection and ban enforcement
+import re
 import threading
 import time
 import os
@@ -550,6 +551,76 @@ def format_ban_duration(seconds):
         whole = int(hours)
         return f"{whole} hour" + ("" if whole == 1 else "s")
     return f"{hours:.1f} hours"
+
+
+# A TIMED IGNORE (#1206) is a timed ban the operator sets by hand: the same
+# entry in config.banned_users and the same bans.txt, so check_user_status()
+# already drops the nick's requests without a word, the sweep already expires
+# it, a restart already keeps it (the END time is what is stored), and `bans`
+# already lists it. Nothing new is stored and nothing new is checked.
+IGNORE_MAX_MINUTES = 7 * 24 * 60
+_IGNORE_NICK_RE = re.compile(r"^[A-Za-z\[\]\\`_^{|}][A-Za-z0-9\[\]\\`_^{|}-]{0,49}$")
+
+
+def ignore_user(nick, minutes):
+    """Ignore `nick` for `minutes`. Returns (ok, message).
+
+    Refused: a word that is not a nick (a wildcard is a permanent `ban`), the
+    bot's own nick, and a length outside 1..IGNORE_MAX_MINUTES. An ignore
+    already running is replaced, shorter or longer: the operator's latest
+    word is the one that counts. The nick's pending replies are dropped, as a
+    flood ban drops them; its queued files are left alone (Clear user does
+    that).
+    """
+    import time
+    import defaults as config
+    import db
+    import runtime
+
+    nick = str(nick or "").strip()
+    if not _IGNORE_NICK_RE.match(nick):
+        return False, f"'{nick}' is not a nick. For a pattern, use ban."
+    if nick.lower() == str(getattr(config, "NICKNAME", "") or "").strip().lower():
+        return False, "That is the bot's own nick."
+    try:
+        minutes = int(str(minutes).strip())
+    except (TypeError, ValueError):
+        return False, "The length is a whole number of minutes."
+    if minutes < 1 or minutes > IGNORE_MAX_MINUTES:
+        return False, f"The length is 1 to {IGNORE_MAX_MINUTES} minutes."
+
+    key = nick.lower()
+    config.banned_users[key] = time.time() + minutes * 60
+    _ban_notified.discard(key)
+    with runtime.send_queue_lock:
+        config.send_queue.pop(key, None)
+    db.save_bans_to_file()
+    return True, f"Ignoring {nick} for {format_ban_duration(minutes * 60)}."
+
+
+def lift_ban(nick):
+    """End a timed ban or ignore on `nick` now. Returns (ok, message)."""
+    import defaults as config
+    import db
+
+    key = str(nick or "").strip().lower()
+    if key not in config.banned_users:
+        return False, f"{str(nick or '').strip() or 'That nick'} is not ignored or banned for a time."
+    del config.banned_users[key]
+    _ban_notified.discard(key)
+    db.save_bans_to_file()
+    return True, f"{key} is no longer ignored."
+
+
+def ban_seconds_left(nick):
+    """Seconds of a timed ban or ignore still to run on `nick`, or 0."""
+    import time
+    import defaults as config
+
+    until = config.banned_users.get(str(nick or "").strip().lower())
+    if until is None:
+        return 0
+    return max(0, int(_ban_expiry(until) - time.time()))
 
 
 def is_flooding(user):

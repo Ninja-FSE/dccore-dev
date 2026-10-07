@@ -90,7 +90,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.15 }
+alias dccore.ver { return 1.16 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1507,6 +1507,24 @@ alias dccore.packcancel {
 alias dccore.confirm {
   if ($input($2-,yq,DCCore)) { dccore.send $1 }
 }
+; Ignore a nick for some minutes (#1206). The bot drops its requests until the
+; time is up; Cancel or something that is not a whole number sends nothing.
+; No commas in the prompt text: they would end the $input argument.
+alias dccore.minutes {
+  var %v = $input(Ignore $1 for how many minutes? 1 to 10080. Its requests are dropped until then.,eo,DCCore,30)
+  if (%v isnum 1-10080) && (. !isin %v) { return %v }
+  if (%v != $null) { dccore.sys Ignore: %v is not a whole number of minutes from 1 to 10080. }
+}
+alias dccore.ignorefor {
+  var %m = $dccore.minutes($1)
+  if (%m) { dccore.send ignore $1 %m }
+}
+; Drop what it has queued and what it asks for next: ignore first, so its
+; pending replies go too, then clear.
+alias dccore.clearignore {
+  var %m = $dccore.minutes($1)
+  if (%m) { dccore.send ignore $1 %m | dccore.send clearqueue $1 }
+}
 alias dccore.askfont {
   var %v = $input(Font size (6 or more),eo,DCCore)
   if (%v isnum) { dccore font %v }
@@ -1540,6 +1558,10 @@ menu @DCCore {
   .Ban...:dccore.ask ban Ban pattern (for example *!*@host.example)
   .Unban...:dccore.ask unban Pattern to remove
   .Clear a queue...:dccore.ask clearqueue Clear the queue of which nick
+  .Ignore a nick...:dccore.ask ignore Which nick and for how many minutes - for example someone 30
+  .Stop ignoring a nick...:dccore.ask unignore Stop ignoring which nick
+  .Move in the queue...:dccore.ask queuemove Nick then up or down - or nick then file number then up or down
+  .Remove one queued file...:dccore.ask queueremove Nick then the file number from Queue of the nick
   Control
   .Check for a new version:dccore.send checkversion
   .Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
@@ -1550,6 +1572,10 @@ menu @DCCore {
   -
   $iif($dccore.selq,Queue of $dccore.selq):dccore.send queue $dccore.selq
   $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
+  $iif($dccore.selq,Ignore $dccore.selq for...):dccore.ignorefor $dccore.selq
+  $iif($dccore.selq,Clear the queue of $dccore.selq and ignore for...):dccore.clearignore $dccore.selq
+  $iif($dccore.selq,Move $dccore.selq earlier in line):dccore.send queuemove $dccore.selq up
+  $iif($dccore.selq,Move $dccore.selq later in line):dccore.send queuemove $dccore.selq down
   $iif($dccore.sels,Queue of $dccore.sels):dccore.send queue $dccore.sels
   -
   Connection
@@ -1572,6 +1598,9 @@ menu nicklist {
   DCCore
   .Queue of $1:dccore.send queue $1
   .Clear the queue of $1:dccore.send clearqueue $1
+  .Ignore $1 for...:dccore.ignorefor $1
+  .Clear the queue of $1 and ignore for...:dccore.clearignore $1
+  .Stop ignoring $1:dccore.send unignore $1
 }
 
 menu status,channel {
