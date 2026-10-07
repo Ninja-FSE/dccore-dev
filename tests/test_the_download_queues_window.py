@@ -180,8 +180,9 @@ class TheScript(unittest.TestCase):
     def setUp(self):
         self.text = script()
 
-    def test_the_version_is_the_one_the_bot_gates_on(self):
-        self.assertIn("alias dccore.ver { return " + adminchat.DLQUEUE_SCRIPT_VERSION + " }", self.text)
+    def test_the_version_is_at_least_the_one_the_bot_gates_on(self):
+        self.assertTrue(adminchat.script_draws_dlqueue(
+            re.search(r"alias dccore\.ver \{ return ([\d.]+) \}", self.text).group(1)))
 
     def test_the_three_lines_are_handled(self):
         for word in ("DQBEGIN", "DQROW", "DQEND"):

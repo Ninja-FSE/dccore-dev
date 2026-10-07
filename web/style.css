@@ -2946,3 +2946,19 @@ mark.filter-hit {
 .data-table th[aria-sort="descending"] .sort-btn::after {
   content: " \25BC";
 }
+
+/* #1206: the operator's queue controls sit small beside what they act on. */
+.queue-file-controls {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.queue-actions {
+  white-space: nowrap;
+}
+
+.queue-actions .btn + .btn {
+  margin-left: 4px;
+}

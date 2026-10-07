@@ -1299,7 +1299,7 @@
       })
       .catch(function (err) {
         markConnection(false);
-        el.queueBody.innerHTML = emptyRow(4, "Could not load the queue: " + err.message);
+        el.queueBody.innerHTML = emptyRow(5, "Could not load the queue: " + err.message);
       });
   }
 
@@ -1344,10 +1344,78 @@
   if (el.queueBody) {
     el.queueBody.addEventListener("click", function (evt) {
       var target = evt.target;
-      if (!target || !target.classList || !target.classList.contains("pack-cancel-btn")) { return; }
+      if (!target || !target.classList) { return; }
+      if (target.classList.contains("ignore-btn")) {
+        var nick = target.getAttribute("data-user");
+        var answer = window.prompt(t("queue.ignorePrompt").replace("{user}", nick), "30");
+        if (answer === null) { return; }
+        postJson("/api/ignore", { nick: nick, minutes: answer.trim() }).then(function (res) {
+          if (!res.ok) { window.alert(t("queue.ignoreFailed").replace("{error}", (res.data && res.data.error) || res.status)); }
+          loadQueue();
+        });
+        return;
+      }
+      if (target.classList.contains("qmove-user-btn")) {
+        queueControl("/api/queue/move-user", { nick: target.getAttribute("data-user"), direction: target.getAttribute("data-dir") });
+        return;
+      }
+      if (target.classList.contains("qmove-file-btn")) {
+        queueControl("/api/queue/move-file", {
+          nick: target.getAttribute("data-user"), position: target.getAttribute("data-pos"),
+          file: target.getAttribute("data-file"), direction: target.getAttribute("data-dir")
+        });
+        return;
+      }
+      if (target.classList.contains("qremove-btn")) {
+        queueControl("/api/queue/remove-file", {
+          nick: target.getAttribute("data-user"), position: target.getAttribute("data-pos"),
+          file: target.getAttribute("data-file")
+        });
+        return;
+      }
+      if (target.classList.contains("qclear-btn")) {
+        var who = target.getAttribute("data-user");
+        var total = target.getAttribute("data-count");
+        if (!window.confirm(t("queue.clearConfirm").replace("{user}", who).replace("{count}", total))) { return; }
+        queueControl("/api/queue/clear", { nick: who });
+        return;
+      }
+      if (target.classList.contains("lift-btn")) {
+        target.disabled = true;
+        postJson("/api/unignore", { nick: target.getAttribute("data-user") }).then(function () { loadQueue(); });
+        return;
+      }
+      if (!target.classList.contains("pack-cancel-btn")) { return; }
       target.disabled = true;
       postJson("/api/queue/pack/cancel", {}).then(function () { loadQueue(); });
     });
+  }
+
+  // The operator's queue controls (#1206). Each posts one change and draws
+  // the queue again; a refusal (the file is being sent, the queue moved since
+  // the page was drawn) is said in words rather than ignored.
+  function queueControl(url, body) {
+    postJson(url, body).then(function (res) {
+      if (!res.ok) { window.alert(t("queue.controlFailed").replace("{error}", (res.data && res.data.error) || res.status)); }
+      loadQueue();
+    });
+  }
+
+  function queueButton(cls, label, attrs) {
+    return "<button type=\"button\" class=\"btn btn-small " + cls + "\" title=\"" + escapeHtml(label) +
+      "\" aria-label=\"" + escapeHtml(label) + "\" " + attrs + ">";
+  }
+
+  // The three buttons of one queued file: earlier, later, remove. Its place
+  // and its name go with the click, so a queue that moved since the page was
+  // drawn is refused instead of changing whatever slid into that place.
+  function queueFileControls(row, index) {
+    var name = row.files[index];
+    var attrs = "data-user=\"" + escapeHtml(row.user) + "\" data-pos=\"" + (index + 1) + "\" data-file=\"" + escapeHtml(name) + "\"";
+    var up = index > 0 ? queueButton("qmove-file-btn", t("queue.fileEarlier"), attrs + " data-dir=\"up\"") + "\u25B2</button>" : "";
+    var down = index < row.files.length - 1 ? queueButton("qmove-file-btn", t("queue.fileLater"), attrs + " data-dir=\"down\"") + "\u25BC</button>" : "";
+    return " <span class=\"queue-file-controls\">" + up + down +
+      queueButton("qremove-btn btn-danger", t("queue.removeFile"), attrs) + "\u2715</button></span>";
   }
 
   // What is WAITING - never includes whatever is currently sending, because
@@ -1359,19 +1427,49 @@
   function queueFileList(row) {
     var files = row.files || [];
     if (!files.length) { return ""; }
-    if (files.length === 1) { return escapeHtml(files[0]); }
-    return "<details class=\"queue-files\"><summary>" +
+    if (files.length === 1) { return escapeHtml(files[0]) + queueFileControls(row, 0); }
+    return "<details class=\"queue-files\" data-user=\"" + escapeHtml(row.user) + "\"><summary>" +
       escapeHtml(files[0]) + " <span class=\"col-dim\">(+" + (files.length - 1) + " more)</span></summary>" +
       "<ul class=\"queue-file-list\">" +
-      files.map(function (f) { return "<li>" + escapeHtml(f) + "</li>"; }).join("") +
+      files.map(function (f, i) { return "<li>" + escapeHtml(f) + queueFileControls(row, i) + "</li>"; }).join("") +
       "</ul></details>";
+  }
+
+  // Ignore (#1206): a nick's requests dropped for some minutes. A nick under
+  // one - or under a flood ban - reads how long is left, and Lift ends it.
+  function queueOrderPart(row) {
+    if (!(row.files || []).length) { return ""; }
+    var nick = escapeHtml(row.user);
+    var attrs = "data-user=\"" + nick + "\"";
+    return queueButton("qmove-user-btn", t("queue.earlier"), attrs + " data-dir=\"up\"") + "\u25B2</button>" +
+      queueButton("qmove-user-btn", t("queue.later"), attrs + " data-dir=\"down\"") + "\u25BC</button>" +
+      queueButton("qclear-btn btn-danger", t("queue.clear"), attrs + " data-count=\"" + row.files.length + "\"") +
+      escapeHtml(t("queue.clear")) + "</button> ";
+  }
+
+  function queueIgnorePart(row) {
+    var nick = escapeHtml(row.user);
+    if (row.ignored_seconds > 0) {
+      return "<span class=\"col-dim\">" +
+        escapeHtml(t("queue.ignoredLeft").replace("{left}", describeDuration(row.ignored_seconds))) + "</span> " +
+        "<button type=\"button\" class=\"btn btn-small lift-btn\" data-user=\"" + nick + "\">" +
+        escapeHtml(t("queue.lift")) + "</button>";
+    }
+    return "<button type=\"button\" class=\"btn btn-small btn-danger ignore-btn\" data-user=\"" + nick + "\">" +
+      escapeHtml(t("queue.ignore")) + "</button>";
   }
 
   function renderQueueTable(rows) {
     if (!rows.length) {
-      el.queueBody.innerHTML = emptyRow(4, t("queue.empty"));
+      el.queueBody.innerHTML = emptyRow(5, t("queue.empty"));
       return;
     }
+    // The queue is drawn again every few seconds; a nick's open list of files
+    // has to stay open through it, or it shuts under the operator's finger.
+    var opened = {};
+    Array.prototype.forEach.call(el.queueBody.querySelectorAll("details.queue-files[open]"), function (d) {
+      opened[d.getAttribute("data-user")] = true;
+    });
     el.queueBody.innerHTML = rows.map(function (row) {
       var status = row.status || "queued";
       var label = t(STATUS_LABELS[status] || status);
@@ -1394,8 +1492,12 @@
         "<td class=\"col-dim col-mono\">" + sendingPart + queuedPart + "</td>" +
         "<td class=\"col-mono\">" + escapeHtml(row.count) + "</td>" +
         "<td><span class=\"status-pill status-" + escapeHtml(status) + "\">" + escapeHtml(label) + "</span></td>" +
+        "<td class=\"queue-actions\">" + queueOrderPart(row) + queueIgnorePart(row) + "</td>" +
         "</tr>";
     }).join("");
+    Array.prototype.forEach.call(el.queueBody.querySelectorAll("details.queue-files"), function (d) {
+      if (opened[d.getAttribute("data-user")]) { d.open = true; }
+    });
   }
 
   // WHAT THE OPERATOR MISSED. Two severities and no more: "warning" happened
