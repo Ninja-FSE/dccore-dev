@@ -2056,6 +2056,48 @@ def rebuild_pauses_requests():
     return update_list.read_phase() not in update_list.PHASES_BEFORE_THE_SWAP
 
 
+# The shortest SEARCH_FOLDER_MAX_CHARS honoured (#1228). The cut keeps
+# "..." and the end of the folder, so a cap of 3 or less would show nothing
+# of it, and 0 would slice nothing off at all (text[-0:] is the whole text).
+# Ten keeps at least the last seven characters - usually enough of an album
+# name to tell two apart.
+SEARCH_FOLDER_MIN_CHARS = 10
+
+
+def search_folder_text(folder, max_chars):
+    """The folder a search reply's From: line shows (#1228), or "" for none.
+
+    The list's own heading, as find_matching_entries() returns it - the
+    "D:\\MEDIA\\..." prefix included, never a path on the operator's disk -
+    without the trailing backslash every heading is written with, so the line
+    ends on the folder's own name. Past `max_chars` it is cut from the LEFT
+    and marked with "...": the end of a folder (the album) is what tells two
+    results apart, and the start is the prefix every heading shares.
+    """
+    text = str(folder or "").strip().rstrip("\\")
+    try:
+        limit = int(max_chars)
+    except (TypeError, ValueError):
+        limit = 80
+    limit = max(limit, SEARCH_FOLDER_MIN_CHARS)
+    if len(text) <= limit:
+        return text
+    return "..." + text[len(text) - (limit - 3):]
+
+
+def group_search_entries_by_folder(entries):
+    """The search results with each folder's files together, folders sorted (#1228).
+
+    A stable sort, so the files of one folder keep the list's own order.
+    Results with no folder (rows above the first heading) come FIRST: placed
+    after a From: line they would read as part of that folder.
+    """
+    def key(entry):
+        folder = entry.get("folder") or ""
+        return (bool(folder), folder.casefold(), folder)
+    return sorted(entries, key=key)
+
+
 def execute_search(irc_sock, user, search_term, channel):
     """Search the list file, sending the matching rows exactly as they are stored."""
     # update_inprogress, not search_inprogress (#214) - see dcc.py's own comment
@@ -2142,6 +2184,13 @@ def execute_search(irc_sock, user, search_term, channel):
                 search_words, limit=max_results, name=wanted)
         else:
             found_entries, total_matches = [], 0
+        # SEARCH_SHOW_FOLDER (#1228): each folder's files together, so its
+        # From: line is sent once above them rather than once per result.
+        # Sorted AFTER the cap, so MAX_SEARCH_RESULTS still counts files and
+        # the same files are sent either way; off, nothing is reordered.
+        show_folder = getattr(config, 'SEARCH_SHOW_FOLDER', False) is True
+        if show_folder:
+            found_entries = group_search_entries_by_folder(found_entries)
         # The row is kept exactly as it is on disk - matches go to IRC raw.
         matches = [entry["line"] for entry in found_entries]
 
@@ -2162,8 +2211,29 @@ def execute_search(irc_sock, user, search_term, channel):
             oserve = sys.modules.get('oserve')
             if oserve:
                 BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
-                
-                for match in matches:
+
+                # The From: line (#1228). It always begins with the bytes
+                # "From: " - the theme's colour goes on the folder after the
+                # label - so no theme or CUSTOM_THEME_ACCENT can make it start
+                # with "!", and copying several reply lines at once never
+                # pastes it as a request. No reset when the accent is empty
+                # (THEME=plain): that line then carries no control code at all.
+                folder_reset = R if X else ""
+
+                def _build_folder(shown_folder):
+                    return f"PRIVMSG {user} :From: {X}{shown_folder}{folder_reset}\r\n"
+
+                folder_cap = getattr(config, 'SEARCH_FOLDER_MAX_CHARS', 80)
+                previous_folder = None
+
+                for entry, match in zip(found_entries, matches):
+                    folder = entry.get("folder")
+                    if show_folder and folder and folder != previous_folder:
+                        previous_folder = folder
+                        shown_folder = search_folder_text(folder, folder_cap)
+                        if shown_folder:
+                            oserve.queue_message(user, announce.fit_irc_line(
+                                _build_folder, shown_folder))
                     # Through fit_irc_line, like the header of this very reply
                     # two lines above. These rows were the only user-visible
                     # lines in the module that skipped it, so a long filename

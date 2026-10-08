@@ -549,6 +549,8 @@ MAX_DCC_SLOTS: int      = 3      # Maximum simultaneous live downloads
 MAX_USER_QUEUE: int     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE: int   = 1000   # Most files across every queue combined
 MAX_SEARCH_RESULTS: int = 5      # Maximum result lines sent in reply to an @find
+SEARCH_SHOW_FOLDER: bool = False  # Name each @find result's folder on a From: line above its files
+SEARCH_FOLDER_MAX_CHARS: int = 80  # Longest folder a From: line shows; longer ones are cut from the left
 MSG_DELAY: float        = 5.0    # Delay in seconds for the ordinary message queue
 DEBUG_MSG_DELAY: float  = 0.0    # Wait between debug-channel lines; the larger of this and MSG_DELAY is used, so it can only slow the debug channel down (0 = the same as MSG_DELAY)
 

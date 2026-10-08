@@ -3382,6 +3382,7 @@ SETTINGS_CATEGORIES = (
                                                 "CHECK_FOR_UPDATES"]),
     ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_USER_QUEUE",
                                                 "MAX_GLOBAL_QUEUE", "MAX_SEARCH_RESULTS",
+                                                "SEARCH_SHOW_FOLDER", "SEARCH_FOLDER_MAX_CHARS",
                                                 "PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE",
                                                 "REHASH_TRANSFER_WAIT"]),
     # The transfer-tuning pair, together. Anyone reaching for one wants the
@@ -3504,6 +3505,8 @@ SETTINGS_LABELS = {
     "MAX_USER_QUEUE": "Max queue per user",
     "MAX_GLOBAL_QUEUE": "Max global queue",
     "MAX_SEARCH_RESULTS": "Max search results",
+    "SEARCH_SHOW_FOLDER": "Name the folder in search replies",
+    "SEARCH_FOLDER_MAX_CHARS": "Longest folder shown (characters)",
     "MSG_DELAY": "Message delay (seconds)",
     "DEBUG_MSG_DELAY": "Debug message delay (seconds)",
     "DCC_PORT_START": "DCC port range start",

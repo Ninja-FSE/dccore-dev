@@ -4860,6 +4860,8 @@
     MAX_USER_QUEUE: "settings.field.MAX_USER_QUEUE",
     MAX_GLOBAL_QUEUE: "settings.field.MAX_GLOBAL_QUEUE",
     MAX_SEARCH_RESULTS: "settings.field.MAX_SEARCH_RESULTS",
+    SEARCH_SHOW_FOLDER: "settings.field.SEARCH_SHOW_FOLDER",
+    SEARCH_FOLDER_MAX_CHARS: "settings.field.SEARCH_FOLDER_MAX_CHARS",
     MSG_DELAY: "settings.field.MSG_DELAY",
     DEBUG_MSG_DELAY: "settings.field.DEBUG_MSG_DELAY",
     DCC_PORT_START: "settings.field.DCC_PORT_START",

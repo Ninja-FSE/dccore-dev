@@ -181,6 +181,8 @@ PLAIN_HELP = {
     'MAX_USER_QUEUE': 'The most files one person can have waiting in their queue at once.',
     'MAX_GLOBAL_QUEUE': "The most files that can be waiting across everybody's queues put together.",
     'MAX_SEARCH_RESULTS': 'How many matching files are sent back to somebody who searches with @find. Each result is one line to that person.',
+    'SEARCH_SHOW_FOLDER': 'In the reply to an @find, name each result\'s folder on a line of its own above its files, e.g. From: D:\\MEDIA\\Rock\\Some Band\\1999 - Some Album. One extra line per folder, not per file; the result lines stay exactly as they are. Off by default: every line is paced, so it slows the reply.',
+    'SEARCH_FOLDER_MAX_CHARS': 'The longest folder a From: line shows, in characters, so the line does not wrap. A longer one is cut from the left and starts with ..., keeping its end, where the album name is. At least 10.',
     'PAUSE_ON_UPDATE': 'While a rebuilt list is being swapped in - a few seconds at the end of !update - refuse searches and file requests. The rest of the rebuild, they are answered from the current list, which stays complete until the swap.',
     'PAUSE_FOR_WHOLE_UPDATE': 'The old behaviour: refuse searches and file requests for the whole rebuild, not only while the new list is swapped in. Only needs Pause sharing during !update on too.',
     'REHASH_TRANSFER_WAIT': 'When you rehash (reload settings), how many seconds the bot waits for running transfers to finish first before reloading anyway. 0 reloads straight away.',

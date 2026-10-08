@@ -549,6 +549,8 @@
   "settings.field.MAX_USER_QUEUE": "Max queue per user",
   "settings.field.MAX_GLOBAL_QUEUE": "Max global queue",
   "settings.field.MAX_SEARCH_RESULTS": "Max search results",
+  "settings.field.SEARCH_SHOW_FOLDER": "Name the folder in search replies",
+  "settings.field.SEARCH_FOLDER_MAX_CHARS": "Longest folder shown (characters)",
   "settings.field.MSG_DELAY": "Message delay (seconds)",
   "settings.field.DEBUG_MSG_DELAY": "Debug message delay (seconds)",
   "settings.field.DCC_PORT_START": "DCC port range start",
