@@ -426,12 +426,23 @@ def _secondary_channel_candidates(now=None):
             elif known_signatures:
                 if any(not _signatures_differ(signature, known) for known in known_signatures):
                     continue
-            elif not isinstance(signature.get("files"), int):
-                # Nothing to compare against at all (the bot has never
-                # advertised in the channel we actually hold its list from,
-                # and nothing has been discovered yet either) - only worth
-                # acting on when this candidate channel's own signal is
-                # concrete enough to be a real list rather than noise.
+            else:
+                # NOTHING TO COMPARE AGAINST AT ALL - the bot's primary
+                # marker has no recorded channel (held from before #1232)
+                # and nothing has been discovered for it yet either. This
+                # used to let a candidate through anyway as long as its own
+                # count looked concrete; real incidents (twice, on two
+                # different bots) showed why not: a bot that genuinely
+                # serves the SAME list in several channels has nothing here
+                # to say so, so a channel showing the exact content the
+                # primary already holds - just under a different name -
+                # looked exactly as "new" as one that is genuinely
+                # different, and was fetched and stored as a duplicate.
+                # Skipping until the primary's own channel is on record
+                # (its own ordinary AUTO_REFETCH_LISTS cycle backfills this
+                # automatically, same as a manual refresh does) costs one
+                # refresh interval of delay and nothing else - no real
+                # secondary list goes undiscovered for longer than that.
                 continue
             record = _secondary_channel_state().get(f"{bot_key}:{channel}") or {}
             if int(record.get("tries") or 0) >= SECONDARY_CHANNEL_TRIES:

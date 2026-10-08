@@ -103,14 +103,20 @@ class Candidates(Case):
         self.register("SomeBot", {"#chan_a": {"files": 100, "since": NOW - STABLE * 2}})
         self.assertEqual(list_grab._secondary_channel_candidates(NOW), [])
 
-    def test_with_no_signature_for_the_held_channel_a_real_looking_count_still_qualifies(self):
+    def test_with_no_signature_for_the_held_channel_nothing_qualifies(self):
         """The bot has never advertised in the channel we actually hold its
-        list from (fetched by hand, say) - nothing to compare against, so a
-        stable, concrete file count elsewhere is still worth a look."""
+        list from (fetched by hand, say): two real incidents (two different
+        bots, each genuinely serving the SAME list in more than one channel)
+        showed why a concrete count elsewhere must NOT be taken as "new" in
+        this case - with no real baseline, a channel serving the identical
+        content under a different name looks exactly as promising as one
+        that truly differs, and gets fetched and stored as a duplicate. Wait
+        for the primary's own channel to land on record instead - its next
+        ordinary refresh does that for free."""
         self.hold("SomeBot", "#chan_a")
         self.register("SomeBot", {"#chan_b": {"files": 200, "since": NOW - STABLE * 2}})
         found = list_grab._secondary_channel_candidates(NOW)
-        self.assertEqual(found, [("somebot", "SomeBot", "#chan_b")])
+        self.assertEqual(found, [])
 
     def test_a_cooled_down_pair_is_skipped(self):
         self.hold("SomeBot", "#chan_a")
@@ -124,6 +130,42 @@ class Candidates(Case):
         runtime.secondary_channel_tries = {
             "somebot:#chan_b": {"tries": list_grab.SECONDARY_CHANNEL_TRIES, "last": NOW - 10 ** 6}}
         self.assertEqual(list_grab._secondary_channel_candidates(NOW), [])
+
+
+class WithNoPrimarySignatureNothingIsEverDiscovered(Case):
+    """Two real incidents, each on a bot with no recorded primary channel,
+    each genuinely serving the SAME list from more than one channel: with
+    no baseline, a channel showing the identical content under a different
+    name is indistinguishable from one that genuinely differs, so NOTHING
+    is offered until the primary's own channel lands on record - its
+    ordinary refresh cycle does that for free, with no code change needed
+    here.
+    """
+
+    def test_a_concrete_but_matching_count_is_not_offered(self):
+        self.hold("SomeBot", None)
+        self.register("SomeBot", {"#chan_a": {"files": 500, "since": NOW - STABLE * 2}})
+        self.assertEqual(list_grab._secondary_channel_candidates(NOW), [])
+
+    def test_several_channels_with_no_primary_signature_offer_nothing(self):
+        """The exact live shape: a bot advertising several channels, all
+        genuinely the same list, none of them the recorded primary."""
+        self.hold("SomeBot", None)
+        self.register("SomeBot", {"#chan_a": {"files": 500, "since": NOW - STABLE * 2},
+                                  "#chan_b": {"files": 500, "since": NOW - STABLE * 2},
+                                  "#chan_c": {"files": 500, "since": NOW - STABLE * 2}})
+        self.assertEqual(list_grab._secondary_channel_candidates(NOW), [])
+
+    def test_once_the_primary_channel_is_on_record_discovery_resumes(self):
+        """The resolution: an ordinary refresh (AUTO_REFETCH_LISTS, or a
+        manual one) backfills entry["channel"] the same way any primary
+        fetch already does - after that, a GENUINE difference is found
+        exactly as it would be for any other bot."""
+        self.hold("SomeBot", "#chan_a")
+        self.register("SomeBot", {"#chan_a": {"files": 500, "since": NOW - STABLE * 2},
+                                  "#chan_b": {"files": 900, "since": NOW - STABLE * 2}})
+        found = list_grab._secondary_channel_candidates(NOW)
+        self.assertEqual(found, [("somebot", "SomeBot", "#chan_b")])
 
 
 class TwoChannelsWithTheSameContentAreNotBothFetched(Case):
