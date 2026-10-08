@@ -1139,6 +1139,13 @@ def record_private_message(nick, text):
     body = str(text or "").strip()
     if not name or not body:
         return None
+    # A FILE REQUEST IS NOT A MESSAGE (#1242), though it was sent as one: it
+    # is answered with a file, and the Messages page is for what nobody
+    # answered. The dispatcher already keeps it from reaching here; this is
+    # the same test, so the page stays clear of requests whatever calls this.
+    import irc
+    if irc.names_a_file_request(body.lower()):
+        return None
 
     key = name.lower()
     now = time.time()

@@ -455,7 +455,8 @@ unread count on the tab. **Mark all read** clears it.
 What is recorded, and nothing else:
 
 - **private** messages only - a channel line is one you can already see;
-- that are **not** a recognised command;
+- that are **not** a recognised command - a file asked for privately
+  (`!<nick> <file>`) is a request and is answered, so it is never one of them;
 - that are **not** a CTCP (a DCC offer or a VERSION reply is a client talking
   to a client, not a person);
 - from somebody who is **not banned** - a ban silences them here too.
