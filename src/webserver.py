@@ -1488,14 +1488,8 @@ BOT_ALONE_FETCH_CONFLICT_ERROR = (
 )
 
 
-def bot_not_here_error(bot, channel=None):
+def bot_not_here_error(bot):
     """Why we will not ask this bot, or None if we will.
-
-    `channel` (#1232), when given, asks the narrower question: not "is this
-    bot in any channel of ours" but "is it in THIS one" - for a request that
-    asks to be sent in a specific channel (a manual fetch naming one
-    explicitly). The broader, channel-less check below is unchanged and is
-    what every other caller still gets.
 
     FROM THE BETA. A list was requested from a nick that was not on the
     network - the server answered the operator's own WHOIS with "No such
@@ -1524,13 +1518,6 @@ def bot_not_here_error(bot, channel=None):
                     (getattr(config, "channel_users", {}) or {}).values())
     if not known:
         return None
-    channel = str(channel or "").strip()
-    if channel:
-        import dcc_fetch
-        if dcc_fetch.bot_in_our_channel(nick, channel):
-            return None
-        return (f"{nick} is not in {channel}, so a request sent there "
-                f"would go nowhere.")
     if dcc.user_is_present_in_ram(nick):
         return None
     return (f"{nick} is not in any channel this bot is in, so a request "
@@ -1538,21 +1525,9 @@ def bot_not_here_error(bot, channel=None):
             f"their name says which.")
 
 
-def build_list_fetch_enqueue_result(bot_raw, channel_raw=None):
+def build_list_fetch_enqueue_result(bot_raw):
     """POST /api/filelists/fetch's pure logic: validate the bot nick and
     enqueue a request_type="list" row.
-
-    `channel_raw` (#1232), when given, asks for this bot's list from a
-    SPECIFIC one of our channels, rather than letting the dispatcher pick one
-    (dcc_fetch._resolve_fetch_channel()'s own order). This is how a bot that
-    binds a different list to each of several channels it shares with us -
-    DCCore's own multi-list-per-channel feature (src/library.py), which
-    another DCCore-family bot may equally be running - gets its OTHER list
-    fetched at all: naming the channel that other list answers in replaces
-    the one we already hold for this bot (fetched_bot_lists stays one entry
-    per bot - "switchable, not accumulating", per list_fetch.process_
-    fetched_list_zip()'s own docstring), so re-fetching from its usual
-    channel switches back just as deliberately.
 
     Deliberately reuses dcc_fetch.enqueue_fetch() (extended with a
     request_type parameter) rather than build_fetch_enqueue_result() above:
@@ -1593,20 +1568,14 @@ def build_list_fetch_enqueue_result(bot_raw, channel_raw=None):
     if not bot:
         return 400, {"error": "'bot' is required."}
 
-    channel_raw = str(channel_raw or "")
-    channel_err = reject_if_unsafe_for_irc_line(channel_raw, "channel") if channel_raw.strip() else None
-    if channel_err:
-        return 400, {"error": channel_err}
-    channel = channel_raw.strip()
-
-    absent = bot_not_here_error(bot, channel=channel)
+    absent = bot_not_here_error(bot)
     if absent:
         return 409, {"error": absent}
 
     if dcc_fetch.has_outstanding_bot_alone_request(bot):
         return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
 
-    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list", channel=channel or None)
+    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list")
     if request_id is None:
         # Defense in depth: enqueue_fetch() enforces this same invariant
         # itself (see its docstring), so this should be unreachable given
@@ -5424,8 +5393,7 @@ if HAVE_FLASK:
         @app.route("/api/filelists/fetch", methods=["POST"])
         def api_filelists_fetch():
             body = json_object(request.get_json(silent=True))
-            status, result = build_list_fetch_enqueue_result(
-                body.get("bot", ""), body.get("channel", ""))
+            status, result = build_list_fetch_enqueue_result(body.get("bot", ""))
             return jsonify(result), status
 
         @app.route("/api/filelists/fetch-folder-rar", methods=["POST"])

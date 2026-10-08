@@ -1883,27 +1883,20 @@ def _cmd_lists(session, args):
         session.send("Ask for the changed ones with `fetch`, or one bot with `fetch <bot>`.")
 
 
-def _ask_for_list(nick, channel=None):
-    """(ok, message) after asking `nick` for its list through the dashboard's
-    enqueue. `channel` (#1232), when given, asks for the list that channel's
-    binding answers with - see webserver.build_list_fetch_enqueue_result()'s
-    own docstring for why that may differ from the bot's usual list."""
+def _ask_for_list(nick):
+    """(ok, message) after asking `nick` for its list through the dashboard's enqueue."""
     import webserver
-    status, result = webserver.build_list_fetch_enqueue_result(nick, channel)
+    status, result = webserver.build_list_fetch_enqueue_result(nick)
     if status == 200:
-        return True, f"asked {nick} for its list" + (f" in {channel}" if channel else "")
+        return True, f"asked {nick} for its list"
     return False, f"{nick}: {result.get('error', 'refused')}"
 
 
 def _cmd_fetch(session, args):
-    """`fetch [bot] [channel]`: ask every held bot whose list has changed, or
-    one bot - from a specific one of our channels when a second word names
-    one (#1232), for a bot that binds a different list to each."""
-    words = args.split(None, 1)
-    name = words[0].strip() if words else ""
-    channel = words[1].strip() if len(words) > 1 else None
+    """`fetch [bot]`: ask every held bot whose list has changed, or one bot."""
+    name = args.strip()
     if name:
-        ok, message = _ask_for_list(name, channel)
+        ok, message = _ask_for_list(name)
         session.send((message + ". It arrives when the transfer finishes." if ok else message))
         return
 
@@ -2350,7 +2343,7 @@ COMMANDS = {
     "audioinfo":  (_cmd_audioinfo,  "read audio lengths the list lacks", "audioinfo"),
     "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
     "lists":      (_cmd_lists,      "held bot lists, and which have changed", "lists"),
-    "fetch":      (_cmd_fetch,      "ask the bots whose lists changed",  "fetch [bot] [channel]"),
+    "fetch":      (_cmd_fetch,      "ask the bots whose lists changed",  "fetch [bot]"),
     "downloads":  (_cmd_downloads,  "the Downloads window opening or closing", "downloads on [rows]|off"),
     "dlcancel":   (_cmd_dlcancel,   "cancel downloads that have not started", "dlcancel <id>... | all"),
     "dlqueue":    (_cmd_dlqueue,    "requests waiting to start, with their ids", "dlqueue"),

@@ -56,9 +56,8 @@ class WithSummaries(DCCoreTestCase):
         self.asked = []
         self.refuse = {}
 
-        def enqueue(nick, channel=None):
+        def enqueue(nick):
             self.asked.append(nick)
-            self.asked_channel = channel
             if nick in self.refuse:
                 return self.refuse[nick]
             return 200, {"created": [1]}
@@ -175,20 +174,6 @@ class TheFetch(WithSummaries):
         adminchat._cmd_fetch(self.session, "Alpha")
         self.assertEqual(self.asked, ["Alpha"])
         self.assertIn("asked Alpha for its list", self.session.text)
-        self.assertIsNone(self.asked_channel)
-
-    def test_a_channel_names_which_of_the_bots_lists_to_fetch(self):
-        self.rows = [row("Alpha", "current")]
-        adminchat._cmd_fetch(self.session, "Alpha #video")
-        self.assertEqual(self.asked, ["Alpha"])
-        self.assertEqual(self.asked_channel, "#video")
-        self.assertIn("asked Alpha for its list in #video", self.session.text)
-
-    def test_asking_every_changed_bot_names_no_channel(self):
-        self.rows = [row("Bravo", "changed")]
-        adminchat._cmd_fetch(self.session, "")
-        self.assertEqual(self.asked, ["Bravo"])
-        self.assertIsNone(self.asked_channel)
 
     def test_one_bot_that_is_refused_says_why(self):
         self.refuse["Nope"] = (400, {"error": "'bot' has a space"})
@@ -198,7 +183,7 @@ class TheFetch(WithSummaries):
     def test_it_uses_the_dashboards_own_enqueue(self):
         with open(os.path.join(REPO_ROOT, "src", "adminchat.py"), encoding="utf-8") as handle:
             source = handle.read()
-        self.assertIn("webserver.build_list_fetch_enqueue_result(nick, channel)", source)
+        self.assertIn("webserver.build_list_fetch_enqueue_result(nick)", source)
 
     def test_it_is_a_registered_command(self):
         self.assertIn("fetch", adminchat.COMMANDS)

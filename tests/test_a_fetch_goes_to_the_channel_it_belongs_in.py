@@ -236,49 +236,6 @@ class HeldListChannelFeedsFileAndFolderRequests(DCCoreTestCase):
         self.assertIsNone(config.fetch_queue[rid]["channel"])
 
 
-class AnExplicitChannelOnTheListRoute(DCCoreTestCase):
-
-    def setUp(self):
-        super().setUp()
-        self.set_config(fetch_queue={}, MAX_FETCH_SLOTS=10, fetch_feature_disabled=False,
-                        CHANNEL="#chan,#video", bot_joined_channel=True)
-        config.channel_users.clear()
-
-    def test_naming_a_channel_the_bot_is_in_succeeds_and_is_remembered(self):
-        bots_in_the_channel("GoodBot", channel="#chan")
-        bots_in_the_channel("GoodBot", channel="#video")
-        status, result = webserver.build_list_fetch_enqueue_result("GoodBot", "#video")
-        self.assertEqual(status, 200)
-        rid = result["created"][0]
-        self.assertEqual(config.fetch_queue[rid]["channel"], "#video")
-
-    def test_naming_a_channel_the_bot_is_not_in_is_refused(self):
-        bots_in_the_channel("GoodBot", channel="#chan")
-        status, result = webserver.build_list_fetch_enqueue_result("GoodBot", "#video")
-        self.assertEqual(status, 409)
-        self.assertIn("GoodBot", result["error"])
-        self.assertIn("#video", result["error"])
-        self.assertEqual(config.fetch_queue, {})
-
-    def test_naming_no_channel_is_the_ordinary_any_channel_rule(self):
-        bots_in_the_channel("GoodBot", channel="#video")
-        status, result = webserver.build_list_fetch_enqueue_result("GoodBot", "")
-        self.assertEqual(status, 200)
-        self.assertIsNone(config.fetch_queue[result["created"][0]]["channel"])
-
-    def test_an_unsafe_channel_is_refused_before_anything_is_queued(self):
-        bots_in_the_channel("GoodBot", channel="#chan")
-        status, result = webserver.build_list_fetch_enqueue_result("GoodBot", "#chan\r\nPRIVMSG x :hi")
-        self.assertEqual(status, 400)
-        self.assertEqual(config.fetch_queue, {})
-
-    def test_bot_not_here_error_with_a_channel_asks_the_narrower_question(self):
-        bots_in_the_channel("GoodBot", channel="#chan")
-        self.assertIsNone(webserver.bot_not_here_error("GoodBot"))
-        self.assertIsNotNone(webserver.bot_not_here_error("GoodBot", channel="#video"))
-        self.assertIsNone(webserver.bot_not_here_error("GoodBot", channel="#chan"))
-
-
 class DropOurRequestAtUsesTheRowsChannel(DCCoreTestCase):
 
     def setUp(self):

@@ -298,7 +298,7 @@ alias dccore {
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore chat [text] $+ $str($dccore.nbsp,9) open DCCore Chat, or say something in it (public)
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore status $+ $str($dccore.nbsp,15) ask the bot for its status
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore lists $+ $str($dccore.nbsp,16) the bots' lists we hold, and which have changed
-  echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore fetch [bot] [channel] $+ $str($dccore.nbsp,10) ask the bots whose lists changed, or one bot - from one of its channels, for its other list
+  echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore fetch [bot] $+ $str($dccore.nbsp,10) ask the bots whose lists changed, or one bot
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore raw <command> $+ $str($dccore.nbsp,8) send any console command (or just type it in the window)
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore panel on|off $+ $str($dccore.nbsp,8) the side panel
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore font <size> $+ $str($dccore.nbsp,10) the window's font size (now $dccore.fontsize $+ )
