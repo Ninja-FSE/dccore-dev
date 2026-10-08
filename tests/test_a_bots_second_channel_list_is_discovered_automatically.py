@@ -232,6 +232,30 @@ class TheWiring(unittest.TestCase):
         self.assertFalse(list_grab.ensure_secondary_channel_worker(start=lambda: started.append(1)))
         self.assertEqual(started, [1])
 
+    def test_the_loop_survives_a_tick_that_raises(self):
+        real = list_grab.secondary_channel_tick
+
+        def explode(*_a, **_k):
+            raise RuntimeError("boom")
+
+        list_grab.secondary_channel_tick = explode
+        self.addCleanup(setattr, list_grab, "secondary_channel_tick", real)
+
+        class Enough(Exception):
+            pass
+
+        def stop(_seconds):
+            raise Enough()
+
+        with self.assertRaises(Enough):
+            list_grab.secondary_channel_worker(sleep=stop)
+
+    def test_boot_and_rehash_start_it(self):
+        with open(os.path.join(REPO_ROOT, "oserve.py"), encoding="utf-8") as handle:
+            self.assertIn("ensure_secondary_channel_worker()", handle.read())
+        with open(os.path.join(REPO_ROOT, "src", "commands.py"), encoding="utf-8") as handle:
+            self.assertIn("if _list_grab_secondary.ensure_secondary_channel_worker():", handle.read())
+
 
 if __name__ == "__main__":
     unittest.main()
