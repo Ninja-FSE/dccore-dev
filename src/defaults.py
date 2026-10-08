@@ -548,6 +548,7 @@ ANNOUNCE_INTERVAL: int = 300     # Time between each channel advert, in seconds
 MAX_DCC_SLOTS: int      = 3      # Maximum simultaneous live downloads
 MAX_USER_QUEUE: int     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE: int   = 1000   # Most files across every queue combined
+SEARCH_ENABLED: bool = True  # Answer @find and @locator; off ignores them and the advert says Search: OFF
 MAX_SEARCH_RESULTS: int = 5      # Maximum result lines sent in reply to an @find
 SEARCH_SHOW_FOLDER: bool = False  # Name each @find result's folder on a From: line above its files
 SEARCH_FOLDER_MAX_CHARS: int = 80  # Longest folder a From: line shows; longer ones are cut from the left

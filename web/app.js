@@ -4859,6 +4859,7 @@
     MAX_DCC_SLOTS: "settings.field.MAX_DCC_SLOTS",
     MAX_USER_QUEUE: "settings.field.MAX_USER_QUEUE",
     MAX_GLOBAL_QUEUE: "settings.field.MAX_GLOBAL_QUEUE",
+    SEARCH_ENABLED: "settings.field.SEARCH_ENABLED",
     MAX_SEARCH_RESULTS: "settings.field.MAX_SEARCH_RESULTS",
     SEARCH_SHOW_FOLDER: "settings.field.SEARCH_SHOW_FOLDER",
     SEARCH_FOLDER_MAX_CHARS: "settings.field.SEARCH_FOLDER_MAX_CHARS",

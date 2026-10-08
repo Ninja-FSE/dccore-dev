@@ -808,6 +808,13 @@
 # Most files across every queue combined
 #MAX_GLOBAL_QUEUE = 1000
 
+# Answer @find and @locator searches. Off, they are ignored without a reply
+# and the channel advert says Search: OFF. Requests for files and lists are
+# still answered.
+#
+# Answer @find and @locator; off ignores them and the advert says Search: OFF
+#SEARCH_ENABLED = true
+
 # How many matching files are sent back to somebody who searches with @find.
 # Each result is one line to that person.
 #

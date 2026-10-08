@@ -548,6 +548,7 @@
   "settings.field.MAX_DCC_SLOTS": "Max simultaneous sends",
   "settings.field.MAX_USER_QUEUE": "Max queue per user",
   "settings.field.MAX_GLOBAL_QUEUE": "Max global queue",
+  "settings.field.SEARCH_ENABLED": "Answer @find searches",
   "settings.field.MAX_SEARCH_RESULTS": "Max search results",
   "settings.field.SEARCH_SHOW_FOLDER": "Name the folder in search replies",
   "settings.field.SEARCH_FOLDER_MAX_CHARS": "Longest folder shown (characters)",
