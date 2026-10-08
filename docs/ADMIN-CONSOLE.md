@@ -561,10 +561,10 @@ fields inserted into old ones, so they do not move the minor. An older script
 shows them as they come, as it does any type it does not know.
 
 `<channel>` is always exactly one token, straight after the nick: the channel
-the request or search was made in, or `-` when there is none (a request by
-private message, a resume, or a transfer that no longer knows where it was
-asked for) - so a client can count on the position of everything after it and
-print nothing for `-`.
+the request or search was made in - for a request by private message, the
+channel its sender shares with the bot - or `-` when there is none (a resume,
+or a transfer that no longer knows where it was asked for), so a client can
+count on the position of everything after it and print nothing for `-`.
 
 Whatever you did not tick in **Settings → Console feed** is not sent in either
 mode. A session that never says `hello` is the console described above,

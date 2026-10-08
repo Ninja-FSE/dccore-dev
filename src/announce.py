@@ -391,11 +391,16 @@ def _channel_may_be_told(channel, user):
         return True
 
 
-def send_transfer_complete(channel, user, file_name, file_size, start_time, actual_speed, duration=None):
+def send_transfer_complete(channel, user, file_name, file_size, start_time, actual_speed, duration=None,
+                           private=False):
     """Send the block-styled transfer notice once a file has finished.
 
     `duration` (seconds) is optional and only feeds the structured SENT
     event (#550); the notice's own speed figure comes from `actual_speed`.
+
+    `private` is a transfer asked for by private message (#1242). `channel`
+    is then the one the requester shares with the bot, and the SENT event
+    names it - but the channel is not told: the request was not made there.
     """
     import sys
     import db
@@ -460,7 +465,10 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     # figures this function reads are used by both.
     # A Quiet or Request only channel is not told either (#1204): this line is
     # the bot speaking in the channel unasked, which is what those modes are for.
-    if getattr(config, "ANNOUNCE_TRANSFERS", True) and _channel_may_be_told(channel, user):
+    if private:
+        print(f"[ANNOUNCE] Transfer complete for {user} ({speed_str}) - asked for "
+              f"by private message, so no channel is told.")
+    elif getattr(config, "ANNOUNCE_TRANSFERS", True) and _channel_may_be_told(channel, user):
         msg = fit_irc_line(_build, file_name)
         if oserve:
             oserve.queue_message("channel_announce", msg)

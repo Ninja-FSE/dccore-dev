@@ -382,6 +382,9 @@ class DownloadRequestChannelValidationTests(PathSecurityBase):
         self.assertIn("dave", config.dcc_queue)
 
     def test_the_bots_own_nick_is_accepted_a_private_request(self):
+        # From somebody in one of our channels: a private request from
+        # somebody in none is refused (#1242).
+        config.channel_users["#dccore-test"] = {"dave"}
         self.request(config.NICKNAME)
         self.assertIn("dave", config.dcc_queue)
 
