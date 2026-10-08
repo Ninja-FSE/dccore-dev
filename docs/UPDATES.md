@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔕 Search can be turned off (#1237)
+
+The channel advert said `Search: ON` and every `@find` reply header `Search Result: ON`, but both were fixed text: no
+setting could stop the bot answering searches.
+
+- **`SEARCH_ENABLED`** ("Answer @find searches", in Settings → Sharing & queue next to `MAX_SEARCH_RESULTS`), default
+  **on**, so nothing changes on update.
+- **Off:** `@find` and `@locator` get no reply at all (not even the "term too short" notice), and the console logs
+  `[SEARCH] Ignored a search from <nick> in <channel>: searching is off (SEARCH_ENABLED).` The advert says
+  `Search: OFF` in the theme's alert colour; on, the advert is byte for byte what it was.
+- Unchanged: file and list requests, the dashboard's own search and the List Browser.
+- **Tests:** `tests/test_search_can_be_turned_off.py` (13 tests).
+
 ### 📁 Search replies can name each result's folder (#1228)
 
 An `@find` result named the file but not the folder it is in. With track-number-and-title file names, where the

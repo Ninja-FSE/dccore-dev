@@ -330,6 +330,14 @@ def format_size_human(bytes_size):
 # solve.
 # ==========================================================================
 
+def search_state(settings, on_colour, off_colour):
+    """The advert's "Search:" value (#1237): ON in the value colour, or OFF in
+    the alert colour when SEARCH_ENABLED is off. `settings` is the preview's
+    unsaved values, read before the running config."""
+    value = (settings or {}).get("SEARCH_ENABLED", getattr(config, "SEARCH_ENABLED", True))
+    return f"{off_colour}OFF" if value is False else f"{on_colour}ON"
+
+
 def build_advert_line(channel, nickname, file_count, total_size, list_date,
                       slots, queued, speed, record, total_sent, version,
                       settings=None):
@@ -347,7 +355,7 @@ def build_advert_line(channel, nickname, file_count, total_size, list_date,
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {queued} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {speed} / Record: {record} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {total_sent} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Search: {V}ON{R}{BG_TEXT_BOX} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Search: {search_state(settings, V, A)}{R}{BG_TEXT_BOX} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {version} {BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
     )
 

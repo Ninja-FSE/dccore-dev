@@ -180,6 +180,7 @@ PLAIN_HELP = {
     'MAX_DCC_SLOTS': 'How many files the bot sends at the same time. Everyone else waits in the queue. 3 is a good number for a home connection; raise it only if your upload speed can take it.',
     'MAX_USER_QUEUE': 'The most files one person can have waiting in their queue at once.',
     'MAX_GLOBAL_QUEUE': "The most files that can be waiting across everybody's queues put together.",
+    'SEARCH_ENABLED': 'Answer @find and @locator searches. Off, they are ignored without a reply and the channel advert says Search: OFF. Requests for files and lists are still answered.',
     'MAX_SEARCH_RESULTS': 'How many matching files are sent back to somebody who searches with @find. Each result is one line to that person.',
     'SEARCH_SHOW_FOLDER': 'In the reply to an @find, name each result\'s folder on a line of its own above its files, e.g. From: D:\\MEDIA\\Rock\\Some Band\\1999 - Some Album. One extra line per folder, not per file; the result lines stay exactly as they are. Off by default: every line is paced, so it slows the reply.',
     'SEARCH_FOLDER_MAX_CHARS': 'The longest folder a From: line shows, in characters, so the line does not wrap. A longer one is cut from the left and starts with ..., keeping its end, where the album name is. At least 10.',

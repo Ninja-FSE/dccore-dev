@@ -2100,6 +2100,11 @@ def group_search_entries_by_folder(entries):
 
 def execute_search(irc_sock, user, search_term, channel):
     """Search the list file, sending the matching rows exactly as they are stored."""
+    # Off (#1237): no reply at all, the same silence as a channel that is not
+    # served. "is False" so only a real off turns searching off.
+    if getattr(config, 'SEARCH_ENABLED', True) is False:
+        print(f'[SEARCH] Ignored a search from {user} in {channel}: searching is off (SEARCH_ENABLED).')
+        return
     # update_inprogress, not search_inprogress (#214) - see dcc.py's own comment
     # on the same change. This branch is the REBUILD case and its message says
     # so; the branch below is the concurrent-search case and needs its own.
