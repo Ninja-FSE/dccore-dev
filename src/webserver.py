@@ -1525,9 +1525,21 @@ def bot_not_here_error(bot):
             f"their name says which.")
 
 
-def build_list_fetch_enqueue_result(bot_raw):
+def build_list_fetch_enqueue_result(bot_raw, channel_raw=None):
     """POST /api/filelists/fetch's pure logic: validate the bot nick and
     enqueue a request_type="list" row.
+
+    `channel_raw` (#1240) asks for this bot's list from a SPECIFIC one of our
+    channels rather than letting the dispatcher pick one. INTERNAL ONLY: the
+    HTTP route below never reads a "channel" field from its body, and no
+    console command accepts one either - an operator cannot ask for one by
+    hand (that capability existed briefly in #1239's draft and was reverted;
+    see its PR thread for the real-world data loss that caused it, now fixed
+    at the storage layer instead - see list_fetch._install_secondary_channel_
+    lists()). The one caller that does pass this is list_grab.
+    secondary_channel_tick(), and only once its own confidence gate
+    (list_grab._secondary_channel_candidates(), a confirmed, STABLE
+    difference) has already decided the channel is worth asking.
 
     Deliberately reuses dcc_fetch.enqueue_fetch() (extended with a
     request_type parameter) rather than build_fetch_enqueue_result() above:
@@ -1568,6 +1580,12 @@ def build_list_fetch_enqueue_result(bot_raw):
     if not bot:
         return 400, {"error": "'bot' is required."}
 
+    channel_raw = str(channel_raw or "")
+    channel_err = reject_if_unsafe_for_irc_line(channel_raw, "channel") if channel_raw.strip() else None
+    if channel_err:
+        return 400, {"error": channel_err}
+    channel = channel_raw.strip() or None
+
     absent = bot_not_here_error(bot)
     if absent:
         return 409, {"error": absent}
@@ -1575,7 +1593,7 @@ def build_list_fetch_enqueue_result(bot_raw):
     if dcc_fetch.has_outstanding_bot_alone_request(bot):
         return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
 
-    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list")
+    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list", channel=channel)
     if request_id is None:
         # Defense in depth: enqueue_fetch() enforces this same invariant
         # itself (see its docstring), so this should be unreachable given

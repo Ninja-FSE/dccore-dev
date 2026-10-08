@@ -211,6 +211,43 @@ class Tick(Case):
         self.assertEqual(list_grab._secondary_channel_state()["somebot:#chan_b"]["tries"], 1)
 
 
+class EndToEndThroughTheRealEnqueueFunction(DCCoreTestCase):
+    """secondary_channel_tick() through the REAL
+    webserver.build_list_fetch_enqueue_result() - not the fake Case installs
+    for the tests above - so a signature mismatch between the two (#1240's
+    actual first live bug: the channel parameter was dropped by #1239's
+    revert and nothing caught it, since every other test here mocks this
+    exact call away) fails loudly instead of only in production."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(AUTO_DISCOVER_CHANNEL_LISTS=True,
+                        MULTI_CHANNEL_LIST_STABLE_SECONDS=STABLE,
+                        fetched_bot_lists={}, fetch_queue={},
+                        fetch_feature_disabled=False, bot_joined_channel=True)
+        runtime.secondary_channel_tries = {}
+        runtime.secondary_channel_last = None
+        config.channel_users.clear()
+        config.channel_users["#chan_a"] = {"somebot"}
+        config.channel_users["#chan_b"] = {"somebot"}
+
+    def test_a_confirmed_candidate_is_really_enqueued(self):
+        config.fetched_bot_lists["somebot"] = {
+            "bot": "SomeBot", "channel": "#chan_a",
+            "lists": {"": {"list_path": "x", "entry_count": 1, "channel": "#chan_a"}},
+        }
+        runtime.known_bots["somebot"] = {"nick": "SomeBot", "channels": channels(
+            {"#chan_a": {"files": 100, "since": NOW - STABLE * 2},
+             "#chan_b": {"files": 200, "since": NOW - STABLE * 2}})}
+
+        result = list_grab.secondary_channel_tick(NOW)
+
+        self.assertEqual(result, "asked")
+        rows = [row for row in config.fetch_queue.values() if row.get("request_type") == "list"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["channel"], "#chan_b")
+
+
 class TheWiring(unittest.TestCase):
 
     def setUp(self):
