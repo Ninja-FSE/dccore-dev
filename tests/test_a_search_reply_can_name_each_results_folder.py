@@ -129,6 +129,11 @@ class SearchCase(DCCoreTestCase):
         assert line.startswith(prefix), line
         return line[len(prefix):].rstrip("\r\n")
 
+    @classmethod
+    def label(cls, line):
+        """A From: line as the user reads it: no colour codes, no frame spaces."""
+        return list_mod.strip_control_codes(cls.text(line)).strip()
+
     def from_lines(self, lines):
         return [line for line in lines if "::INFO::" not in line and "Search Result:" not in line]
 
@@ -182,9 +187,11 @@ class OffKeepsTheAudioFallback(SearchCase):
         expected_rows = self.rows(reply_as_before(USER, "very long title", CHANNEL))
         got = self.reply("very long title", SEARCH_SHOW_FOLDER=True)
         self.assertEqual(self.rows(got), expected_rows)
+        border, separator, textbox, _r, _b, value, _a, _x = theme.blocks()
         self.assertEqual([self.text(line) for line in self.from_lines(got)],
-                         ["From: " + chr(3) + "12" + list_mod.LIST_FOLDER_PREFIX
-                          + "Rock" + BS + "Some Band" + BS + "1999 - Some Album" + chr(15)])
+                         [f"{border} {separator} {textbox} From: {value}" + list_mod.LIST_FOLDER_PREFIX
+                          + "Rock" + BS + "Some Band" + BS + "1999 - Some Album"
+                          + f" {separator} {border} "])
 
 
 class OnGroupsByFolder(SearchCase):
@@ -198,14 +205,14 @@ class OnGroupsByFolder(SearchCase):
         for line in reply_as_before(USER, "some song", CHANNEL)[1:]:
             old[re.search(r"(\S+)  ::INFO::", line).group(1)] = line
         lines = self.on()
-        prefix = "From: D:" + BS + "MEDIA" + BS
+        prefix = "   From: D:" + BS + "MEDIA" + BS
         self.assertEqual(lines[1:], [
             old["00-some_song-loose.flac"],
-            f"PRIVMSG {USER} :" + prefix + "Live" + BS + "Zeta Band" + BS + "2003 - Live Somewhere\r\n",
+            f"PRIVMSG {USER} :" + prefix + "Live" + BS + "Zeta Band" + BS + "2003 - Live Somewhere   \r\n",
             old["10-some_song-live.mp3"],
-            f"PRIVMSG {USER} :" + prefix + "Rock" + BS + "Alpha Band" + BS + "1990 - First Album\r\n",
+            f"PRIVMSG {USER} :" + prefix + "Rock" + BS + "Alpha Band" + BS + "1990 - First Album   \r\n",
             old["05-some_song.flac"],
-            f"PRIVMSG {USER} :" + prefix + "Rock" + BS + "Zeta Band" + BS + "2001 - Last Album\r\n",
+            f"PRIVMSG {USER} :" + prefix + "Rock" + BS + "Zeta Band" + BS + "2001 - Last Album   \r\n",
             old["01-some_song.flac"],
             old["07-some_song-edit.flac"],
         ])
@@ -221,8 +228,8 @@ class OnGroupsByFolder(SearchCase):
         current = None
         for line in lines[1:]:
             text = self.text(line)
-            if text.startswith("From: "):
-                current = text
+            if self.label(line).startswith("From: "):
+                current = self.label(line)
                 continue
             name = re.search(f"!{NICK} (.+?)  ::INFO::", text).group(1)
             folder = by_name[name]
@@ -233,18 +240,18 @@ class OnGroupsByFolder(SearchCase):
                 self.assertTrue(current.endswith(folder.rstrip(BS)), (current, folder))
 
     def test_the_groups_are_sorted_by_folder(self):
-        froms = [re.sub("[" + chr(3) + chr(15) + r"]\d*", "", self.text(line))
-                 for line in self.from_lines(self.on())]
+        froms = [self.label(line) for line in self.from_lines(self.on())]
         self.assertEqual(froms, sorted(froms, key=str.casefold))
 
     def test_a_folder_line_never_starts_with_a_bang(self):
-        """Under every theme - and even an accent override of "!", because the
-        colour goes after the label."""
+        """Under every theme, and with an accent override of "!": after the
+        frame the line reads "From: "."""
         for name in theme.THEMES:
             for accent in (None, "!"):
                 with self.subTest(theme=name, accent=accent):
                     for line in self.from_lines(self.on(THEME=name, CUSTOM_THEME_ACCENT=accent)):
-                        self.assertTrue(self.text(line).startswith("From: "), line)
+                        self.assertTrue(self.label(line).startswith("From: "), line)
+                        self.assertFalse(self.text(line).lstrip().startswith("!"), line)
 
     def test_the_result_lines_are_unchanged(self):
         expected = self.rows(reply_as_before(USER, "some song", CHANNEL))
@@ -278,7 +285,7 @@ class OnGroupsByFolder(SearchCase):
 
     def test_the_folder_is_the_lists_heading_never_a_disk_path(self):
         for line in self.from_lines(self.on(THEME="plain")):
-            self.assertTrue(self.text(line).startswith("From: " + list_mod.LIST_FOLDER_PREFIX), line)
+            self.assertTrue(self.label(line).startswith("From: " + list_mod.LIST_FOLDER_PREFIX), line)
             self.assertNotIn(self.tree.music, line)
 
     def test_plain_sends_no_colour_code_on_a_folder_line(self):
@@ -286,12 +293,14 @@ class OnGroupsByFolder(SearchCase):
             text = self.text(line)
             self.assertIsNone(re.search("[" + chr(2) + chr(3) + chr(15) + chr(22) + chr(31) + "]", text), text)
 
-    def test_a_theme_colours_the_folder(self):
-        accent = theme.THEMES["midnight"]["accent"]
+    def test_the_line_is_framed_like_the_header(self):
+        """Reported: the From: line did not follow the theme."""
+        palette = theme.THEMES["midnight"]
         for line in self.from_lines(self.on(THEME="midnight")):
             text = self.text(line)
-            self.assertTrue(text.startswith("From: " + accent), text)
-            self.assertTrue(text.endswith(chr(15)), text)
+            self.assertTrue(text.startswith(f"{palette['border']} {palette['separator']} "
+                                            f"{palette['textbox']} From: {palette['value']}"), text)
+            self.assertTrue(text.endswith(f" {palette['separator']} {palette['border']} "), text)
 
 
 class TheLeftCut(SearchCase):
@@ -331,7 +340,7 @@ class TheLeftCut(SearchCase):
     def test_the_reply_carries_the_cut(self):
         lines = self.reply("some song", SEARCH_SHOW_FOLDER=True, THEME="plain",
                            SEARCH_FOLDER_MAX_CHARS=20)
-        froms = [self.text(line) for line in self.from_lines(lines)]
+        froms = [self.label(line) for line in self.from_lines(lines)]
         self.assertIn("From: ...2001 - Last Album", froms)
         for text in froms:
             self.assertEqual(len(text), len("From: ") + 20, text)
@@ -345,7 +354,7 @@ class TheLeftCut(SearchCase):
         froms = self.from_lines(lines)
         self.assertEqual(len(froms), 1)
         self.assertLessEqual(len(froms[0].encode("utf-8")), announce.IRC_LINE_BUDGET)
-        self.assertTrue(self.text(froms[0]).startswith("From: "))
+        self.assertTrue(self.label(froms[0]).startswith("From: "))
 
 
 class TheSettingsPage(unittest.TestCase):

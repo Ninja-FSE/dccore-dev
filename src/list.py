@@ -2212,16 +2212,13 @@ def execute_search(irc_sock, user, search_term, channel):
             if oserve:
                 BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
 
-                # The From: line (#1228). It always begins with the bytes
-                # "From: " - the theme's colour goes on the folder after the
-                # label - so no theme or CUSTOM_THEME_ACCENT can make it start
-                # with "!", and copying several reply lines at once never
-                # pastes it as a request. No reset when the accent is empty
-                # (THEME=plain): that line then carries no control code at all.
-                folder_reset = R if X else ""
-
+                # The From: line (#1228), framed like the header above it so it
+                # follows the theme. After the frame the text is always
+                # "From: ", so copying several reply lines at once never
+                # pastes it as a request.
                 def _build_folder(shown_folder):
-                    return f"PRIVMSG {user} :From: {X}{shown_folder}{folder_reset}\r\n"
+                    return (f"PRIVMSG {user} :{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} "
+                            f"From: {V}{shown_folder} {BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n")
 
                 folder_cap = getattr(config, 'SEARCH_FOLDER_MAX_CHARS', 80)
                 previous_folder = None
