@@ -317,6 +317,18 @@ def _save_secondary_channel_state():
     db.save_secondary_channel_grabs(_secondary_channel_state())
 
 
+def _signature_has_content(signature):
+    """True if `signature` actually carries something comparable - an int
+    files count, or a list_date. A marker merged in before #1240 tracked
+    this (or one whose channel's advert we have simply never parsed a count
+    out of) has an empty {} here, which must never be treated as "known to
+    be the same content" - that read exactly the opposite of what an absent
+    signature means, and silently hid every OTHER candidate behind it."""
+    if not isinstance(signature, dict):
+        return False
+    return isinstance(signature.get("files"), int) or bool(signature.get("list_date"))
+
+
 def _signatures_differ(a, b):
     """True if advert signatures `a` and `b` (known_bots[...]["channels"]
     entries) plausibly describe two different lists, never a guess from
@@ -385,6 +397,19 @@ def _secondary_channel_candidates(now=None):
                 # moving target.
                 continue
         already_held = _held_marker_channels(bot_key)
+        # Every signature already known for this bot - the primary's, and
+        # every secondary channel discovered so far. A candidate is only
+        # worth a NEW fetch if it differs from ALL of them: comparing
+        # against the primary alone let two channels that only differ from
+        # it, but not from EACH OTHER, each get fetched as if they were
+        # separate lists - a real incident, hit live: a bot with no known
+        # primary signature (an entry held from before #1232) advertised
+        # the same huge count in two other channels, and both were fetched
+        # and stored as two markers with identical content, because neither
+        # had anything but the (unknown) primary to be compared against.
+        known_signatures = [sig for sig in already_held.values() if _signature_has_content(sig)]
+        if primary_signature is not None:
+            known_signatures.append(primary_signature)
         for channel, signature in channels.items():
             if channel == primary_channel:
                 continue
@@ -398,11 +423,13 @@ def _secondary_channel_candidates(now=None):
                 # advert has moved on since the marker now held was fetched.
                 if not _signatures_differ(signature, already_held[channel]):
                     continue
-            elif primary_signature is not None and not _signatures_differ(signature, primary_signature):
-                continue
-            elif primary_signature is None and not isinstance(signature.get("files"), int):
-                # Nothing to compare against (the bot has never advertised in
-                # the channel we actually hold its list from) - only worth
+            elif known_signatures:
+                if any(not _signatures_differ(signature, known) for known in known_signatures):
+                    continue
+            elif not isinstance(signature.get("files"), int):
+                # Nothing to compare against at all (the bot has never
+                # advertised in the channel we actually hold its list from,
+                # and nothing has been discovered yet either) - only worth
                 # acting on when this candidate channel's own signal is
                 # concrete enough to be a real list rather than noise.
                 continue

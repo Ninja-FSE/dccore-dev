@@ -126,6 +126,50 @@ class Candidates(Case):
         self.assertEqual(list_grab._secondary_channel_candidates(NOW), [])
 
 
+class TwoChannelsWithTheSameContentAreNotBothFetched(Case):
+    """A real incident, hit live: a bot with no recorded primary channel (an
+    entry held before #1232 existed) advertised the identical huge file
+    count in two OTHER shared channels - with no primary signature to
+    compare against, both independently looked "different" and were each
+    fetched and stored as their own marker, duplicating the exact same
+    content under two names. The fix: once one of them is discovered,
+    the other must be compared against IT too, not only against the
+    (unknown) primary.
+    """
+
+    def test_a_channel_already_discovered_blocks_a_matching_new_one(self):
+        """The real sequence (secondary_channel_tick() only ever acts on ONE
+        candidate per tick, so this is how it actually played out live):
+        #chan_a discovered and held first; #chan_b, advertising the SAME
+        count, must not then also be fetched on the next tick's scan - a
+        single scan with NEITHER yet discovered cannot de-duplicate them
+        against each other (nothing is held yet to compare against), but
+        that is fine, because only one of them is ever acted on per tick
+        anyway, and by the next scan the first is in already_held."""
+        self.hold("SomeBot", None,
+                 video={"list_path": "y", "entry_count": 500, "channel": "#chan_a",
+                        "advert_signature": {"files": 500, "since": NOW - STABLE * 2}})
+        self.register("SomeBot", {"#chan_a": {"files": 500, "since": NOW - STABLE * 2},
+                                  "#chan_b": {"files": 500, "since": NOW - STABLE * 2}})
+        found = list_grab._secondary_channel_candidates(NOW)
+        self.assertEqual(found, [])
+
+    def test_a_channel_already_discovered_still_allows_a_genuinely_different_one(self):
+        self.hold("SomeBot", None,
+                 video={"list_path": "y", "entry_count": 500, "channel": "#chan_a",
+                        "advert_signature": {"files": 500, "since": NOW - STABLE * 2}})
+        self.register("SomeBot", {"#chan_a": {"files": 500, "since": NOW - STABLE * 2},
+                                  "#chan_b": {"files": 900, "since": NOW - STABLE * 2}})
+        found = list_grab._secondary_channel_candidates(NOW)
+        self.assertEqual(found, [("somebot", "SomeBot", "#chan_b")])
+
+    def test_signature_has_content_rejects_an_empty_placeholder(self):
+        self.assertFalse(list_grab._signature_has_content({}))
+        self.assertFalse(list_grab._signature_has_content(None))
+        self.assertTrue(list_grab._signature_has_content({"files": 0}))
+        self.assertTrue(list_grab._signature_has_content({"list_date": "Oct 7th"}))
+
+
 class RefreshingAnAlreadyDiscoveredChannel(Case):
     """Not just discovery once - an already-held secondary marker is offered
     again when ITS OWN channel has genuinely moved on since it was fetched,
