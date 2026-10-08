@@ -4,6 +4,39 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📡 A cross-bot request goes to the channel it belongs in (#1232)
+
+A request to another bot - its list, a file, a folder as a RAR - went wherever `dcc.channel_containing_user(bot)`
+found the bot first: the first of OUR channels, in configured order, it happened to be in right now. A bot bound to a
+different list per channel (DCCore's own multi-list-per-channel feature - #1204 and the Served lists work - which
+another DCCore-family bot can equally be running) only answers in the channel that list is bound to, so sharing more
+than one channel with it meant every request risked landing where it serves nothing: silently only its "first
+channel" list, or a file/folder request that got no answer and nothing said why.
+
+- **A fetch row can carry a preferred channel.** The dispatcher resolves a real one from it - only if we are still
+  configured for that channel and the bot is still there - then falls back to the channel the bot last advertised in,
+  then to today's "first channel we share" rule, same order as `has_outstanding_bot_alone_request()`'s docstring
+  always described wanting. Whichever channel is used is written back onto the row, so a retried request keeps
+  asking in the same place rather than drifting tick to tick as presence changes.
+- **A fetched list remembers which channel it came from.** `fetched_bot_lists[bot]["channel"]`, alongside everything
+  else `process_fetched_list_zip()` already stores. None for a list fetched before this, or whose channel could not be
+  resolved - the fallback chain above applies exactly as if nothing had changed.
+- **List Browser and Search reuse that channel automatically.** A file or folder request for a bot we already hold a
+  list from is sent in the same channel the list itself was fetched in - no picker, no new field for the dashboard to
+  send: the request already names the bot, and that is enough to look the channel up.
+- **`fetch <bot> <channel>`** (the console, and dccore.mrc's `/dccore fetch` - which already forwarded everything
+  after "fetch " unchanged, so this needed no script change beyond its help text) asks a SPECIFIC channel by name.
+  This is how a bot's other list, bound to a channel we had never asked it in, gets fetched at all: naming that
+  channel replaces the list we already hold for the bot (one list per bot, "switchable, not accumulating", as
+  always), and asking from its usual channel again switches back just as deliberately.
+- Not changed: a bot's several lists cannot be held and browsed side by side at once - that is a bigger change to
+  how `fetched_bot_lists`/the search index key a bot's entry (left for a later issue if it turns out to be wanted);
+  `drop_our_request_at()` (the `-remove` sent on Delete/Clear) now uses the removed row's own channel too.
+- **Tests:** `tests/test_a_fetch_goes_to_the_channel_it_belongs_in.py` (32 tests) plus updates to existing mocks of
+  `build_list_fetch_enqueue_result`/`_process_fetched_list_zip_unlocked`/`drop_our_request_at` across
+  `tests/test_the_console_shows_list_freshness_and_can_fetch.py`, `tests/test_a_refused_grab_is_not_a_try.py`,
+  `tests/test_clear_spares_a_newer_request.py` and `tests/test_clear_failed_tells_the_other_bot.py`.
+
 ### 🔕 Search can be turned off (#1237)
 
 The channel advert said `Search: ON` and every `@find` reply header `Search Result: ON`, but both were fixed text: no

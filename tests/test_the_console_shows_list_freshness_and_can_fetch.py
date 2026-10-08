@@ -56,8 +56,9 @@ class WithSummaries(DCCoreTestCase):
         self.asked = []
         self.refuse = {}
 
-        def enqueue(nick):
+        def enqueue(nick, channel=None):
             self.asked.append(nick)
+            self.asked_channel = channel
             if nick in self.refuse:
                 return self.refuse[nick]
             return 200, {"created": [1]}
@@ -174,6 +175,20 @@ class TheFetch(WithSummaries):
         adminchat._cmd_fetch(self.session, "Alpha")
         self.assertEqual(self.asked, ["Alpha"])
         self.assertIn("asked Alpha for its list", self.session.text)
+        self.assertIsNone(self.asked_channel)
+
+    def test_a_channel_names_which_of_the_bots_lists_to_fetch(self):
+        self.rows = [row("Alpha", "current")]
+        adminchat._cmd_fetch(self.session, "Alpha #video")
+        self.assertEqual(self.asked, ["Alpha"])
+        self.assertEqual(self.asked_channel, "#video")
+        self.assertIn("asked Alpha for its list in #video", self.session.text)
+
+    def test_asking_every_changed_bot_names_no_channel(self):
+        self.rows = [row("Bravo", "changed")]
+        adminchat._cmd_fetch(self.session, "")
+        self.assertEqual(self.asked, ["Bravo"])
+        self.assertIsNone(self.asked_channel)
 
     def test_one_bot_that_is_refused_says_why(self):
         self.refuse["Nope"] = (400, {"error": "'bot' has a space"})
@@ -183,7 +198,7 @@ class TheFetch(WithSummaries):
     def test_it_uses_the_dashboards_own_enqueue(self):
         with open(os.path.join(REPO_ROOT, "src", "adminchat.py"), encoding="utf-8") as handle:
             source = handle.read()
-        self.assertIn("webserver.build_list_fetch_enqueue_result(nick)", source)
+        self.assertIn("webserver.build_list_fetch_enqueue_result(nick, channel)", source)
 
     def test_it_is_a_registered_command(self):
         self.assertIn("fetch", adminchat.COMMANDS)
@@ -248,27 +263,30 @@ class TheEvents(DCCoreTestCase):
     def test_an_arrived_list_says_how_many_files(self):
         config.fetched_bot_lists["alpha"] = {"bot": "Alpha", "entry_count": 64136}
         self.addCleanup(config.fetched_bot_lists.pop, "alpha", None)
-        with mock.patch.object(list_fetch, "_process_fetched_list_zip_unlocked", lambda bot, path: (True, "")):
+        with mock.patch.object(list_fetch, "_process_fetched_list_zip_unlocked",
+                               lambda bot, path, channel=None: (True, "")):
             self.assertEqual(list_fetch.process_fetched_list_zip("Alpha", "x.zip"), (True, ""))
         self.assertEqual(self.events[0][2], {"bot": "Alpha", "action": "arrived"})
         self.assertIn("64,136 files", self.events[0][1])
 
     def test_an_unusable_list_says_why(self):
         with mock.patch.object(list_fetch, "_process_fetched_list_zip_unlocked",
-                               lambda bot, path: (False, "not a plausible list")):
+                               lambda bot, path, channel=None: (False, "not a plausible list")):
             self.assertEqual(list_fetch.process_fetched_list_zip("Alpha", "x.zip"), (False, "not a plausible list"))
         self.assertEqual(self.events[0][2], {"bot": "Alpha", "action": "unusable"})
         self.assertIn("not a plausible list", self.events[0][1])
 
     def test_the_return_value_is_untouched(self):
-        with mock.patch.object(list_fetch, "_process_fetched_list_zip_unlocked", lambda bot, path: (False, "r")):
+        with mock.patch.object(list_fetch, "_process_fetched_list_zip_unlocked",
+                               lambda bot, path, channel=None: (False, "r")):
             self.assertEqual(list_fetch.process_fetched_list_zip("A", "z"), (False, "r"))
 
     def test_a_console_that_raises_does_not_fail_the_fetch(self):
         announce.feed_event = mock.Mock(side_effect=RuntimeError("no console"))
         with mock.patch("builtins.print"):
             list_fetch._tell_the_console("Alpha", "auto", "t")
-        with mock.patch.object(list_fetch, "_process_fetched_list_zip_unlocked", lambda bot, path: (True, "")), \
+        with mock.patch.object(list_fetch, "_process_fetched_list_zip_unlocked",
+                               lambda bot, path, channel=None: (True, "")), \
                 mock.patch("builtins.print"):
             self.assertEqual(list_fetch.process_fetched_list_zip("Alpha", "x.zip"), (True, ""))
 
