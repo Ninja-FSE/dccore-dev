@@ -233,6 +233,64 @@ def _sanitize_bot_dir_name(bot):
     return platform_compat.windows_safe_name(name) or "unknown_bot"
 
 
+def _is_secondary_channel_fetch(bot, channel):
+    """True when THIS fetch is for a channel other than the one the bot's
+    already-held list came from (#1240) - a bot we have never held anything
+    for, or a channel-less fetch (the ordinary case: no channel given, or one
+    that matches what is already on record), is never "secondary". Only a
+    genuine, confirmed difference - discovered and stable, see list_grab.py's
+    secondary-channel detector - reaches here with a channel that differs.
+
+    Shared by _extract_dir_for() (which directory to extract into) and
+    _install_fetched_list() (merge the result in, or replace the entry
+    outright) so the two can never disagree about which fetch this is.
+    """
+    channel = str(channel or "").strip()
+    if not channel:
+        return False
+    store = _ensure_fetched_bot_lists()
+    previous = store.get(str(bot).strip().lower())
+    previous_channel = str((previous or {}).get("channel") or "").strip()
+    if not previous or not previous_channel:
+        return False
+    return channel.lower() != previous_channel.lower()
+
+
+def _channel_marker_name(channel):
+    """A channel turned into something usable as a list marker (#1240):
+    "#movies4u" becomes "movies4u". Never empty - list_marker()'s own rule
+    that an empty marker means "the main list" must never apply to a channel
+    name by accident, so a channel that somehow sanitises to nothing falls
+    back to a fixed word instead.
+    """
+    name = str(channel or "").strip().lstrip("#")
+    name = _BOT_DIR_CHARSET_RE.sub("_", name)
+    return name.strip("-_ .") or "channel"
+
+
+def secondary_channel_extract_dir(bot, channel):
+    """Where a SECONDARY channel's fetch for `bot` extracts to (#1240): its
+    own subdirectory under the bot's existing one, never the bot's own
+    extraction path itself - that path is the primary channel's, and a
+    secondary fetch extracting there would overwrite the very files the
+    primary channel's held lists still point at (list_extract_dir() is keyed
+    on the bot nick alone; this adds the one extra directory level a second
+    channel needs without moving anything that was already there).
+    """
+    return os.path.join(list_extract_dir(bot), "_channels",
+                        _channel_marker_name(channel).lower())
+
+
+def _extract_dir_for(bot, channel):
+    """Which directory THIS fetch extracts into - list_extract_dir(bot) for
+    everything but a confirmed secondary channel (#1240), which gets its own
+    subdirectory (secondary_channel_extract_dir()) so it can never collide
+    with what the primary channel's lists already point at."""
+    if _is_secondary_channel_fetch(bot, channel):
+        return secondary_channel_extract_dir(bot, channel)
+    return list_extract_dir(bot)
+
+
 def list_extract_dir(bot):
     """Where `bot`'s fetched list gets extracted to:
     <FETCHED_FILES_DIR>/lists/<sanitised bot nick, lowercased>/.
