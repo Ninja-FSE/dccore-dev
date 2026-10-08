@@ -346,7 +346,7 @@ def _secondary_channel_candidates(now=None):
             continue
         registry = bots.get(bot_key)
         channels = registry.get("channels") if isinstance(registry, dict) else None
-        if not isinstance(channels, dict) or len(channels) < 2:
+        if not isinstance(channels, dict) or not channels:
             continue
         primary_channel = str(entry.get("channel") or "").strip().lower()
         primary_signature = channels.get(primary_channel)
