@@ -4,6 +4,48 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 A private request keeps the channel its sender shares with the bot (#1242)
+
+A file asked for by private message was stored with the bot's own nick as its channel, so `announce_channel_for()`
+fell back to the first configured channel. That channel then labelled the feed (SENDING, SENT and QUEUED "in
+#first-channel"), decided the requester's notices by its own mode (#1204) instead of the requester's channel, and
+received the ANNOUNCE_TRANSFERS "Sent" line. Someone in none of the bot's channels was served when a slot was free,
+and frozen then dropped when they had to queue.
+
+Built to the maintainer's decision on #1242:
+
+1. **Not a message:** `irc.names_a_file_request()` (the `!<nick> <file>` check, on every name `get_bot_aliases()`
+   returns) is what the dispatcher's `is_file_request` uses. `announce.record_private_message()` refuses such a line
+   before its cooldown, so a file request never appears on the dashboard's Messages page or in its count. Real
+   messages, including `!SomeOtherBot ...` and a bare `!SomeBot`, are kept.
+2. **The requester must share a channel with the bot:** `library.shared_channel(user)` gives the first list-bound
+   channel of ours the user is in. On an install where no channel is bound, it gives the first channel the
+   catch-all primary serves that the user is in. The debug channel never counts. `mode_for_request()` reads
+   through it, with identical results.
+   - The check runs first in `handle_download_request()`, so a free slot and a queue give the same answer.
+   - Sharing none, the request is refused silently, with no notice, row or feed event; a console and a debug line
+     say why. `list.send_file_list()` refuses the same way, before its "Preparing full list" notice.
+   - A user who leaves later is frozen and dropped as before (`freeze_absent_user()`, `FREEZE_TIMEOUT`).
+   - While the bot is still re-learning channel members after a reconnect, nobody is known to share a channel, so
+     a private request is refused until it has.
+3. **No announcement:** `send_transfer_complete(..., private=True)` tells no channel, and `start_dcc_send()` passes
+   it from `dcc.is_private_row()`.
+4. **The real channel for the operator:** the row stores the shared channel with `"private": True`. REQUEST, QUEUED,
+   SENDING, SENT, FAIL and the freeze lines name it, and its mode decides the notices. The REQUEST line says
+   "by private message (in #chan)".
+
+**Unchanged:**
+- **Old queue rows** (the bot's nick as channel, no flag) load and send. `is_private_row()` recognises them,
+  `announce_channel_for()` resolves their shared channel when they are sent, and gives `""`, never the first
+  configured channel, when there is none.
+- **Channel requests** keep the same keys and lines, with no presence check.
+
+- **Tests:** `tests/test_a_private_request_keeps_its_real_channel.py` (36 tests; 22/22 mutations caught).
+  - Four tests that pinned the old fallback now expect the shared channel and no Sent line:
+    `test_a_private_requests_sent_line_goes_to_a_channel`, `test_the_sweep_could_not_see_a_pm_requester`,
+    `test_path_security` and `test_a_private_rar_request_is_routed_by_its_label`.
+  - `test_irc_dispatch`'s harness binds `names_a_file_request`.
+
 ### 🔕 Search can be turned off (#1237)
 
 The channel advert said `Search: ON` and every `@find` reply header `Search Result: ON`, but both were fixed text: no
