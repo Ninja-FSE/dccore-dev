@@ -312,6 +312,16 @@ list_grab_last         = None
 list_grab_state        = None
 list_grab_others_asked = {}
 
+# Automatic discovery of a bot's OTHER channel-bound lists (#1240), a
+# separate, much rarer pass from the grab above (that one finds a bot we hold
+# nothing from yet; this one finds a SECOND list for one we already do).
+# Its own guard/lock/timer so the two workers never block each other.
+secondary_channel_guard = threading.Lock()
+secondary_channel_started = False
+secondary_channel_lock = threading.Lock()
+secondary_channel_last = None
+secondary_channel_tries = None
+
 # DCCore Chat, relayed by the bot (#371) - serverschat.py. IN MEMORY ONLY:
 # chat_recent is what other people said in the channels, and none of it is
 # ever written to disk; a restart forgets it. Here so a rehash that reloads

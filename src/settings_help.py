@@ -218,6 +218,8 @@ PLAIN_HELP = {
     'AUTO_GRAB_EVERY_MINUTES': 'The least time between two automatic list grabs, in minutes.',
     'AUTO_GRAB_MIN_FILES': 'Do not grab the list of a bot that advertises fewer files than this. 0 grabs any size.',
     'AUTO_GRAB_MIN_SPEED_KB': 'Do not grab the list of a bot that advertises a speed below this, in KB/s. A bot that shows no speed is not skipped. 0 turns this off.',
+    'AUTO_DISCOVER_CHANNEL_LISTS': 'Watch bots you already hold a list from for a second, genuinely different list bound to another of your channels, and fetch and hold that one too - never instead of the first. Only acts once the difference has held steady for the time below.',
+    'MULTI_CHANNEL_LIST_STABLE_SECONDS': "How long, in seconds, a bot's channels must show a stable, differing file count or list date before the setting above acts on it. A bot mid-scan in one channel when its advert goes out should not be mistaken for a second list.",
     'AUTO_REFETCH_MAX_PER_RUN': 'The most lists to re-fetch in one go. If many are out of date at once, the rest are picked up on later rounds, oldest first.',
     'FETCH_MAX_PER_BOT': 'How many files to ask one bot for at once. The next one is asked when one arrives. Servers allow each person only a few; asking for more gets "queue full". 0 means no limit.',
     'FETCH_QUEUED_TIMEOUT': 'When another bot puts your request in its queue, how long to wait for your turn before giving up. Busy servers take hours. 0 waits for ever.',

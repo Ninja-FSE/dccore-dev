@@ -270,6 +270,183 @@ def tick(now=None, log=print, pick_delay=None):
     return "asked"
 
 
+# ==========================================================================
+# Automatic discovery of a bot's OTHER channel-bound lists (#1240).
+#
+# A separate, much rarer pass from the grab above: that one finds a bot we
+# hold nothing from yet, on AutoGet's own rules; this one finds a SECOND,
+# genuinely different list for a bot we already hold one from, bound to
+# another of our channels (DCCore's own multi-list-per-channel feature, which
+# another DCCore-family bot can equally run). OFF by default
+# (AUTO_DISCOVER_CHANNEL_LISTS) - see its own comment in defaults.py for why.
+# ==========================================================================
+
+SECONDARY_CHANNEL_TICK_SECONDS = 300.0
+SECONDARY_CHANNEL_TRIES = 3
+SECONDARY_CHANNEL_COOLDOWN_SECONDS = 30 * 60
+
+
+def _secondary_channel_state():
+    """The per-(bot, channel) tries record, loaded from disk the first time
+    it is needed - same shape and reason as _state() above, in its own file
+    so a problem in one never costs the other."""
+    if runtime.secondary_channel_tries is None:
+        runtime.secondary_channel_tries = {
+            key: dict(value) for key, value in db.load_secondary_channel_grabs().items()
+            if isinstance(value, dict)
+        }
+    return runtime.secondary_channel_tries
+
+
+def _save_secondary_channel_state():
+    db.save_secondary_channel_grabs(_secondary_channel_state())
+
+
+def _signatures_differ(a, b):
+    """True if advert signatures `a` and `b` (known_bots[...]["channels"]
+    entries) plausibly describe two different lists, never a guess from
+    only one of them - see _secondary_channel_candidates()'s own docstring
+    for why both have to clear a stability bar first."""
+    files_a, files_b = a.get("files"), b.get("files")
+    if isinstance(files_a, int) and isinstance(files_b, int):
+        return files_a != files_b
+    date_a, date_b = a.get("list_date"), b.get("list_date")
+    return bool(date_a) and bool(date_b) and date_a != date_b
+
+
+def _held_marker_channels(bot_key):
+    """{channel, lowercased} already held as a marker for this bot - a
+    channel in this set has already been discovered, whatever confirmed it
+    (this detector, or an operator's own fetch); never asked for twice."""
+    entry = (getattr(config, "fetched_bot_lists", {}) or {}).get(bot_key)
+    lists = (entry or {}).get("lists") if isinstance(entry, dict) else None
+    if not isinstance(lists, dict):
+        return set()
+    return {str(info.get("channel")).strip().lower()
+            for info in lists.values()
+            if isinstance(info, dict) and info.get("channel")}
+
+
+def _secondary_channel_candidates(now=None):
+    """[(bot_key, nick, channel), ...] worth fetching: a bot we already hold
+    a list from, advertising in another of our channels with a file count or
+    list date that genuinely differs from its own held channel's - and has
+    held stable, on BOTH sides of the comparison, for at least
+    MULTI_CHANNEL_LIST_STABLE_SECONDS. Never a bot's first list at all (that
+    is list_grab's own job above) and never a channel already held as a
+    marker for this bot.
+    """
+    now = time.time() if now is None else now
+    stable_for = max(0, _setting("MULTI_CHANNEL_LIST_STABLE_SECONDS", 3600))
+    held = getattr(config, "fetched_bot_lists", {}) or {}
+    bots = getattr(config, "known_bots", {}) or {}
+    found = []
+    for bot_key, entry in held.items():
+        if not isinstance(entry, dict):
+            continue
+        registry = bots.get(bot_key)
+        channels = registry.get("channels") if isinstance(registry, dict) else None
+        if not isinstance(channels, dict) or len(channels) < 2:
+            continue
+        primary_channel = str(entry.get("channel") or "").strip().lower()
+        primary_signature = channels.get(primary_channel)
+        if primary_signature is not None:
+            since = primary_signature.get("since")
+            if not isinstance(since, (int, float)) or now - since < stable_for:
+                # The channel we already hold is itself mid-change - comparing
+                # anything against it right now would be comparing against a
+                # moving target.
+                continue
+        already_held = _held_marker_channels(bot_key)
+        for channel, signature in channels.items():
+            if channel == primary_channel or channel in already_held:
+                continue
+            if not isinstance(signature, dict):
+                continue
+            since = signature.get("since")
+            if not isinstance(since, (int, float)) or now - since < stable_for:
+                continue
+            if primary_signature is not None and not _signatures_differ(signature, primary_signature):
+                continue
+            if primary_signature is None and not isinstance(signature.get("files"), int):
+                # Nothing to compare against (the bot has never advertised in
+                # the channel we actually hold its list from) - only worth
+                # acting on when this candidate channel's own signal is
+                # concrete enough to be a real list rather than noise.
+                continue
+            record = _secondary_channel_state().get(f"{bot_key}:{channel}") or {}
+            if int(record.get("tries") or 0) >= SECONDARY_CHANNEL_TRIES:
+                continue
+            if now - float(record.get("last") or 0) < SECONDARY_CHANNEL_COOLDOWN_SECONDS:
+                continue
+            found.append((bot_key, registry.get("nick") or entry.get("bot") or bot_key, channel))
+    return found
+
+
+def secondary_channel_tick(now=None, log=print):
+    """One look: fetch at most one confirmed secondary channel. Returns what
+    it did, for tests and the log."""
+    import webserver
+
+    if not getattr(config, "AUTO_DISCOVER_CHANNEL_LISTS", False):
+        return "off"
+    now = time.time() if now is None else now
+    with runtime.secondary_channel_lock:
+        every = SECONDARY_CHANNEL_TICK_SECONDS
+        if now - float(runtime.secondary_channel_last or 0) < every:
+            return "waiting"
+        found = _secondary_channel_candidates(now)
+        if not found:
+            runtime.secondary_channel_last = now
+            return "nothing"
+        bot_key, nick, channel = found[0]
+        runtime.secondary_channel_last = now
+        state = _secondary_channel_state()
+        record = state.setdefault(f"{bot_key}:{channel}", {"tries": 0})
+        record["last"] = now
+        record["tries"] = int(record.get("tries") or 0) + 1
+        tries = record["tries"]
+        _save_secondary_channel_state()
+
+    status, result = webserver.build_list_fetch_enqueue_result(nick, channel)
+    if status != 200:
+        log(f"[LIST-GRAB] Did not ask {nick} for {channel}'s list: "
+            f"{result.get('error', 'refused')}")
+        return "refused"
+    log(f"[LIST-GRAB] {nick} advertises a different list in {channel} - "
+        f"asking for it (try {tries} of {SECONDARY_CHANNEL_TRIES}).")
+    return "asked"
+
+
+def ensure_secondary_channel_worker(start=None):
+    """Start secondary_channel_worker() if AUTO_DISCOVER_CHANNEL_LISTS is on
+    and it is not running. True only when this call started it. Same shape
+    as ensure_worker() above, its own guard so the two never interfere."""
+    if not getattr(config, "AUTO_DISCOVER_CHANNEL_LISTS", False):
+        return False
+    with runtime.secondary_channel_guard:
+        if runtime.secondary_channel_started:
+            return False
+        starter = start or (lambda: threading.Thread(
+            target=secondary_channel_worker, daemon=True).start())
+        starter()
+        runtime.secondary_channel_started = True
+    return True
+
+
+def secondary_channel_worker(sleep=None):
+    """The loop. Turning the setting off needs no stop: the tick does
+    nothing while it is off."""
+    naptime = sleep or time.sleep
+    print("[LIST-GRAB] Automatic discovery of channel-bound lists is on.")
+    while True:
+        try:
+            secondary_channel_tick()
+        except Exception as err:
+            print(f"[LIST-GRAB] Automatic secondary-channel discovery error: {err}")
+        naptime(60.0)
+
+
 def ensure_worker(start=None):
     """Start the loop below if AUTO_GRAB_LISTS is on and it is not running.
     True only when this call started it. Called from oserve.startup() and the

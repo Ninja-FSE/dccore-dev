@@ -3429,7 +3429,9 @@ SETTINGS_CATEGORIES = (
     # #926: fetching lists nobody asked for is its own decision, with its
     # own rules - not four more lines at the end of "Fetching from bots".
     ("list-grab",     "Grabbing lists",        ["AUTO_GRAB_LISTS", "AUTO_GRAB_EVERY_MINUTES",
-                                                "AUTO_GRAB_MIN_FILES", "AUTO_GRAB_MIN_SPEED_KB"]),
+                                                "AUTO_GRAB_MIN_FILES", "AUTO_GRAB_MIN_SPEED_KB",
+                                                "AUTO_DISCOVER_CHANNEL_LISTS",
+                                                "MULTI_CHANNEL_LIST_STABLE_SECONDS"]),
     ("fetching",      "Fetching from bots",    ["MAX_FETCH_SLOTS", "AUTO_REFETCH_LISTS",
                                                 "AUTO_REFETCH_INTERVAL_HOURS",
                                                 "AUTO_REFETCH_MAX_PER_RUN",
@@ -3543,6 +3545,8 @@ SETTINGS_LABELS = {
     "AUTO_GRAB_EVERY_MINUTES": "Minutes between automatic grabs",
     "AUTO_GRAB_MIN_FILES": "Skip bots with fewer files than",
     "AUTO_GRAB_MIN_SPEED_KB": "Skip bots slower than (KB/s)",
+    "AUTO_DISCOVER_CHANNEL_LISTS": "Discover a bot's other channel-bound lists",
+    "MULTI_CHANNEL_LIST_STABLE_SECONDS": "Hold stable this long first (seconds)",
     "AUTO_REFETCH_INTERVAL_HOURS": "Least time between re-fetches of one bot (hours)",
     "AUTO_REFETCH_MAX_PER_RUN": "Most lists to re-fetch in one sweep",
     "FETCH_TRANSFER_TIMEOUT": "Fetch transfer timeout (seconds)",

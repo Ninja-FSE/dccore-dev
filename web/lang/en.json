@@ -571,6 +571,8 @@
   "settings.field.AUTO_GRAB_EVERY_MINUTES": "Minutes between automatic grabs",
   "settings.field.AUTO_GRAB_MIN_FILES": "Skip bots with fewer files than",
   "settings.field.AUTO_GRAB_MIN_SPEED_KB": "Skip bots slower than (KB/s)",
+  "settings.field.AUTO_DISCOVER_CHANNEL_LISTS": "Discover a bot's other channel-bound lists",
+  "settings.field.MULTI_CHANNEL_LIST_STABLE_SECONDS": "Hold stable this long first (seconds)",
   "settings.field.FETCH_TRANSFER_TIMEOUT": "Fetch transfer timeout (seconds)",
   "settings.field.FETCH_OFFER_TIMEOUT": "Wait for a reply to a fetch request (seconds)",
   "settings.field.FETCH_QUEUED_TIMEOUT": "Wait for a queued request (s)",

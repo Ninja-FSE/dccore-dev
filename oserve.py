@@ -519,6 +519,12 @@ def startup(setup_page=None):
         list_grab.ensure_worker()
     except Exception as grab_err:
         print(f"[LIST-GRAB] Could not start automatic list grabbing: {grab_err}")
+    # Automatic discovery of a bot's other channel-bound lists (#1240).
+    try:
+        import list_grab as _list_grab_secondary
+        _list_grab_secondary.ensure_secondary_channel_worker()
+    except Exception as secondary_err:
+        print(f"[LIST-GRAB] Could not start automatic channel-list discovery: {secondary_err}")
 
     # The list rebuild schedule (#776): started the same way, also re-armed by
     # every rehash, so setting it on the dashboard needs no restart.
