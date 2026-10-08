@@ -191,12 +191,86 @@ class TheAdvertSignatureIsStamped(DCCoreTestCase):
                          {"files": 9, "since": 2.0})
 
 
+class ABotHeldBeforeChannelsWereTracked(DCCoreTestCase):
+    """A real incident, hit live on the real bot: an entry fetched before
+    #1232 ever existed has no "channel" field at all - sometimes not even a
+    "lists" dict, only the old flat list_path/entry_count shape from before
+    #1209's multi-list-per-archive feature. Either shape must be preserved
+    exactly as safely as a channel-tagged one once a secondary channel's
+    fetch comes in, not read as "nothing recorded here to protect"."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-1240-legacy-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+        self.video_zip = os.path.join(self.tmp, "video.zip")
+
+    def fetch_video(self):
+        _write_zip(self.video_zip, [(f"{BOT}-VIDEO-2026-08-27.txt",
+                                     _list_txt(base_name=BOT, files=(("Clip.mkv", "700.0MB"),)))])
+        return list_fetch.process_fetched_list_zip(BOT, self.video_zip, channel="#video")
+
+    def test_an_entry_with_no_channel_field_at_all_is_still_treated_as_secondary(self):
+        config.fetched_bot_lists[KEY] = {
+            "bot": BOT, "entry_count": 1116789,
+            "list_path": "/somewhere/real/list.txt",  # no "channel" key, no "lists" dict
+        }
+        self.assertTrue(list_fetch._is_secondary_channel_fetch(BOT, "#video"))
+
+    def test_a_bot_with_no_lists_dict_at_all_keeps_its_old_content(self):
+        """The pre-#1209 flat shape: the one list lives in list_path/
+        entry_count directly on the entry, no "lists" dict exists yet."""
+        config.fetched_bot_lists[KEY] = {
+            "bot": BOT, "entry_count": 1116789,
+            "list_path": "/somewhere/real/list.txt",
+        }
+        ok, _reason = self.fetch_video()
+        self.assertTrue(ok, _reason)
+        lists = config.fetched_bot_lists[KEY]["lists"]
+        self.assertEqual(lists[""]["entry_count"], 1116789)
+        self.assertEqual(lists[""]["list_path"], "/somewhere/real/list.txt")
+        self.assertIn("video", lists)
+        self.assertEqual(lists["video"]["entry_count"], 1)
+
+    def test_a_bot_with_a_lists_dict_but_no_channel_field_keeps_its_markers(self):
+        """The #1209-but-pre-#1232 shape: a real "lists" dict (maybe Main
+        and RAR already), just never tagged with which channel it came
+        from."""
+        config.fetched_bot_lists[KEY] = {
+            "bot": BOT,
+            "lists": {
+                "": {"list_path": "/x/main.txt", "entry_count": 500, "file_name": "main.txt"},
+                "RAR": {"list_path": "/x/rar.txt", "entry_count": 12, "file_name": "rar.txt"},
+            },
+        }
+        ok, _reason = self.fetch_video()
+        self.assertTrue(ok, _reason)
+        lists = config.fetched_bot_lists[KEY]["lists"]
+        self.assertEqual(lists[""]["entry_count"], 500)
+        self.assertEqual(lists["RAR"]["entry_count"], 12)
+        self.assertIn("video", lists)
+
+    def test_a_bot_with_nothing_held_at_all_is_not_secondary(self):
+        """No previous entry whatsoever - the FIRST ever fetch for a bot
+        must still take the ordinary, full-replace path."""
+        self.assertFalse(list_fetch._is_secondary_channel_fetch(BOT, "#video"))
+        ok, _reason = self.fetch_video()
+        self.assertTrue(ok, _reason)
+        self.assertEqual(set(config.fetched_bot_lists[KEY]["lists"]), {""})
+
+
 class TheMergeHelpersInIsolation(DCCoreTestCase):
 
     def test_is_secondary_requires_an_existing_entry(self):
         self.assertFalse(list_fetch._is_secondary_channel_fetch(BOT, "#video"))
 
-    def test_is_secondary_requires_the_existing_entry_to_have_a_channel(self):
+    def test_an_entry_with_no_channel_and_no_real_content_is_not_secondary(self):
+        """No channel AND nothing actually held (an empty "lists" dict, no
+        list_path either) - contrast with ABotHeldBeforeChannelsWereTracked
+        below, where the entry has no channel but DOES hold real content and
+        must be treated as secondary instead."""
         config.fetched_bot_lists[KEY] = {"bot": BOT, "channel": None, "lists": {}}
         self.assertFalse(list_fetch._is_secondary_channel_fetch(BOT, "#video"))
 

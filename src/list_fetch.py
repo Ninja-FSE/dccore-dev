@@ -259,6 +259,16 @@ def _is_secondary_channel_fetch(bot, channel):
     genuine, confirmed difference - discovered and stable, see list_grab.py's
     secondary-channel detector - reaches here with a channel that differs.
 
+    A real incident, hit live: a bot held from before #1232 ever existed has
+    no "channel" field at all on its entry, which must NEVER be read as "no
+    channel on record, so there is nothing here to protect" - that entry can
+    hold a million real rows just the same, and a channel-targeted fetch
+    that is allowed to replace it wholesale destroys them exactly as
+    thoroughly as the incident that #1232's own storage rework was written
+    to stop. An entry with real content but no recorded channel is still
+    something this fetch must merge beside, never overwrite - it is simply
+    one whose OWN channel we never happened to learn.
+
     Shared by _extract_dir_for() (which directory to extract into) and
     _install_fetched_list() (merge the result in, or replace the entry
     outright) so the two can never disagree about which fetch this is.
@@ -268,9 +278,15 @@ def _is_secondary_channel_fetch(bot, channel):
         return False
     store = _ensure_fetched_bot_lists()
     previous = store.get(str(bot).strip().lower())
-    previous_channel = str((previous or {}).get("channel") or "").strip()
-    if not previous or not previous_channel:
+    if not isinstance(previous, dict) or not previous:
         return False
+    previous_channel = str(previous.get("channel") or "").strip()
+    if not previous_channel:
+        # No channel on record - but if there is already real content here,
+        # treat this fetch as secondary anyway: merging beside unknown
+        # content is always safe, where replacing it is only safe when there
+        # really is nothing there to lose.
+        return bool(previous.get("list_path") or previous.get("lists"))
     return channel.lower() != previous_channel.lower()
 
 
@@ -1890,6 +1906,19 @@ def _install_secondary_channel_lists(bot, channel, extract_dir, list_path):
     key = str(bot).strip().lower()
     previous = store.get(key) or {}
     kept_lists = dict(previous.get("lists") or {})
+    if "" not in kept_lists and previous.get("list_path"):
+        # A bot held from before #1209's multi-list-per-archive feature has
+        # no "lists" dict at all - its one list lives directly in list_path/
+        # entry_count on the entry itself. Backfilled here as the "" marker
+        # so the loop just below (which only ever looks at kept_lists) still
+        # finds and preserves it, exactly as if it had always been stored
+        # this way - the alternative is losing it the moment this runs.
+        kept_lists[""] = {
+            "list_path": previous["list_path"],
+            "entry_count": previous.get("entry_count") or 0,
+            "file_name": os.path.basename(str(previous["list_path"])),
+            "channel": previous.get("channel"),
+        }
     this_channels_markers = {marker for marker, info in kept_lists.items()
                              if isinstance(info, dict) and info.get("channel") == channel}
 
