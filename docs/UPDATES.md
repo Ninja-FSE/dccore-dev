@@ -4,6 +4,36 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔭 A bot's other channel-bound list is discovered and held automatically (#1240)
+
+#1232/#1239 fixed a request landing in the wrong channel; it still took an operator's own action to ever see a bot's
+SECOND list at all - one bound to a channel other than the one its first list was fetched from (DCCore's own
+multi-list-per-channel feature, which another DCCore-family bot can equally run). Measured in the field first
+(@chchatzop: 49 bots advertising over ~8.5 hours in 17 channels, 38 sharing more than one with us, only 1 with a
+genuinely different list per channel): rare, but real, and the operator wanted it with no manual step at all.
+
+- **A bot's OTHER channel-bound lists are held side by side with its first, not instead of it.** A fetch from a
+  channel other than the one already on record for a bot used to replace the bot's whole entry - on a bot with Main,
+  RAR and a video-bound second list, asking for the video channel's answer deleted Main and RAR, a real incident
+  found while reviewing this very change. `_install_fetched_list()` now MERGES a channel's own markers into the
+  existing entry instead, named after the channel (`video`, `video-RAR`) rather than main/rar/video; an ordinary
+  refresh of the bot's own channel still fully replaces that channel's own markers, exactly as before, and never
+  touches another channel's. Extracted into its own subdirectory, so it can never overwrite what the primary
+  channel's lists point at on disk either.
+- **`AUTO_DISCOVER_CHANNEL_LISTS`** (Settings → Grabbing lists, off by default, same reasoning as
+  `AUTO_GRAB_LISTS`/`AUTO_REFETCH_LISTS`): watches every bot already held for a channel advertising a genuinely
+  different file count or list date than the channel its list came from - and fetches and holds that one too.
+- **Never off a single advert.** `known_bots[...]["channels"]` now tracks each channel's own advertised signature,
+  and a difference only counts once it has held steady on BOTH sides for `MULTI_CHANNEL_LIST_STABLE_SECONDS`
+  (default 1 hour) - a bot mid-scan in one channel when its advert goes out must not be mistaken for a second list.
+  Three tries, 30 minutes apart, then that (bot, channel) pair is left alone until something about it changes.
+- **Kept fresh afterward, not just found once.** Each marker remembers what its channel was advertising when it was
+  fetched; once that channel's own signature moves on and holds stable again, it is asked for again automatically -
+  the same upkeep a bot's primary list already gets from `AUTO_REFETCH_LISTS`, extended to a secondary one.
+- **Tests:** `tests/test_a_bots_channel_bound_lists_are_held_side_by_side.py` (20 tests, including the exact
+  Main+RAR+video regression) and `tests/test_a_bots_second_channel_list_is_discovered_automatically.py` (23 tests:
+  the stability gate, the tick, ongoing refresh, the worker).
+
 ### 📡 A cross-bot request goes to the channel it belongs in (#1232)
 
 A request to another bot - its list, a file, a folder as a RAR - went wherever `dcc.channel_containing_user(bot)`
