@@ -1631,8 +1631,18 @@ def process_fetched_list_zip(bot, zip_path, channel=None):
         # entry["entry_count"] is the PRIMARY channel's, untouched by this
         # fetch, and would misreport what just actually arrived (#1240).
         if secondary and isinstance(entry, dict):
-            marker = _channel_marker_name(channel)
-            count = int(((entry.get("lists") or {}).get(marker) or {}).get("entry_count") or 0)
+            # Not just kept_lists[_channel_marker_name(channel)]: a channel
+            # that sub-splits INSIDE its own archive (its own "-VIDEO-" file,
+            # say) does not keep that base name at all - the base marker's
+            # own file can even turn out empty and be dropped, as happened
+            # live (the console reported 0 files for a channel that had
+            # really just arrived with thousands, because the one marker it
+            # looked up by name was never stored). Sum every marker this
+            # fetch actually touched - the ones tagged with THIS channel -
+            # instead of assuming there is exactly one, named after it.
+            count = sum(int(info.get("entry_count") or 0)
+                       for info in (entry.get("lists") or {}).values()
+                       if isinstance(info, dict) and info.get("channel") == channel)
         else:
             count = int((entry or {}).get("entry_count") or 0) if isinstance(entry, dict) else 0
         _tell_the_console(bot, "arrived", f"{bot}'s list arrived: {count:,} files")

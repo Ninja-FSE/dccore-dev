@@ -23,6 +23,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+import announce  # noqa: E402
 import defaults as config  # noqa: E402
 import list_fetch  # noqa: E402
 import list_index  # noqa: E402
@@ -156,6 +157,58 @@ class TheIncidentItself(DCCoreTestCase):
         secondary_dir = list_fetch.secondary_channel_extract_dir(BOT, "#video")
         self.assertTrue(os.path.isdir(secondary_dir))
         self.assertTrue(os.listdir(secondary_dir))
+
+
+class TheArrivedMessageReportsTheRealCount(DCCoreTestCase):
+    """A real incident, hit live: a channel's own archive can sub-split
+    inside itself - its base file (what _channel_marker_name(channel) alone
+    would look up) turned out empty and was dropped, while a sibling file in
+    the SAME archive (stored as "<channel>-VIDEO") held the real content.
+    The console reported "0 files" for a fetch that genuinely brought back
+    thousands, because the old lookup only ever checked the one key named
+    after the channel itself.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-1240-arrived-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+        self.music_zip = os.path.join(self.tmp, "music.zip")
+        self.video_zip = os.path.join(self.tmp, "video.zip")
+        self.events = []
+        real = announce.feed_event
+        announce.feed_event = lambda kind, text, **fields: self.events.append((kind, text, fields))
+        self.addCleanup(setattr, announce, "feed_event", real)
+
+    def arrived_text(self):
+        for kind, text, fields in self.events:
+            if kind == "LISTFETCH" and fields.get("action") == "arrived":
+                return text
+        return None
+
+    def test_a_channel_whose_own_main_file_is_empty_still_reports_its_real_count(self):
+        _write_zip(self.music_zip, [
+            (f"{BOT}-2026-08-27.txt", _list_txt(base_name=BOT, files=(("Song.flac", "10.0MB"),))),
+        ])
+        list_fetch.process_fetched_list_zip(BOT, self.music_zip, channel="#music")
+        self.events.clear()
+
+        # The channel's own archive: an empty base file (just headers, no
+        # request lines) alongside a real "-VIDEO-" one - exactly the shape
+        # that left nothing stored under the base channel marker name.
+        empty_header = "List of 0 Files generated on Jan 1st\n"
+        _write_zip(self.video_zip, [
+            (f"{BOT}-2026-08-27.txt", empty_header),
+            (f"{BOT}-VIDEO-2026-08-27.txt", _list_txt(base_name=BOT, files=(("Clip.mkv", "700.0MB"),))),
+        ])
+        ok, _reason = list_fetch.process_fetched_list_zip(BOT, self.video_zip, channel="#video")
+
+        self.assertTrue(ok)
+        self.assertNotIn("video", config.fetched_bot_lists[KEY]["lists"])
+        self.assertIn("video-VIDEO", config.fetched_bot_lists[KEY]["lists"])
+        self.assertEqual(self.arrived_text(), f"{BOT}'s list arrived: 1 files")
 
 
 class TheAdvertSignatureIsStamped(DCCoreTestCase):
