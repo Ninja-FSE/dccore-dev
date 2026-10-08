@@ -885,14 +885,19 @@
       // refused as unsolicited.
       var folder = String(row.requested_filename || "").replace(/^!rar\s+/i, "");
       if (!folder) { button.disabled = false; return; }
-      again = postJson("/api/filelists/fetch-folder-rar", { bot: row.bot, folder: folder });
+      // row.channel (#1240): the channel THIS row actually went out in last
+      // time, carried straight through rather than re-resolved - a retry of
+      // a secondary marker's folder must keep asking in that same channel,
+      // not fall back to the bot's primary one for lack of a marker here.
+      again = postJson("/api/filelists/fetch-folder-rar",
+                       { bot: row.bot, folder: folder, channel: row.channel });
     } else {
       // requested_filename, not filename: for a folder row the second is the
       // name the OTHER bot eventually advertised, and for a failed one it may
       // never have been set at all. The first is what we asked for.
       var wanted = row.requested_filename || row.filename;
       if (!wanted) { button.disabled = false; return; }
-      again = postJson("/api/fetch/enqueue", [{ bot: row.bot, filename: wanted }]);
+      again = postJson("/api/fetch/enqueue", [{ bot: row.bot, filename: wanted, channel: row.channel }]);
     }
 
     again.then(function (res) {

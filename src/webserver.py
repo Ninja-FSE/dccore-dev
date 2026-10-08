@@ -1603,7 +1603,7 @@ def build_list_fetch_enqueue_result(bot_raw, channel_raw=None):
     return 200, {"created": [request_id]}
 
 
-def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw, marker_raw=None):
+def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw, marker_raw=None, channel_raw=None):
     """POST /api/filelists/fetch-folder-rar's pure logic: validate the bot
     nick and folder path, then enqueue a request_type="folder" row asking
     that bot to pack the whole folder/album as a .rar via its own "!rar"
@@ -1648,7 +1648,8 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw, marker_raw=None):
     if absent:
         return 409, {"error": absent}
 
-    return _enqueue_folder_request(dcc_fetch, bot, folder, marker=marker_raw)
+    return _enqueue_folder_request(dcc_fetch, bot, folder,
+                                   raw={"marker": marker_raw, "channel": channel_raw})
 
 
 def build_folder_rar_batch_enqueue_result(payload):
@@ -1670,7 +1671,7 @@ def build_folder_rar_batch_enqueue_result(payload):
             errors.append({"error": "Each item must be an object with bot/folder.", "item": raw})
             continue
         status, result = build_folder_rar_fetch_enqueue_result(
-            raw.get("bot", ""), raw.get("folder", ""), raw.get("marker", ""))
+            raw.get("bot", ""), raw.get("folder", ""), raw.get("marker", ""), raw.get("channel", ""))
         if status == 200:
             created.extend(result.get("created", []))
         else:
@@ -1689,6 +1690,24 @@ PACK_FETCH_CONFLICT_ERROR = (
     "already in progress for this bot - wait for it to finish before asking "
     "for this one."
 )
+
+
+def _preferred_fetch_channel(raw, bot, marker_field="marker"):
+    """The channel a file/folder enqueue item should prefer (#1240): an
+    explicit "channel" on the item itself wins first - a Downloads-page
+    retry already knows exactly which channel its row went out in before
+    and must keep asking there, not fall back to a marker lookup it has no
+    marker for - then the item's own marker (held_list_channel()), then
+    nothing, same fallback chain dcc_fetch._resolve_fetch_channel() applies
+    from there regardless. A non-string or unsafe "channel" is ignored
+    rather than rejecting the whole item over it - this is only ever a
+    preference, never a requirement, so a bad value just loses the
+    preference instead of losing the request too.
+    """
+    channel = raw.get("channel") if isinstance(raw, dict) else None
+    if isinstance(channel, str) and channel.strip() and not reject_if_unsafe_for_irc_line(channel, "channel"):
+        return channel.strip()
+    return held_list_channel(bot, marker=(raw or {}).get(marker_field) if isinstance(raw, dict) else None)
 
 
 def held_list_channel(bot, marker=None):
@@ -1725,7 +1744,7 @@ def held_list_channel(bot, marker=None):
     return entry.get("channel")
 
 
-def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None, marker=None):
+def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None, raw=None):
     """Enqueue one folder request: (http_status, payload_dict).
 
     TWO SHAPES (#1209). A "!rar" folder - DCCore's and its relatives' - is
@@ -1734,6 +1753,13 @@ def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None, marker=None):
     exactly as its list wrote it, "!<trigger> <path>.rar", with no "!rar",
     and its RAR is admitted by the name it will arrive under, so several may
     wait together as long as those names cannot clash.
+
+    `raw` (#1240) is the original item dict, read by _preferred_fetch_
+    channel() for an explicit "channel" (a Downloads-page retry, which
+    already knows exactly which channel this row went out in before) or a
+    "marker" (a List Browser request, which knows which of the bot's lists
+    the row came from but not its channel directly) - either way, never
+    both at once in practice, and neither is required.
     """
     import list as list_mod
 
@@ -1747,7 +1773,7 @@ def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None, marker=None):
         request, conflict = f"!rar {folder}", BOT_ALONE_FETCH_CONFLICT_ERROR
 
     request_id = dcc_fetch.enqueue_fetch(bot, request, request_type="folder", trigger=trigger,
-                                         channel=held_list_channel(bot, marker=marker))
+                                         channel=_preferred_fetch_channel(raw or {}, bot))
     if request_id is None:
         # Defense in depth - see build_list_fetch_enqueue_result()'s
         # identical comment above.
@@ -2897,7 +2923,7 @@ def build_fetch_enqueue_result(payload):
         # be admitted. It goes the folder route instead.
         if list_mod.pack_path_of(filename):
             folder_status, result = _enqueue_folder_request(
-                dcc_fetch, bot, filename, trigger, marker=raw.get("marker"))
+                dcc_fetch, bot, filename, trigger, raw=raw)
             if folder_status == 200:
                 created.extend(result["created"])
             else:
@@ -2909,7 +2935,7 @@ def build_fetch_enqueue_result(payload):
                            "item": raw})
             continue
         request_id = dcc_fetch.enqueue_fetch(bot, filename, trigger=trigger,
-                                            channel=held_list_channel(bot, marker=raw.get("marker")))
+                                            channel=_preferred_fetch_channel(raw, bot))
         if request_id is None:
             # Only reachable via the queue cap: enqueue_fetch()'s other refusal
             # is for "list"/"folder" rows and this route only creates "file"
@@ -5445,7 +5471,7 @@ if HAVE_FLASK:
                 return jsonify(result), status
             body = json_object(payload)
             status, result = build_folder_rar_fetch_enqueue_result(
-                body.get("bot", ""), body.get("folder", ""), body.get("marker", ""))
+                body.get("bot", ""), body.get("folder", ""), body.get("marker", ""), body.get("channel", ""))
             return jsonify(result), status
 
         @app.route("/api/settings/theme-preview", methods=["POST"])

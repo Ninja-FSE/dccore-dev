@@ -115,7 +115,8 @@ class TheSourceSaysSo(unittest.TestCase):
     def test_both_send_a_folder_row_by_the_folder_route(self):
         with io.open(os.path.join(REPO_ROOT, "web", "app.js"), encoding="utf-8") as handle:
             js = handle.read()
-        self.assertIn('again = postJson("/api/filelists/fetch-folder-rar", { bot: row.bot, folder: folder });', js)
+        self.assertIn('again = postJson("/api/filelists/fetch-folder-rar",\n'
+                     '                       { bot: row.bot, folder: folder, channel: row.channel });', js)
         with io.open(os.path.join(REPO_ROOT, "src", "adminchat.py"), encoding="utf-8") as handle:
             py = handle.read()
         self.assertIn("webserver.build_folder_rar_fetch_enqueue_result(bot, dcc_fetch.folder_asked_for(row))", py)
