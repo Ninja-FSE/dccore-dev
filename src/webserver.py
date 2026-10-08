@@ -1603,7 +1603,7 @@ def build_list_fetch_enqueue_result(bot_raw, channel_raw=None):
     return 200, {"created": [request_id]}
 
 
-def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
+def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw, marker_raw=None):
     """POST /api/filelists/fetch-folder-rar's pure logic: validate the bot
     nick and folder path, then enqueue a request_type="folder" row asking
     that bot to pack the whole folder/album as a .rar via its own "!rar"
@@ -1648,7 +1648,7 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
     if absent:
         return 409, {"error": absent}
 
-    return _enqueue_folder_request(dcc_fetch, bot, folder)
+    return _enqueue_folder_request(dcc_fetch, bot, folder, marker=marker_raw)
 
 
 def build_folder_rar_batch_enqueue_result(payload):
@@ -1670,7 +1670,7 @@ def build_folder_rar_batch_enqueue_result(payload):
             errors.append({"error": "Each item must be an object with bot/folder.", "item": raw})
             continue
         status, result = build_folder_rar_fetch_enqueue_result(
-            raw.get("bot", ""), raw.get("folder", ""))
+            raw.get("bot", ""), raw.get("folder", ""), raw.get("marker", ""))
         if status == 200:
             created.extend(result.get("created", []))
         else:
@@ -1691,23 +1691,41 @@ PACK_FETCH_CONFLICT_ERROR = (
 )
 
 
-def held_list_channel(bot):
+def held_list_channel(bot, marker=None):
     """The channel the list we already hold for `bot` was fetched in, or None
-    (#1232) - fetched_bot_lists[...]["channel"], read by its nick alone so
-    every caller (a file, a folder, a re-fetch) steers into the same channel
-    that list itself came from, with no picker and no extra field for the
-    List Browser or Search tab to carry: a row's own "bot" is already enough
-    to look this up. None for a bot with no held list, or one fetched before
-    #1232, or one whose channel could not be resolved when it was fetched -
-    dcc_fetch._resolve_fetch_channel()'s own fallback chain applies from
-    there, same as always.
+    (#1232) - read by its nick alone so most callers (a re-fetch, a request
+    with no marker of its own) need no extra field to carry.
+
+    `marker` (#1240), when given, asks the narrower question: not "the bot's
+    primary channel" but "the channel THIS marker's own list came from" -
+    fetched_bot_lists[bot]["lists"][marker]["channel"], checked FIRST. A
+    secondary channel's own marker has a different channel than the bot's
+    primary one by construction (that is what makes it secondary - see
+    list_fetch._is_secondary_channel_fetch()), so a request for a file or
+    folder on a secondary marker's list that fell back to the primary's
+    channel would go out in the wrong place - found live: a file ticked on a
+    bot's "-VIDEO" marker's list went to the bot's ordinary channel, where
+    the file both was never advertised. Falls back to the bot's own
+    "channel" (today's rule) when no marker is given, the marker is "" (the
+    primary itself), or that marker is not actually held.
+
+    None for a bot with no held list, or a marker whose own channel could
+    not be resolved when it was fetched either - dcc_fetch._resolve_fetch_
+    channel()'s own fallback chain applies from there, same as always.
     """
     store = getattr(config, "fetched_bot_lists", None) or {}
     entry = store.get(str(bot).strip().lower())
-    return (entry or {}).get("channel") if isinstance(entry, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    marker = str(marker or "").strip()
+    if marker:
+        info = (entry.get("lists") or {}).get(marker)
+        if isinstance(info, dict) and info.get("channel"):
+            return info["channel"]
+    return entry.get("channel")
 
 
-def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None):
+def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None, marker=None):
     """Enqueue one folder request: (http_status, payload_dict).
 
     TWO SHAPES (#1209). A "!rar" folder - DCCore's and its relatives' - is
@@ -1729,7 +1747,7 @@ def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None):
         request, conflict = f"!rar {folder}", BOT_ALONE_FETCH_CONFLICT_ERROR
 
     request_id = dcc_fetch.enqueue_fetch(bot, request, request_type="folder", trigger=trigger,
-                                         channel=held_list_channel(bot))
+                                         channel=held_list_channel(bot, marker=marker))
     if request_id is None:
         # Defense in depth - see build_list_fetch_enqueue_result()'s
         # identical comment above.
@@ -2878,7 +2896,8 @@ def build_fetch_enqueue_result(payload):
         # comes back under another name, so as a file request it could never
         # be admitted. It goes the folder route instead.
         if list_mod.pack_path_of(filename):
-            folder_status, result = _enqueue_folder_request(dcc_fetch, bot, filename, trigger)
+            folder_status, result = _enqueue_folder_request(
+                dcc_fetch, bot, filename, trigger, marker=raw.get("marker"))
             if folder_status == 200:
                 created.extend(result["created"])
             else:
@@ -2890,7 +2909,7 @@ def build_fetch_enqueue_result(payload):
                            "item": raw})
             continue
         request_id = dcc_fetch.enqueue_fetch(bot, filename, trigger=trigger,
-                                            channel=held_list_channel(bot))
+                                            channel=held_list_channel(bot, marker=raw.get("marker")))
         if request_id is None:
             # Only reachable via the queue cap: enqueue_fetch()'s other refusal
             # is for "list"/"folder" rows and this route only creates "file"
@@ -5426,7 +5445,7 @@ if HAVE_FLASK:
                 return jsonify(result), status
             body = json_object(payload)
             status, result = build_folder_rar_fetch_enqueue_result(
-                body.get("bot", ""), body.get("folder", ""))
+                body.get("bot", ""), body.get("folder", ""), body.get("marker", ""))
             return jsonify(result), status
 
         @app.route("/api/settings/theme-preview", methods=["POST"])

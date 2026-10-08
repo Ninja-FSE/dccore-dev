@@ -3089,6 +3089,17 @@
           if (i >= boxes.length) { return; }
           boxes[i].dataset.bot = row.source;
           boxes[i].dataset.filename = row.title;
+          // WHICH OF THE BOT'S LISTS THIS ROW CAME FROM (#1240). row.source
+          // is the bare nick only - entries_to_filelist_rows() shares that
+          // shape with the operator's own list, which has no marker at all -
+          // so the marker has to come from here instead: group.bot for a
+          // cross-search row (each group is its own "nick/marker" source),
+          // state.filelistsSource for the single list currently open in the
+          // List Browser. Sent on every request so the server can answer
+          // from the CHANNEL THIS LIST CAME FROM rather than always the
+          // bot's primary one - a file from a secondary channel's list used
+          // to be asked for in the bot's main channel instead, found live.
+          boxes[i].dataset.marker = splitFetchedSource(group.bot || state.filelistsSource).list;
           // A row of a RAR list asks for a folder (#1233): Download selected
           // sends it the way "Get Folder as Rar" does, not as a file.
           if (row.rar_folder) {
@@ -3122,8 +3133,11 @@
         // whichever list the sidebar has selected - not the one this folder
         // came from. Requesting the right folder from the wrong bot is a
         // request that cannot succeed.
-        button.dataset.bot = splitFetchedSource(
-          group.bot || state.filelistsSource).nick;
+        var source = splitFetchedSource(group.bot || state.filelistsSource);
+        button.dataset.bot = source.nick;
+        // WHICH OF THE BOT'S LISTS (#1240) - same reasoning as
+        // attachFilelistsCheckboxData()'s own comment above.
+        button.dataset.marker = source.list;
         // THE ROW'S OWN FOLDER, taken from the request line that put the
         // button there - not the folder HEADING the row happens to sit under.
         // A RAR list's rows are grouped under whatever heading that list
@@ -3140,7 +3154,8 @@
       var folder = button.dataset.folder;
       if (!bot || !folder) { return; }
       button.disabled = true;
-      postJson("/api/filelists/fetch-folder-rar", { bot: bot, folder: folder }).then(function (res) {
+      postJson("/api/filelists/fetch-folder-rar",
+              { bot: bot, folder: folder, marker: button.dataset.marker }).then(function (res) {
         if (!res.ok) {
           showFilelistsFetchStatus(res.data.error || ("HTTP " + res.status), true);
           button.disabled = false;
@@ -3169,9 +3184,10 @@
       var folders = [];
       Array.prototype.forEach.call(checked, function (box) {
         if (box.dataset.rarFolder) {
-          folders.push({ bot: box.dataset.folderBot || box.dataset.bot, folder: box.dataset.rarFolder });
+          folders.push({ bot: box.dataset.folderBot || box.dataset.bot, folder: box.dataset.rarFolder,
+                        marker: box.dataset.marker });
         } else {
-          items.push({ bot: box.dataset.bot, filename: box.dataset.filename });
+          items.push({ bot: box.dataset.bot, filename: box.dataset.filename, marker: box.dataset.marker });
         }
       });
       if (!items.length && !folders.length) { return; }

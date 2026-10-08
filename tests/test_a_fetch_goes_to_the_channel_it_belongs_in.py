@@ -235,6 +235,66 @@ class HeldListChannelFeedsFileAndFolderRequests(DCCoreTestCase):
         rid = result["created"][0]
         self.assertIsNone(config.fetch_queue[rid]["channel"])
 
+    def held_bot_with_a_secondary_marker(self):
+        config.fetched_bot_lists["goodbot"] = {
+            "channel": "#chan",
+            "lists": {
+                "": {"channel": "#chan"},
+                "video": {"channel": "#video"},
+            },
+        }
+
+    def test_held_list_channel_with_a_marker_reads_that_markers_own_channel(self):
+        self.held_bot_with_a_secondary_marker()
+        self.assertEqual(webserver.held_list_channel("GoodBot", marker="video"), "#video")
+
+    def test_held_list_channel_with_no_marker_still_reads_the_primary(self):
+        self.held_bot_with_a_secondary_marker()
+        self.assertEqual(webserver.held_list_channel("GoodBot"), "#chan")
+
+    def test_held_list_channel_with_the_empty_marker_reads_the_primary(self):
+        """"" names the main list itself - not a secondary one."""
+        self.held_bot_with_a_secondary_marker()
+        self.assertEqual(webserver.held_list_channel("GoodBot", marker=""), "#chan")
+
+    def test_held_list_channel_with_an_unknown_marker_falls_back_to_the_primary(self):
+        self.held_bot_with_a_secondary_marker()
+        self.assertEqual(webserver.held_list_channel("GoodBot", marker="nonsense"), "#chan")
+
+    def test_a_file_request_from_a_secondary_markers_list_uses_that_markers_channel(self):
+        """The real incident: a file ticked on a bot's secondary ("-VIDEO")
+        list went to the bot's ordinary channel instead of the one that list
+        itself came from."""
+        self.held_bot_with_a_secondary_marker()
+        status, result = webserver.build_fetch_enqueue_result(
+            {"bot": "GoodBot", "filename": "Clip.mkv", "marker": "video"})
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#video")
+
+    def test_a_folder_request_from_a_secondary_markers_list_uses_that_markers_channel(self):
+        self.held_bot_with_a_secondary_marker()
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "GoodBot", "Artist/Album", "video")
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#video")
+
+    def test_a_batch_folder_request_carries_the_marker_too(self):
+        self.held_bot_with_a_secondary_marker()
+        status, result = webserver.build_folder_rar_batch_enqueue_result(
+            [{"bot": "GoodBot", "folder": "Artist/Album", "marker": "video"}])
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#video")
+
+    def test_a_request_with_no_marker_still_uses_the_primary_as_before(self):
+        self.held_bot_with_a_secondary_marker()
+        status, result = webserver.build_fetch_enqueue_result({"bot": "GoodBot", "filename": "Song.flac"})
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#chan")
+
 
 class DropOurRequestAtUsesTheRowsChannel(DCCoreTestCase):
 
