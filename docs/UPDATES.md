@@ -22,8 +22,9 @@ people (and clients such as AutoQ) copy as a request.
   - **The cap:** past `SEARCH_FOLDER_MAX_CHARS` (default 80) it is cut from the left and keeps its end:
     `From: ...allica\1988 - ...And Justice for All`. 80 fits a common 120-column window beside the timestamp
     and nick. A cap below `SEARCH_FOLDER_MIN_CHARS` (10) is raised to it, and one that is not a number is 80.
-  - **The line always begins `From: `,** so no theme or accent can make it start with `!`. The folder is coloured
-    with the theme's accent role after the label, and under `THEME=plain` there is no control code at all.
+  - **The line has the same frame as the header above it** (the theme's blocks and text box, the folder in the
+    theme's value colour), so it follows the theme. After the frame it always reads `From: `, so it never starts
+    a request; under `THEME=plain` there is no control code at all.
 - **Settings:** next to `MAX_SEARCH_RESULTS` in the sharing category, with help and labels in en, es and fr, and
   the regenerated `conf/settings.conf.sample`.
 - **Tests:** `tests/test_a_search_reply_can_name_each_results_folder.py` (26 tests; 22/22 mutations caught).
