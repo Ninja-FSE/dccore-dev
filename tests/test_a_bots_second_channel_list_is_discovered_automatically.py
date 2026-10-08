@@ -126,6 +126,43 @@ class Candidates(Case):
         self.assertEqual(list_grab._secondary_channel_candidates(NOW), [])
 
 
+class RefreshingAnAlreadyDiscoveredChannel(Case):
+    """Not just discovery once - an already-held secondary marker is offered
+    again when ITS OWN channel has genuinely moved on since it was fetched,
+    the ongoing upkeep #1240 promises (no manual re-fetch, ever)."""
+
+    def hold_with_video(self, signature_when_fetched):
+        self.hold("SomeBot", "#chan_a",
+                 video={"list_path": "y", "entry_count": 1, "channel": "#chan_b",
+                        "advert_signature": dict(signature_when_fetched)})
+
+    def test_unchanged_since_the_marker_was_fetched_is_not_offered_again(self):
+        sig = {"files": 200, "since": NOW - STABLE * 3}
+        self.hold_with_video(sig)
+        self.register("SomeBot", {"#chan_a": {"files": 100, "since": NOW - STABLE * 2},
+                                  "#chan_b": dict(sig)})
+        self.assertEqual(list_grab._secondary_channel_candidates(NOW), [])
+
+    def test_a_stable_change_since_the_marker_was_fetched_is_offered_again(self):
+        self.hold_with_video({"files": 200, "since": NOW - STABLE * 10})
+        self.register("SomeBot", {"#chan_a": {"files": 100, "since": NOW - STABLE * 2},
+                                  "#chan_b": {"files": 350, "since": NOW - STABLE * 2}})
+        found = list_grab._secondary_channel_candidates(NOW)
+        self.assertEqual(found, [("somebot", "SomeBot", "#chan_b")])
+
+    def test_a_change_not_yet_stable_is_not_offered_again_yet(self):
+        self.hold_with_video({"files": 200, "since": NOW - STABLE * 10})
+        self.register("SomeBot", {"#chan_a": {"files": 100, "since": NOW - STABLE * 2},
+                                  "#chan_b": {"files": 350, "since": NOW - 10}})
+        self.assertEqual(list_grab._secondary_channel_candidates(NOW), [])
+
+    def test_a_successful_refetch_resets_its_own_tries(self):
+        list_grab.note_secondary_channel_list_arrived("SomeBot", "#chan_b")  # no-op, nothing to reset
+        runtime.secondary_channel_tries = {"somebot:#chan_b": {"tries": 3, "last": NOW}}
+        list_grab.note_secondary_channel_list_arrived("SomeBot", "#chan_b")
+        self.assertNotIn("somebot:#chan_b", runtime.secondary_channel_tries)
+
+
 class Tick(Case):
 
     def test_off_does_nothing(self):

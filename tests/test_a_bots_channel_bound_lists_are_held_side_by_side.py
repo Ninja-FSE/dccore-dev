@@ -158,6 +158,39 @@ class TheIncidentItself(DCCoreTestCase):
         self.assertTrue(os.listdir(secondary_dir))
 
 
+class TheAdvertSignatureIsStamped(DCCoreTestCase):
+    """Each marker remembers what its own channel was advertising when it was
+    fetched (#1240) - list_grab._secondary_channel_candidates() reads this to
+    know when an already-discovered secondary list has moved on."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-1240-sig-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+        self.zip_path = os.path.join(self.tmp, "x.zip")
+
+    def test_the_primary_markers_carry_the_channels_live_signature(self):
+        import runtime
+        runtime.known_bots["someserver"] = {"channels": {"#music": {"files": 7, "since": 1.0}}}
+        _write_zip(self.zip_path, [(f"{BOT}-2026-08-27.txt", _list_txt(base_name=BOT))])
+        list_fetch.process_fetched_list_zip(BOT, self.zip_path, channel="#music")
+        self.assertEqual(config.fetched_bot_lists[KEY]["lists"][""]["advert_signature"],
+                         {"files": 7, "since": 1.0})
+
+    def test_a_secondary_markers_signature_is_the_channel_it_came_from(self):
+        import runtime
+        _write_zip(self.zip_path, [(f"{BOT}-2026-08-27.txt", _list_txt(base_name=BOT))])
+        list_fetch.process_fetched_list_zip(BOT, self.zip_path, channel="#music")
+        runtime.known_bots["someserver"] = {"channels": {"#video": {"files": 9, "since": 2.0}}}
+        video_zip = os.path.join(self.tmp, "v.zip")
+        _write_zip(video_zip, [(f"{BOT}-VIDEO-2026-08-27.txt", _list_txt(base_name=BOT))])
+        list_fetch.process_fetched_list_zip(BOT, video_zip, channel="#video")
+        self.assertEqual(config.fetched_bot_lists[KEY]["lists"]["video"]["advert_signature"],
+                         {"files": 9, "since": 2.0})
+
+
 class TheMergeHelpersInIsolation(DCCoreTestCase):
 
     def test_is_secondary_requires_an_existing_entry(self):

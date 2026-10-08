@@ -133,6 +133,21 @@ def note_list_arrived(bot):
             _save()
 
 
+def note_secondary_channel_list_arrived(bot, channel):
+    """`channel`'s list for `bot` arrived (#1240), however it was asked for.
+    Its tries start over, same reasoning as note_list_arrived() above: three
+    tries is a bar against a channel that never answers, not a ceiling on
+    how many times a list that keeps answering may be refreshed."""
+    key = str(bot or "").strip().lower()
+    channel = str(channel or "").strip().lower()
+    if not key or not channel:
+        return
+    with runtime.secondary_channel_lock:
+        state = _secondary_channel_state()
+        if state.pop(f"{key}:{channel}", None) is not None:
+            _save_secondary_channel_state()
+
+
 def note_someone_else_asked(user, msg, now=None):
     """Channel text "@Bot" from another user: they asked `Bot` for its list.
     Called from irc.py on every channel line, so cheap and quiet. Only a known
@@ -315,14 +330,19 @@ def _signatures_differ(a, b):
 
 
 def _held_marker_channels(bot_key):
-    """{channel, lowercased} already held as a marker for this bot - a
-    channel in this set has already been discovered, whatever confirmed it
-    (this detector, or an operator's own fetch); never asked for twice."""
+    """{channel, lowercased: its marker's own "advert_signature" - what it
+    was advertising when fetched} for every channel already held as a
+    marker for this bot, whatever confirmed it (this detector, or an
+    operator's own fetch). Read by _secondary_channel_candidates() to tell
+    a channel it already holds apart from one it has never seen: the first
+    is only worth asking again once its OWN signature has moved on; the
+    second is worth asking at all.
+    """
     entry = (getattr(config, "fetched_bot_lists", {}) or {}).get(bot_key)
     lists = (entry or {}).get("lists") if isinstance(entry, dict) else None
     if not isinstance(lists, dict):
-        return set()
-    return {str(info.get("channel")).strip().lower()
+        return {}
+    return {str(info.get("channel")).strip().lower(): (info.get("advert_signature") or {})
             for info in lists.values()
             if isinstance(info, dict) and info.get("channel")}
 
@@ -333,8 +353,15 @@ def _secondary_channel_candidates(now=None):
     list date that genuinely differs from its own held channel's - and has
     held stable, on BOTH sides of the comparison, for at least
     MULTI_CHANNEL_LIST_STABLE_SECONDS. Never a bot's first list at all (that
-    is list_grab's own job above) and never a channel already held as a
-    marker for this bot.
+    is list_grab's own job above).
+
+    A channel ALREADY held as one of this bot's markers is offered again
+    too, once ITS OWN advertised signature has moved on since it was last
+    fetched - the ongoing upkeep a once-discovered secondary list needs to
+    stay current, through the exact same confirm-then-fetch path as
+    discovering it the first time; nothing else refreshes a secondary
+    marker on its own schedule the way AUTO_REFETCH_LISTS already does for
+    a bot's primary one.
     """
     now = time.time() if now is None else now
     stable_for = max(0, _setting("MULTI_CHANNEL_LIST_STABLE_SECONDS", 3600))
@@ -359,16 +386,21 @@ def _secondary_channel_candidates(now=None):
                 continue
         already_held = _held_marker_channels(bot_key)
         for channel, signature in channels.items():
-            if channel == primary_channel or channel in already_held:
+            if channel == primary_channel:
                 continue
             if not isinstance(signature, dict):
                 continue
             since = signature.get("since")
             if not isinstance(since, (int, float)) or now - since < stable_for:
                 continue
-            if primary_signature is not None and not _signatures_differ(signature, primary_signature):
+            if channel in already_held:
+                # Discovered already - only worth asking again if its own
+                # advert has moved on since the marker now held was fetched.
+                if not _signatures_differ(signature, already_held[channel]):
+                    continue
+            elif primary_signature is not None and not _signatures_differ(signature, primary_signature):
                 continue
-            if primary_signature is None and not isinstance(signature.get("files"), int):
+            elif primary_signature is None and not isinstance(signature.get("files"), int):
                 # Nothing to compare against (the bot has never advertised in
                 # the channel we actually hold its list from) - only worth
                 # acting on when this candidate channel's own signal is

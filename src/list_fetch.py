@@ -233,6 +233,24 @@ def _sanitize_bot_dir_name(bot):
     return platform_compat.windows_safe_name(name) or "unknown_bot"
 
 
+def _current_channel_signature(bot, channel):
+    """A snapshot of what `channel` is advertising for `bot` RIGHT NOW
+    (#1240) - the same shape irc._record_channel_signature() stores,
+    {"files", "list_date", "last_seen", "since"} (whichever of the first two
+    are known). Stamped onto a marker as "advert_signature" when it is
+    fetched, so a later comparison (list_grab._secondary_channel_candidates())
+    can tell a channel's list has moved on since WITHOUT needing a second,
+    separate freshness mechanism - the same signature this already is.
+    """
+    channel = str(channel or "").strip().lower()
+    if not channel:
+        return {}
+    registry = (getattr(config, "known_bots", {}) or {}).get(str(bot).strip().lower())
+    channels = registry.get("channels") if isinstance(registry, dict) else None
+    signature = channels.get(channel) if isinstance(channels, dict) else None
+    return dict(signature) if isinstance(signature, dict) else {}
+
+
 def _is_secondary_channel_fetch(bot, channel):
     """True when THIS fetch is for a channel other than the one the bot's
     already-held list came from (#1240) - a bot we have never held anything
@@ -1607,6 +1625,8 @@ def process_fetched_list_zip(bot, zip_path, channel=None):
         try:
             import list_grab
             list_grab.note_list_arrived(bot)
+            if secondary:
+                list_grab.note_secondary_channel_list_arrived(bot, channel)
         except Exception as err:
             print(f"[LIST-FETCH] Could not reset {bot}'s automatic grab record: {err}")
     else:
@@ -1873,12 +1893,14 @@ def _install_secondary_channel_lists(bot, channel, extract_dir, list_path):
     this_channels_markers = {marker for marker, info in kept_lists.items()
                              if isinstance(info, dict) and info.get("channel") == channel}
 
+    signature = _current_channel_signature(bot, channel)
     fresh = {}
     for marker, path in pick_list_files(extract_dir, list_path):
         effective = channel_marker if not marker else f"{channel_marker}-{marker}"
         info = _measure_extra_list(bot, effective, path)
         if info:
             info["channel"] = channel
+            info["advert_signature"] = signature
             fresh[effective] = info
 
     if not fresh:
@@ -2018,13 +2040,15 @@ def _install_fetched_list(bot, zip_path, extract_dir, channel=None):
     # oversized or unreadable costs that list alone. Reporting the whole fetch
     # as failed over it would throw away a list that is sitting there, correct.
     kept_lists = {"": {"list_path": list_path, "entry_count": entry_count,
-                       "file_name": os.path.basename(list_path), "channel": channel}}
+                       "file_name": os.path.basename(list_path), "channel": channel,
+                       "advert_signature": _current_channel_signature(bot, channel)}}
     for marker, path in pick_list_files(extract_dir, list_path):
         if not marker:
             continue
         info = _measure_extra_list(bot, marker, path)
         if info:
             info["channel"] = channel
+            info["advert_signature"] = _current_channel_signature(bot, channel)
             kept_lists[marker] = info
 
     store = _ensure_fetched_bot_lists()
