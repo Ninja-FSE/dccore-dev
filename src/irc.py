@@ -2056,7 +2056,13 @@ def _record_channel_signature(entry, channel, advert, now):
     key = str(channel or "").strip().lower()
     if not key:
         return
-    channels = entry.setdefault("channels", {})
+    if not isinstance(entry.get("channels"), dict):
+        # A malformed "channels" value (loaded from known_bots.json, where
+        # nothing enforces its shape) must not raise on every single advert
+        # from this bot forever after (#1240 review) - start fresh rather
+        # than trust whatever was there.
+        entry["channels"] = {}
+    channels = entry["channels"]
     previous = channels.get(key) or {}
     # Carried forward, not blanked, for a field this particular advert line
     # did not repeat - the same "absent means did not say" rule

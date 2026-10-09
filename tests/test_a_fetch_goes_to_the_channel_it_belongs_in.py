@@ -190,7 +190,17 @@ class ACompletedFetchRemembersWhereItCameFrom(DCCoreTestCase):
         with mock.patch.object(list_fetch, "process_fetched_list_zip") as fake:
             fake.return_value = (True, None)
             dcc_fetch._handle_completed_list_fetch(row, self.zip_path)
-        fake.assert_called_once_with("VideoBot", self.zip_path, channel="#video")
+        fake.assert_called_once_with("VideoBot", self.zip_path, channel="#video", secondary=False)
+
+    def test_the_completion_handler_passes_the_rows_own_secondary_flag_through(self):
+        """#1240 review: `secondary` is carried on the row from enqueue time
+        (new_fetch_row()'s own field), never re-derived here from `channel` -
+        the whole point of the fix is that the two are independent."""
+        row = {"bot": "VideoBot", "channel": "#video", "secondary_channel": True}
+        with mock.patch.object(list_fetch, "process_fetched_list_zip") as fake:
+            fake.return_value = (True, None)
+            dcc_fetch._handle_completed_list_fetch(row, self.zip_path)
+        fake.assert_called_once_with("VideoBot", self.zip_path, channel="#video", secondary=True)
 
 
 class HeldListChannelFeedsFileAndFolderRequests(DCCoreTestCase):

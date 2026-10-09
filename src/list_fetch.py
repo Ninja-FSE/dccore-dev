@@ -52,6 +52,7 @@
 # the same "::INFO::" tolerance this project already added for OTHER bots'
 # formatting variance (see strip_info_suffix()'s own docstring) applies here
 # automatically, for free.
+import hashlib
 import io
 import os
 import re
@@ -251,45 +252,6 @@ def _current_channel_signature(bot, channel):
     return dict(signature) if isinstance(signature, dict) else {}
 
 
-def _is_secondary_channel_fetch(bot, channel):
-    """True when THIS fetch is for a channel other than the one the bot's
-    already-held list came from (#1240) - a bot we have never held anything
-    for, or a channel-less fetch (the ordinary case: no channel given, or one
-    that matches what is already on record), is never "secondary". Only a
-    genuine, confirmed difference - discovered and stable, see list_grab.py's
-    secondary-channel detector - reaches here with a channel that differs.
-
-    A real incident, hit live: a bot held from before #1232 ever existed has
-    no "channel" field at all on its entry, which must NEVER be read as "no
-    channel on record, so there is nothing here to protect" - that entry can
-    hold a million real rows just the same, and a channel-targeted fetch
-    that is allowed to replace it wholesale destroys them exactly as
-    thoroughly as the incident that #1232's own storage rework was written
-    to stop. An entry with real content but no recorded channel is still
-    something this fetch must merge beside, never overwrite - it is simply
-    one whose OWN channel we never happened to learn.
-
-    Shared by _extract_dir_for() (which directory to extract into) and
-    _install_fetched_list() (merge the result in, or replace the entry
-    outright) so the two can never disagree about which fetch this is.
-    """
-    channel = str(channel or "").strip()
-    if not channel:
-        return False
-    store = _ensure_fetched_bot_lists()
-    previous = store.get(str(bot).strip().lower())
-    if not isinstance(previous, dict) or not previous:
-        return False
-    previous_channel = str(previous.get("channel") or "").strip()
-    if not previous_channel:
-        # No channel on record - but if there is already real content here,
-        # treat this fetch as secondary anyway: merging beside unknown
-        # content is always safe, where replacing it is only safe when there
-        # really is nothing there to lose.
-        return bool(previous.get("list_path") or previous.get("lists"))
-    return channel.lower() != previous_channel.lower()
-
-
 def _channel_marker_name(channel):
     """A channel turned into something usable as a list marker (#1240):
     "#video" becomes "video". Never empty - list_marker()'s own rule
@@ -302,25 +264,75 @@ def _channel_marker_name(channel):
     return name.strip("-_ .") or "channel"
 
 
-def secondary_channel_extract_dir(bot, channel):
-    """Where a SECONDARY channel's fetch for `bot` extracts to (#1240): its
-    own subdirectory under the bot's existing one, never the bot's own
-    extraction path itself - that path is the primary channel's, and a
-    secondary fetch extracting there would overwrite the very files the
-    primary channel's held lists still point at (list_extract_dir() is keyed
-    on the bot nick alone; this adds the one extra directory level a second
-    channel needs without moving anything that was already there).
+def _disambiguate_marker(candidate, channel, reserved_lower):
+    """`candidate`, unchanged unless it collides - compared case-
+    insensitively - with a marker name `reserved_lower` already lists
+    (#1240 review). The common case, no collision, returns it untouched.
+
+    Confirmed on review: "#RAR" sanitises to the exact name a filename-
+    derived "RAR" marker already uses (`kept_lists.update(fresh)` would
+    silently replace the primary's own RAR list); "#rar" and "#RAR" differ
+    only by case, which the dict tolerates as two distinct keys but
+    index_bot_list() folds to the same search-index entry regardless; "#a|b"
+    and "#a_b" both sanitise to "a_b" outright, a flat dict-key collision
+    that would let the second channel's fetch silently overwrite the
+    first's.
+
+    The suffix is a short hash of `channel` itself, not of `candidate` - two
+    different channels that collide on the same sanitised name need two
+    DIFFERENT suffixes to stop colliding with EACH OTHER, which hashing the
+    (identical, by definition of a collision) candidate string could never
+    produce - and the same channel must always land on the same
+    disambiguated name across repeated fetches, which a running counter
+    could not promise (its result would depend on fetch order).
     """
-    return os.path.join(list_extract_dir(bot), "_channels",
-                        _channel_marker_name(channel).lower())
+    if candidate.lower() not in reserved_lower:
+        return candidate
+    digest = hashlib.sha1(str(channel).strip().lower().encode("utf-8", "replace")).hexdigest()
+    return f"{candidate}-{digest[:6]}"
 
 
-def _extract_dir_for(bot, channel):
+def secondary_channel_extract_dir(bot, channel):
+    """Where a SECONDARY channel's fetch for `bot` extracts to (#1240): a
+    directory OUTSIDE the bot's own (list_extract_dir()), never a
+    subdirectory of it.
+
+    A real incident, confirmed on review: an earlier version of this put it
+    at <bot's own dir>/_channels/<chan> - inside the exact directory
+    _hold_existing_list()/_release_held_list() rename and rmtree whole on
+    every ordinary refresh of the PRIMARY channel. The marker and its index
+    rows survived (they live in config.fetched_bot_lists, untouched by an
+    ordinary refresh - see _install_fetched_list()), but the files a
+    secondary channel's fetch had just extracted did not: a ordinary refresh
+    of the primary deleted them outright, leaving a marker that pointed at
+    nothing. Sibling to list_extract_dir(bot), not nested in it, so nothing
+    that ever touches the primary's own directory can reach this one.
+    """
+    base = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+    channels_root = os.path.join(base, "lists", "_channels")
+    candidate = os.path.join(channels_root, _sanitize_bot_dir_name(bot).lower(),
+                             _channel_marker_name(channel).lower())
+    if not dcc.is_safe_path(channels_root, candidate):
+        candidate = os.path.join(channels_root, "unknown_bot", "channel")
+    return candidate
+
+
+def _extract_dir_for(bot, channel, secondary=False):
     """Which directory THIS fetch extracts into - list_extract_dir(bot) for
-    everything but a confirmed secondary channel (#1240), which gets its own
-    subdirectory (secondary_channel_extract_dir()) so it can never collide
-    with what the primary channel's lists already point at."""
-    if _is_secondary_channel_fetch(bot, channel):
+    an ordinary/primary fetch, secondary_channel_extract_dir() for a
+    CONFIRMED secondary one (#1240) so it can never collide with - or share
+    a directory tree that gets rmtree'd alongside - what the primary
+    channel's lists already point at.
+
+    `secondary` is explicit, passed down from whichever caller already knows
+    which kind of fetch this is (see new_fetch_row()'s docstring in
+    dcc_fetch.py) - never inferred here from `channel` alone. An earlier
+    version guessed "secondary" from a channel mismatch against whatever was
+    already on record; a bot held from before #1232 has no channel on
+    record at all, so every ordinary refresh of it looked like a mismatch
+    and was treated as secondary forever, a real incident on the live bot.
+    """
+    if secondary:
         return secondary_channel_extract_dir(bot, channel)
     return list_extract_dir(bot)
 
@@ -1553,13 +1565,21 @@ def auto_refetch_worker(sleep=None):
 
 
 
-def process_fetched_list_zip(bot, zip_path, channel=None):
+def process_fetched_list_zip(bot, zip_path, channel=None, secondary=False):
     """Entry point, called by dcc_fetch.py once a request_type="list" fetch
     reaches 'complete'. Safely extracts `zip_path`, locates the master-list
     .txt inside it, and stores a REFERENCE to it - not its parsed contents -
     in config.fetched_bot_lists keyed by lowercased bot nick, REPLACING any
     previous entry for the same bot, per the operator's explicit
     "switchable, not accumulating" requirement.
+
+    `secondary` (#1240 review) is explicit, carried on the fetch_queue row
+    from the moment it was enqueued (dcc_fetch.new_fetch_row()) all the way
+    to here - never re-derived from `channel` at this end. Only
+    list_grab.secondary_channel_tick() ever enqueues with it True; every
+    other caller (a manual fetch, AUTO_REFETCH_LISTS, a Downloads-page
+    retry) is always a primary refresh of this bot's own list, whatever
+    channel it actually went out in.
 
     Issue #76, option 2: earlier versions of this function parsed the whole
     extracted list here and stored the resulting row list permanently in
@@ -1606,13 +1626,10 @@ def process_fetched_list_zip(bot, zip_path, channel=None):
     out an in-progress fetch, itself already a background step measured in
     seconds) is the same accepted tradeoff as above, extended to reads.
     """
-    # Decided ONCE, before anything is mutated, and reused by every step
-    # below - _install_fetched_list() makes this exact same call itself, so
-    # the two can never disagree about which fetch this is (#1240).
-    secondary = _is_secondary_channel_fetch(bot, channel)
-    extract_dir = _extract_dir_for(bot, channel)
+    extract_dir = _extract_dir_for(bot, channel, secondary=secondary)
     with _lock():
-        result = _process_fetched_list_zip_unlocked(bot, zip_path, channel=channel)
+        result = _process_fetched_list_zip_unlocked(bot, zip_path, channel=channel,
+                                                     secondary=secondary)
         # The files under THIS fetch's directory were rewritten or put back:
         # its folder tables describe what was there (#1128). Under the lock,
         # so no page builds one from the files half way through. Keyed on
@@ -1713,20 +1730,25 @@ def _release_held_list(held, extract_dir, succeeded):
               f"({err}); it is still on disk at {held!r}.")
 
 
-def _process_fetched_list_zip_unlocked(bot, zip_path, channel=None):
+def _process_fetched_list_zip_unlocked(bot, zip_path, channel=None, secondary=False):
     """The body of process_fetched_list_zip. Caller must hold _lock().
 
     Wraps the real work so that a rejected re-fetch leaves the list we were
     already serving exactly where it was - see _hold_existing_list(). The
-    directory itself is _extract_dir_for(bot, channel) (#1240): the bot's own
-    for an ordinary or primary-channel fetch, a channel-named subdirectory of
-    it for a confirmed secondary channel - see that function's docstring.
+    directory itself is _extract_dir_for(bot, channel, secondary) (#1240):
+    the bot's own for an ordinary or primary-channel fetch, a directory
+    outside it entirely for a confirmed secondary channel - see that
+    function's docstring. Holding/releasing THAT directory (never the
+    primary's) is what keeps a secondary channel's own re-fetch from ever
+    touching the primary's files, the same safety _hold_existing_list()
+    already gives the primary.
     """
-    extract_dir = _extract_dir_for(bot, channel)
+    extract_dir = _extract_dir_for(bot, channel, secondary=secondary)
     held = _hold_existing_list(extract_dir)
     succeeded = False
     try:
-        succeeded, reason = _install_fetched_list(bot, zip_path, extract_dir, channel=channel)
+        succeeded, reason = _install_fetched_list(bot, zip_path, extract_dir, channel=channel,
+                                                   secondary=secondary)
         return succeeded, reason
     finally:
         _release_held_list(held, extract_dir, succeeded)
@@ -1895,7 +1917,7 @@ def _install_secondary_channel_lists(bot, channel, extract_dir, list_path):
     """Merge a SECONDARY channel's archive into the bot's existing entry,
     rather than replace it (#1240).
 
-    Called only when _is_secondary_channel_fetch() is already true - an entry
+    Called only when `secondary` is explicitly True - an entry
     for this bot exists, and this fetch's channel differs from the one its
     "" (main) marker came from. Every file this archive held - `list_path`,
     whatever _pick_list_file() called "main" for lack of anything better to
@@ -1910,8 +1932,17 @@ def _install_secondary_channel_lists(bot, channel, extract_dir, list_path):
     channel's "" and anything else, and any OTHER secondary channel's - is
     left exactly as it was. (bool, reason), the same contract as
     _install_fetched_list().
+
+    `channel_marker` is disambiguated against every OTHER marker already in
+    the entry, compared case-insensitively (#1240 review): "#RAR" sanitises
+    to the same name a filename-derived "RAR" marker already uses, "#rar"
+    and "#RAR" differ only by case - which index_bot_list() folds away in
+    the search index regardless of their (distinct) dict keys - and "#a|b"
+    and "#a_b" both sanitise to "a_b" outright. Left alone, any of these
+    would overwrite (in the dict, the index, or both) a marker that belongs
+    to someone else entirely. See _disambiguate_marker()'s own docstring for
+    why a hash of the CHANNEL, not of the name, is what breaks the tie.
     """
-    channel_marker = _channel_marker_name(channel)
     store = _ensure_fetched_bot_lists()
     key = str(bot).strip().lower()
     previous = store.get(key) or {}
@@ -1931,6 +1962,9 @@ def _install_secondary_channel_lists(bot, channel, extract_dir, list_path):
         }
     this_channels_markers = {marker for marker, info in kept_lists.items()
                              if isinstance(info, dict) and info.get("channel") == channel}
+    reserved_lower = {str(marker).lower() for marker in kept_lists
+                      if marker not in this_channels_markers}
+    channel_marker = _disambiguate_marker(_channel_marker_name(channel), channel, reserved_lower)
 
     signature = _current_channel_signature(bot, channel)
     fresh = {}
@@ -1971,7 +2005,7 @@ def _install_secondary_channel_lists(bot, channel, extract_dir, list_path):
     return True, None
 
 
-def _install_fetched_list(bot, zip_path, extract_dir, channel=None):
+def _install_fetched_list(bot, zip_path, extract_dir, channel=None, secondary=False):
     """Extract, validate and publish one fetched list. (bool, reason).
 
     `channel` (#1232) is the channel this particular fetch actually went out
@@ -1980,10 +2014,12 @@ def _install_fetched_list(bot, zip_path, extract_dir, channel=None):
     answer, not a guess. Stored on the entry so a later request for this bot
     (a file, a folder, a re-fetch) can use the same channel instead of
     dcc.channel_containing_user()'s plain "first channel we share" rule.
+
+    `secondary` (#1240 review) is explicit, carried straight through from
+    process_fetched_list_zip() - see its own docstring. Decides which of the
+    two branches below runs; never re-derived from `channel` here.
     """
-    # Normalised once, used everywhere below it matters - an entry's own
-    # "channel"/per-marker "channel" field and _is_secondary_channel_fetch()'s
-    # comparison must agree on what "no channel" looks like (#1232, #1240).
+    # Normalised once, used everywhere below it matters.
     channel = (str(channel).strip() or None) if channel else None
 
     list_path, reason = _extract_and_locate_list_file(zip_path, extract_dir)
@@ -2028,7 +2064,7 @@ def _install_fetched_list(bot, zip_path, extract_dir, channel=None):
     # existing entry's "lists" dict instead, named after the channel rather
     # than main/rar/video - see _install_secondary_channel_lists()'s own
     # docstring for the rest.
-    if _is_secondary_channel_fetch(bot, channel):
+    if secondary:
         return _install_secondary_channel_lists(bot, channel, extract_dir, list_path)
 
     # list.py opens this path directly and does not wrap it itself, so the

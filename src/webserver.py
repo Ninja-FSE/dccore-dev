@@ -1525,7 +1525,7 @@ def bot_not_here_error(bot):
             f"their name says which.")
 
 
-def build_list_fetch_enqueue_result(bot_raw, channel_raw=None):
+def build_list_fetch_enqueue_result(bot_raw, channel_raw=None, secondary_raw=False):
     """POST /api/filelists/fetch's pure logic: validate the bot nick and
     enqueue a request_type="list" row.
 
@@ -1536,10 +1536,28 @@ def build_list_fetch_enqueue_result(bot_raw, channel_raw=None):
     hand (that capability existed briefly in #1239's draft and was reverted;
     see its PR thread for the real-world data loss that caused it, now fixed
     at the storage layer instead - see list_fetch._install_secondary_channel_
-    lists()). The one caller that does pass this is list_grab.
-    secondary_channel_tick(), and only once its own confidence gate
-    (list_grab._secondary_channel_candidates(), a confirmed, STABLE
-    difference) has already decided the channel is worth asking.
+    lists()).
+
+    When not given and this is not a secondary fetch (see `secondary_raw`
+    below), it defaults to held_list_channel(bot) - the channel this bot's
+    list is already known to answer in, if any (#1240 review). Left to the
+    dispatcher's own fallback (the bot's last advert channel, which may be
+    ANY channel we share with it) an ordinary refresh could re-ask in a
+    different shared channel than the one its list actually came from,
+    which - before this - created a second, duplicate marker for content
+    already held under the first: confirmed on review, real data from
+    #1239's own measurement (38 of 49 bots share more than one channel with
+    us).
+
+    `secondary_raw` is explicit (#1240 review), and True only for the one
+    caller that ran the discovery confidence gate: list_grab.
+    secondary_channel_tick(), once list_grab._secondary_channel_candidates()
+    has already decided a genuinely different, STABLE list is worth asking
+    for. Carried all the way to list_fetch.process_fetched_list_zip() so the
+    completion handler knows which kind of fetch this was without having to
+    guess from `channel_raw` after the fact - guessing is what let a bot
+    held from before #1232 (no channel on record at all) look "secondary" on
+    EVERY ordinary refresh forever, a real incident caught on review.
 
     Deliberately reuses dcc_fetch.enqueue_fetch() (extended with a
     request_type parameter) rather than build_fetch_enqueue_result() above:
@@ -1585,6 +1603,9 @@ def build_list_fetch_enqueue_result(bot_raw, channel_raw=None):
     if channel_err:
         return 400, {"error": channel_err}
     channel = channel_raw.strip() or None
+    secondary = bool(secondary_raw)
+    if channel is None and not secondary:
+        channel = held_list_channel(bot)
 
     absent = bot_not_here_error(bot)
     if absent:
@@ -1593,7 +1614,8 @@ def build_list_fetch_enqueue_result(bot_raw, channel_raw=None):
     if dcc_fetch.has_outstanding_bot_alone_request(bot):
         return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
 
-    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list", channel=channel)
+    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list", channel=channel,
+                                         secondary_channel=secondary)
     if request_id is None:
         # Defense in depth: enqueue_fetch() enforces this same invariant
         # itself (see its docstring), so this should be unreachable given
@@ -1720,7 +1742,7 @@ def held_list_channel(bot, marker=None):
     fetched_bot_lists[bot]["lists"][marker]["channel"], checked FIRST. A
     secondary channel's own marker has a different channel than the bot's
     primary one by construction (that is what makes it secondary - see
-    list_fetch._is_secondary_channel_fetch()), so a request for a file or
+    list_fetch._install_secondary_channel_lists()), so a request for a file or
     folder on a secondary marker's list that fell back to the primary's
     channel would go out in the wrong place - found live: a file ticked on a
     bot's "-VIDEO" marker's list went to the bot's ordinary channel, where

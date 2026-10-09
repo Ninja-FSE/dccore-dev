@@ -374,19 +374,34 @@ def _secondary_channel_candidates(now=None):
     discovering it the first time; nothing else refreshes a secondary
     marker on its own schedule the way AUTO_REFETCH_LISTS already does for
     a bot's primary one.
+
+    The bot must be in the candidate channel RIGHT NOW (#1240 review):
+    channels[...] is never pruned, so a channel it left keeps its last
+    advertised signature on record indefinitely - without this, that stale
+    signature reads as a candidate exactly like a live one, and the confirmed
+    fetch that follows gets no answer and spends one of the three tries on a
+    channel nobody can actually ask.
     """
+    import dcc_fetch
+
     now = time.time() if now is None else now
     stable_for = max(0, _setting("MULTI_CHANNEL_LIST_STABLE_SECONDS", 3600))
     held = getattr(config, "fetched_bot_lists", {}) or {}
     bots = getattr(config, "known_bots", {}) or {}
     found = []
-    for bot_key, entry in held.items():
+    # Copied, not iterated live (#1240 review): the IRC reader thread mutates
+    # both of these (a fetch arriving, _record_channel_signature() on every
+    # advert) with no lock shared with this discovery pass. "dictionary
+    # changed size during iteration" is a real, if intermittent, crash risk
+    # otherwise - a plain copy is enough, nothing below mutates either dict.
+    for bot_key, entry in list(held.items()):
         if not isinstance(entry, dict):
             continue
         registry = bots.get(bot_key)
         channels = registry.get("channels") if isinstance(registry, dict) else None
         if not isinstance(channels, dict) or not channels:
             continue
+        channels = dict(channels)
         primary_channel = str(entry.get("channel") or "").strip().lower()
         primary_signature = channels.get(primary_channel)
         if primary_signature is not None:
@@ -410,6 +425,7 @@ def _secondary_channel_candidates(now=None):
         known_signatures = [sig for sig in already_held.values() if _signature_has_content(sig)]
         if primary_signature is not None:
             known_signatures.append(primary_signature)
+        nick = registry.get("nick") or entry.get("bot") or bot_key
         for channel, signature in channels.items():
             if channel == primary_channel:
                 continue
@@ -417,6 +433,16 @@ def _secondary_channel_candidates(now=None):
                 continue
             since = signature.get("since")
             if not isinstance(since, (int, float)) or now - since < stable_for:
+                continue
+            # The bot must be THERE RIGHT NOW (#1240 review), not just once
+            # have been - channels[...] is never pruned, so a channel the bot
+            # left long ago keeps its last advertised signature forever. Left
+            # unchecked, that stale signature reads as a candidate exactly
+            # like a live one: a confirmed fetch would go out, get no answer
+            # (the bot is not there to send it), and spend one of the three
+            # tries for nothing - repeated up to three times before the pair
+            # is finally left alone.
+            if not dcc_fetch.bot_in_our_channel(nick, channel):
                 continue
             if channel in already_held:
                 # Discovered already - only worth asking again if its own
@@ -449,7 +475,7 @@ def _secondary_channel_candidates(now=None):
                 continue
             if now - float(record.get("last") or 0) < SECONDARY_CHANNEL_COOLDOWN_SECONDS:
                 continue
-            found.append((bot_key, registry.get("nick") or entry.get("bot") or bot_key, channel))
+            found.append((bot_key, nick, channel))
     return found
 
 
@@ -474,15 +500,26 @@ def secondary_channel_tick(now=None, log=print):
         state = _secondary_channel_state()
         record = state.setdefault(f"{bot_key}:{channel}", {"tries": 0})
         record["last"] = now
-        record["tries"] = int(record.get("tries") or 0) + 1
-        tries = record["tries"]
         _save_secondary_channel_state()
 
-    status, result = webserver.build_list_fetch_enqueue_result(nick, channel)
+    status, result = webserver.build_list_fetch_enqueue_result(nick, channel, secondary_raw=True)
     if status != 200:
+        # NOT a try (#1240 review): nothing was actually asked of the bot -
+        # a 409 (busy with another list/folder already) or the bot having
+        # just left is a local refusal, not an unanswered attempt. Counting
+        # it anyway meant a candidate could exhaust all three tries without
+        # the bot ever having been asked once, and then be left alone for
+        # good over something that had nothing to do with it. `record["last"]`
+        # above still paces the retry via SECONDARY_CHANNEL_COOLDOWN_SECONDS.
         log(f"[LIST-GRAB] Did not ask {nick} for {channel}'s list: "
             f"{result.get('error', 'refused')}")
         return "refused"
+
+    with runtime.secondary_channel_lock:
+        record = _secondary_channel_state().setdefault(f"{bot_key}:{channel}", {"tries": 0})
+        record["tries"] = int(record.get("tries") or 0) + 1
+        tries = record["tries"]
+        _save_secondary_channel_state()
     log(f"[LIST-GRAB] {nick} advertises a different list in {channel} - "
         f"asking for it (try {tries} of {SECONDARY_CHANNEL_TRIES}).")
     return "asked"

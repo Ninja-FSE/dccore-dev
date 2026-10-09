@@ -246,7 +246,8 @@ def bot_for_trigger(word):
     return str(nicks[found.pop()]).strip() or None
 
 
-def new_fetch_row(bot, filename, now=None, request_type="file", channel=None):
+def new_fetch_row(bot, filename, now=None, request_type="file", channel=None,
+                  secondary_channel=False):
     """Build a fresh `pending` row in the shape every reader of
     config.fetch_queue expects. Does not insert it - callers decide the key.
 
@@ -278,6 +279,26 @@ def new_fetch_row(bot, filename, now=None, request_type="file", channel=None):
     before when it is absent, stale, or the bot is not there) and writes the
     result back onto the row before dispatch, so a retried row keeps asking in
     the same channel it first went out in rather than drifting tick to tick.
+
+    `secondary_channel` (#1240 review) is True only for a "list" row built by
+    list_grab.secondary_channel_tick() once its own confidence gate has
+    confirmed a genuinely different, stable list in another of our channels.
+    Every other caller leaves it False - an ORDINARY list fetch (a manual
+    one, AUTO_REFETCH_LISTS, a Downloads-page retry) is always a primary
+    refresh, whatever channel it happens to be resolved to. Carried on the
+    row, untouched by dispatch (unlike "channel" above, which dispatch
+    overwrites with the resolved one), so list_fetch.py's completion handler
+    still knows which kind of fetch this was once the file has arrived -
+    see process_fetched_list_zip()'s own "secondary" parameter.
+
+    This replaces guessing "secondary" from a channel mismatch after the
+    fact (list_fetch._is_secondary_channel_fetch(), removed): a bot held
+    from before #1232 has no "channel" on record at all, so EVERY ordinary
+    refresh of it looked like a mismatch and was never again treated as the
+    primary - the bot's channel was never backfilled, the content never
+    replaced, confirmed as a real incident on the live bot. Only the one
+    caller that actually ran the discovery confidence gate may say "this is
+    secondary"; nothing else gets to infer it.
     """
     now = time.time() if now is None else now
 
@@ -320,6 +341,7 @@ def new_fetch_row(bot, filename, now=None, request_type="file", channel=None):
         "reason": "",
         "stored_filename": None,
         "channel": _clean_channel(channel),
+        "secondary_channel": bool(secondary_channel),
     }
 
 
@@ -900,7 +922,8 @@ def request_already_waiting(bot, filename):
         return _find_unresolved_file_request_locked(queue, bot, filename) is not None
 
 
-def enqueue_fetch(bot, filename, request_type="file", trigger=None, channel=None):
+def enqueue_fetch(bot, filename, request_type="file", trigger=None, channel=None,
+                  secondary_channel=False):
     """Append one `pending` row to config.fetch_queue and return its id, or
     None if the request was refused (see below) - callers must check for
     None, they can no longer assume this always succeeds.
@@ -943,6 +966,9 @@ def enqueue_fetch(bot, filename, request_type="file", trigger=None, channel=None
 
     `channel` (#1232) is a preferred channel for this request - see
     new_fetch_row()'s docstring. Optional; most callers pass nothing.
+
+    `secondary_channel` (#1240 review) - see new_fetch_row()'s docstring.
+    Only list_grab.secondary_channel_tick() passes True.
     """
     queue = _ensure_fetch_queue()
     trigger = _sendable_trigger(trigger) if trigger else None
@@ -978,7 +1004,8 @@ def enqueue_fetch(bot, filename, request_type="file", trigger=None, channel=None
             return None
         while request_id in queue:  # practically never, but be certain
             request_id = uuid.uuid4().hex[:12]
-        queue[request_id] = new_fetch_row(bot, filename, request_type=request_type, channel=channel)
+        queue[request_id] = new_fetch_row(bot, filename, request_type=request_type, channel=channel,
+                                          secondary_channel=secondary_channel)
         if trigger:
             queue[request_id]["trigger"] = trigger
     return request_id
@@ -3015,7 +3042,8 @@ def _handle_completed_list_fetch(row, zip_path):
     try:
         import list_fetch
         ok, reason = list_fetch.process_fetched_list_zip(row.get("bot", ""), zip_path,
-                                                          channel=row.get("channel"))
+                                                          channel=row.get("channel"),
+                                                          secondary=bool(row.get("secondary_channel")))
         if not ok:
             row["list_processing_error"] = reason or "no recognizable list file found in the zip"
             print(f"[FETCH] {row.get('bot')}'s fetched list zip was received "

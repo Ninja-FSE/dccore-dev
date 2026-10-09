@@ -347,6 +347,11 @@ def reset_config(**overrides):
                         # per-bot record - reloaded from the test's own file.
                         ("list_grab_started", False), ("list_grab_plan", None),
                         ("list_grab_last", None), ("list_grab_state", None),
+                        # #1240 review: secondary_channel_tick()'s own wait/
+                        # started flags, missed by the reset above - a test
+                        # that started the worker or primed the tick's pacing
+                        # left both set for the next one otherwise.
+                        ("secondary_channel_started", False), ("secondary_channel_last", None),
                         ("chat_last_id", 0),
                         # Stamped by dcc.pause_freeze_clock() when a test drives
                         # irc_loop() to its disconnect epilogue. Left set, the

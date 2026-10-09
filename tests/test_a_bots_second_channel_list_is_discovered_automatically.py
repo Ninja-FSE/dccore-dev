@@ -43,8 +43,9 @@ class Case(DCCoreTestCase):
         self.asked = []
         self.answer = (200, {"created": ["rid"]})
 
-        def fake_enqueue(bot, channel):
+        def fake_enqueue(bot, channel, secondary_raw=False):
             self.asked.append((bot, channel))
+            self.assertTrue(secondary_raw, "the discovery tick must always say secondary_raw=True")
             return self.answer
 
         real = webserver.build_list_fetch_enqueue_result
@@ -60,6 +61,14 @@ class Case(DCCoreTestCase):
 
     def register(self, bot, chans):
         runtime.known_bots[bot.lower()] = {"nick": bot, "channels": channels(chans)}
+        # The bot must be PRESENT, not just once advertised (#1240 review):
+        # _secondary_channel_candidates() now checks dcc_fetch.bot_in_our_
+        # channel() for every candidate channel, since channels[...] is
+        # never pruned and a channel the bot left keeps its last advert on
+        # record indefinitely. Every test here means "the bot is there" by
+        # registering a channel at all, so this is the one place to say so.
+        for chan in chans:
+            config.channel_users.setdefault(str(chan).strip().lower(), set()).add(bot.lower())
 
 
 class Candidates(Case):
@@ -279,15 +288,31 @@ class Tick(Case):
         list_grab.secondary_channel_tick(NOW)
         self.assertEqual(list_grab.secondary_channel_tick(NOW + 1), "waiting")
 
-    def test_three_tries_then_it_gives_up(self):
+    def test_three_genuine_asks_then_it_gives_up(self):
+        self.hold("SomeBot", "#chan_a")
+        self.register("SomeBot", {"#chan_a": {"files": 100, "since": NOW - STABLE * 2}, "#chan_b": {"files": 200, "since": NOW - STABLE * 2}})
+        t = NOW
+        for _ in range(list_grab.SECONDARY_CHANNEL_TRIES):
+            self.assertEqual(list_grab.secondary_channel_tick(t), "asked")
+            t += list_grab.SECONDARY_CHANNEL_COOLDOWN_SECONDS + 1
+        self.assertEqual(list_grab.secondary_channel_tick(t), "nothing")
+
+    def test_a_persistent_local_refusal_never_exhausts_the_tries_cap(self):
+        """#1240 review: a 409 means NOTHING was actually asked of the bot -
+        it must not spend one of the three tries, or a transient local
+        conflict (busy with another list/folder already, or the bot
+        momentarily absent) could leave a real, undiscovered second list
+        stuck forever for a reason that never involved asking the bot at
+        all. `record["last"]` still paces the retry via the ordinary
+        cooldown, so this never means asking every single tick either."""
         self.hold("SomeBot", "#chan_a")
         self.register("SomeBot", {"#chan_a": {"files": 100, "since": NOW - STABLE * 2}, "#chan_b": {"files": 200, "since": NOW - STABLE * 2}})
         self.answer = (409, {"error": "busy"})
         t = NOW
-        for _ in range(list_grab.SECONDARY_CHANNEL_TRIES):
+        for _ in range(list_grab.SECONDARY_CHANNEL_TRIES + 2):
             self.assertEqual(list_grab.secondary_channel_tick(t), "refused")
             t += list_grab.SECONDARY_CHANNEL_COOLDOWN_SECONDS + 1
-        self.assertEqual(list_grab.secondary_channel_tick(t), "nothing")
+        self.assertEqual(list_grab._secondary_channel_state().get("somebot:#chan_b", {}).get("tries", 0), 0)
 
     def test_tries_survive_a_restart(self):
         self.hold("SomeBot", "#chan_a")
