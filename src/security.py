@@ -6,6 +6,24 @@ import os
 import sys
 import defaults as config
 import db
+import runtime
+
+# config.banned_users is written from the Flask (dashboard) and console
+# threads (ignore_user(), lift_ban()) and iterated by the IRC read thread's
+# own flood sweep (_prune_flood_tracking()) - the only one of the three
+# flood-tracking structures that ANOTHER thread ever writes; the other two
+# are IRC-thread-only and need no lock. Before this, an ignore or lift
+# landing mid-sweep could raise "dictionary changed size during iteration",
+# which reaches the read loop's own outer exception handler and reconnects
+# the bot - confirmed on review, forced in a scratch test.
+#
+# Bound from runtime.py, not constructed here (#1248 review): a Lock()
+# built at this module's top level is rebound every time !rehash reloads
+# security.py, the same trap runtime.py's own module docstring already
+# warns about for every other lock it holds - a thread already inside
+# `with banned_users_lock:` would go on holding the OLD object while the
+# next caller acquired the fresh one rehash just created.
+banned_users_lock = runtime.banned_users_lock
 
 # Nicks we have already sent a debug notice about - one notice per nick.
 # send_debug sleeps 0.5s while holding a lock and is called from here by the IRC
@@ -472,6 +490,15 @@ def _prune_flood_tracking(now):
     dict while iterating it raises RuntimeError, and this runs on the IRC read
     thread, where that would take the connection down.
 
+    banned_users (#1248 review) needs more than that: unlike user_requests
+    and muted_until, which only the IRC thread ever writes, it is also
+    written from the Flask and console threads (ignore_user(), lift_ban()).
+    An ignore or lift landing between this function's own list-comprehension
+    read of the dict and its delete loop would still raise - materialising
+    the key list first only protects against THIS function's own deletes,
+    not another thread's concurrent write - so both the read and the deletes
+    run under banned_users_lock, the same lock those two functions take.
+
     Returns how many entries were dropped. The tests asserts on that number
     because a sweep that runs and removes nothing is indistinguishable from
     outside from one that never ran at all.
@@ -498,10 +525,12 @@ def _prune_flood_tracking(now):
     # that will not parse as a number is treated as 0.0 and swept, exactly as
     # that path would have deleted it. A row nothing can read is not a ban
     # anyone is serving.
-    expired_bans = [nick for nick, until in config.banned_users.items()
-                    if now >= _ban_expiry(until)]
+    with banned_users_lock:
+        expired_bans = [nick for nick, until in config.banned_users.items()
+                        if now >= _ban_expiry(until)]
+        for nick in expired_bans:
+            del config.banned_users[nick]
     for nick in expired_bans:
-        del config.banned_users[nick]
         # The "already told them" marker goes with the ban it belongs to.
         # _NotifiedNicks expires its own entries on a TTL, so this is tidiness
         # rather than a leak - but leaving it would let a returning nick be
@@ -590,7 +619,8 @@ def ignore_user(nick, minutes):
         return False, f"The length is 1 to {IGNORE_MAX_MINUTES} minutes."
 
     key = nick.lower()
-    config.banned_users[key] = time.time() + minutes * 60
+    with banned_users_lock:
+        config.banned_users[key] = time.time() + minutes * 60
     _ban_notified.discard(key)
     with runtime.send_queue_lock:
         config.send_queue.pop(key, None)
@@ -604,9 +634,14 @@ def lift_ban(nick):
     import db
 
     key = str(nick or "").strip().lower()
-    if key not in config.banned_users:
+    # pop(), not a check-then-del (#1248 review): the two used to be separate
+    # statements, so the sweep thread could expire this exact nick in the gap
+    # between them, and the del below would raise KeyError - a 500 on the
+    # dashboard for an ignore that really had just ended on its own.
+    with banned_users_lock:
+        existed = config.banned_users.pop(key, None) is not None
+    if not existed:
         return False, f"{str(nick or '').strip() or 'That nick'} is not ignored or banned for a time."
-    del config.banned_users[key]
     _ban_notified.discard(key)
     db.save_bans_to_file()
     return True, f"{key} is no longer ignored."

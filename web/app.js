@@ -1382,14 +1382,14 @@
       if (target.classList.contains("qmove-file-btn")) {
         queueControl("/api/queue/move-file", {
           nick: target.getAttribute("data-user"), position: target.getAttribute("data-pos"),
-          file: target.getAttribute("data-file"), direction: target.getAttribute("data-dir")
+          id: target.getAttribute("data-id"), direction: target.getAttribute("data-dir")
         });
         return;
       }
       if (target.classList.contains("qremove-btn")) {
         queueControl("/api/queue/remove-file", {
           nick: target.getAttribute("data-user"), position: target.getAttribute("data-pos"),
-          file: target.getAttribute("data-file")
+          id: target.getAttribute("data-id")
         });
         return;
       }
@@ -1427,20 +1427,22 @@
   }
 
   // The three buttons of one queued file: earlier, later, remove. Its place
-  // and its name go with the click, so a queue that moved since the page was
-  // drawn is refused instead of changing whatever slid into that place.
+  // and its id go with the click, so a queue that moved since the page was
+  // drawn is refused instead of changing whatever slid into that place. The
+  // id, not the name (#1245): two albums can each hold an Intro.mp3.
   function queueFileControls(row, index) {
-    var name = row.files[index];
-    var attrs = "data-user=\"" + escapeHtml(row.user) + "\" data-pos=\"" + (index + 1) + "\" data-file=\"" + escapeHtml(name) + "\"";
+    var id = (row.file_ids || [])[index] || "";
+    var attrs = "data-user=\"" + escapeHtml(row.user) + "\" data-pos=\"" + (index + 1) + "\" data-id=\"" + escapeHtml(id) + "\"";
     var up = index > 0 ? queueButton("qmove-file-btn", t("queue.fileEarlier"), attrs + " data-dir=\"up\"") + "\u25B2</button>" : "";
     var down = index < row.files.length - 1 ? queueButton("qmove-file-btn", t("queue.fileLater"), attrs + " data-dir=\"down\"") + "\u25BC</button>" : "";
     return " <span class=\"queue-file-controls\">" + up + down +
       queueButton("qremove-btn btn-danger", t("queue.removeFile"), attrs) + "\u2715</button></span>";
   }
 
-  // What is WAITING - never includes whatever is currently sending, because
-  // dcc.py never puts the in-flight file into dcc_queue (see
-  // build_queue_payload()'s own docstring). A single queued file is shown
+  // What is QUEUED. A queued file keeps its row while it is sent, so the one
+  // in flight can be in this list too; the server refuses to move it, move
+  // past it or remove it (#1245, see build_queue_payload()'s own
+  // docstring). A send that never queued is not. A single queued file is shown
   // plain, like before; more than one collapses behind a <details> so the
   // row does not grow without bound, but every one of them is there to open
   // - not just a preview of the first, which is all this used to show.
@@ -3193,7 +3195,17 @@
         if (!queued) {
           showFilelistsFetchStatus(t("download.couldNotQueue").replace("{error}", failure), true);
         } else {
-          showFilelistsFetchStatus(t("download.queuedForFetch").replace("{count}", queued), false);
+          // A mixed files+folders tick (#1244 review): the files post and
+          // the folder post are two separate requests, and only the files
+          // one succeeding used to report total success - a folder post
+          // refused outright (409 for an outstanding list, 413 over 500
+          // rows, the bot absent) was silently dropped, every box unticked
+          // regardless, as if nothing had gone wrong.
+          var message = t("download.queuedForFetch").replace("{count}", queued);
+          if (failure) {
+            message += " " + t("download.partialFailure").replace("{error}", failure);
+          }
+          showFilelistsFetchStatus(message, Boolean(failure));
           Array.prototype.forEach.call(checked, function (box) { box.checked = false; });
           // Re-read the page so the rows just queued say so. The marks are
           // stamped server-side when a page is built, so without this they

@@ -10,6 +10,7 @@ import os
 import sys
 import re
 import subprocess
+import hashlib
 
 import defaults as config
 import platform_compat
@@ -411,7 +412,55 @@ def announce_channel_for(next_file):
         # where picking one of its entries would be a guess.
         if isinstance(named, str) and named.strip() and is_channel_name(named):
             return named.strip()
+        # A PRIVATE request never borrows the first configured channel
+        # (#1242): that is a channel the requester may never have been in,
+        # and it reached the feed, the mode check of #1204 and the "Sent:"
+        # line. A row written since then carries the channel they share with
+        # the bot, and returned above; one queued before has our own nick
+        # there, and is resolved now, by the same rule. Sharing none, it has
+        # no channel - "" - and the mode check takes the private-message
+        # rule for it.
+        if is_private_row(next_file):
+            return library.shared_channel(next_file.get('user_raw')) or ""
     return default_announce_channel()
+
+
+def is_private_row(next_file):
+    """Was this queue row asked for by private message (#1242)?
+
+    Flagged since #1242, because its channel is now the one the requester
+    shares with the bot and no longer says so. A row queued before that has
+    no flag and our own nick as its channel - the wire target of the
+    message - which says it just as well.
+    """
+    if not isinstance(next_file, dict):
+        return False
+    if next_file.get('private') is True:
+        return True
+    named = next_file.get('channel')
+    return isinstance(named, str) and bool(named.strip()) and not is_channel_name(named)
+
+
+def privately_from(private, channel):
+    """What a REQUEST line adds for a private request (#1242): the operator
+    sees that it came by private message and which channel its sender
+    shares with the bot. Nothing for a channel request, whose line is as
+    it was."""
+    return f" by private message (in {channel})" if private else ""
+
+
+def refuse_unshared_private_request(user, what):
+    """A private request from somebody in none of our served channels
+    (#1242): refused, and silently, as a request in a channel this bot does
+    not serve is. The operator still sees it, on the console and in the
+    debug channel. The same check for every private request, whether a slot
+    is free or not: it used to be served at once on an idle bot and frozen
+    and dropped from the queue on a busy one."""
+    print(f"[DCC] Ignored {user}'s private request for {what}: they are in "
+          f"none of the channels this bot serves.")
+    announce.send_debug(f"Ignored {config.C_BOLD}{user}{config.C_RESET}'s private request "
+                        f"for {what}: they are in none of the channels this bot serves.",
+                        category="INFO")
 
 
 def is_channel_name(target):
@@ -423,7 +472,9 @@ def is_channel_name(target):
     handle_download_request), and until #530 announce_channel_for() handed it
     straight back, so the "Sent:" line for a PM request went out as
     `PRIVMSG <our nick> :Sent ...` - the bot telling itself. A nick is not a
-    place to announce; the default channel is.
+    place to announce. Nor, since #1242, is the default channel for such a
+    row: it is the channel the requester shares with the bot, and a private
+    request is not announced at all - see announce_channel_for().
     """
     text = str(target or "").strip()
     return bool(text) and text[0] in "#&+!"
@@ -722,12 +773,15 @@ def put_the_list_first(rows):
     return at + 1
 
 
-def a_list_may_go_first():
+def a_list_may_go_first(transfers=None):
     """May a list take the next free slot ahead of the waiting nicks? Caller holds queue_lock.
 
     Not while another list that went first is still being sent (#1205).
+    `transfers` is a copy of active_transfers for a reader that holds no lock
+    (the Queue page); by default the live list.
     """
-    return not any(tx.get("list_went_first") for tx in config.active_transfers)
+    held = config.active_transfers if transfers is None else transfers
+    return not any(tx.get("list_went_first") for tx in held)
 
 
 def list_first_rank(user_key, rows, lists_first):
@@ -738,6 +792,18 @@ def list_first_rank(user_key, rows, lists_first):
     """
     goes_first = bool(lists_first and rows and is_a_list_row(rows[0]))
     return (0 if goes_first else 1, queue_waiting_since(user_key))
+
+
+def slot_order(queue, lists_first):
+    """The nicks with something in `queue`, in the order a freed slot is offered to them.
+
+    The dispatcher's own key, list_first_rank(); ties keep `queue`'s order.
+    What `queue`, the Queue page and move up/down show and move against, so
+    the three cannot disagree with the dispatcher (#1205, #1245).
+    """
+    waiting = [(key, rows) for key, rows in queue.items() if rows]
+    waiting.sort(key=lambda entry: list_first_rank(entry[0], entry[1], lists_first))
+    return [key for key, _rows in waiting]
 
 
 def a_list_passes_a_longer_wait(user_key, packs_can_start):
@@ -765,6 +831,38 @@ def queued_position_of(user_key, path):
         held = row.get("source_path") or row.get("path") or ""
         if os.path.normcase(os.path.normpath(str(held))) == wanted:
             return place
+    return None
+
+
+def queue_row_id(row):
+    """A short id for a queue row, which the Queue page sends back with a move or a removal (#1245).
+
+    Made from the path the row was queued for - the folder, for a packed one,
+    as queued_position_of() reads it - so it names THAT file: two albums can
+    each hold an Intro.mp3, and a name matched whichever had slid into the
+    place. The path itself never reaches the page.
+    """
+    if isinstance(row, dict):
+        held = row.get("source_path") or row.get("path") or row.get("file") or ""
+    else:
+        held = row
+    key = os.path.normcase(os.path.normpath(str(held)))
+    return hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+
+def queued_row_in_flight(row):
+    """Is this queue row out? "sending", "packing" or None. Caller holds queue_lock.
+
+    By the row itself (#1245): a queued send's claim carries its row as
+    "queue_row" and a running pack its job's "row". The claims hold no path,
+    so is_being_sent_to() - for a send that never had a row - cannot see
+    them, and a place says nothing once a list has gone to the front.
+    """
+    if any(tx.get("queue_row") is row for tx in config.active_transfers):
+        return "sending"
+    job = runtime.pack_job
+    if job is not None and job.get("row") is row:
+        return "packing"
     return None
 
 
@@ -2001,7 +2099,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     # so the operator can see how far it has got and stop
                     # THAT process. The timeout stays: it is the backstop for
                     # a rar nobody is watching.
-                    job = _begin_pack_job(completed_user, folder_leaf, true_source_dir, target_rar_path)
+                    job = _begin_pack_job(completed_user, folder_leaf, true_source_dir, target_rar_path, row=next_file)
                     try:
                         process = _run_rar(job, cmd, rar_timeout)
                     except subprocess.TimeoutExpired:
@@ -2056,7 +2154,8 @@ def check_queue_and_send(irc_sock, completed_user):
                         with queue_lock:
                             room = len(config.active_transfers) < config.MAX_DCC_SLOTS
                             if room:
-                                config.active_transfers.append({"user": completed_user, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename})
+                                config.active_transfers.append({"user": completed_user, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename,
+                                                                 "queue_row": next_file})
                         if not room:
                             print(f"[DCC-BLOCK] {completed_user}: all {config.MAX_DCC_SLOTS} slot(s) busy, "
                                   f"the packed archive stays queued for the next trigger.")
@@ -2148,7 +2247,8 @@ def check_queue_and_send(irc_sock, completed_user):
 
                         f_name = next_file['file'] if isinstance(next_file, dict) else os.path.basename(str(next_file))
                         f_path = next_file['path'] if isinstance(next_file, dict) else str(next_file)
-                        claim = {"user": completed_user, "file": f_name, "bytes_sent": 0, "next_file_obj": f_name}
+                        claim = {"user": completed_user, "file": f_name, "bytes_sent": 0, "next_file_obj": f_name,
+                                 "queue_row": next_file}
                         if list_went_first:
                             claim["list_went_first"] = True
                         config.active_transfers.append(claim)
@@ -2323,7 +2423,8 @@ def check_queue_and_send(irc_sock, completed_user):
                         config.user_processing_lock = set()
                     config.user_processing_lock.add(queue_key)
 
-                    claim = {"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name}
+                    claim = {"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name,
+                             "queue_row": g_next}
                     # Counted by the cap only when the list took the slot from
                     # a nick that had waited longer (#1205).
                     if (lists_first and is_a_list_row(g_next)
@@ -2763,16 +2864,20 @@ def _folder_total_bytes(path):
     return total
 
 
-def _begin_pack_job(user, folder_name, source, archive):
+def _begin_pack_job(user, folder_name, source, archive, row=None):
     """Register the pack about to start (#1202) and return its job.
 
     Registered BEFORE rar is started, so a cancel that arrives in the gap
     still finds something to mark. The folder's size is added by a thread of
     its own: walking a big album must not delay the pack, and the status is
     honest about a total it does not have yet (0).
+
+    `row` is the queue row being packed: the Queue page's controls know it by
+    that, not by its place (#1245).
     """
     job = {"user": str(user), "name": str(folder_name), "archive": archive,
-           "started": time.time(), "total": 0, "process": None, "cancelled": False}
+           "started": time.time(), "total": 0, "process": None, "cancelled": False,
+           "row": row}
     with runtime.pack_lock:
         runtime.pack_job = job
 
@@ -2994,6 +3099,19 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         print(f"[DCC] No list is bound to {target_chan!r}; ignoring the "
               f"request from {user}.")
         return
+    # A PRIVATE REQUEST BELONGS TO THE CHANNEL ITS SENDER SHARES WITH US
+    # (#1242). Resolved once, here, and stored on the row: the feed names it,
+    # the notices follow its mode, and nothing is announced in it. Sharing
+    # none, the request is refused - up front, so a free slot and a full
+    # queue answer it the same way. target_chan itself stays our nick: the
+    # list routing below and the refusals on the way are about the message.
+    private = not is_channel_name(target_chan)
+    row_chan = target_chan
+    if private:
+        row_chan = library.shared_channel(user)
+        if row_chan is None:
+            refuse_unshared_private_request(user, repr(str(requested_file or "")[:120]))
+            return
     # A private message has no channel to route on, but a labelled `!rar`
     # row does (#653): its first component names a folder, and folders
     # belong to lists. Routed by that label; an ambiguous one is refused
@@ -3277,12 +3395,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 config.dcc_queue[user_key].append({
                     "file": master_rar_filename, # The clean name is what gets written to dcc_queue.txt
                     "path": true_source_dir,
-                    "channel": target_chan,
+                    "channel": row_chan,
                     "user_raw": user,
                     "is_unpacked_rar_folder": True,
                     "is_temporary_zip": True,
                     "queued_at": time.time()
                 })
+                # Only on a private row (#1242): a channel row stays as it was.
+                if private:
+                    config.dcc_queue[user_key][-1]["private"] = True
                 user_pos = len(config.dcc_queue[user_key])
 
             # Persisted AFTER the lock is released (#605): save_dcc_queue()
@@ -3295,10 +3416,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
 
             # One single clean line to the debug channel, nothing more
-            announce_mod.feed_event("REQUEST", f"{user} asked for the folder \"{clean_folder_name}\" - packing it, sending when done.",
-                                    nick=user, channel=target_chan, kind="folder", name=clean_folder_name)
+            announce_mod.feed_event("REQUEST", f"{user} asked for the folder \"{clean_folder_name}\""
+                                    f"{privately_from(private, row_chan)} - packing it, sending when done.",
+                                    nick=user, channel=row_chan, kind="folder", name=clean_folder_name)
 
-            announce_mod.send_dcc_queue_notice(user, folder_name, user_pos, channel=target_chan)
+            announce_mod.send_dcc_queue_notice(user, folder_name, user_pos, channel=row_chan)
             threading.Thread(target=check_queue_and_send, args=(irc_sock, user), daemon=True).start()
             return
 
@@ -3656,8 +3778,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # whether it sends now or queues is decided under the lock below, and
         # each of those reports itself (SENDING / QUEUED). A refused request
         # is reported by its refusal.
-        announce.feed_event("REQUEST", f'{user} asked for "{file_name}"',
-                            nick=user, channel=target_chan, kind="file", name=file_name)
+        announce.feed_event("REQUEST", f'{user} asked for "{file_name}"{privately_from(private, row_chan)}',
+                            nick=user, channel=row_chan, kind="file", name=file_name)
 
         with queue_lock:
             # Asking again for what is already waiting adds nothing (#1077):
@@ -3717,8 +3839,10 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)
 
-                next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False,
+                next_file_fake = {"path": full_path, "file": file_name, "channel": row_chan, "is_temporary_zip": False,
                                   "queued_at": time.time()}
+                if private:
+                    next_file_fake["private"] = True
                 claim = {"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name,
                          "path": full_path}
                 if is_master_zip:
@@ -3731,8 +3855,10 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 start_waiting(user_key)
                 if user_key not in config.dcc_queue:
                     config.dcc_queue[user_key] = []
-                config.dcc_queue[user_key].append({"file": file_name, "path": full_path, "channel": target_chan, "user_raw": user, "is_temporary_zip": False,
+                config.dcc_queue[user_key].append({"file": file_name, "path": full_path, "channel": row_chan, "user_raw": user, "is_temporary_zip": False,
                                                    "queued_at": time.time()})
+                if private:
+                    config.dcc_queue[user_key][-1]["private"] = True
                 user_pos = len(config.dcc_queue[user_key])
                 if is_master_zip:
                     user_pos = put_the_list_first(config.dcc_queue[user_key])
@@ -3755,7 +3881,9 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # completion line went out as PRIVMSG <ournick>, cost a VIP slot,
             # and the read loop dropped it as our own message. #530 fixed
             # this for rows picked up from the queue via
-            # announce_channel_for(); this path never went through it.
+            # announce_channel_for(); this path never went through it. For a
+            # private request it is the channel they share with us (#1242),
+            # which the "Sent:" line is then not sent to.
             announce_chan = announce_channel_for(next_file_fake)
             announce.send_dcc_sending_notice(user, file_name, path=full_path, channel=announce_chan)
             threading.Thread(target=start_dcc_send, args=(irc_sock, user, full_path, file_name, announce_chan, next_file_fake), daemon=True).start()
@@ -3766,9 +3894,9 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         db.save_dcc_queue()
 
         if is_master_zip:
-            announce.send_dcc_queue_notice(user, file_name, user_pos, channel=target_chan, list_is_next=True)
+            announce.send_dcc_queue_notice(user, file_name, user_pos, channel=row_chan, list_is_next=True)
         else:
-            announce.send_dcc_queue_notice(user, file_name, user_pos, channel=target_chan)
+            announce.send_dcc_queue_notice(user, file_name, user_pos, channel=row_chan)
         return
 
     except Exception as e:
@@ -4667,9 +4795,12 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             # Only announce a transfer that actually completed. A failed attempt now keeps
             # its queue row for retry, so announcing here would tell the channel "Sent" and
             # re-offer the same file on every attempt.
+            # A private request is not announced (#1242): the operator's
+            # decision, though the channel it belongs to is known by now.
             if transfer_completed:
                 announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, reported_speed,
-                                                    duration=acute_duration)
+                                                    duration=acute_duration,
+                                                    private=is_private_row(next_file))
         except Exception as ann_chan_err:
             print(f"[ANNOUNCE CHANNEL ERROR] Could not send the channel notice: {ann_chan_err}")
 

@@ -42,6 +42,18 @@ def names(nick):
     return [r["file"] for r in config.dcc_queue.get(nick, [])]
 
 
+def row_id(nick, place):
+    """The id the Queue page sends back for the file at 1-based `place` (#1245)."""
+    return dcc.queue_row_id(config.dcc_queue[nick][place - 1])
+
+
+def sending(nick, place):
+    """The slot claim dcc.py makes for a queued row: its row, and no path (#1245)."""
+    queued = config.dcc_queue[nick][place - 1]
+    return {"user": nick, "file": queued["file"], "bytes_sent": 0,
+            "next_file_obj": queued["file"], "queue_row": queued}
+
+
 class Base(DCCoreTestCase):
 
     def setUp(self):
@@ -154,12 +166,12 @@ class AFileInsideItsQueue(Base):
             ok, _ = commands.move_queued_file("ann", position, "up")
             self.assertFalse(ok, position)
 
-    def test_the_name_the_page_saw_has_to_still_be_there(self):
-        ok, message = commands.move_queued_file("ann", 2, "up", name="a3.mp3")
+    def test_the_file_the_page_saw_has_to_still_be_there(self):
+        ok, message = commands.move_queued_file("ann", 2, "up", row_id=row_id("ann", 3))
         self.assertFalse(ok)
         self.assertIn("changed", message)
         self.assertEqual(names("ann"), ["a1.mp3", "a2.mp3", "a3.mp3"])
-        self.assertTrue(commands.move_queued_file("ann", 2, "up", name="a2.mp3")[0])
+        self.assertTrue(commands.move_queued_file("ann", 2, "up", row_id=row_id("ann", 2))[0])
 
     def test_the_other_nicks_are_untouched(self):
         commands.move_queued_file("ann", 1, "down")
@@ -172,7 +184,7 @@ class AFileInsideItsQueue(Base):
         self.assertEqual(saved, [True])
 
     def test_a_file_being_sent_stays_put(self):
-        config.active_transfers = [{"user": "ann", "file": "a1.mp3", "path": "/music/a1.mp3"}]
+        config.active_transfers = [sending("ann", 1)]
         for position, direction in ((1, "down"), (2, "up")):
             ok, message = commands.move_queued_file("ann", position, direction)
             self.assertFalse(ok)
@@ -180,17 +192,18 @@ class AFileInsideItsQueue(Base):
         self.assertEqual(names("ann"), ["a1.mp3", "a2.mp3", "a3.mp3"])
 
     def test_the_rest_can_still_be_moved_while_one_is_sent(self):
-        config.active_transfers = [{"user": "ann", "file": "a1.mp3", "path": "/music/a1.mp3"}]
+        config.active_transfers = [sending("ann", 1)]
         self.assertTrue(commands.move_queued_file("ann", 3, "up")[0])
         self.assertEqual(names("ann"), ["a1.mp3", "a3.mp3", "a2.mp3"])
 
     def test_a_folder_being_packed_stays_put(self):
         config.dcc_queue["ann"][0]["is_unpacked_rar_folder"] = True
         runtime.pack_job = {"user": "Ann", "name": "Album", "archive": "/nowhere.rar",
-                            "started": time.time(), "total": 0, "cancelled": False}
+                            "started": time.time(), "total": 0, "cancelled": False,
+                            "row": config.dcc_queue["ann"][0]}
         ok, message = commands.move_queued_file("ann", 2, "up")
         self.assertFalse(ok)
-        self.assertIn("being sent", message)
+        self.assertIn("being packed", message)
 
 
 class OneFileRemoved(Base):
@@ -226,8 +239,8 @@ class OneFileRemoved(Base):
         commands.remove_queued_file("ann", 2)
         self.assertEqual([r["path"] for r in config.dcc_queue["ann"]], ["/one/same.mp3"])
 
-    def test_the_name_the_page_saw_has_to_still_be_there(self):
-        ok, message = commands.remove_queued_file("ann", 1, name="a2.mp3")
+    def test_the_file_the_page_saw_has_to_still_be_there(self):
+        ok, message = commands.remove_queued_file("ann", 1, row_id=row_id("ann", 2))
         self.assertFalse(ok)
         self.assertIn("changed", message)
         self.assertEqual(len(names("ann")), 3)
@@ -315,19 +328,19 @@ class TheDashboardRoutes(Base):
 
     def test_move_file(self):
         status, _ = webserver.build_queue_move_file_result(
-            {"nick": "ann", "position": "2", "file": "a2.mp3", "direction": "down"})
+            {"nick": "ann", "position": "2", "id": row_id("ann", 2), "direction": "down"})
         self.assertEqual(status, 200)
         self.assertEqual(names("ann"), ["a1.mp3", "a3.mp3", "a2.mp3"])
 
     def test_move_file_of_a_queue_that_changed_is_refused(self):
         status, result = webserver.build_queue_move_file_result(
-            {"nick": "ann", "position": "2", "file": "gone.mp3", "direction": "down"})
+            {"nick": "ann", "position": "2", "id": dcc.queue_row_id(row("gone.mp3")), "direction": "down"})
         self.assertEqual(status, 400)
         self.assertIn("changed", result["error"])
 
     def test_remove_file(self):
         status, result = webserver.build_queue_remove_file_result(
-            {"nick": "ann", "position": 1, "file": "a1.mp3"})
+            {"nick": "ann", "position": 1, "id": row_id("ann", 1)})
         self.assertEqual(status, 200)
         self.assertIn("a1.mp3", result["message"])
         self.assertEqual(names("ann"), ["a2.mp3", "a3.mp3"])

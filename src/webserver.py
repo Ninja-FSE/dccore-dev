@@ -1104,14 +1104,18 @@ def build_queue_payload(user=None):
     that one user instead - what a click-through or `?user=<nick>` on
     /api/queue returns.
 
-    "preview"/"count"/"files" describe the QUEUE only - what is waiting
-    behind whatever is currently sending, if anything, never included in it.
-    dcc.py never puts the in-flight file into config.dcc_queue; it lives in
-    config.active_transfers instead, which is why a sending user's progress
-    needs its own fields rather than being folded into the queue ones -
+    "preview"/"count"/"files" describe the QUEUE: config.dcc_queue's rows.
+    A send that found a free slot at once never has a row; a queued file
+    keeps its row while it is sent, until the send settles it (#1245). The
+    progress lives in config.active_transfers either way, which is why a
+    sending user's progress needs its own fields rather than being folded
+    into the queue ones -
     an operator asked to see the whole queue, not just its head, and a
     progress bar for the transfer actually running, not for whatever is
     queued behind it.
+
+    "file_ids" is dcc.queue_row_id() of each of "files", in step: what a move
+    or a removal sends back to name the file it means (#1245).
 
     No lock is taken, matching adminchat.py's _cmd_queue/_cmd_status idiom: a
     shallow dict()/list() copy of the live containers, read without a lock,
@@ -1129,9 +1133,9 @@ def build_queue_payload(user=None):
 
     # The user a folder is being packed for (#1202): without it their row read
     # "queued" for as long as rar ran. The folder's name, never its path.
+    import dcc
     pack = None
     try:
-        import dcc
         pack = dcc.pack_status()
     except Exception as err:
         print(f"[WEBSERVER] The running pack could not be read for the queue: {err}")
@@ -1166,6 +1170,7 @@ def build_queue_payload(user=None):
         files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
         current_file, bytes_sent, size = _progress_fields(user_key)
         result = {"user": user_key, "status": status, "count": len(entries), "files": files,
+                  "file_ids": [dcc.queue_row_id(e) for e in entries],
                   "current_file": current_file, "bytes_sent": bytes_sent, "size": size,
                   "ignored_seconds": _security_seconds_left(user_key)}
         if status == "packing":
@@ -1182,10 +1187,13 @@ def build_queue_payload(user=None):
     # sending_users regardless of whether entries exist; this does the same.
     rows = []
     # In the order the dispatcher gives out free slots (#1206): the page shows
-    # who is next, and Move up/down on a row changes that.
+    # who is next, and Move up/down on a row changes that. The dispatcher's
+    # own key (#1245): ranked by the wait alone, a waiting list was shown
+    # last while it went first, and the arrows moved against a line the
+    # page did not show.
     try:
-        import dcc as _dcc
-        waiting_order = sorted(queue.keys(), key=_dcc.queue_waiting_since)
+        waiting_order = dcc.slot_order(queue, dcc.a_list_may_go_first(active))
+        waiting_order += [key for key in queue if not queue[key]]
     except Exception as err:
         print(f"[WEBSERVER] The queue's order could not be read: {err}")
         waiting_order = list(queue.keys())
@@ -1215,7 +1223,8 @@ def build_queue_payload(user=None):
             preview = ""
         current_file, bytes_sent, size = _progress_fields(user_key)
         row = {"user": user_key, "preview": preview, "count": len(entries), "status": status,
-               "files": files, "current_file": current_file,
+               "files": files, "file_ids": [dcc.queue_row_id(e) for e in entries],
+               "current_file": current_file,
                "bytes_sent": bytes_sent, "size": size,
                "ignored_seconds": _security_seconds_left(user_key)}
         if status == "packing":
@@ -1283,13 +1292,25 @@ def build_queue_move_user_result(body):
     return 200, {"user": nick.lower(), "message": message}
 
 
+def _queue_row_id(body):
+    """The `id` of the file a move or a removal means - one of the queue
+    payload's "file_ids" - or None when it is missing. Required: without it
+    nothing says the file is still the one the page showed (#1245).
+    """
+    row_id = str(body.get("id") or "").strip()
+    return row_id or None
+
+
 def build_queue_move_file_result(body):
     """POST /api/queue/move-file (#1206): one place up or down inside the
-    nick's own queue. `position` is 1-based and `file` the name the page saw
+    nick's own queue. `position` is 1-based and `id` the file the page saw
     there, so a queue that moved meanwhile is refused, not misread."""
     import commands
     nick = _queue_nick(body)
-    ok, message = commands.move_queued_file(nick, body.get("position"), body.get("direction"), body.get("file"))
+    row_id = _queue_row_id(body)
+    if row_id is None:
+        return 400, {"error": "Which file? The page sent no id - reload it."}
+    ok, message = commands.move_queued_file(nick, body.get("position"), body.get("direction"), row_id)
     if not ok:
         return 400, {"error": message}
     return 200, {"user": nick.lower(), "message": message}
@@ -1297,10 +1318,14 @@ def build_queue_move_file_result(body):
 
 def build_queue_remove_file_result(body):
     """POST /api/queue/remove-file (#1206): the one file out of the queue, with
-    the same notice to the nick as their own `@<bot>-remove <file>`."""
+    the same notice to the nick as their own `@<bot>-remove <file>`. `id`
+    names the file, as for a move."""
     import commands
     nick = _queue_nick(body)
-    ok, message = commands.remove_queued_file(nick, body.get("position"), body.get("file"))
+    row_id = _queue_row_id(body)
+    if row_id is None:
+        return 400, {"error": "Which file? The page sent no id - reload it."}
+    ok, message = commands.remove_queued_file(nick, body.get("position"), row_id)
     if not ok:
         return 400, {"error": message}
     return 200, {"user": nick.lower(), "message": message}
@@ -1314,7 +1339,9 @@ def build_queue_clear_result(body):
     if not nick or any(ch.isspace() for ch in nick):
         return 400, {"error": "Give the nick."}
     key = nick.lower()
-    count = len(getattr(config, "dcc_queue", {}).get(key) or [])
+    import dcc
+    with dcc.queue_lock:
+        count = len(getattr(config, "dcc_queue", {}).get(key) or [])
     if not count:
         return 404, {"error": f"{nick} has nothing queued."}
     commands.handle_admin_clear_queue("dashboard", "", f"!clearqueue {nick}", authorised=True)
