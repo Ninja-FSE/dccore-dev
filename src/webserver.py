@@ -1575,7 +1575,16 @@ def build_list_fetch_enqueue_result(bot_raw):
     if dcc_fetch.has_outstanding_bot_alone_request(bot):
         return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
 
-    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list")
+    # held_list_channel(bot) (review of #1239): with no channel given, a
+    # channel-less list refresh must re-ask in the SAME channel its list
+    # already came from, not drift to whatever channel the dispatcher would
+    # otherwise resolve on its own (the bot's last advert, overwritten by
+    # every advert line - runtime.known_bots[...]["channel"] - which can be
+    # a DIFFERENT channel we also share with the bot). Left to that fallback,
+    # a bot bound to a different list per channel could have its whole held
+    # entry silently replaced by another channel's answer on its next
+    # ordinary refresh - confirmed on review, with a real repro.
+    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list", channel=held_list_channel(bot))
     if request_id is None:
         # Defense in depth: enqueue_fetch() enforces this same invariant
         # itself (see its docstring), so this should be unreachable given

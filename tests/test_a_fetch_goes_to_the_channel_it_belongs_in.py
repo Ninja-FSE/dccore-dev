@@ -12,14 +12,20 @@ Now:
 - a fetch row can carry a preferred channel; the dispatcher resolves a real
   one from it (falling back to the bot's advert channel, then to today's
   "first channel we share" rule) and remembers what it used, so a retried
-  row keeps asking in the same place;
+  row keeps asking in the same place - its ORIGINAL preference, kept on its
+  own field, never the fallback a previous dispatch happened to resolve;
 - the list a fetch brings back remembers which channel it came from;
 - a File list browser or Search request for a bot we already hold a list
   from reuses that list's own channel automatically - no picker, no new
   field for the dashboard to send;
-- `fetch <bot> <channel>` (the console / dccore.mrc "fetch" command) asks a
-  SPECIFIC channel explicitly - how a bot's other list, bound elsewhere,
-  gets fetched at all.
+- a channel-less list refresh (an ordinary one, AUTO_REFETCH_LISTS, console/
+  mIRC `fetch <bot>`, a Downloads retry) prefers the channel its list already
+  came from too, rather than drifting to wherever the bot last advertised.
+
+Deliberately NOT done: asking a bot for its list from a SPECIFIC, named
+channel by hand - tried during review and reverted (see "Remove the
+explicit fetch <bot> <channel> capability" and its own commit message for
+the real-world data loss that caused it).
 """
 
 import os
@@ -134,9 +140,34 @@ class TheDispatcherRemembersIt(DCCoreTestCase):
         self.assertEqual(self.sent_to(), "#video")
         self.assertEqual(config.fetch_queue[rid]["channel"], "#video")
 
+    def test_a_fallback_at_dispatch_does_not_lose_the_original_preference(self):
+        """Review of #1239: "channel" and the preference used to be the SAME
+        field - a bot briefly out of its preferred channel at dispatch got
+        the fallback channel written into "channel", and a later retry of
+        that same row (still pending, not yet sent - a busy-bot retry, not a
+        brand new request) read that fallback back as ITS preference,
+        quietly losing the original choice even once the bot returned.
+        "preferred_channel" is never overwritten, so the retry still prefers
+        the real original choice."""
+        bots_in_the_channel("GoodBot", channel="#chan")
+        rid = dcc_fetch.enqueue_fetch("GoodBot", "Song.flac", channel="#video")
+        config.channel_users["#video"].discard("goodbot")  # briefly out of #video
+        dcc_fetch.check_fetch_queue()
+        self.assertEqual(self.sent_to(), "#chan", "falls back since #video is unavailable")
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#chan")
+        self.assertEqual(config.fetch_queue[rid]["preferred_channel"], "#video",
+                         "the original preference must survive the fallback")
+
+        self.oserve.queued.clear()
+        config.fetch_queue[rid].update(state="pending", offered_at=None)
+        bots_in_the_channel("GoodBot", channel="#video")  # back again
+        dcc_fetch.check_fetch_queue()
+        self.assertEqual(self.sent_to(), "#video", "the retry must prefer #video again, not #chan")
+
     def test_new_fetch_row_carries_the_channel_given(self):
         row = dcc_fetch.new_fetch_row("GoodBot", "Song.flac", channel="#video")
         self.assertEqual(row["channel"], "#video")
+        self.assertEqual(row["preferred_channel"], "#video")
 
     def test_new_fetch_row_defaults_the_channel_to_none(self):
         row = dcc_fetch.new_fetch_row("GoodBot", "Song.flac")
@@ -234,6 +265,30 @@ class HeldListChannelFeedsFileAndFolderRequests(DCCoreTestCase):
         self.assertEqual(status, 200)
         rid = result["created"][0]
         self.assertIsNone(config.fetch_queue[rid]["channel"])
+
+    def test_a_channel_less_list_refresh_uses_the_held_lists_channel(self):
+        """Review of #1239: a channel-less list refresh (an ordinary
+        refresh, console/mIRC `fetch <bot>`, a Downloads retry of a list
+        row) used to go wherever the dispatcher's own fallback chain
+        resolved - the bot's LAST ADVERT channel, which can be a different
+        one we also share with it - and could silently REPLACE the whole
+        held entry (Main and RAR included) with that other channel's
+        answer. It must re-ask in the same channel its list already came
+        from instead."""
+        config.fetched_bot_lists["goodbot"] = {"channel": "#video"}
+        runtime.known_bots["goodbot"] = {"channel": "#chan"}  # a DIFFERENT shared channel
+        status, result = webserver.build_list_fetch_enqueue_result("GoodBot")
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#video")
+
+    def test_a_list_refresh_with_no_held_list_still_falls_back_as_before(self):
+        runtime.known_bots["goodbot"] = {"channel": "#chan"}
+        status, result = webserver.build_list_fetch_enqueue_result("GoodBot")
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertIsNone(config.fetch_queue[rid]["channel"],
+                          "no held list yet - nothing to prefer, same as before")
 
 
 class DropOurRequestAtUsesTheRowsChannel(DCCoreTestCase):
