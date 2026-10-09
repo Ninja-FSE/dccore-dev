@@ -118,19 +118,26 @@ def handle_help_request(s, user, target):
         f"What I have and what I have sent: {bold}{red}@{nick}-stats{reset}. "
         f"What people request most: {bold}{red}@{nick}-top{reset}.")
 
-    lines.append(
+    # Gated the same way RAR_ENABLED's own line above is (#1249 review):
+    # with SEARCH_ENABLED off, @find and @locator get no reply at all, so
+    # -help explaining them anyway just sent people to a dead end.
+    search_enabled = getattr(config, "SEARCH_ENABLED", True)
+    queue_line = (
         f"Your queue: {bold}{red}@{nick}-que{reset} to see it, "
         f"{bold}{red}@{nick}-remove{reset} to cancel it all, "
-        f"{bold}{red}@{nick}-remove <file>{reset} for just one. "
-        f"To search every bot at once, type: {bold}{red}@find <words>{reset}")
+        f"{bold}{red}@{nick}-remove <file>{reset} for just one.")
+    if search_enabled:
+        queue_line += f" To search every bot at once, type: {bold}{red}@find <words>{reset}"
+    lines.append(queue_line)
 
-    # #774: a band or title made of common words - "Metal Church" matched
-    # every file with both words anywhere. Said as this bot's own rule: the
-    # same @find reaches every bot, and one that does not know quotes simply
-    # answers nothing to a quoted term.
-    lines.append(
-        f"Words in quotes must appear together, in that order, in my list: "
-        f'{bold}{red}@find "metal church"{reset}')
+    if search_enabled:
+        # #774: a band or title made of common words - "Metal Church" matched
+        # every file with both words anywhere. Said as this bot's own rule: the
+        # same @find reaches every bot, and one that does not know quotes simply
+        # answers nothing to a quoted term.
+        lines.append(
+            f"Words in quotes must appear together, in that order, in my list: "
+            f'{bold}{red}@find "metal church"{reset}')
 
     for line in lines:
         # #426: NOT is_vip=True. The VIP lane is strict-priority with no

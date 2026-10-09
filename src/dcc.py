@@ -660,7 +660,22 @@ def _rar_archive_disk_name(source_dir):
         rel = os.path.basename(str(source_dir).rstrip("/\\"))
     rel = rel.replace("\\", "/").strip("/")
     segments = [_clean_rar_chars(part) for part in rel.split("/") if part]
-    return f"{platform_compat.windows_safe_name('_'.join(segments) or 'album', trim_end=False)}.rar"
+    joined = "_".join(segments) or "album"
+    # A Windows-reserved name and ITS OWN "_"-suffixed form collide once
+    # windows_safe_name() runs (#1249 review): "AUX" and a folder already
+    # named "AUX_" both become "AUX_.rar" - the fixed suffix is not
+    # reserved itself, so the second path is returned exactly as given,
+    # landing on the same disk name windows_safe_name() gives the first.
+    # `rar a` adds to an existing archive rather than replacing it - the
+    # same #162 finding #7 this function exists to prevent, reached a
+    # different way. A short digest of the real (pre-sanitised) relative
+    # path, same discipline list.list_slug() already uses, makes the two
+    # distinguishable - added only for a reserved name, so an ordinary
+    # album keeps its plain, readable disk name exactly as before.
+    if platform_compat.is_windows_reserved(joined):
+        digest = hashlib.sha1(rel.encode("utf-8", "replace")).hexdigest()[:6]
+        joined = f"{joined}-{digest}"
+    return f"{platform_compat.windows_safe_name(joined, trim_end=False)}.rar"
 
 
 def _is_temp_zip_cache_file(path):

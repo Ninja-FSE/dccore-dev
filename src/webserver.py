@@ -3993,6 +3993,15 @@ def theme_preview_overrides(payload):
             value = body.get(key)
             wanted[key] = (settings_file.coerce(key, value, "", str)
                            if isinstance(value, str) else "")
+    # SEARCH_ENABLED (#1249 review): announce.search_state() already reads
+    # the unsaved value first - `(settings or {}).get("SEARCH_ENABLED", ...)`
+    # - but nothing ever put it in `settings`, since this whitelist stopped
+    # at THEME and CUSTOM_THEME_*. The advert sample's "Search: ON/OFF"
+    # followed the SAVED setting regardless of what the operator had just
+    # toggled on the page, same as every other preview bug this function
+    # exists to prevent.
+    if "SEARCH_ENABLED" in body:
+        wanted["SEARCH_ENABLED"] = bool(body.get("SEARCH_ENABLED"))
     return wanted
 
 

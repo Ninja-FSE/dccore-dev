@@ -4,6 +4,36 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧹 Small follow-ups: the From: line, the search preview, -help, and reserved-name collisions (#1249)
+
+Found in a post-merge review of #1236 (#1228), #1238 (#1237) and #1213.
+
+1. **The `From:` line could start with `!` again under a custom theme.** `CUSTOM_THEME_BORDER`/`SEPARATOR`/`TEXTBOX`
+   are free-text, operator-only settings - a border set to e.g. `!othernick` put that text, unescaped, at the very
+   start of the line, framed BEFORE `From: ` rather than after it. `From: ` now comes first, unconditionally, so
+   the line always starts with that literal text under any theme or custom colour - the guarantee #1228's own
+   changelog entry already promised. The test that should have caught this only overrode `CUSTOM_THEME_ACCENT`
+   (never used by this template) and checked `.lstrip()` before stripping control codes, which a leading `\x03`
+   could hide a `!` behind; both gaps are closed.
+2. **The settings preview ignored an unsaved `SEARCH_ENABLED`.** `announce.search_state()` already read the
+   unsaved value first, but `webserver.theme_preview_overrides()`'s whitelist stopped at `THEME` and
+   `CUSTOM_THEME_*`, so nothing ever put it in the dict that function reads from - the advert sample's
+   "Search: ON/OFF" always showed the saved setting. Added to the whitelist, and to what the dashboard posts for
+   a preview (as a real boolean, not stringified like the text settings).
+3. **`-help` still explained `@find`/`@locator` with search off.** Gated the same way the `!rar` line already is
+   for `RAR_ENABLED`.
+4. **The `@locator` test only grepped the source** for its own branch condition, which proves nothing about what
+   runs once matched. Now checks the branch body calls `list.execute_search` exactly once, so `@find` and
+   `@locator` are structurally the same call, not two sites that happen to agree today.
+5. **Reserved-name suffix collisions.** `_rar_archive_disk_name()` and `_sanitize_bot_dir_name()` both gave a
+   Windows-reserved name ("AUX") the same fixed `"_"` suffix `windows_safe_name()` always has - which collided
+   with a folder or bot ALREADY named that way ("AUX_"), the same #162 finding #7 this function exists to
+   prevent, reached a different way. Both now take `list.list_slug()`'s own discipline: a short digest of the
+   real name, added only when the name was actually reserved, so an ordinary name's disk name is unchanged.
+- **Tests:** `tests/test_a_search_reply_can_name_each_results_folder.py` (strengthened, several existing tests
+  updated for the new frame order), `tests/test_search_can_be_turned_off.py` (3 new tests), `tests/test_help_command.py`
+  (3 new tests), `tests/test_windows_reserved_names_are_made_safe.py` (4 new tests).
+
 ### 🔭 A bot's other channel-bound list is discovered and held automatically (#1240)
 
 #1232/#1239 fixed a request landing in the wrong channel; it still took an operator's own action to ever see a bot's

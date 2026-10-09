@@ -22,6 +22,7 @@ import defaults as config  # noqa: E402
 import list as list_mod  # noqa: E402
 import settings_help  # noqa: E402
 import theme  # noqa: E402
+import webserver  # noqa: E402
 
 from tests.support import DCCoreTestCase, RecordingSocket  # noqa: E402
 from tests.test_webserver import write_master_list  # noqa: E402
@@ -85,9 +86,19 @@ class TheSwitch(DCCoreTestCase):
                 self.assertTrue(self.reply()[0])
 
     def test_locator_takes_the_same_path(self):
+        """#1249 review: grepping for the branch's own condition line only
+        proves the TEXT "@locator" is matched somewhere - it says nothing
+        about what runs once it is. Checked here instead: the branch body,
+        up to the next elif, calls list.execute_search exactly once - so
+        whatever "@find" does, "@locator" necessarily does the identical
+        thing, by construction, not by two call sites that happen to agree
+        today and could silently drift apart."""
         with open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             source = handle.read()
-        self.assertIn('elif msg.startswith("@find ") or msg.startswith("@locator "):', source)
+        start = source.index('elif msg.startswith("@find ") or msg.startswith("@locator "):')
+        end = source.index("elif ", start + 1)
+        branch = source[start:end]
+        self.assertEqual(branch.count("list.execute_search"), 1, branch)
 
 
 class TheAdvert(DCCoreTestCase):
@@ -107,6 +118,36 @@ class TheAdvert(DCCoreTestCase):
         self.assertIn("OFF", advert(SEARCH_ENABLED=False))
         self.set_config(SEARCH_ENABLED=False)
         self.assertIn("ON", advert(SEARCH_ENABLED=True).split("Search: ")[1][:8])
+
+    def test_the_real_preview_route_reads_the_unsaved_value_too(self):
+        """#1249 review: the test above calls build_advert_line(settings=...)
+        directly, which is not what the real preview route does - that one
+        goes through theme_preview_overrides() first, to turn a posted body
+        into the settings dict build_theme_preview() then renders. That
+        whitelist stopped at THEME and CUSTOM_THEME_*, so a toggled-but-
+        unsaved SEARCH_ENABLED never reached the preview at all; the advert
+        sample kept showing the SAVED setting regardless of what was on the
+        page, the one bug class this whole page of previews exists to
+        prevent."""
+        self.set_config(SEARCH_ENABLED=True)
+        overrides = webserver.theme_preview_overrides({"SEARCH_ENABLED": False})
+        preview = webserver.build_theme_preview(overrides)
+        self.assertIn("OFF", preview["advert"])
+
+        self.set_config(SEARCH_ENABLED=False)
+        overrides = webserver.theme_preview_overrides({"SEARCH_ENABLED": True})
+        preview = webserver.build_theme_preview(overrides)
+        self.assertIn("ON", preview["advert"].split("Search: ")[1][:8])
+
+    def test_the_preview_overrides_whitelist_coerces_to_a_real_boolean(self):
+        """Whatever JSON type the body carries - and the dashboard now sends
+        a real boolean, not the "true"/"false" strings THEME/CUSTOM_THEME_*
+        use - this must not let a string "false" read as truthy."""
+        self.assertEqual(webserver.theme_preview_overrides({"SEARCH_ENABLED": False}),
+                         {"SEARCH_ENABLED": False})
+        self.assertEqual(webserver.theme_preview_overrides({"SEARCH_ENABLED": True}),
+                         {"SEARCH_ENABLED": True})
+        self.assertEqual(webserver.theme_preview_overrides({}), {})
 
     def test_on_is_the_advert_it_always_was(self):
         """Byte for byte: the advert other scripts parse is unchanged when on."""

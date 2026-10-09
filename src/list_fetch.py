@@ -231,6 +231,15 @@ def _sanitize_bot_dir_name(bot):
     name = name.replace('..', '')
     name = _BOT_DIR_CHARSET_RE.sub('_', name)
     name = name.strip().strip('.').strip()
+    # A Windows-reserved nick and one already spelled with windows_safe_
+    # name()'s own "_" suffix collide (#1249 review): "AUX" and "AUX_" both
+    # become "AUX_", one directory for two different bots' held lists.
+    # Lower-cased before hashing, since every caller lower-cases the result
+    # anyway (list_extract_dir() and friends) - two spellings of the same
+    # nick, "AUX" and "Aux", must still land on one directory, not two.
+    if platform_compat.is_windows_reserved(name):
+        digest = hashlib.sha1(name.strip().lower().encode("utf-8", "replace")).hexdigest()[:6]
+        name = f"{name}-{digest}"
     return platform_compat.windows_safe_name(name) or "unknown_bot"
 
 
