@@ -273,12 +273,21 @@ def new_fetch_row(bot, filename, now=None, request_type="file", channel=None,
     `channel` (#1232) is the channel the CALLER prefers this request go out
     in - a List Browser or Search request for a bot we already hold a list
     from carries that list's own remembered channel; most callers pass
-    nothing, which is None and means "no preference, use today's rule". It is
-    never itself the channel a request goes out in: check_fetch_queue()'s
-    dispatcher resolves a concrete channel from it (falling back exactly as
-    before when it is absent, stale, or the bot is not there) and writes the
-    result back onto the row before dispatch, so a retried row keeps asking in
-    the same channel it first went out in rather than drifting tick to tick.
+    nothing, which is None and means "no preference, use today's rule".
+
+    Stored on TWO fields (review of #1239), not one: "preferred_channel" is
+    this value, untouched for the row's whole life, and "channel" starts the
+    same but is OVERWRITTEN by check_fetch_queue()'s dispatcher with whatever
+    channel it actually resolved and sent to - the same field a completed
+    list fetch is tagged with, and the one a cancel's "-remove" is sent to,
+    both of which need to know where the request REALLY went, not what was
+    asked for. Before this split, the two meanings shared one field: a bot
+    briefly out of its preferred channel at dispatch time got the FALLBACK
+    channel written into "channel", and a later retry of that same row (busy,
+    not yet sent) read that fallback back as its new "preference" - quietly
+    losing the original choice for good, even once the bot returned. Reading
+    "preferred_channel" instead for every dispatch means the original choice
+    never decays, no matter how many times resolving it falls back meanwhile.
 
     `secondary_channel` (#1240 review) is True only for a "list" row built by
     list_grab.secondary_channel_tick() once its own confidence gate has
@@ -286,10 +295,10 @@ def new_fetch_row(bot, filename, now=None, request_type="file", channel=None,
     Every other caller leaves it False - an ORDINARY list fetch (a manual
     one, AUTO_REFETCH_LISTS, a Downloads-page retry) is always a primary
     refresh, whatever channel it happens to be resolved to. Carried on the
-    row, untouched by dispatch (unlike "channel" above, which dispatch
-    overwrites with the resolved one), so list_fetch.py's completion handler
-    still knows which kind of fetch this was once the file has arrived -
-    see process_fetched_list_zip()'s own "secondary" parameter.
+    row, untouched by dispatch (unlike "channel"/"preferred_channel" above),
+    so list_fetch.py's completion handler still knows which kind of fetch
+    this was once the file has arrived - see process_fetched_list_zip()'s
+    own "secondary" parameter.
 
     This replaces guessing "secondary" from a channel mismatch after the
     fact (list_fetch._is_secondary_channel_fetch(), removed): a bot held
@@ -341,6 +350,7 @@ def new_fetch_row(bot, filename, now=None, request_type="file", channel=None,
         "reason": "",
         "stored_filename": None,
         "channel": _clean_channel(channel),
+        "preferred_channel": _clean_channel(channel),
         "secondary_channel": bool(secondary_channel),
     }
 
@@ -366,10 +376,14 @@ def bot_in_our_channel(bot, channel):
 def _resolve_fetch_channel(bot, preferred):
     """Which of our channels a request for `bot` goes out in (#1232).
 
-    1. `preferred` (a row's own remembered channel, or a caller's explicit
-       choice) - but only if it is still one we are configured for AND `bot`
-       is still there; a channel we left, or one the bot has since left,
-       would send the request where nobody capable of answering it can see.
+    1. `preferred` (the row's own "preferred_channel" - a list/file/folder
+       request for a bot we already hold a list from carries that list's own
+       channel, see webserver.held_list_channel()) - but only if it is still
+       one we are configured for AND `bot` is still there; a channel we
+       left, or one the bot has since left, would send the request where
+       nobody capable of answering it can see. There is no way for an
+       operator to give one by hand (tried during review and reverted - see
+       "Remove the explicit fetch <bot> <channel> capability").
     2. The channel `bot` last advertised in (runtime.known_bots), again only
        if `bot` is still there - the strongest sign of where it actually
        answers requests, for a row with no remembered channel of its own.
@@ -1688,7 +1702,7 @@ def check_fetch_queue():
                 alone_busy.add(key)
             promoted += 1
             to_dispatch.append((rid, row["bot"], row["filename"], row.get("request_type", "file"),
-                                row.get("trigger"), row.get("channel")))
+                                row.get("trigger"), row.get("preferred_channel")))
 
     for bot, filename, channel in to_take_back:
         drop_our_request_at(bot, filename, channel=channel)
