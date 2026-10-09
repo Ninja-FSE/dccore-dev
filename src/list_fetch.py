@@ -398,6 +398,24 @@ def _fetch_file_size_budget_name():
     return f"the list archive ceiling (MAX_LIST_TEXT_SIZE x {MAX_LISTS_PER_ARCHIVE})"
 
 
+def _member_parts(filename):
+    """The path components a list-archive member is written under.
+
+    The archive's own separators and "." dropped, and every component made
+    into a name Windows can create (platform_compat.windows_safe_name()). A
+    peer chooses these names, and on Windows os.path.abspath() turns a
+    component like "NUL" - or, before Windows 11, "COM1" or "con.txt" - into
+    the device itself ("\\\\.\\NUL"), which long_path() then makes a UNC
+    path: the write went to a device, and a serial port could hold the fetch
+    thread. "NUL" becomes "NUL_", as everywhere else a peer's name is used;
+    _pick_list_file() looks for the list by what is in the folder, not by the
+    member's name, so nothing is lost.
+    """
+    parts = [p for p in str(filename).replace("\\", "/").split("/")
+             if p not in ("", ".")]
+    return [platform_compat.windows_safe_name(p) or "_" for p in parts]
+
+
 def _validate_zip_members(infolist, extract_dir, kind="zip"):
     """Check EVERY member before anything is extracted. Returns a short
     rejection reason string, or None if the whole archive is clear to
@@ -436,8 +454,13 @@ def _validate_zip_members(infolist, extract_dir, kind="zip"):
         if not parts:
             continue
 
+        # Both the name as sent and the name written (_member_parts()) must
+        # stay inside: the renaming trims dots, so only the first still
+        # shows a ".." for what it is.
         dest_path = os.path.join(extract_dir, *parts)
-        if not dcc.is_safe_path(extract_dir, dest_path):
+        written_path = os.path.join(extract_dir, *_member_parts(info.filename))
+        if not (dcc.is_safe_path(extract_dir, dest_path)
+                and dcc.is_safe_path(extract_dir, written_path)):
             return (f"{kind} entry {info.filename!r} would extract outside the "
                      f"target directory (path traversal / zip-slip)")
 
@@ -1149,10 +1172,9 @@ def _extract_rar_list(rar_path, extract_dir):
         for member in members:
             if member.is_dir() or not member.filename.lower().endswith(".txt"):
                 continue
-            parts = [p for p in member.filename.replace("\\", "/").split("/")
-                     if p not in ("", ".")]
             reason = _unpack_rar_member(rar_bin, archive, member,
-                                        os.path.join(extract_dir, *parts))
+                                        os.path.join(extract_dir,
+                                                     *_member_parts(member.filename)))
             if reason:
                 return refuse(reason)
     except (OSError, ValueError, subprocess.SubprocessError) as err:
@@ -1248,8 +1270,7 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
             for info in infolist:
                 if info.is_dir():
                     continue
-                member_name = info.filename.replace('\\', '/')
-                parts = [p for p in member_name.split('/') if p not in ('', '.')]
+                parts = _member_parts(info.filename)
                 if not parts:
                     continue
                 dest_path = os.path.join(extract_dir, *parts)

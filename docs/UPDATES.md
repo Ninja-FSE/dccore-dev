@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🛡️ A list archive's member named after a Windows device is renamed
+
+Reported privately and fixed before the release, because the names come from a peer.
+
+- **What was wrong.** `list_fetch.py` unpacked a zip or RAR list under the member names the remote bot chose.
+  `_validate_zip_members()` refused traversal, absolute paths and all-dots components, but not device names. On
+  Windows, `os.path.abspath()` turns `...\lists\<bot>\NUL` into `\\.\NUL` (before Windows 11, `COM1`, `CON` and
+  names with an extension too), and `long_path()` then makes that a UNC path. The member was written to the device,
+  and an open on a serial port could hold the fetch thread.
+- **Fix.** A new `_member_parts()` gives the components a member is written under, each through
+  `platform_compat.windows_safe_name()` (`NUL.txt` becomes `NUL_.txt`, a `CON` folder `CON_`). Both the zip and the
+  RAR route use it, on every platform. rar is still asked for the member by its own name.
+  `_pick_list_file()` finds the list by what is in the folder, so a renamed list is still installed.
+- **The containment check reads both names.** The renaming trims dots, so `..` would reach the check as `_`: the
+  name as sent and the name written must both stay inside the target.
+- **Tests:** `tests/test_a_list_member_named_after_a_device_is_renamed.py` (7 tests). These cover zip, RAR through
+  the stand-in rar, a device-named folder, and an all-dots name still refused. They read the names that reach the
+  disk, so they run the same on every runner and open no device. 4/4 mutations caught.
+
 ### 🔭 The Download queues window and `dlcancel all` stay fast and correct at scale (#1246)
 
 A big fetch queue made both the Download queues window's own snapshot and letting several requests go at once slow, and
