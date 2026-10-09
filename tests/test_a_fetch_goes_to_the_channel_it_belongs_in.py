@@ -221,7 +221,17 @@ class ACompletedFetchRemembersWhereItCameFrom(DCCoreTestCase):
         with mock.patch.object(list_fetch, "process_fetched_list_zip") as fake:
             fake.return_value = (True, None)
             dcc_fetch._handle_completed_list_fetch(row, self.zip_path)
-        fake.assert_called_once_with("VideoBot", self.zip_path, channel="#video")
+        fake.assert_called_once_with("VideoBot", self.zip_path, channel="#video", secondary=False)
+
+    def test_the_completion_handler_passes_the_rows_own_secondary_flag_through(self):
+        """#1240 review: `secondary` is carried on the row from enqueue time
+        (new_fetch_row()'s own field), never re-derived here from `channel` -
+        the whole point of the fix is that the two are independent."""
+        row = {"bot": "VideoBot", "channel": "#video", "secondary_channel": True}
+        with mock.patch.object(list_fetch, "process_fetched_list_zip") as fake:
+            fake.return_value = (True, None)
+            dcc_fetch._handle_completed_list_fetch(row, self.zip_path)
+        fake.assert_called_once_with("VideoBot", self.zip_path, channel="#video", secondary=True)
 
 
 class HeldListChannelFeedsFileAndFolderRequests(DCCoreTestCase):
@@ -289,6 +299,128 @@ class HeldListChannelFeedsFileAndFolderRequests(DCCoreTestCase):
         rid = result["created"][0]
         self.assertIsNone(config.fetch_queue[rid]["channel"],
                           "no held list yet - nothing to prefer, same as before")
+
+    def held_bot_with_a_secondary_marker(self):
+        config.fetched_bot_lists["goodbot"] = {
+            "channel": "#chan",
+            "lists": {
+                "": {"channel": "#chan"},
+                "video": {"channel": "#video"},
+            },
+        }
+
+    def test_held_list_channel_with_a_marker_reads_that_markers_own_channel(self):
+        self.held_bot_with_a_secondary_marker()
+        self.assertEqual(webserver.held_list_channel("GoodBot", marker="video"), "#video")
+
+    def test_held_list_channel_with_no_marker_still_reads_the_primary(self):
+        self.held_bot_with_a_secondary_marker()
+        self.assertEqual(webserver.held_list_channel("GoodBot"), "#chan")
+
+    def test_held_list_channel_with_the_empty_marker_reads_the_primary(self):
+        """"" names the main list itself - not a secondary one."""
+        self.held_bot_with_a_secondary_marker()
+        self.assertEqual(webserver.held_list_channel("GoodBot", marker=""), "#chan")
+
+    def test_held_list_channel_with_an_unknown_marker_falls_back_to_the_primary(self):
+        self.held_bot_with_a_secondary_marker()
+        self.assertEqual(webserver.held_list_channel("GoodBot", marker="nonsense"), "#chan")
+
+    def test_a_file_request_from_a_secondary_markers_list_uses_that_markers_channel(self):
+        """The real incident: a file ticked on a bot's secondary ("-VIDEO")
+        list went to the bot's ordinary channel instead of the one that list
+        itself came from."""
+        self.held_bot_with_a_secondary_marker()
+        status, result = webserver.build_fetch_enqueue_result(
+            {"bot": "GoodBot", "filename": "Clip.mkv", "marker": "video"})
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#video")
+
+    def test_a_folder_request_from_a_secondary_markers_list_uses_that_markers_channel(self):
+        self.held_bot_with_a_secondary_marker()
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "GoodBot", "Artist/Album", "video")
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#video")
+
+    def test_a_batch_folder_request_carries_the_marker_too(self):
+        self.held_bot_with_a_secondary_marker()
+        status, result = webserver.build_folder_rar_batch_enqueue_result(
+            [{"bot": "GoodBot", "folder": "Artist/Album", "marker": "video"}])
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#video")
+
+    def test_a_request_with_no_marker_still_uses_the_primary_as_before(self):
+        self.held_bot_with_a_secondary_marker()
+        status, result = webserver.build_fetch_enqueue_result({"bot": "GoodBot", "filename": "Song.flac"})
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#chan")
+
+
+class ARetriedRowCarriesItsOwnChannelDirectly(DCCoreTestCase):
+    """The Downloads page's "Try again" button (#1240): a row already knows
+    exactly which channel it went out in last time (fetch_queue's own
+    "channel" field, set by whichever rule applied when it was first
+    queued) and sends that back as an explicit "channel" - not a marker,
+    which a retry has no reason to still know - so the retry must reuse it
+    even where it disagrees with whatever held_list_channel() would resolve
+    on its own."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(fetch_queue={}, MAX_FETCH_SLOTS=10, fetch_feature_disabled=False,
+                        CHANNEL="#chan,#video,#other", bot_joined_channel=True,
+                        fetched_bot_lists={})
+        config.channel_users.clear()
+        bots_in_the_channel("GoodBot", channel="#chan")
+        bots_in_the_channel("GoodBot", channel="#video")
+        bots_in_the_channel("GoodBot", channel="#other")
+        config.fetched_bot_lists["goodbot"] = {
+            "channel": "#chan",
+            "lists": {"": {"channel": "#chan"}, "video": {"channel": "#video"}},
+        }
+
+    def test_an_explicit_channel_wins_over_the_bots_primary(self):
+        status, result = webserver.build_fetch_enqueue_result(
+            {"bot": "GoodBot", "filename": "Song.flac", "channel": "#other"})
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#other")
+
+    def test_an_explicit_channel_wins_over_a_markers_own_channel_too(self):
+        """Not a real combination in practice - a retry sends one or the
+        other - but the precedence must hold either way: the row's own
+        remembered channel is the more specific fact."""
+        status, result = webserver.build_fetch_enqueue_result(
+            {"bot": "GoodBot", "filename": "Song.flac", "marker": "video", "channel": "#other"})
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#other")
+
+    def test_a_folder_retry_sends_its_own_channel_through_the_single_object_route(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "GoodBot", "Artist/Album", None, "#other")
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#other")
+
+    def test_a_folder_retry_through_the_batch_route_honours_channel_too(self):
+        status, result = webserver.build_folder_rar_batch_enqueue_result(
+            [{"bot": "GoodBot", "folder": "Artist/Album", "channel": "#other"}])
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#other")
+
+    def test_an_unsafe_channel_is_ignored_rather_than_rejecting_the_item(self):
+        status, result = webserver.build_fetch_enqueue_result(
+            {"bot": "GoodBot", "filename": "Song.flac", "channel": "#chan\r\nQUIT"})
+        self.assertEqual(status, 200)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["channel"], "#chan")
 
 
 class DropOurRequestAtUsesTheRowsChannel(DCCoreTestCase):

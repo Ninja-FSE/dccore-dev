@@ -2020,11 +2020,65 @@ def _record_bot(key, user, target, advert, now):
     for field in _ADVERT_FIELDS.get(advert.get("family"), ()):
         if field in advert:
             entry[field] = advert[field]
+    _record_channel_signature(entry, target, advert, now)
     runtime.known_bots[key] = entry
     expire = not 0 <= now - runtime.known_bots_pruned_at < KNOWN_BOTS_EXPIRY_INTERVAL_SECONDS
     if expire:
         runtime.known_bots_pruned_at = now
     _prune_known_bots(now, expire=expire)
+
+
+# The fields compared to tell one of a bot's channels' lists apart from
+# another's (#1240) - "files" is the one count every advert family that
+# publishes a real catalogue carries (_ADVERT_FIELDS above), so it is the one
+# signal comparable across OmenServe, SPQR and mxrarserver alike. list_date
+# is a second, independent signal for the same comparison, carried by fewer
+# families - kept beside "files" rather than instead of it, so two channels
+# that happen to share a file count (round numbers, or two empty lists) are
+# not mistaken for the same list, when it so happens one of them also gives
+# the date and can still be compared on that.
+_CHANNEL_SIGNATURE_FIELDS = ("files", "list_date")
+
+
+def _record_channel_signature(entry, channel, advert, now):
+    """Remember, per channel, what THIS channel's advert claimed (#1240) -
+    entry["channels"][<lowercased channel>] = {"files", "list_date",
+    "last_seen", "since"}. Additive only: nothing existing reads or writes
+    this, so a bot entry that predates it simply starts growing one from its
+    next advert, the same way a brand new field always has.
+
+    "since" is when the CURRENT files/list_date pair started holding - reset
+    to `now` only when either actually changes, left alone on every advert
+    that just repeats what was already on record. secondary_channel_lists.py
+    reads it to require a difference to have held for a while before acting
+    on it, rather than a single advert that might just be a bot mid-scan.
+    """
+    key = str(channel or "").strip().lower()
+    if not key:
+        return
+    if not isinstance(entry.get("channels"), dict):
+        # A malformed "channels" value (loaded from known_bots.json, where
+        # nothing enforces its shape) must not raise on every single advert
+        # from this bot forever after (#1240 review) - start fresh rather
+        # than trust whatever was there.
+        entry["channels"] = {}
+    channels = entry["channels"]
+    previous = channels.get(key) or {}
+    # Carried forward, not blanked, for a field this particular advert line
+    # did not repeat - the same "absent means did not say" rule
+    # _advert_snapshot() already follows, so one advert missing list_date
+    # right after another gave it does not read as the list having changed.
+    signature = {field: previous[field] for field in _CHANNEL_SIGNATURE_FIELDS
+                if field in previous}
+    signature.update({field: advert[field] for field in _CHANNEL_SIGNATURE_FIELDS
+                      if field in advert})
+    changed = any(previous.get(field) != signature.get(field)
+                  for field in _CHANNEL_SIGNATURE_FIELDS)
+    channels[key] = {
+        **signature,
+        "last_seen": now,
+        "since": now if changed or "since" not in previous else previous["since"],
+    }
 
 
 def never_breaks_the_read_loop(capture):

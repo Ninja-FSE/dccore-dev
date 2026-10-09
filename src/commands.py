@@ -1610,6 +1610,14 @@ def _handle_rehash_request(user, target_chan, confirmed_debug_removal=False):
                 print("[REHASH] AUTO_GRAB_LISTS is on: automatic list grabbing has started.")
         except Exception as grab_err:
             print(f"[REHASH] Could not start automatic list grabbing: {grab_err}")
+        # Automatic discovery of a bot's other channel-bound lists (#1240).
+        try:
+            import list_grab as _list_grab_secondary
+            if _list_grab_secondary.ensure_secondary_channel_worker():
+                print("[REHASH] AUTO_DISCOVER_CHANNEL_LISTS is on: automatic "
+                      "channel-list discovery has started.")
+        except Exception as secondary_err:
+            print(f"[REHASH] Could not start automatic channel-list discovery: {secondary_err}")
 
         # The list rebuild schedule (#776), the same way and for the same
         # reason: a dashboard save that sets one lands here.

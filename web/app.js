@@ -885,14 +885,19 @@
       // refused as unsolicited.
       var folder = String(row.requested_filename || "").replace(/^!rar\s+/i, "");
       if (!folder) { button.disabled = false; return; }
-      again = postJson("/api/filelists/fetch-folder-rar", { bot: row.bot, folder: folder });
+      // row.channel (#1240): the channel THIS row actually went out in last
+      // time, carried straight through rather than re-resolved - a retry of
+      // a secondary marker's folder must keep asking in that same channel,
+      // not fall back to the bot's primary one for lack of a marker here.
+      again = postJson("/api/filelists/fetch-folder-rar",
+                       { bot: row.bot, folder: folder, channel: row.channel });
     } else {
       // requested_filename, not filename: for a folder row the second is the
       // name the OTHER bot eventually advertised, and for a failed one it may
       // never have been set at all. The first is what we asked for.
       var wanted = row.requested_filename || row.filename;
       if (!wanted) { button.disabled = false; return; }
-      again = postJson("/api/fetch/enqueue", [{ bot: row.bot, filename: wanted }]);
+      again = postJson("/api/fetch/enqueue", [{ bot: row.bot, filename: wanted, channel: row.channel }]);
     }
 
     again.then(function (res) {
@@ -3091,6 +3096,17 @@
           if (i >= boxes.length) { return; }
           boxes[i].dataset.bot = row.source;
           boxes[i].dataset.filename = row.title;
+          // WHICH OF THE BOT'S LISTS THIS ROW CAME FROM (#1240). row.source
+          // is the bare nick only - entries_to_filelist_rows() shares that
+          // shape with the operator's own list, which has no marker at all -
+          // so the marker has to come from here instead: group.bot for a
+          // cross-search row (each group is its own "nick/marker" source),
+          // state.filelistsSource for the single list currently open in the
+          // List Browser. Sent on every request so the server can answer
+          // from the CHANNEL THIS LIST CAME FROM rather than always the
+          // bot's primary one - a file from a secondary channel's list used
+          // to be asked for in the bot's main channel instead, found live.
+          boxes[i].dataset.marker = splitFetchedSource(group.bot || state.filelistsSource).list;
           // A row of a RAR list asks for a folder (#1233): Download selected
           // sends it the way "Get Folder as Rar" does, not as a file.
           if (row.rar_folder) {
@@ -3124,8 +3140,11 @@
         // whichever list the sidebar has selected - not the one this folder
         // came from. Requesting the right folder from the wrong bot is a
         // request that cannot succeed.
-        button.dataset.bot = splitFetchedSource(
-          group.bot || state.filelistsSource).nick;
+        var source = splitFetchedSource(group.bot || state.filelistsSource);
+        button.dataset.bot = source.nick;
+        // WHICH OF THE BOT'S LISTS (#1240) - same reasoning as
+        // attachFilelistsCheckboxData()'s own comment above.
+        button.dataset.marker = source.list;
         // THE ROW'S OWN FOLDER, taken from the request line that put the
         // button there - not the folder HEADING the row happens to sit under.
         // A RAR list's rows are grouped under whatever heading that list
@@ -3142,7 +3161,8 @@
       var folder = button.dataset.folder;
       if (!bot || !folder) { return; }
       button.disabled = true;
-      postJson("/api/filelists/fetch-folder-rar", { bot: bot, folder: folder }).then(function (res) {
+      postJson("/api/filelists/fetch-folder-rar",
+              { bot: bot, folder: folder, marker: button.dataset.marker }).then(function (res) {
         if (!res.ok) {
           showFilelistsFetchStatus(res.data.error || ("HTTP " + res.status), true);
           button.disabled = false;
@@ -3171,9 +3191,10 @@
       var folders = [];
       Array.prototype.forEach.call(checked, function (box) {
         if (box.dataset.rarFolder) {
-          folders.push({ bot: box.dataset.folderBot || box.dataset.bot, folder: box.dataset.rarFolder });
+          folders.push({ bot: box.dataset.folderBot || box.dataset.bot, folder: box.dataset.rarFolder,
+                        marker: box.dataset.marker });
         } else {
-          items.push({ bot: box.dataset.bot, filename: box.dataset.filename });
+          items.push({ bot: box.dataset.bot, filename: box.dataset.filename, marker: box.dataset.marker });
         }
       });
       if (!items.length && !folders.length) { return; }
@@ -4894,6 +4915,8 @@
     AUTO_GRAB_EVERY_MINUTES: "settings.field.AUTO_GRAB_EVERY_MINUTES",
     AUTO_GRAB_MIN_FILES: "settings.field.AUTO_GRAB_MIN_FILES",
     AUTO_GRAB_MIN_SPEED_KB: "settings.field.AUTO_GRAB_MIN_SPEED_KB",
+    AUTO_DISCOVER_CHANNEL_LISTS: "settings.field.AUTO_DISCOVER_CHANNEL_LISTS",
+    MULTI_CHANNEL_LIST_STABLE_SECONDS: "settings.field.MULTI_CHANNEL_LIST_STABLE_SECONDS",
     FETCH_TRANSFER_TIMEOUT: "settings.field.FETCH_TRANSFER_TIMEOUT",
     FETCH_OFFER_TIMEOUT: "settings.field.FETCH_OFFER_TIMEOUT",
     FETCH_QUEUED_TIMEOUT: "settings.field.FETCH_QUEUED_TIMEOUT",

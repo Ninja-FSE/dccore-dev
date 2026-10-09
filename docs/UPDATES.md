@@ -4,6 +4,55 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔭 A bot's other channel-bound list is discovered and held automatically (#1240)
+
+#1232/#1239 fixed a request landing in the wrong channel; it still took an operator's own action to ever see a bot's
+SECOND list at all - one bound to a channel other than the one its first list was fetched from (DCCore's own
+multi-list-per-channel feature, which another DCCore-family bot can equally run). Measured in the field first
+(@chchatzop: 49 bots advertising over ~8.5 hours in 17 channels, 38 sharing more than one with us, only 1 with a
+genuinely different list per channel): rare, but real, and the operator wanted it with no manual step at all.
+
+- **A bot's OTHER channel-bound lists are held side by side with its first, not instead of it.** A fetch from a
+  channel other than the one already on record for a bot used to replace the bot's whole entry - on a bot with Main,
+  RAR and a video-bound second list, asking for the video channel's answer deleted Main and RAR, a real incident
+  found while reviewing this very change. `_install_fetched_list()` now MERGES a channel's own markers into the
+  existing entry instead, named after the channel (`video`, `video-RAR`) rather than main/rar/video; an ordinary
+  refresh of the bot's own channel still fully replaces that channel's own markers, exactly as before, and never
+  touches another channel's. Extracted into its own subdirectory, so it can never overwrite what the primary
+  channel's lists point at on disk either.
+- **`AUTO_DISCOVER_CHANNEL_LISTS`** (Settings → Grabbing lists, off by default, same reasoning as
+  `AUTO_GRAB_LISTS`/`AUTO_REFETCH_LISTS`): watches every bot already held for a channel advertising a genuinely
+  different file count or list date than the channel its list came from - and fetches and holds that one too.
+- **Never off a single advert.** `known_bots[...]["channels"]` now tracks each channel's own advertised signature,
+  and a difference only counts once it has held steady on BOTH sides for `MULTI_CHANNEL_LIST_STABLE_SECONDS`
+  (default 1 hour) - a bot mid-scan in one channel when its advert goes out must not be mistaken for a second list.
+  Three tries, 30 minutes apart, then that (bot, channel) pair is left alone until something about it changes.
+- **Kept fresh afterward, not just found once.** Each marker remembers what its channel was advertising when it was
+  fetched; once that channel's own signature moves on and holds stable again, it is asked for again automatically -
+  the same upkeep a bot's primary list already gets from `AUTO_REFETCH_LISTS`, extended to a secondary one.
+- **Live-tested on the real bot, start to finish**, with six real bugs surfacing one after another as actual peers
+  triggered each case in turn - all fixed, tested and redeployed the same session (duplicate markers compared only
+  against the primary's signature instead of every known one; a legacy bot with no recorded channel; a "0 files"
+  arrival message for a channel that sub-splits internally; a file/folder/retry request from a secondary marker's
+  list using the bot's primary channel instead).
+- **A second review pass afterward found three more, each confirmed with a real repro:** "secondary" was inferred
+  from a channel mismatch rather than said explicitly, so a bot held from before #1232 (no channel on record at all)
+  looked secondary on EVERY ordinary refresh forever, never backfilling its channel - fixed by making it an explicit
+  flag only `secondary_channel_tick()` ever sets, carried on the fetch_queue row end to end. An ordinary list refresh
+  with no channel preference now prefers the channel its list already came from over the bot's last advert, closing
+  off the duplicate-marker risk at the source rather than only after the fact. A secondary channel's own directory
+  moved fully outside the primary's (it used to be a subdirectory of it, which the primary's own hold-aside-and-rmtree
+  cycle deleted outright on its next ordinary refresh). A channel whose sanitised name collides with another marker's
+  (a filename-derived one, or another channel's) is now disambiguated with a short hash of the channel itself, instead
+  of silently overwriting it in the dict and the search index. The three-try cap no longer counts a local refusal
+  (busy, or the bot briefly absent) as a try - only a genuine ask does. A candidate channel the bot has since left
+  is no longer offered from its last, now-stale advert. `dccore.mrc`'s own `dlagain` carries a retried row's channel
+  through too, the same fix the dashboard's "Try again" button already needed.
+- **Tests:** `tests/test_a_bots_channel_bound_lists_are_held_side_by_side.py` (27 tests, including the exact
+  Main+RAR+video regression, two legacy-shape regressions and two marker-collision regressions) and
+  `tests/test_a_bots_second_channel_list_is_discovered_automatically.py` (33 tests: the stability gate, the tick,
+  ongoing refresh, the worker, the presence check and the tries cap).
+
 ### 📡 A cross-bot request goes to the channel it belongs in (#1232)
 
 A request to another bot - its list, a file, a folder as a RAR - went wherever `dcc.channel_containing_user(bot)`
@@ -23,6 +72,9 @@ than one channel with it meant every request risked landing where it serves noth
   list from is sent in the same channel the list itself was fetched in - no picker, no new field for the dashboard to
   send: the request already names the bot, and that is enough to look the channel up.
 - `drop_our_request_at()` (the `-remove` sent on Delete/Clear) now uses the removed row's own channel too.
+- **The Downloads page's "Try again" button, and `dccore.mrc`'s own `dlagain`, carry a retried row's channel too** -
+  found live: a retry of a row that had gone out via a secondary marker's channel fell back to the bot's primary
+  channel instead, the same bug class as the rest of this fix, just not yet closed for a retry.
 - **Deliberately NOT done: asking a bot for its list from a specific, named channel.** Tried during review and
   reverted (#1232's own discussion): a bot's held list is one entry, fully replaced by whatever archive a fetch
   returns (`process_fetched_list_zip()`'s own docstring already called this "switchable, not accumulating"). That
@@ -32,7 +84,7 @@ than one channel with it meant every request risked landing where it serves noth
   included). Holding a bot's several lists side by side needs `fetched_bot_lists`/the search index to key on
   (bot, channel) rather than bot alone - a bigger change, left for a later issue. A channel-less refresh/auto-refetch
   is unaffected: it always asks the same channel it already does today.
-- **Tests:** `tests/test_a_fetch_goes_to_the_channel_it_belongs_in.py` (27 tests) plus updates to existing mocks of
+- **Tests:** `tests/test_a_fetch_goes_to_the_channel_it_belongs_in.py` (41 tests) plus updates to existing mocks of
   `_process_fetched_list_zip_unlocked`/`drop_our_request_at` across
   `tests/test_a_refused_grab_is_not_a_try.py`, `tests/test_clear_spares_a_newer_request.py` and
   `tests/test_clear_failed_tells_the_other_bot.py`.

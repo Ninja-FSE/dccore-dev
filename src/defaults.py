@@ -829,6 +829,25 @@ AUTO_GRAB_MIN_FILES: int = 0
 # Skip bots advertising a speed below this, in KB/s. A bot that advertises no
 # speed is not skipped. 0 turns it off.
 AUTO_GRAB_MIN_SPEED_KB: int = 0
+# Automatically discover and hold a bot's OTHER channel-bound lists (#1240):
+# a bot we already hold a list from, bound to a different list in a second of
+# our channels (DCCore's own multi-list-per-channel feature, which another
+# DCCore-family bot can equally run), has that second list fetched and held
+# alongside the first - not instead of it - with no manual step. OFF by
+# default, for the same reason as AUTO_REFETCH_LISTS/AUTO_GRAB_LISTS: a real
+# measurement (one operator's channels, ~8.5 hours, 49 advertising bots, 38
+# sharing more than one channel) found only 1 with a genuinely different list
+# per channel - everyone else just shares several channels with one list - so
+# this spends a little background watching for a case that is rare, and only
+# ever fetches on a confirmed, stable difference (MULTI_CHANNEL_LIST_STABLE_
+# SECONDS below), never a single advert.
+AUTO_DISCOVER_CHANNEL_LISTS: bool = False
+# How long a bot's channels must show a stable, differing file count/date
+# before AUTO_DISCOVER_CHANNEL_LISTS acts on it, in seconds. A bot mid-scan
+# in one channel when its advert goes out must not be mistaken for a second
+# list - this is the bar that advert has to clear instead: the SAME
+# difference, held the whole time, not one lucky (or unlucky) pair of lines.
+MULTI_CHANNEL_LIST_STABLE_SECONDS: int = 3600
 # How long a rehash waits for transfers in flight to finish before reloading
 # anyway, in seconds (#310). A transfer can sit idle for as long as the far
 # end keeps its socket open, so this cannot be unbounded: a bot that cannot

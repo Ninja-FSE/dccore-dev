@@ -2057,15 +2057,22 @@ def _cmd_dlagain(session, args):
         # By the folder route (#1040): asked as a file, "!rar <folder>" was a
         # file row matched by name, and the pack the other bot sent back was
         # refused as unsolicited.
+        #
+        # row.get("channel") (#1240 review): the channel THIS row actually
+        # went out in last time, carried straight through - same live bug as
+        # the dashboard's own retry button, just on the path dccore.mrc's
+        # `dlagain` takes instead.
         import dcc_fetch
         import webserver
-        status, result = webserver.build_folder_rar_fetch_enqueue_result(bot, dcc_fetch.folder_asked_for(row))
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            bot, dcc_fetch.folder_asked_for(row), None, row.get("channel"))
         session.send(f"Asked {bot} for {_download_name(row)} again." if status == 200
                      else (result.get("error") or "Refused."))
     else:
         import webserver
         wanted = row.get("requested_filename") or row.get("filename") or ""
-        status, result = webserver.build_fetch_enqueue_result([{"bot": bot, "filename": wanted}])
+        status, result = webserver.build_fetch_enqueue_result(
+            [{"bot": bot, "filename": wanted, "channel": row.get("channel")}])
         if status == 200:
             session.send(f"Asked {bot} for {_download_name(row)} again.")
         else:

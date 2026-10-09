@@ -1552,9 +1552,39 @@ def bot_not_here_error(bot):
             f"their name says which.")
 
 
-def build_list_fetch_enqueue_result(bot_raw):
+def build_list_fetch_enqueue_result(bot_raw, channel_raw=None, secondary_raw=False):
     """POST /api/filelists/fetch's pure logic: validate the bot nick and
     enqueue a request_type="list" row.
+
+    `channel_raw` (#1240) asks for this bot's list from a SPECIFIC one of our
+    channels rather than letting the dispatcher pick one. INTERNAL ONLY: the
+    HTTP route below never reads a "channel" field from its body, and no
+    console command accepts one either - an operator cannot ask for one by
+    hand (that capability existed briefly in #1239's draft and was reverted;
+    see its PR thread for the real-world data loss that caused it, now fixed
+    at the storage layer instead - see list_fetch._install_secondary_channel_
+    lists()).
+
+    When not given and this is not a secondary fetch (see `secondary_raw`
+    below), it defaults to held_list_channel(bot) - the channel this bot's
+    list is already known to answer in, if any (#1240 review). Left to the
+    dispatcher's own fallback (the bot's last advert channel, which may be
+    ANY channel we share with it) an ordinary refresh could re-ask in a
+    different shared channel than the one its list actually came from,
+    which - before this - created a second, duplicate marker for content
+    already held under the first: confirmed on review, real data from
+    #1239's own measurement (38 of 49 bots share more than one channel with
+    us).
+
+    `secondary_raw` is explicit (#1240 review), and True only for the one
+    caller that ran the discovery confidence gate: list_grab.
+    secondary_channel_tick(), once list_grab._secondary_channel_candidates()
+    has already decided a genuinely different, STABLE list is worth asking
+    for. Carried all the way to list_fetch.process_fetched_list_zip() so the
+    completion handler knows which kind of fetch this was without having to
+    guess from `channel_raw` after the fact - guessing is what let a bot
+    held from before #1232 (no channel on record at all) look "secondary" on
+    EVERY ordinary refresh forever, a real incident caught on review.
 
     Deliberately reuses dcc_fetch.enqueue_fetch() (extended with a
     request_type parameter) rather than build_fetch_enqueue_result() above:
@@ -1595,6 +1625,15 @@ def build_list_fetch_enqueue_result(bot_raw):
     if not bot:
         return 400, {"error": "'bot' is required."}
 
+    channel_raw = str(channel_raw or "")
+    channel_err = reject_if_unsafe_for_irc_line(channel_raw, "channel") if channel_raw.strip() else None
+    if channel_err:
+        return 400, {"error": channel_err}
+    channel = channel_raw.strip() or None
+    secondary = bool(secondary_raw)
+    if channel is None and not secondary:
+        channel = held_list_channel(bot)
+
     absent = bot_not_here_error(bot)
     if absent:
         return 409, {"error": absent}
@@ -1602,16 +1641,8 @@ def build_list_fetch_enqueue_result(bot_raw):
     if dcc_fetch.has_outstanding_bot_alone_request(bot):
         return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
 
-    # held_list_channel(bot) (review of #1239): with no channel given, a
-    # channel-less list refresh must re-ask in the SAME channel its list
-    # already came from, not drift to whatever channel the dispatcher would
-    # otherwise resolve on its own (the bot's last advert, overwritten by
-    # every advert line - runtime.known_bots[...]["channel"] - which can be
-    # a DIFFERENT channel we also share with the bot). Left to that fallback,
-    # a bot bound to a different list per channel could have its whole held
-    # entry silently replaced by another channel's answer on its next
-    # ordinary refresh - confirmed on review, with a real repro.
-    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list", channel=held_list_channel(bot))
+    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list", channel=channel,
+                                         secondary_channel=secondary)
     if request_id is None:
         # Defense in depth: enqueue_fetch() enforces this same invariant
         # itself (see its docstring), so this should be unreachable given
@@ -1621,7 +1652,7 @@ def build_list_fetch_enqueue_result(bot_raw):
     return 200, {"created": [request_id]}
 
 
-def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
+def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw, marker_raw=None, channel_raw=None):
     """POST /api/filelists/fetch-folder-rar's pure logic: validate the bot
     nick and folder path, then enqueue a request_type="folder" row asking
     that bot to pack the whole folder/album as a .rar via its own "!rar"
@@ -1666,7 +1697,8 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
     if absent:
         return 409, {"error": absent}
 
-    return _enqueue_folder_request(dcc_fetch, bot, folder)
+    return _enqueue_folder_request(dcc_fetch, bot, folder,
+                                   raw={"marker": marker_raw, "channel": channel_raw})
 
 
 def build_folder_rar_batch_enqueue_result(payload):
@@ -1688,7 +1720,7 @@ def build_folder_rar_batch_enqueue_result(payload):
             errors.append({"error": "Each item must be an object with bot/folder.", "item": raw})
             continue
         status, result = build_folder_rar_fetch_enqueue_result(
-            raw.get("bot", ""), raw.get("folder", ""))
+            raw.get("bot", ""), raw.get("folder", ""), raw.get("marker", ""), raw.get("channel", ""))
         if status == 200:
             created.extend(result.get("created", []))
         else:
@@ -1709,23 +1741,59 @@ PACK_FETCH_CONFLICT_ERROR = (
 )
 
 
-def held_list_channel(bot):
+def _preferred_fetch_channel(raw, bot, marker_field="marker"):
+    """The channel a file/folder enqueue item should prefer (#1240): an
+    explicit "channel" on the item itself wins first - a Downloads-page
+    retry already knows exactly which channel its row went out in before
+    and must keep asking there, not fall back to a marker lookup it has no
+    marker for - then the item's own marker (held_list_channel()), then
+    nothing, same fallback chain dcc_fetch._resolve_fetch_channel() applies
+    from there regardless. A non-string or unsafe "channel" is ignored
+    rather than rejecting the whole item over it - this is only ever a
+    preference, never a requirement, so a bad value just loses the
+    preference instead of losing the request too.
+    """
+    channel = raw.get("channel") if isinstance(raw, dict) else None
+    if isinstance(channel, str) and channel.strip() and not reject_if_unsafe_for_irc_line(channel, "channel"):
+        return channel.strip()
+    return held_list_channel(bot, marker=(raw or {}).get(marker_field) if isinstance(raw, dict) else None)
+
+
+def held_list_channel(bot, marker=None):
     """The channel the list we already hold for `bot` was fetched in, or None
-    (#1232) - fetched_bot_lists[...]["channel"], read by its nick alone so
-    every caller (a file, a folder, a re-fetch) steers into the same channel
-    that list itself came from, with no picker and no extra field for the
-    List Browser or Search tab to carry: a row's own "bot" is already enough
-    to look this up. None for a bot with no held list, or one fetched before
-    #1232, or one whose channel could not be resolved when it was fetched -
-    dcc_fetch._resolve_fetch_channel()'s own fallback chain applies from
-    there, same as always.
+    (#1232) - read by its nick alone so most callers (a re-fetch, a request
+    with no marker of its own) need no extra field to carry.
+
+    `marker` (#1240), when given, asks the narrower question: not "the bot's
+    primary channel" but "the channel THIS marker's own list came from" -
+    fetched_bot_lists[bot]["lists"][marker]["channel"], checked FIRST. A
+    secondary channel's own marker has a different channel than the bot's
+    primary one by construction (that is what makes it secondary - see
+    list_fetch._install_secondary_channel_lists()), so a request for a file or
+    folder on a secondary marker's list that fell back to the primary's
+    channel would go out in the wrong place - found live: a file ticked on a
+    bot's "-VIDEO" marker's list went to the bot's ordinary channel, where
+    the file both was never advertised. Falls back to the bot's own
+    "channel" (today's rule) when no marker is given, the marker is "" (the
+    primary itself), or that marker is not actually held.
+
+    None for a bot with no held list, or a marker whose own channel could
+    not be resolved when it was fetched either - dcc_fetch._resolve_fetch_
+    channel()'s own fallback chain applies from there, same as always.
     """
     store = getattr(config, "fetched_bot_lists", None) or {}
     entry = store.get(str(bot).strip().lower())
-    return (entry or {}).get("channel") if isinstance(entry, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    marker = str(marker or "").strip()
+    if marker:
+        info = (entry.get("lists") or {}).get(marker)
+        if isinstance(info, dict) and info.get("channel"):
+            return info["channel"]
+    return entry.get("channel")
 
 
-def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None):
+def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None, raw=None):
     """Enqueue one folder request: (http_status, payload_dict).
 
     TWO SHAPES (#1209). A "!rar" folder - DCCore's and its relatives' - is
@@ -1734,6 +1802,13 @@ def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None):
     exactly as its list wrote it, "!<trigger> <path>.rar", with no "!rar",
     and its RAR is admitted by the name it will arrive under, so several may
     wait together as long as those names cannot clash.
+
+    `raw` (#1240) is the original item dict, read by _preferred_fetch_
+    channel() for an explicit "channel" (a Downloads-page retry, which
+    already knows exactly which channel this row went out in before) or a
+    "marker" (a List Browser request, which knows which of the bot's lists
+    the row came from but not its channel directly) - either way, never
+    both at once in practice, and neither is required.
     """
     import list as list_mod
 
@@ -1747,7 +1822,7 @@ def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None):
         request, conflict = f"!rar {folder}", BOT_ALONE_FETCH_CONFLICT_ERROR
 
     request_id = dcc_fetch.enqueue_fetch(bot, request, request_type="folder", trigger=trigger,
-                                         channel=held_list_channel(bot))
+                                         channel=_preferred_fetch_channel(raw or {}, bot))
     if request_id is None:
         # Defense in depth - see build_list_fetch_enqueue_result()'s
         # identical comment above.
@@ -2896,7 +2971,8 @@ def build_fetch_enqueue_result(payload):
         # comes back under another name, so as a file request it could never
         # be admitted. It goes the folder route instead.
         if list_mod.pack_path_of(filename):
-            folder_status, result = _enqueue_folder_request(dcc_fetch, bot, filename, trigger)
+            folder_status, result = _enqueue_folder_request(
+                dcc_fetch, bot, filename, trigger, raw=raw)
             if folder_status == 200:
                 created.extend(result["created"])
             else:
@@ -2908,7 +2984,7 @@ def build_fetch_enqueue_result(payload):
                            "item": raw})
             continue
         request_id = dcc_fetch.enqueue_fetch(bot, filename, trigger=trigger,
-                                            channel=held_list_channel(bot))
+                                            channel=_preferred_fetch_channel(raw, bot))
         if request_id is None:
             # Only reachable via the queue cap: enqueue_fetch()'s other refusal
             # is for "list"/"folder" rows and this route only creates "file"
@@ -3465,7 +3541,9 @@ SETTINGS_CATEGORIES = (
     # #926: fetching lists nobody asked for is its own decision, with its
     # own rules - not four more lines at the end of "Fetching from bots".
     ("list-grab",     "Grabbing lists",        ["AUTO_GRAB_LISTS", "AUTO_GRAB_EVERY_MINUTES",
-                                                "AUTO_GRAB_MIN_FILES", "AUTO_GRAB_MIN_SPEED_KB"]),
+                                                "AUTO_GRAB_MIN_FILES", "AUTO_GRAB_MIN_SPEED_KB",
+                                                "AUTO_DISCOVER_CHANNEL_LISTS",
+                                                "MULTI_CHANNEL_LIST_STABLE_SECONDS"]),
     ("fetching",      "Fetching from bots",    ["MAX_FETCH_SLOTS", "AUTO_REFETCH_LISTS",
                                                 "AUTO_REFETCH_INTERVAL_HOURS",
                                                 "AUTO_REFETCH_MAX_PER_RUN",
@@ -3579,6 +3657,8 @@ SETTINGS_LABELS = {
     "AUTO_GRAB_EVERY_MINUTES": "Minutes between automatic grabs",
     "AUTO_GRAB_MIN_FILES": "Skip bots with fewer files than",
     "AUTO_GRAB_MIN_SPEED_KB": "Skip bots slower than (KB/s)",
+    "AUTO_DISCOVER_CHANNEL_LISTS": "Discover a bot's other channel-bound lists",
+    "MULTI_CHANNEL_LIST_STABLE_SECONDS": "Hold stable this long first (seconds)",
     "AUTO_REFETCH_INTERVAL_HOURS": "Least time between re-fetches of one bot (hours)",
     "AUTO_REFETCH_MAX_PER_RUN": "Most lists to re-fetch in one sweep",
     "FETCH_TRANSFER_TIMEOUT": "Fetch transfer timeout (seconds)",
@@ -5440,7 +5520,7 @@ if HAVE_FLASK:
                 return jsonify(result), status
             body = json_object(payload)
             status, result = build_folder_rar_fetch_enqueue_result(
-                body.get("bot", ""), body.get("folder", ""))
+                body.get("bot", ""), body.get("folder", ""), body.get("marker", ""), body.get("channel", ""))
             return jsonify(result), status
 
         @app.route("/api/settings/theme-preview", methods=["POST"])

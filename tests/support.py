@@ -347,6 +347,11 @@ def reset_config(**overrides):
                         # per-bot record - reloaded from the test's own file.
                         ("list_grab_started", False), ("list_grab_plan", None),
                         ("list_grab_last", None), ("list_grab_state", None),
+                        # #1240 review: secondary_channel_tick()'s own wait/
+                        # started flags, missed by the reset above - a test
+                        # that started the worker or primed the tick's pacing
+                        # left both set for the next one otherwise.
+                        ("secondary_channel_started", False), ("secondary_channel_last", None),
                         ("chat_last_id", 0),
                         # Stamped by dcc.pause_freeze_clock() when a test drives
                         # irc_loop() to its disconnect epilogue. Left set, the
@@ -1010,6 +1015,9 @@ class DCCoreTestCase(unittest.TestCase):
                                           "known_bots.json")
         self._real_list_grabs_file = db.LIST_GRABS_FILE
         db.LIST_GRABS_FILE = os.path.join(self._fetch_history_dir, "list_grabs.json")
+        self._real_secondary_channel_grabs_file = db.SECONDARY_CHANNEL_GRABS_FILE
+        db.SECONDARY_CHANNEL_GRABS_FILE = os.path.join(self._fetch_history_dir,
+                                                       "secondary_channel_grabs.json")
 
         # The console's token store (#704, audit L40). Every password check
         # goes through db.load_admin_tokens() on this path, so every login
@@ -1141,6 +1149,7 @@ class DCCoreTestCase(unittest.TestCase):
         db.PRIVATE_MESSAGES_FILE = self._real_pm_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
         db.LIST_GRABS_FILE = self._real_list_grabs_file
+        db.SECONDARY_CHANNEL_GRABS_FILE = self._real_secondary_channel_grabs_file
         db.ADMIN_TOKENS_FILE = self._real_admin_tokens_file
         # NOT self._real_download_counts_file / self._real_speed_record_file
         # / self._real_dcc_queue_file - see the three _ORPHANED_*_SINK
