@@ -146,6 +146,7 @@ debug_drain_guard  = threading.Lock()  # announce.py's single-drain-worker start
 debug_sinks_lock   = threading.Lock()  # announce.py's admin-console debug sink list
 disk_lock          = threading.Lock()  # db.py's serialised on-disk writes
 told_queue_full_lock = threading.Lock()  # announce.py's queue-full notice memory (#888)
+banned_users_lock  = threading.Lock()  # security.py's config.banned_users (#1248 review)
 
 # dcc.py's library lookup (#580, #886), moved here in #749. They were built in
 # dcc.py as `x = globals().get("x") or threading.Lock()` - kept across a reload

@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 An ignore set from the dashboard could race the flood sweep and reconnect the bot (#1248)
+
+Found in a post-merge review of #1223. `config.banned_users` is written from the Flask (dashboard) and console
+threads (`ignore_user()`, `lift_ban()`) while the IRC read thread's own flood sweep reads and prunes the same dict on
+a timer - neither side took any lock. An ignore or lift landing mid-sweep raised "dictionary changed size during
+iteration", reaching the read loop's own outer exception handler, which closed the socket and reconnected the bot.
+Separately, `lift_ban()`'s check-then-delete could raise `KeyError` (a 500 on the dashboard) if the sweep expired the
+same nick in the gap between the two statements.
+
+- `security.banned_users_lock` (bound from a new `runtime.banned_users_lock`, the same pattern every other
+  reloadable module's lock already uses, so `!rehash` reloading `security.py` can never rebind it to a second,
+  uncoordinated lock) now guards every touch of `config.banned_users`: `ignore_user()`'s write, the sweep's own
+  read-and-prune, and `lift_ban()`, which also switched from check-then-`del` to an atomic `pop(key, None)`.
+- **Tests:** `tests/test_banned_users_lock.py` (5 tests) - the same deterministic forced-interleaving technique
+  `test_channel_users_lock.py` already uses for the equivalent `channel_users` race: a control test shows the
+  unlocked pattern really does raise, and a second shows the real, now-locked functions do not.
+
 ### 🔒 A private request keeps the channel its sender shares with the bot (#1242)
 
 A file asked for by private message was stored with the bot's own nick as its channel, so `announce_channel_for()`
