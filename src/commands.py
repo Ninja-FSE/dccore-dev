@@ -383,32 +383,49 @@ def _queue_order_held():
     whenever a list was waiting.
     """
     import dcc
-    waiting = [(key, rows) for key, rows in config.dcc_queue.items() if rows]
-    lists_first = dcc.a_list_may_go_first()
-    waiting.sort(key=lambda entry: dcc.list_first_rank(entry[0], entry[1], lists_first))
-    return [key for key, _rows in waiting]
+    return dcc.slot_order(config.dcc_queue, dcc.a_list_may_go_first())
 
 
 def queue_order():
     """The nicks that have something queued, in the order the dispatcher gives
     out free slots: a list that may go first (#1205), then longest-waiting
-    first (#1032), ties in arrival order."""
+    first (#1032), ties in arrival order.
+    """
     import dcc
     with dcc.queue_lock:
         return _queue_order_held()
+
+
+def _untie_waits(stamp):
+    """Give the waiting nicks that share the wait `stamp` one each, in the
+    order they already stand. Caller holds queue_lock.
+
+    After a restart no nick has a stamp, and a swap of two equal ones changes
+    nothing. Only the tied nicks are touched, and they stay below the next
+    stamp up, so nobody else's place changes.
+    """
+    import dcc
+    tied = [key for key, rows in config.dcc_queue.items()
+            if rows and dcc.queue_waiting_since(key) == stamp]
+    above = [st for st in runtime.queue_waiting_since.values() if st > stamp]
+    step = min(1e-4, (min(above) - stamp) / (len(tied) + 1)) if above else 1e-4
+    for place, key in enumerate(tied):
+        runtime.queue_waiting_since[key] = stamp + place * step
 
 
 def move_waiting_user(nick, direction):
     """Move a nick one place up or down the line for a free slot (#1206).
     Returns (ok, message).
 
-    The dispatcher goes by who has waited longest, so the move is a swap of
-    the two nicks' wait stamps. Every waiting nick is re-stamped one after the
-    other in its new place: after a restart none has a stamp, and a swap of
-    two zeros would change nothing.
+    The line is queue_order(). A move swaps the wait stamps of the nick and
+    its neighbour there and touches no other nick's (#1245). It used to
+    re-stamp the whole line in that order, which gave a nick with a list at
+    its head the oldest stamp; go_to_the_back(keep_place=True) kept it once
+    the list had gone, and its files jumped everyone (#1032). A list going
+    first is not a wait, so no swap of waits moves a nick past one: that is
+    refused, and said. The reply is read from the line after the move.
     """
     import dcc
-    import time
     step = {"up": -1, "down": 1}.get(str(direction).strip().lower())
     if step is None:
         return False, "Say up or down."
@@ -423,21 +440,32 @@ def move_waiting_user(nick, direction):
             return False, f"{nick} is already first in line."
         if there >= len(order):
             return False, f"{nick} is already last in line."
-        order[here], order[there] = order[there], order[here]
-        stamps = [runtime.queue_waiting_since.get(k, 0.0) for k in order]
-        base = min([st for st in stamps if st > 0] or [time.time() - 1])
-        for place, waiting in enumerate(order):
-            runtime.queue_waiting_since[waiting] = base + place * 1e-4
-    return True, f"{nick} is now number {there + 1} of {len(order)} in line."
+        other = order[there]
+        lists_first = dcc.a_list_may_go_first()
+        mine = dcc.list_first_rank(key, config.dcc_queue[key], lists_first)
+        theirs = dcc.list_first_rank(other, config.dcc_queue[other], lists_first)
+        if mine[0] != theirs[0]:
+            lister = key if mine[0] == 0 else other
+            return False, (f"{lister} has a list waiting, and a list goes ahead of every wait: "
+                           f"{nick} stays number {here + 1} of {len(order)} in line.")
+        if mine[1] == theirs[1]:
+            _untie_waits(mine[1])
+        stamps = runtime.queue_waiting_since
+        stamps[key], stamps[other] = dcc.queue_waiting_since(other), dcc.queue_waiting_since(key)
+        order = _queue_order_held()
+    return True, f"{nick} is now number {order.index(key) + 1} of {len(order)} in line."
 
 
-def _queued_row(user_key, position, name):
+def _queued_row(user_key, position, row_id):
     """The row at 1-based `position` in a nick's queue, or an error text. Caller holds queue_lock.
 
-    `name`, when given, has to be the file the caller saw there: the queue moves
-    under a page that was loaded a minute ago, and "remove number 2" must never
-    remove whatever has slid into place 2 since.
+    `row_id`, when given, has to be dcc.queue_row_id() of the file the caller
+    saw there: the queue moves under a page that was loaded a minute ago, and
+    "remove number 2" must never remove whatever has slid into place 2 since.
+    An id, not the name (#1245): two albums can each hold an Intro.mp3. The
+    console passes none - its numbers come from `queue <nick>` a moment before.
     """
+    import dcc
     rows = config.dcc_queue.get(user_key) or []
     try:
         index = int(position) - 1
@@ -446,26 +474,20 @@ def _queued_row(user_key, position, name):
     if not 0 <= index < len(rows):
         return None, f"{user_key} has no file number {position} queued."
     row = rows[index]
-    if name and not (isinstance(row, dict) and _same_file_name(row.get('file', ''), name)):
+    if row_id is not None and dcc.queue_row_id(row) != str(row_id).strip():
         return None, "The queue has changed - look again."
     return (index, row), None
 
 
-def _being_sent_or_packed(user_key, row, index):
-    import dcc
-    if isinstance(row, dict) and row.get('path') and dcc.is_being_sent_to(user_key, row['path']):
-        return True
-    pack = dcc.pack_status()
-    return bool(pack and str(pack["user"]).lower() == user_key and index == 0)
-
-
-def move_queued_file(nick, position, direction, name=None):
+def move_queued_file(nick, position, direction, row_id=None):
     """Move the file at `position` one place up or down in a nick's own queue
     (#1206). Returns (ok, message). The dispatcher sends a nick's queue from
     the top, so this is what decides which file they get next.
 
-    A file that is being sent, or packed, stays where it is - and nothing is
-    moved past it - because the send settles its row by the place it holds.
+    A file that is being sent, or the folder being packed, stays where it is
+    and nothing is moved past it. Known by the row itself, not by its place
+    or its path (#1245): a list goes to the front while a folder packs, and a
+    queued send's claim holds no path.
     """
     import dcc
     step = {"up": -1, "down": 1}.get(str(direction).strip().lower())
@@ -473,7 +495,7 @@ def move_queued_file(nick, position, direction, name=None):
         return False, "Say up or down."
     key = str(nick).strip().lower()
     with dcc.queue_lock:
-        found, error = _queued_row(key, position, name)
+        found, error = _queued_row(key, position, row_id)
         if error:
             return False, error
         index, row = found
@@ -483,28 +505,47 @@ def move_queued_file(nick, position, direction, name=None):
             return False, "That file is already first."
         if other >= len(rows):
             return False, "That file is already last."
-        if _being_sent_or_packed(key, row, index) or _being_sent_or_packed(key, rows[other], other):
-            return False, "That file is being sent right now."
+        busy = dcc.queued_row_in_flight(row)
+        if busy:
+            return False, ("That folder is being packed right now." if busy == "packing"
+                           else "That file is being sent right now.")
+        busy = dcc.queued_row_in_flight(rows[other])
+        if busy:
+            return False, (f"The file next to it is being {'packed' if busy == 'packing' else 'sent'} "
+                           f"right now, and nothing moves past it.")
         rows[index], rows[other] = rows[other], rows[index]
         db.save_dcc_queue()
     return True, f"Moved to place {other + 1} of {len(rows)}."
 
 
-def remove_queued_file(nick, position, name=None):
+def remove_queued_file(nick, position, row_id=None):
     """Take the file at `position` out of a nick's queue, as if they had typed
     `@<bot>-remove <file>` themselves - same removal, same notice to them
-    (#1206). Returns (ok, message)."""
+    (#1206). Returns (ok, message).
+
+    Not a file being sent or the folder being packed (#1245): the row went,
+    the nick was told so, and the file kept arriving. The pack has its own
+    cancel.
+    """
     import list as list_mod
     key = str(nick).strip().lower()
     import dcc
     with dcc.queue_lock:
-        found, error = _queued_row(key, position, name)
+        found, error = _queued_row(key, position, row_id)
         if error:
             return False, error
         row = found[1]
+        busy = dcc.queued_row_in_flight(row)
+        if busy == "packing":
+            return False, "That folder is being packed right now - cancel the pack to stop it."
+        if busy:
+            return False, "That file is being sent right now, so it cannot be removed."
         shown = list_mod.printable_text(str(row.get('file', '?') if isinstance(row, dict) else row)).strip()[:120]
         who = (row.get('user_raw') if isinstance(row, dict) else None) or nick
-    gone, removed_archives = _take_rows_out(key, lambda rows: [r for r in rows if r is row])
+    # Looked at again under the lock that takes it out: the slot may have
+    # gone to this very row in between.
+    gone, removed_archives = _take_rows_out(
+        key, lambda rows: [r for r in rows if r is row and not dcc.queued_row_in_flight(r)])
     if not gone:
         return False, "The queue has changed - look again."
     oserve = sys.modules.get('oserve')

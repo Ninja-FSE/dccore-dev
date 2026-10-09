@@ -10,6 +10,7 @@ import os
 import sys
 import re
 import subprocess
+import hashlib
 
 import defaults as config
 import platform_compat
@@ -722,12 +723,15 @@ def put_the_list_first(rows):
     return at + 1
 
 
-def a_list_may_go_first():
+def a_list_may_go_first(transfers=None):
     """May a list take the next free slot ahead of the waiting nicks? Caller holds queue_lock.
 
     Not while another list that went first is still being sent (#1205).
+    `transfers` is a copy of active_transfers for a reader that holds no lock
+    (the Queue page); by default the live list.
     """
-    return not any(tx.get("list_went_first") for tx in config.active_transfers)
+    held = config.active_transfers if transfers is None else transfers
+    return not any(tx.get("list_went_first") for tx in held)
 
 
 def list_first_rank(user_key, rows, lists_first):
@@ -738,6 +742,18 @@ def list_first_rank(user_key, rows, lists_first):
     """
     goes_first = bool(lists_first and rows and is_a_list_row(rows[0]))
     return (0 if goes_first else 1, queue_waiting_since(user_key))
+
+
+def slot_order(queue, lists_first):
+    """The nicks with something in `queue`, in the order a freed slot is offered to them.
+
+    The dispatcher's own key, list_first_rank(); ties keep `queue`'s order.
+    What `queue`, the Queue page and move up/down show and move against, so
+    the three cannot disagree with the dispatcher (#1205, #1245).
+    """
+    waiting = [(key, rows) for key, rows in queue.items() if rows]
+    waiting.sort(key=lambda entry: list_first_rank(entry[0], entry[1], lists_first))
+    return [key for key, _rows in waiting]
 
 
 def a_list_passes_a_longer_wait(user_key, packs_can_start):
@@ -765,6 +781,38 @@ def queued_position_of(user_key, path):
         held = row.get("source_path") or row.get("path") or ""
         if os.path.normcase(os.path.normpath(str(held))) == wanted:
             return place
+    return None
+
+
+def queue_row_id(row):
+    """A short id for a queue row, which the Queue page sends back with a move or a removal (#1245).
+
+    Made from the path the row was queued for - the folder, for a packed one,
+    as queued_position_of() reads it - so it names THAT file: two albums can
+    each hold an Intro.mp3, and a name matched whichever had slid into the
+    place. The path itself never reaches the page.
+    """
+    if isinstance(row, dict):
+        held = row.get("source_path") or row.get("path") or row.get("file") or ""
+    else:
+        held = row
+    key = os.path.normcase(os.path.normpath(str(held)))
+    return hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+
+def queued_row_in_flight(row):
+    """Is this queue row out? "sending", "packing" or None. Caller holds queue_lock.
+
+    By the row itself (#1245): a queued send's claim carries its row as
+    "queue_row" and a running pack its job's "row". The claims hold no path,
+    so is_being_sent_to() - for a send that never had a row - cannot see
+    them, and a place says nothing once a list has gone to the front.
+    """
+    if any(tx.get("queue_row") is row for tx in config.active_transfers):
+        return "sending"
+    job = runtime.pack_job
+    if job is not None and job.get("row") is row:
+        return "packing"
     return None
 
 
@@ -2001,7 +2049,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     # so the operator can see how far it has got and stop
                     # THAT process. The timeout stays: it is the backstop for
                     # a rar nobody is watching.
-                    job = _begin_pack_job(completed_user, folder_leaf, true_source_dir, target_rar_path)
+                    job = _begin_pack_job(completed_user, folder_leaf, true_source_dir, target_rar_path, row=next_file)
                     try:
                         process = _run_rar(job, cmd, rar_timeout)
                     except subprocess.TimeoutExpired:
@@ -2056,7 +2104,8 @@ def check_queue_and_send(irc_sock, completed_user):
                         with queue_lock:
                             room = len(config.active_transfers) < config.MAX_DCC_SLOTS
                             if room:
-                                config.active_transfers.append({"user": completed_user, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename})
+                                config.active_transfers.append({"user": completed_user, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename,
+                                                                 "queue_row": next_file})
                         if not room:
                             print(f"[DCC-BLOCK] {completed_user}: all {config.MAX_DCC_SLOTS} slot(s) busy, "
                                   f"the packed archive stays queued for the next trigger.")
@@ -2148,7 +2197,8 @@ def check_queue_and_send(irc_sock, completed_user):
 
                         f_name = next_file['file'] if isinstance(next_file, dict) else os.path.basename(str(next_file))
                         f_path = next_file['path'] if isinstance(next_file, dict) else str(next_file)
-                        claim = {"user": completed_user, "file": f_name, "bytes_sent": 0, "next_file_obj": f_name}
+                        claim = {"user": completed_user, "file": f_name, "bytes_sent": 0, "next_file_obj": f_name,
+                                 "queue_row": next_file}
                         if list_went_first:
                             claim["list_went_first"] = True
                         config.active_transfers.append(claim)
@@ -2323,7 +2373,8 @@ def check_queue_and_send(irc_sock, completed_user):
                         config.user_processing_lock = set()
                     config.user_processing_lock.add(queue_key)
 
-                    claim = {"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name}
+                    claim = {"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name,
+                             "queue_row": g_next}
                     # Counted by the cap only when the list took the slot from
                     # a nick that had waited longer (#1205).
                     if (lists_first and is_a_list_row(g_next)
@@ -2763,16 +2814,20 @@ def _folder_total_bytes(path):
     return total
 
 
-def _begin_pack_job(user, folder_name, source, archive):
+def _begin_pack_job(user, folder_name, source, archive, row=None):
     """Register the pack about to start (#1202) and return its job.
 
     Registered BEFORE rar is started, so a cancel that arrives in the gap
     still finds something to mark. The folder's size is added by a thread of
     its own: walking a big album must not delay the pack, and the status is
     honest about a total it does not have yet (0).
+
+    `row` is the queue row being packed: the Queue page's controls know it by
+    that, not by its place (#1245).
     """
     job = {"user": str(user), "name": str(folder_name), "archive": archive,
-           "started": time.time(), "total": 0, "process": None, "cancelled": False}
+           "started": time.time(), "total": 0, "process": None, "cancelled": False,
+           "row": row}
     with runtime.pack_lock:
         runtime.pack_job = job
 
