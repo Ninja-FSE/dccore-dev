@@ -11,6 +11,7 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -198,6 +199,53 @@ class FromTheConsole(Base):
         text = read("docs", "ADMIN-CONSOLE.md")
         self.assertIn("`ignore <nick> <minutes>`", text)
         self.assertIn("`unignore <nick>`", text)
+
+
+class ClearAndIgnoreOnlyClearsIfTheIgnoreTook(Base):
+    """#1247: dccore.mrc's "Clear the queue of ... and ignore for..." used
+    to send `ignore` and `clearqueue` as two separate, unconditional
+    commands - a nick the ignore refused (the bot's own nick, or one
+    outside the pattern `ignore` accepts) still had its queue cleared
+    regardless, as if the ignore had worked. `clearandignore` is one
+    console command, so the clear only ever runs once the ignore itself
+    has actually succeeded."""
+
+    def setUp(self):
+        super().setUp()
+        self.session = make_session(self)
+
+    def test_a_refused_ignore_never_touches_the_queue(self):
+        with mock.patch.object(adminchat, "_run_detached") as detached:
+            adminchat._cmd_clearandignore(self.session, "thebot 5")
+        self.assertIn("own nick", self.session.sent[-1])
+        detached.assert_not_called()
+
+    def test_a_successful_ignore_goes_on_to_clear(self):
+        with mock.patch.object(adminchat, "_run_detached") as detached:
+            adminchat._cmd_clearandignore(self.session, "dave 20")
+        self.assertIn("dave", config.banned_users)
+        self.assertIn("20 minutes", self.session.sent[-2])
+        self.assertIn("Clearing the queue for dave", self.session.sent[-1])
+        detached.assert_called_once()
+        self.assertEqual(detached.call_args[0][1], "clearqueue")
+
+    def test_a_wrong_line_gets_the_usage(self):
+        for args in ("", "dave", "dave 5 extra"):
+            adminchat._cmd_clearandignore(self.session, args)
+            self.assertIn("Usage: clearandignore", self.session.sent[-1], args)
+        self.assertEqual(config.banned_users, {})
+
+    def test_it_is_registered_and_documented(self):
+        self.assertIn("clearandignore", adminchat.COMMANDS)
+        text = read("docs", "ADMIN-CONSOLE.md")
+        self.assertIn("`clearandignore <nick> <minutes>`", text)
+
+    def test_dccore_mrc_sends_the_combined_command(self):
+        """The mIRC side of the same fix: one send, not two."""
+        script = read("scripts", "mirc", "dccore.mrc")
+        start = script.index("alias dccore.clearignore {")
+        body = script[start:script.index("\n}", start)]
+        self.assertIn("dccore.send clearandignore $1 %m", body)
 
 
 class FromTheDashboard(Base):

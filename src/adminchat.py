@@ -1789,6 +1789,31 @@ def _cmd_clearqueue(session, args):
         session.nick, CONSOLE_SOURCE, f"!clearqueue {target}", authorised=True))
 
 
+def _cmd_clearandignore(session, args):
+    """`clearandignore <nick> <minutes>`: ignore first (so its pending
+    replies are dropped too), THEN clear - and only if the ignore actually
+    took (#1247). dccore.mrc's own "Clear the queue of ... and ignore
+    for..." menu used to send `ignore` and `clearqueue` as two separate,
+    unconditional commands - a nick the ignore refused (the bot's own nick,
+    or one outside the nick pattern, see security.ignore_user()) still had
+    its queue cleared regardless, as if the ignore had worked.
+    """
+    import security
+    parts = args.split()
+    if len(parts) != 2:
+        session.send("Usage: clearandignore <nick> <minutes>   e.g. clearandignore someone 30")
+        return
+    nick, minutes = parts
+    ok, message = security.ignore_user(nick, minutes)
+    session.send(message)
+    if not ok:
+        return
+    import commands
+    session.send(f"Clearing the queue for {nick} ...")
+    _run_detached(session, "clearqueue", lambda: commands.handle_admin_clear_queue(
+        session.nick, CONSOLE_SOURCE, f"!clearqueue {nick}", authorised=True))
+
+
 def _cmd_rehash(session, args):
     import commands
     session.send("Rehashing - reloading modules in place ...")
@@ -2342,6 +2367,7 @@ COMMANDS = {
     "queuemove":  (_cmd_queuemove,  "move a nick, or one of its files, up or down the queue", "queuemove <nick> [number] up|down"),
     "queueremove": (_cmd_queueremove, "remove one queued file (the nick is told)", "queueremove <nick> <number>"),
     "ignore":     (_cmd_ignore,     "ignore a nick for some minutes (drops its requests)", "ignore <nick> <minutes>"),
+    "clearandignore": (_cmd_clearandignore, "ignore a nick, then clear its queue - only if the ignore took", "clearandignore <nick> <minutes>"),
     "unignore":   (_cmd_unignore,   "end a timed ignore or ban now",     "unignore <nick>"),
     "unban":      (_cmd_unban,      "remove a permanent wildcard ban",   "unban <pattern>"),
     "clearqueue": (_cmd_clearqueue, "force-clear another user's queue",  "clearqueue <nick>"),

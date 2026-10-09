@@ -90,7 +90,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.16 }
+alias dccore.ver { return 1.17 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1520,10 +1520,13 @@ alias dccore.ignorefor {
   if (%m) { dccore.send ignore $1 %m }
 }
 ; Drop what it has queued and what it asks for next: ignore first, so its
-; pending replies go too, then clear.
+; pending replies go too, then clear - one console command, so the clear
+; only happens if the ignore actually took (#1247). Two separate sends
+; used to clear the queue unconditionally even when the bot refused the
+; ignore (its own nick, or a nick outside the pattern ignore accepts).
 alias dccore.clearignore {
   var %m = $dccore.minutes($1)
-  if (%m) { dccore.send ignore $1 %m | dccore.send clearqueue $1 }
+  if (%m) { dccore.send clearandignore $1 %m }
 }
 alias dccore.askfont {
   var %v = $input(Font size (6 or more),eo,DCCore)
