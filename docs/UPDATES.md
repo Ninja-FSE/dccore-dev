@@ -2,6 +2,27 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
+
+### 🧹 Purge every held list, to clear a channel stuck wrong from before v1.16 (#1260)
+
+Found live: on a bot upgraded to v1.16.0, a folder request (and its retry) both went out in a channel the peer bot
+served nothing in, with no answer for hours. The peer's list had been held since before #1232/#1240 shipped, so it
+never had a real channel of its own on record - the first ordinary re-fetch after upgrading resolved one from a
+weaker fallback (`dcc_fetch._resolve_fetch_channel()`'s advert-channel or first-configured-channel steps), and for a
+bot that advertises the same list identically in several channels, whichever one that fallback landed on got
+stamped and reused from then on. It self-corrects on a later successful fetch, but there was no way to force that.
+
+- **`purgealllists confirm`** (console) and **"Purge every held list"** (the List Browser's sidebar, next to the
+  existing "Purge offline bots' lists") forget every held bot list at once, online or not - purge-offline only ever
+  clears the ones showing the red dot, which can never reach a bot that is online right now. Each list rebuilds on
+  its own, with a channel resolved fresh instead of a stale one. A bot with a request in flight is still skipped,
+  the same safety purge-offline already has.
+- **Tests:** `tests/test_purge_all_fetched_lists.py`, `tests/test_purgealllists_console_command.py`,
+  `tests/test_the_mirc_menu_has_every_command.py` (new menu entry). `dccore.ver` is 1.17.2.
+
 ## 🟩 v1.16.0 (2026-10-09) - "The Channel-Aware Release"
 
 ### 🛡️ A list archive's member named after a Windows device is renamed
