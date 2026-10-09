@@ -1461,7 +1461,7 @@ def auto_refetch_worker(sleep=None):
 
 
 
-def process_fetched_list_zip(bot, zip_path):
+def process_fetched_list_zip(bot, zip_path, channel=None):
     """Entry point, called by dcc_fetch.py once a request_type="list" fetch
     reaches 'complete'. Safely extracts `zip_path`, locates the master-list
     .txt inside it, and stores a REFERENCE to it - not its parsed contents -
@@ -1515,7 +1515,7 @@ def process_fetched_list_zip(bot, zip_path):
     seconds) is the same accepted tradeoff as above, extended to reads.
     """
     with _lock():
-        result = _process_fetched_list_zip_unlocked(bot, zip_path)
+        result = _process_fetched_list_zip_unlocked(bot, zip_path, channel=channel)
         # The files under this bot's directory were rewritten or put back:
         # its folder tables describe what was there (#1128). Under the lock,
         # so no page builds one from the files half way through. Keyed on
@@ -1597,7 +1597,7 @@ def _release_held_list(held, extract_dir, succeeded):
               f"({err}); it is still on disk at {held!r}.")
 
 
-def _process_fetched_list_zip_unlocked(bot, zip_path):
+def _process_fetched_list_zip_unlocked(bot, zip_path, channel=None):
     """The body of process_fetched_list_zip. Caller must hold _lock().
 
     Wraps the real work so that a rejected re-fetch leaves the list we were
@@ -1607,7 +1607,7 @@ def _process_fetched_list_zip_unlocked(bot, zip_path):
     held = _hold_existing_list(extract_dir)
     succeeded = False
     try:
-        succeeded, reason = _install_fetched_list(bot, zip_path, extract_dir)
+        succeeded, reason = _install_fetched_list(bot, zip_path, extract_dir, channel=channel)
         return succeeded, reason
     finally:
         _release_held_list(held, extract_dir, succeeded)
@@ -1772,8 +1772,16 @@ def split_index_key(key):
     return (nick, marker) if sep else (text, "")
 
 
-def _install_fetched_list(bot, zip_path, extract_dir):
-    """Extract, validate and publish one fetched list. (bool, reason)."""
+def _install_fetched_list(bot, zip_path, extract_dir, channel=None):
+    """Extract, validate and publish one fetched list. (bool, reason).
+
+    `channel` (#1232) is the channel this particular fetch actually went out
+    in - dcc_fetch.py's dispatcher resolves and stamps it onto the row before
+    the request is even sent, so by the time a fetch completes it is the real
+    answer, not a guess. Stored on the entry so a later request for this bot
+    (a file, a folder, a re-fetch) can use the same channel instead of
+    dcc.channel_containing_user()'s plain "first channel we share" rule.
+    """
     list_path, reason = _extract_and_locate_list_file(zip_path, extract_dir)
     if reason:
         print(f"[LIST-FETCH] Rejected list zip from {bot}: {reason}")
@@ -1864,6 +1872,12 @@ def _install_fetched_list(bot, zip_path, extract_dir):
     store[str(bot).strip().lower()] = {
         "bot": str(bot).strip(),
         "fetched_at": time.time(),
+        # The channel THIS fetch actually went out in (#1232), or None for a
+        # fetch dispatched before this existed, or one whose channel could
+        # not be resolved at all. Read by webserver.py to steer a later file
+        # or folder request for this bot into the same channel its list
+        # answers in, without the operator having to say so again.
+        "channel": (str(channel).strip() or None) if channel else None,
         # The plain, already-absolute path _pick_list_file() returned -
         # NOT long_path()-wrapped here. Every reader of this field (the parse
         # call just above, and get_fetched_bot_page() below) wraps it with

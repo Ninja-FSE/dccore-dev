@@ -1602,7 +1602,16 @@ def build_list_fetch_enqueue_result(bot_raw):
     if dcc_fetch.has_outstanding_bot_alone_request(bot):
         return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
 
-    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list")
+    # held_list_channel(bot) (review of #1239): with no channel given, a
+    # channel-less list refresh must re-ask in the SAME channel its list
+    # already came from, not drift to whatever channel the dispatcher would
+    # otherwise resolve on its own (the bot's last advert, overwritten by
+    # every advert line - runtime.known_bots[...]["channel"] - which can be
+    # a DIFFERENT channel we also share with the bot). Left to that fallback,
+    # a bot bound to a different list per channel could have its whole held
+    # entry silently replaced by another channel's answer on its next
+    # ordinary refresh - confirmed on review, with a real repro.
+    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list", channel=held_list_channel(bot))
     if request_id is None:
         # Defense in depth: enqueue_fetch() enforces this same invariant
         # itself (see its docstring), so this should be unreachable given
@@ -1700,6 +1709,22 @@ PACK_FETCH_CONFLICT_ERROR = (
 )
 
 
+def held_list_channel(bot):
+    """The channel the list we already hold for `bot` was fetched in, or None
+    (#1232) - fetched_bot_lists[...]["channel"], read by its nick alone so
+    every caller (a file, a folder, a re-fetch) steers into the same channel
+    that list itself came from, with no picker and no extra field for the
+    List Browser or Search tab to carry: a row's own "bot" is already enough
+    to look this up. None for a bot with no held list, or one fetched before
+    #1232, or one whose channel could not be resolved when it was fetched -
+    dcc_fetch._resolve_fetch_channel()'s own fallback chain applies from
+    there, same as always.
+    """
+    store = getattr(config, "fetched_bot_lists", None) or {}
+    entry = store.get(str(bot).strip().lower())
+    return (entry or {}).get("channel") if isinstance(entry, dict) else None
+
+
 def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None):
     """Enqueue one folder request: (http_status, payload_dict).
 
@@ -1721,7 +1746,8 @@ def _enqueue_folder_request(dcc_fetch, bot, folder, trigger=None):
             return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
         request, conflict = f"!rar {folder}", BOT_ALONE_FETCH_CONFLICT_ERROR
 
-    request_id = dcc_fetch.enqueue_fetch(bot, request, request_type="folder", trigger=trigger)
+    request_id = dcc_fetch.enqueue_fetch(bot, request, request_type="folder", trigger=trigger,
+                                         channel=held_list_channel(bot))
     if request_id is None:
         # Defense in depth - see build_list_fetch_enqueue_result()'s
         # identical comment above.
@@ -2881,7 +2907,8 @@ def build_fetch_enqueue_result(payload):
                                     "it is not asked for twice.",
                            "item": raw})
             continue
-        request_id = dcc_fetch.enqueue_fetch(bot, filename, trigger=trigger)
+        request_id = dcc_fetch.enqueue_fetch(bot, filename, trigger=trigger,
+                                            channel=held_list_channel(bot))
         if request_id is None:
             # Only reachable via the queue cap: enqueue_fetch()'s other refusal
             # is for "list"/"folder" rows and this route only creates "file"
@@ -3030,7 +3057,7 @@ def build_fetch_delete_result(request_id, only_states=None):
 
     removed_at_bot = False
     if at_the_bot and not never_sent:
-        removed_at_bot = dcc_fetch.drop_our_request_at(bot, asked_for)
+        removed_at_bot = dcc_fetch.drop_our_request_at(bot, asked_for, channel=row.get("channel"))
 
     if stored_filename:
         directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
@@ -3099,13 +3126,13 @@ def build_fetch_clear_result(payload):
             never_sent = dcc_fetch.take_back_unsent_request(row)
             if (row.get("state") == "failed" and row.get("reason") == "no response"
                     and row.get("request_type", "file") == "file" and not never_sent):
-                still_held.append((row.get("bot"), row.get("requested_filename") or row.get("filename")))
+                still_held.append((row.get("bot"), row.get("requested_filename") or row.get("filename"), row.get("channel")))
         # Never for a file a newer row still waits on there (#1083): the
         # remove would take that request's place too.
-        still_held = [(bot, asked_for) for bot, asked_for in still_held
+        still_held = [(bot, asked_for, channel) for bot, asked_for, channel in still_held
                       if not dcc_fetch.another_row_wants_locked(queue, bot, asked_for)]
-    for bot, asked_for in still_held:
-        dcc_fetch.drop_our_request_at(bot, asked_for)
+    for bot, asked_for, channel in still_held:
+        dcc_fetch.drop_our_request_at(bot, asked_for, channel=channel)
     if doomed:
         dcc_fetch.persist_fetch_history()
     return 200, {"cleared": len(doomed)}

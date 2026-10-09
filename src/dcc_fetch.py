@@ -246,7 +246,7 @@ def bot_for_trigger(word):
     return str(nicks[found.pop()]).strip() or None
 
 
-def new_fetch_row(bot, filename, now=None, request_type="file"):
+def new_fetch_row(bot, filename, now=None, request_type="file", channel=None):
     """Build a fresh `pending` row in the shape every reader of
     config.fetch_queue expects. Does not insert it - callers decide the key.
 
@@ -268,6 +268,25 @@ def new_fetch_row(bot, filename, now=None, request_type="file"):
     text (e.g. "!rar Artist/Album") since _claim_matching_offer_locked() will
     later overwrite row["filename"] with whatever name the responding bot
     actually sends, exactly as it already does for "list" rows.
+
+    `channel` (#1232) is the channel the CALLER prefers this request go out
+    in - a List Browser or Search request for a bot we already hold a list
+    from carries that list's own remembered channel; most callers pass
+    nothing, which is None and means "no preference, use today's rule".
+
+    Stored on TWO fields (review of #1239), not one: "preferred_channel" is
+    this value, untouched for the row's whole life, and "channel" starts the
+    same but is OVERWRITTEN by check_fetch_queue()'s dispatcher with whatever
+    channel it actually resolved and sent to - the same field a completed
+    list fetch is tagged with, and the one a cancel's "-remove" is sent to,
+    both of which need to know where the request REALLY went, not what was
+    asked for. Before this split, the two meanings shared one field: a bot
+    briefly out of its preferred channel at dispatch time got the FALLBACK
+    channel written into "channel", and a later retry of that same row (busy,
+    not yet sent) read that fallback back as its new "preference" - quietly
+    losing the original choice for good, even once the bot returned. Reading
+    "preferred_channel" instead for every dispatch means the original choice
+    never decays, no matter how many times resolving it falls back meanwhile.
     """
     now = time.time() if now is None else now
 
@@ -309,7 +328,66 @@ def new_fetch_row(bot, filename, now=None, request_type="file"):
         "total_size": None,
         "reason": "",
         "stored_filename": None,
+        "channel": _clean_channel(channel),
+        "preferred_channel": _clean_channel(channel),
     }
+
+
+def _clean_channel(channel):
+    """A channel name stripped down to "" is still a channel nobody typed -
+    treat it the same as never having given one (#1232)."""
+    text = str(channel or "").strip()
+    return text or None
+
+
+def bot_in_our_channel(bot, channel):
+    """True if `bot` is on OUR live member list for `channel` right now - the
+    same membership config.channel_users already tracks for
+    dcc.channel_containing_user(), just asked about one channel instead of
+    searched across all of them (#1232)."""
+    wanted = str(bot).strip().lower()
+    with runtime.channel_users_lock():
+        users = (getattr(config, "channel_users", {}) or {}).get(str(channel).strip().lower())
+        return bool(users) and wanted in {str(u).lower() for u in users}
+
+
+def _resolve_fetch_channel(bot, preferred):
+    """Which of our channels a request for `bot` goes out in (#1232).
+
+    1. `preferred` (the row's own "preferred_channel" - a list/file/folder
+       request for a bot we already hold a list from carries that list's own
+       channel, see webserver.held_list_channel()) - but only if it is still
+       one we are configured for AND `bot` is still there; a channel we
+       left, or one the bot has since left, would send the request where
+       nobody capable of answering it can see. There is no way for an
+       operator to give one by hand (tried during review and reverted - see
+       "Remove the explicit fetch <bot> <channel> capability").
+    2. The channel `bot` last advertised in (runtime.known_bots), again only
+       if `bot` is still there - the strongest sign of where it actually
+       answers requests, for a row with no remembered channel of its own.
+    3. dcc.channel_containing_user(bot): the first of our channels, in
+       configured order, that `bot` is in right now - today's rule, kept as
+       the last resort so a bot we know nothing else about is still asked.
+
+    None if `bot` is in none of our channels - the caller's own fixed
+    fallback (BROADCAST_SEARCH_CHANNEL or the first configured channel)
+    applies from there, exactly as before this existed.
+    """
+    import irc
+    configured = {chan.lower(): chan for chan in irc.configured_channels()}
+
+    def _usable(raw):
+        chan = configured.get(str(raw or "").strip().lower())
+        return chan if chan and bot_in_our_channel(bot, chan) else None
+
+    chosen = _usable(preferred)
+    if chosen:
+        return chosen
+    advert_channel = (runtime.known_bots.get(str(bot).strip().lower()) or {}).get("channel")
+    chosen = _usable(advert_channel)
+    if chosen:
+        return chosen
+    return dcc.channel_containing_user(bot)
 
 
 _UNRESOLVED_FETCH_STATES = ("pending", "offered", "queued", "listening", "receiving")
@@ -836,7 +914,7 @@ def request_already_waiting(bot, filename):
         return _find_unresolved_file_request_locked(queue, bot, filename) is not None
 
 
-def enqueue_fetch(bot, filename, request_type="file", trigger=None):
+def enqueue_fetch(bot, filename, request_type="file", trigger=None, channel=None):
     """Append one `pending` row to config.fetch_queue and return its id, or
     None if the request was refused (see below) - callers must check for
     None, they can no longer assume this always succeeds.
@@ -876,6 +954,9 @@ def enqueue_fetch(bot, filename, request_type="file", trigger=None):
     `trigger` is the word the request is to be addressed to when it is not
     the nick (#1209) - see request_trigger(). Kept on the row only when it is
     given and sendable, so every other row keeps its shape.
+
+    `channel` (#1232) is a preferred channel for this request - see
+    new_fetch_row()'s docstring. Optional; most callers pass nothing.
     """
     queue = _ensure_fetch_queue()
     trigger = _sendable_trigger(trigger) if trigger else None
@@ -911,7 +992,7 @@ def enqueue_fetch(bot, filename, request_type="file", trigger=None):
             return None
         while request_id in queue:  # practically never, but be certain
             request_id = uuid.uuid4().hex[:12]
-        queue[request_id] = new_fetch_row(bot, filename, request_type=request_type)
+        queue[request_id] = new_fetch_row(bot, filename, request_type=request_type, channel=channel)
         if trigger:
             queue[request_id]["trigger"] = trigger
     return request_id
@@ -1474,7 +1555,7 @@ def check_fetch_queue():
                         _mark_failed_locked(row, "no response")
                         failed_bots.append(row.get("bot"))
                         if row.get("request_type", "file") == "file":
-                            to_take_back.append((row.get("bot"), row.get("requested_filename") or row.get("filename")))
+                            to_take_back.append((row.get("bot"), row.get("requested_filename") or row.get("filename"), row.get("channel")))
 
         # Independent safety net for "listening" rows (passive DCC SEND).
         # _serve_passive_offer() already bounds its own accept() with
@@ -1594,10 +1675,10 @@ def check_fetch_queue():
                 alone_busy.add(key)
             promoted += 1
             to_dispatch.append((rid, row["bot"], row["filename"], row.get("request_type", "file"),
-                                row.get("trigger")))
+                                row.get("trigger"), row.get("preferred_channel")))
 
-    for bot, filename in to_take_back:
-        drop_our_request_at(bot, filename)
+    for bot, filename, channel in to_take_back:
+        drop_our_request_at(bot, filename, channel=channel)
     for bot in failed_bots:
         _note_fetch_failure(bot, now)
 
@@ -1616,16 +1697,16 @@ def check_fetch_queue():
     # batch.
     default_channel = (getattr(config, "BROADCAST_SEARCH_CHANNEL", None)
                        or str(getattr(config, "CHANNEL", "")).split(",")[0].strip())
-    for rid, bot, filename, request_type, row_trigger in to_dispatch:
+    for rid, bot, filename, request_type, row_trigger, preferred_channel in to_dispatch:
         # Addressed to the bot's trigger where it has one (#1209); the
         # channel, the log and every match on what comes back stay the nick.
         trigger = request_trigger(bot, {"trigger": row_trigger})
-        # The bot's own channel wins when we can find one - a stale fallback
-        # is exactly the bug above. Only a bot that left between enqueue and
-        # this dispatch tick (bot_not_here_error() already refused any that
-        # were never seen at all) falls through to the fixed default, which
-        # is no worse than what every request did before this fix.
-        channel = dcc.channel_containing_user(bot) or default_channel
+        # The row's own remembered/preferred channel wins first, then the
+        # bot's advert channel, then the first channel we share with it -
+        # _resolve_fetch_channel()'s own docstring has the full order (#1232).
+        # Only a bot in none of our channels at all falls through to the
+        # fixed default, no worse than what every request did before #1232.
+        channel = _resolve_fetch_channel(bot, preferred_channel) or default_channel
         # Defense-in-depth only, expected to be unreachable: `bot` (and, for
         # a "file" row, `filename`) already passed
         # webserver.reject_if_unsafe_for_irc_line() - which now delegates to
@@ -1695,6 +1776,11 @@ def check_fetch_queue():
                     continue
                 _take_back_unsent_line(message)
                 row["request_line"] = message
+                # Remembered on the row so a retry of THIS request keeps
+                # asking in the same channel rather than drifting tick to
+                # tick, and so the list it brings back can remember where it
+                # came from (#1232).
+                row["channel"] = channel
                 # Its own lane, sent ahead of everything: in the ordinary one a
                 # request waited among every other user's replies, in the express
                 # one behind the advert, and either way for minutes.
@@ -1752,7 +1838,7 @@ def requests_not_sent(lines):
     return back
 
 
-def drop_our_request_at(bot, filename):
+def drop_our_request_at(bot, filename, channel=None):
     """Ask `bot` to take `filename` out of our queue there: `@<bot>-remove
     <file>` in the channel, the per-file form of the command DCCore answers
     (commands.handle_queue_remove_file). Without it, cancelling on the
@@ -1760,7 +1846,13 @@ def drop_our_request_at(bot, filename):
     sent it later, refused as unsolicited. Only a bot known to be DCCore is
     told: another server may match its trigger as `@<bot>-remove*`, where the
     per-file form is the bare one and clears everything we have queued there.
-    Returns whether it was sent."""
+    Returns whether it was sent.
+
+    `channel` (#1232) is normally the removed row's own `channel` field - the
+    same one the request itself went out in, so the "-remove" reaches the
+    same place the bot is expecting to hear from us. Resolved the same way a
+    fresh request would be if it is absent, stale, or the bot has since left
+    it."""
     import announce
     import dcc
     import serverschat
@@ -1776,7 +1868,7 @@ def drop_our_request_at(bot, filename):
         return False
     default_channel = (getattr(config, "BROADCAST_SEARCH_CHANNEL", None)
                        or str(getattr(config, "CHANNEL", "")).split(",")[0].strip())
-    channel = dcc.channel_containing_user(bot) or default_channel
+    channel = _resolve_fetch_channel(bot, channel) or default_channel
     if not channel:
         return False
     oserve.queue_message(bot, announce.fit_irc_line(
@@ -2979,7 +3071,8 @@ def _handle_completed_list_fetch(row, zip_path):
     """
     try:
         import list_fetch
-        ok, reason = list_fetch.process_fetched_list_zip(row.get("bot", ""), zip_path)
+        ok, reason = list_fetch.process_fetched_list_zip(row.get("bot", ""), zip_path,
+                                                          channel=row.get("channel"))
         if not ok:
             row["list_processing_error"] = reason or "no recognizable list file found in the zip"
             print(f"[FETCH] {row.get('bot')}'s fetched list zip was received "
