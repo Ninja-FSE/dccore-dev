@@ -113,6 +113,7 @@
   "download.state.rejected": "Rejected",
   "download.couldNotQueue": "Could not queue the download: {error}",
   "download.queuedForFetch": "Queued {count} file(s) for fetch - see Queue → Downloads.",
+  "download.partialFailure": "One of the rest could not be queued: {error}",
   "filelists.collapseAll": "Collapse all",
   "filelists.downloadSelectedTitle": "Tick the files you want. Shift-click a second box to take everything between it and the last one you touched.",
   "filelists.expandAll": "Expand all",

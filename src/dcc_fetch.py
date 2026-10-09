@@ -2273,6 +2273,26 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
             row["state"] = "receiving"
             return rid, row
 
+    # A PENDING FILE ROW (#1244 review), checked before the bot-alone "list"/
+    # "folder" matches below ever get a chance at this offer. A "file" row
+    # goes back to "pending" - no longer awaiting an offer at all - when it
+    # is asked again after silence, held for a busy-bot retry, or kept
+    # waiting for disk space; none of that makes the bot's eventual answer
+    # any less this row's own. Without this check, an offer that happens to
+    # arrive while this same bot also has a "folder" row genuinely offered
+    # was claimed by that folder row instead - bot-alone is the ONLY test a
+    # plain folder match makes, so it cannot tell this exact-name answer
+    # apart from its own - and the file row was left starved, still pending,
+    # its real answer already spent on someone else's request.
+    for rid, row in queue.items():
+        if (row.get("state") == "pending"
+                and row.get("request_type", "file") == "file"
+                and row.get("offered_at") is not None  # was actually asked before, not merely queued
+                and str(row.get("bot", "")).strip().lower() == wanted_bot
+                and _normalize_filename_for_match(row.get("filename", "")) == wanted_name):
+            row["state"] = "receiving"
+            return rid, row
+
     list_candidates = [
         (rid, row) for rid, row in queue.items()
         if row.get("state") in _AWAITING_OFFER_STATES
@@ -2292,6 +2312,28 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
         (rid, row) for rid, row in queue.items()
         if row.get("state") in _AWAITING_OFFER_STATES
         and row.get("request_type") == "folder"
+        and str(row.get("bot", "")).strip().lower() == wanted_bot
+    ]
+    # A LATE FOLDER ANSWER (#1244 review), the same allowance a late file or
+    # list already gets above - but folders need it far more often. #1234's
+    # one-at-a-time dispatch promotes a bot's NEXT folder the moment one
+    # times out, so by the time a slow bot's archive for the FIRST one
+    # finally arrives, that row has already failed ("no response") and the
+    # bot-alone match below would otherwise hand the archive to the row that
+    # replaced it instead - confirmed live: a 100-folder batch with one slow
+    # bot shifted every label after it by one, and the true last archive was
+    # lost outright. Included in the SAME pool the live candidates below are
+    # drawn from, not matched first or separately: a named pack match still
+    # finds a late pack row by its predicted name exactly as it would a live
+    # one, and the final oldest-wins tie-break among plain rows naturally
+    # prefers a late (failed, so necessarily asked for earlier) row over a
+    # live one that only started because the late row's timeout promoted it.
+    folder_candidates += [
+        (rid, row) for rid, row in queue.items()
+        if row.get("state") == "failed" and row.get("reason") == "no response"
+        and row.get("request_type") == "folder"
+        and row.get("offered_at") is not None
+        and 0 <= now - row["offered_at"] <= _LATE_OFFER_GRACE
         and str(row.get("bot", "")).strip().lower() == wanted_bot
     ]
     # AN MXRARSERVER PACK ROW (#1209) is told apart by name. Its request is
@@ -2325,6 +2367,7 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
         # packed .rar - that is only known now. row["requested_filename"] was
         # set once at creation (new_fetch_row()) and is left untouched here,
         # so the original request text survives even after this overwrite.
+        row.pop("reason", None)  # cleared whether or not this was the late branch above
         row["filename"] = filename
         row["state"] = "receiving"
         return rid, row

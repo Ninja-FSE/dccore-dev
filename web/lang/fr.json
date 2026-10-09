@@ -113,6 +113,7 @@
   "download.state.rejected": "Rejeté",
   "download.couldNotQueue": "Impossible de mettre le téléchargement en file : {error}",
   "download.queuedForFetch": "{count} fichier(s) mis en file pour récupération - voir File → Téléchargements.",
+  "download.partialFailure": "Une partie n'a pas pu être mise en file : {error}",
   "filelists.collapseAll": "Tout réduire",
   "filelists.downloadSelectedTitle": "Cochez les fichiers voulus. Cliquez sur une seconde case avec Maj pour sélectionner tout ce qui se trouve entre elle et la dernière touchée.",
   "filelists.expandAll": "Tout développer",

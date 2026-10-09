@@ -4,6 +4,27 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A folder's late archive is matched against the row it actually belongs to (#1244)
+
+Found in a post-merge review of #1234 (#1233). #1234's one-at-a-time dispatch promotes a bot's NEXT folder the
+moment one times out, so by the time a slow bot's archive for the FIRST (now-failed) one finally arrived, the
+bot-alone match handed it to the row that replaced it instead - confirmed live, in a long batch, as every label
+after the slow one shifting by one and the true last archive being lost outright. Separately, a "file" row back in
+"pending" (a busy-bot retry, silence, or disk space) could have its real answer claimed by an unrelated "folder"
+row offered for the same bot, since a plain folder match only ever tests the bot - never the name - and #1234 made
+an offered folder row for the same bot the ordinary case rather than a rare one.
+
+- A late folder answer is now matched the same way a late file or list answer already was - included in the SAME
+  candidate pool a live folder match is drawn from, so the existing oldest-wins tie-break naturally prefers the
+  failed row (it was asked for first) over the one promoted after it, and a named pack row's predicted name still
+  finds it even failed.
+- A pending file row that was genuinely asked for before (not merely queued) is now checked, by its exact name,
+  before any bot-alone "list"/"folder" match gets a chance at an offer.
+- The dashboard's Download selected now reports a folder post that failed outright alongside the files that
+  queued successfully, instead of showing total success and silently dropping the failure.
+- **Tests:** `tests/test_dcc_fetch.py` (7 new tests: `ALateFolderAnswerClaimsTheRightRow`,
+  `APendingFileRowIsMatchedBeforeABotAloneFolderClaim`).
+
 ### 🔐 An ignore set from the dashboard could race the flood sweep and reconnect the bot (#1248)
 
 Found in a post-merge review of #1223. `config.banned_users` is written from the Flask (dashboard) and console
