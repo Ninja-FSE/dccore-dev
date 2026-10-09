@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (security, Windows): a list archive from another bot could make DCCore write to a device instead of a file.** A file inside a fetched zip or RAR list named like a Windows device (`NUL`, `COM1`, `con.txt`) was opened as that device, which could stall fetching lists. Such names are now unpacked with an underscore (`NUL_.txt`), as DCCore already does for names it is sent elsewhere.
 - **Fixed: a large download queue drew more slowly and `dlcancel all` could take tens of seconds.** The Download queues window's snapshot is now capped per message like the Downloads window's already was (the full count still shows), and cancelling several requests - or `dlcancel all` - lets them all go in one pass instead of one at a time. `dlcancel all` followed by extra words is refused instead of cancelling everything. Update `dccore.mrc` to 1.17.1 and reload it with `/reload -rs dccore.mrc`.
 - **Fixed (mIRC): "Clear the queue of ... and ignore for..." no longer clears the queue when the ignore is refused.** The two steps used to run unconditionally; the queue is now only cleared once the ignore has actually taken.
 - **Fixed: a search reply's `From:` line could start with `!` under a custom theme.** A border, separator or text-box colour set to certain text could put it, unescaped, at the very start of the line. The line now always starts with the literal text `From: `, under any theme or custom colour.
