@@ -248,6 +248,7 @@ prefix.
 | `queuemove <nick> <number> up\|down` | move one of a nick's queued files up or down in its own queue — the one at the top is sent first. A file being sent or packed stays put and nothing is moved past it. The number is the one `queue <nick>` shows |
 | `queueremove <nick> <number>` | take one file out of a nick's queue, as if they had typed `@<bot>-remove <file>`: same notice to them, `clearqueue` removes the lot. A file being sent is not removed, nor a folder being packed (`packcancel` stops that) |
 | `ignore <nick> <minutes>` | drop one nick's requests for a while, 1 to 10080 minutes (#1206). It is a timed ban: kept across a restart, ends by itself, listed by `bans` with the time left. Its queued files stay; `clearqueue` removes them |
+| `clearandignore <nick> <minutes>` | `ignore`, then `clearqueue` the same nick - but only if the ignore actually took (the bot's own nick, and a nick outside the pattern `ignore` accepts, are refused and the queue is left alone). dccore.mrc's "Clear the queue of ... and ignore for..." sends this one command instead of the two separately (#1247) |
 | `unignore <nick>` | end a timed ignore - or a flood ban - now |
 | `clearqueue <nick>` | force-clear another user's queue |
 | `rehash` | reload modules in place |
