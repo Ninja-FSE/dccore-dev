@@ -2289,6 +2289,12 @@ def send_file_list(irc_sock, user, channel):
         print(f"[LIST] No list is bound to {channel!r}; ignoring the request "
               f"from {user}.")
         return
+    # Asked for by private message from somebody in none of our channels
+    # (#1242): handle_download_request() below refuses it, so it is refused
+    # here, before "Preparing full list" promises a list that never comes.
+    if not dcc.is_channel_name(channel) and library.shared_channel(user) is None:
+        dcc.refuse_unshared_private_request(user, "the list")
+        return
 
     current_zip_path = find_latest_list_file(wanted)
     

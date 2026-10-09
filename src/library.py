@@ -330,17 +330,45 @@ def mode_for_request(channel=None, user=None):
     name = str(channel or "").strip()
     if name.startswith(("#", "&")):
         return channel_mode(name)
+    # shared_channel() answers with a list-bound channel whenever there is
+    # one, so this is the rule above: an unbound channel served by the
+    # catch-all primary has no mode of its own and reads as Normal.
+    shared = shared_channel(user)
+    return channel_mode(shared) if shared else NORMAL
+
+
+def shared_channel(user):
+    """The channel a private request from `user` belongs to (#1242), or None
+    when they are in none of the channels this bot serves.
+
+    The first list-bound channel of ours they are in - the channel
+    mode_for_request() reads a private message's mode from. With none bound,
+    the first configured channel of ours they are in that the catch-all
+    primary serves: one list and no bindings is every install that has not
+    split its library, and a private request there must not be refused for
+    want of a binding nobody needed. A channel the bot is in but does not
+    serve (the debug channel, or an unbound one once the primary names its
+    own) is not one: a request typed there would not be answered either.
+
+    Looking at it from the bot's side, like mode_for_request(): who is in
+    which channel is config.channel_users, in the order the bot joined them.
+    """
     who = str(user or "").strip().lower()
     if not who:
-        return NORMAL
+        return None
     import runtime
     with runtime.channel_users_lock():
         sharing = [chan for chan, members in (getattr(config, "channel_users", None) or {}).items()
                    if any(str(member).lower().lstrip("@+%&~") == who for member in members)]
     for chan in sharing:
         if list_for_channel(chan) is not None:
-            return channel_mode(chan)
-    return NORMAL
+            return chan
+    configured = {part.strip().lower() for part in str(getattr(config, "CHANNEL", "") or "").split(",")
+                  if part.strip()}
+    for chan in sharing:
+        if str(chan).lower() in configured and list_for_request(chan) is not None:
+            return chan
+    return None
 
 
 def list_name_for_request(channel=None):

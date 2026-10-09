@@ -2714,6 +2714,21 @@ def get_bot_aliases():
     return aliases
 
 
+def names_a_file_request(msg_lower, bot_aliases=None):
+    """True if this message, lowercased, is a file request to this bot:
+    "!<nick> <file>" on any name get_bot_aliases() gives.
+
+    The test the dispatcher's own `is_file_request` makes - it calls this -
+    and the one the Messages page is kept clear of requests by (#1242): a
+    file asked for by private message is a request, not a message, and the
+    recorder in announce.py refuses it by this same test rather than a
+    second copy that could drift from what the dispatcher serves.
+    """
+    if bot_aliases is None:
+        bot_aliases = get_bot_aliases()
+    return any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
+
+
 def is_list_request(msg, msg_lower):
     """True if this message is asking THIS bot for its list.
 
@@ -4078,7 +4093,7 @@ def irc_loop():
                         # -remove, list requests, the CTCPs - is metered
                         # exactly as before.
                         is_file_request = (
-                            any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
+                            names_a_file_request(msg_lower, bot_aliases)
                         )
                         if is_bot_command and not is_file_request and security.is_flooding(user):
                             continue
