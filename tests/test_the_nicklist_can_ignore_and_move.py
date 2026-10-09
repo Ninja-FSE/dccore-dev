@@ -101,20 +101,26 @@ class TheTwoAliases(unittest.TestCase):
         body = block("alias dccore.ignorefor {")
         self.assertIn("if (%m) { dccore.send ignore $1 %m }", body)
 
-    def test_clear_and_ignore_ignores_first_then_clears(self):
+    def test_clear_and_ignore_sends_one_combined_command(self):
+        """#1247: used to send `ignore` and `clearqueue` as two separate,
+        unconditional commands - a nick the ignore refused still had its
+        queue cleared regardless, as if the ignore had worked. One command
+        lets the bot itself decide whether the clear ever happens."""
         body = block("alias dccore.clearignore {")
-        self.assertLess(body.index("dccore.send ignore $1 %m"), body.index("dccore.send clearqueue $1"))
+        self.assertIn("dccore.send clearandignore $1 %m", body)
+        self.assertNotIn("dccore.send ignore", body)
+        self.assertNotIn("dccore.send clearqueue", body)
 
     def test_clear_and_ignore_sends_nothing_without_minutes(self):
         body = block("alias dccore.clearignore {")
         self.assertIn("if (%m) {", body)
-        self.assertNotIn("dccore.send clearqueue $1\n  dccore", body)
+        self.assertNotIn("dccore.send clearandignore $1 %m\n  dccore", body)
 
 
 class TheVersion(unittest.TestCase):
 
-    def test_the_script_is_1_16(self):
-        self.assertIn("alias dccore.ver { return 1.16 }", script_text().replace("\r\n", "\n"))
+    def test_the_script_is_1_17(self):
+        self.assertIn("alias dccore.ver { return 1.17 }", script_text().replace("\r\n", "\n"))
 
     def test_it_still_draws_the_queues_window(self):
         self.assertTrue(adminchat.script_draws_dlqueue("1.16"))

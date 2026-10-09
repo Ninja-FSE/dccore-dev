@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 Clear and ignore no longer clears the queue when the ignore is refused (#1247)
+
+Found reading `dccore.mrc`. "Clear the queue of ... and ignore for..." sent `ignore` and `clearqueue` as two
+separate, unconditional console commands - when the bot refused the ignore (its own nick, or one outside the
+pattern `security.ignore_user()` accepts), the queue was still cleared regardless, as if the ignore had worked.
+
+- A new console command, `clearandignore <nick> <minutes>`, does both in one round trip: it clears the queue only
+  once the ignore itself has actually succeeded. `dccore.mrc`'s `dccore.clearignore` alias sends this one command
+  instead of the two separately. `dccore.ver` is 1.17.
+- **Not changed:** the "Stop ignoring" menu wording - it already lifts a flood ban too, and `docs/ADMIN-CONSOLE.md`
+  already documents that (`unignore <nick> | end a timed ignore - or a flood ban - now`); a nit about the mIRC
+  menu label itself, not worth lengthening a one-line menu item over.
+- **Tests:** `tests/test_a_nick_can_be_ignored_for_a_while.py` (`ClearAndIgnoreOnlyClearsIfTheIgnoreTook`, 5 new
+  tests) and `tests/test_the_nicklist_can_ignore_and_move.py` (updated for the combined command and 1.17).
+
 ### 🔭 A bot's other channel-bound list is discovered and held automatically (#1240)
 
 #1232/#1239 fixed a request landing in the wrong channel; it still took an operator's own action to ever see a bot's
