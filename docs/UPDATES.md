@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟨 Unreleased
+## 🟩 v1.16.0 (2026-10-09) - "The Channel-Aware Release"
 
 ### 🛡️ A list archive's member named after a Windows device is renamed
 
