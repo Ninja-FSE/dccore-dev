@@ -455,7 +455,8 @@ unread count on the tab. **Mark all read** clears it.
 What is recorded, and nothing else:
 
 - **private** messages only - a channel line is one you can already see;
-- that are **not** a recognised command;
+- that are **not** a recognised command - a file asked for privately
+  (`!<nick> <file>`) is a request and is answered, so it is never one of them;
 - that are **not** a CTCP (a DCC offer or a VERSION reply is a client talking
   to a client, not a person);
 - from somebody who is **not banned** - a ban silences them here too.
@@ -560,10 +561,10 @@ fields inserted into old ones, so they do not move the minor. An older script
 shows them as they come, as it does any type it does not know.
 
 `<channel>` is always exactly one token, straight after the nick: the channel
-the request or search was made in, or `-` when there is none (a request by
-private message, a resume, or a transfer that no longer knows where it was
-asked for) - so a client can count on the position of everything after it and
-print nothing for `-`.
+the request or search was made in - for a request by private message, the
+channel its sender shares with the bot - or `-` when there is none (a resume,
+or a transfer that no longer knows where it was asked for), so a client can
+count on the position of everything after it and print nothing for `-`.
 
 Whatever you did not tick in **Settings → Console feed** is not sent in either
 mode. A session that never says `hello` is the console described above,

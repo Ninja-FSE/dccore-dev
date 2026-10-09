@@ -768,7 +768,7 @@
 
 # Post a line in the channel each time a file has been sent. Everything else
 # about a transfer is private to the person who asked; this is the only public
-# part.
+# part. A file asked for by private message is never announced.
 #
 # Announce a finished transfer in the channel it was requested from.
 # 
