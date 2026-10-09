@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔭 The Download queues window and `dlcancel all` stay fast and correct at scale (#1246)
+
+A big fetch queue made both the Download queues window's own snapshot and letting several requests go at once slow, and
+in one case wrong.
+
+- **`dlqueue` and the `@DCCore-Download queues` window are capped at `DOWNLOADS_WAITING_MAX` (50) rows per snapshot**,
+  the same bound the Downloads window's own waiting rows already had - this one had none. The session's outgoing
+  buffer holds only 500 lines and drops the OLDEST once full; with enough requests waiting, that could push `DQBEGIN`
+  itself out before the client ever saw it, leaving the window showing a mix of stale and fresh rows. `DQEND` (and the
+  plain-text fallback for a script too old to draw the window) still reports the real, uncapped total.
+- **`dlcancel all` / `dlcancel <id> <id> ...` cancel the whole batch in one pass instead of one lock-and-history-
+  rewrite per id** - measured at 6.0s for 500 pending + 500 finished requests and 39.8s for 2000 pending, the console
+  taking no other command meanwhile. `webserver.build_fetch_delete_many_result()` holds the fetch lock once for the
+  whole batch and writes the history file once at the end, the same batching `build_fetch_clear_result()` already
+  used for the Downloads page's Clear buttons.
+- **`dlcancel all <extra words>`** (most likely a typo for separate ids) **is now refused with a usage message**
+  instead of silently cancelling everything.
+- **Two `dccore.mrc` controls that could queue a DCC CHAT message with nobody connected to read it are now guarded**
+  the same way `dlqueue`'s own ask already was: the "Remove all" dialog button and selecting several rows to remove.
+
 ### 🔭 A bot's other channel-bound list is discovered and held automatically (#1240)
 
 #1232/#1239 fixed a request landing in the wrong channel; it still took an operator's own action to ever see a bot's
