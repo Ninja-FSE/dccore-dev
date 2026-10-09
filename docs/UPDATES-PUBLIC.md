@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a large download queue drew more slowly and `dlcancel all` could take tens of seconds.** The Download queues window's snapshot is now capped per message like the Downloads window's already was (the full count still shows), and cancelling several requests - or `dlcancel all` - lets them all go in one pass instead of one at a time. `dlcancel all` followed by extra words is refused instead of cancelling everything. Update `dccore.mrc` to 1.17.1 and reload it with `/reload -rs dccore.mrc`.
 - **Fixed (mIRC): "Clear the queue of ... and ignore for..." no longer clears the queue when the ignore is refused.** The two steps used to run unconditionally; the queue is now only cleared once the ignore has actually taken.
 - **Fixed: a search reply's `From:` line could start with `!` under a custom theme.** A border, separator or text-box colour set to certain text could put it, unescaped, at the very start of the line. The line now always starts with the literal text `From: `, under any theme or custom colour.
 - **Fixed: the settings preview now shows an unsaved change to "Answer @find searches" too**, the same as it already does for the theme colours.

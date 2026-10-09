@@ -90,7 +90,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.17 }
+alias dccore.ver { return 1.17.1 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1402,7 +1402,11 @@ alias dccore.dq.draw {
   did -ra dccore.dq 1 $iif($dccore.st(dqcount) == 0,Nothing is waiting.,$dccore.st(dqcount) waiting - select the ones to remove (Ctrl or Shift for several))
 }
 ; Up to 20 ids to a line, so a long selection stays inside one IRC line.
+; $chat() checked the same way dccore.dq.ask already does (#1246 review):
+; sending unconditionally meant a stale window open after a disconnect
+; queued a DCC CHAT message nobody would ever read it as.
 alias dccore.dq.cancel {
+  if (!$chat($dccore.bot)) { return }
   var %ids = $1-, %batch = $null, %k = 0, %i = 1
   while (%i <= $numtok(%ids,32)) {
     %batch = %batch $gettok(%ids,%i,32)
@@ -1439,6 +1443,7 @@ on *:dialog:dccore.dq:init:0: { dccore.dq.ask }
 on *:dialog:dccore.dq:sclick:3: { dccore.dq.remove }
 on *:dialog:dccore.dq:sclick:4: {
   if ($dccore.st(dqcount) == 0) || (!$dccore.st(dqend)) { return }
+  if (!$chat($dccore.bot)) { return }
   if ($input(Remove all $dccore.st(dqcount) waiting requests? Downloads that have started are left alone.,yq,DCCore)) { .msg $+(=,$dccore.bot) dlcancel all | dccore.dq.ask }
 }
 on *:dialog:dccore.dq:sclick:5: { dccore.dq.ask }

@@ -788,9 +788,21 @@ def dlqueue_lines(requests):
 
     kind is f (file), r (folder, asked as !rar) or l (a bot's list); <note> is
     one token, why the request waits. Whole or not sent: the window redraws at DQEND.
+
+    Capped at DOWNLOADS_WAITING_MAX rows (#1246 review), the same bound the
+    Downloads window's own DLBEGIN/DLROW/DLEND snapshot already applies to
+    its "waiting" rows - this had none at all. The session's own outgoing
+    buffer holds only so many lines (500) and drops the OLDEST once full -
+    with 600 pending, that dropped DQBEGIN itself, so the old dq.* rows a
+    client keeps across snapshots were never told to clear, and the window
+    showed a mix of stale and fresh rows with a count that matched neither.
+    DQEND still reports the REAL total, so a client that draws a count
+    (`dqn` in dccore.mrc) shows the true number even though only the first
+    DOWNLOADS_WAITING_MAX were actually drawn - the same split DLEND's own
+    waiting count already makes.
     """
     lines = ["DCCORE DQBEGIN"]
-    for rid, row in requests:
+    for rid, row in requests[:DOWNLOADS_WAITING_MAX]:
         lines.append(f"DCCORE DQROW {rid} {_DLQUEUE_KINDS.get(row.get('request_type', 'file'), 'f')} "
                      f"{row.get('state')} {_clean(row.get('bot'), token=True)} "
                      f"{_clean(_download_waiting_note(row), token=True)} {_clean(_download_name(row))}")
@@ -2019,8 +2031,15 @@ def _cmd_dlcancel(session, args):
 
 
 def _cancel_many(session, words):
-    import webserver
     if words[0].lower() == "all":
+        if len(words) > 1:
+            # #1246 review: "dlcancel all <extra words>" silently ignored
+            # the extra words - most likely a typo for a real id ("dlcancel
+            # all abc123" meaning two separate ids, not "all" at all), which
+            # this used to answer by cancelling EVERYTHING instead of saying
+            # why that could not be right.
+            session.send("Usage: dlcancel <id> [<id> ...] | dlcancel all (not both)")
+            return
         waiting = dlqueue_requests()
         if waiting is None:
             session.send("The download queue could not be read - try again.")
@@ -2031,16 +2050,29 @@ def _cancel_many(session, words):
         if not all(_REQUEST_ID.fullmatch(rid) for rid in ids):
             session.send("Usage: dlcancel <id> [<id> ...] | dlcancel all")
             return
-    cancelled = started = 0
-    for rid in dict.fromkeys(ids):
-        status, _ = webserver.build_fetch_delete_result(rid, only_states=_DLQUEUE_STATES)
-        if status == 200:
-            cancelled += 1
-        else:
-            started += 1
-    note = f" {started} had started or were gone already and were left." if started else ""
-    session.send(f"Cancelled {cancelled} request(s).{note}")
-    _refresh_downloads(session)
+    if not ids:
+        session.send("Nothing to cancel.")
+        return
+    # Run detached and in ONE batched pass, not one build_fetch_delete_
+    # result() call per id (#1246 review): that repeated a full history-
+    # file rewrite and a whole-queue scan per id - measured at 6.0s for
+    # 500 pending + 500 finished and 39.8s for 2000 pending, the console
+    # taking no other command meanwhile, since the dict mutation and the
+    # history write both run under a lock a console command is also
+    # subject to. See webserver.build_fetch_delete_many_result()'s own
+    # docstring for the batching itself.
+    session.send(f"Cancelling {len(ids)} request(s) ...")
+
+    def run():
+        import webserver
+        _status, result = webserver.build_fetch_delete_many_result(ids, only_states=_DLQUEUE_STATES)
+        cancelled = len(result.get("cancelled") or [])
+        started = len(result.get("refused") or [])
+        note = f" {started} had started or were gone already and were left." if started else ""
+        session.send(f"Cancelled {cancelled} request(s).{note}")
+        _refresh_downloads(session)
+
+    _run_detached(session, "dlcancel", run)
 
 
 def _cmd_dlqueue(session, args):
@@ -2058,8 +2090,15 @@ def _cmd_dlqueue(session, args):
         session.send("No request is waiting.")
         return
     session.send(f"{len(requests)} request(s) waiting, remove one with dlcancel <id>:")
-    for rid, row in requests:
+    # Capped the same way dlqueue_lines() now is (#1246 review): sending one
+    # line per row with no cap could push this header line itself out of
+    # the session's own 500-line outgoing buffer on a big enough queue,
+    # exactly the symptom reported for the structured path.
+    shown = requests[:DOWNLOADS_WAITING_MAX]
+    for rid, row in shown:
         session.send(f"  {rid}  {row.get('bot')}: {_download_name(row)}  ({_download_waiting_note(row)})")
+    if len(requests) > len(shown):
+        session.send(f"  ... and {len(requests) - len(shown)} more.")
 
 
 def _cmd_dlagain(session, args):
