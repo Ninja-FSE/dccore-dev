@@ -73,8 +73,11 @@ class TheWindowMenu(unittest.TestCase):
         # dlcancel and dlagain act on one row's id: they live in the
         # Downloads window's own right-click menu (see test_dccore_downloads_window).
         # dlqueue feeds the Download queues window, whose menu item is
-        # dccore.queues.
-        plumbing = {"hello", "help", "quit", "pair", "unpair", "dlcancel", "dlagain", "dlqueue"}
+        # dccore.queues. clearandignore (#1247) is never clicked directly -
+        # the menu's own "Clear the queue of ... and ignore for..." items
+        # reach it through the dccore.clearignore alias instead, the same
+        # way "Clear and ignore..." always had to ask for the minutes first.
+        plumbing = {"hello", "help", "quit", "pair", "unpair", "dlcancel", "dlagain", "dlqueue", "clearandignore"}
         for command in adminchat.COMMANDS:
             if command in plumbing:
                 continue
