@@ -127,7 +127,38 @@ class ArchiveNameTests(unittest.TestCase):
             with self.subTest(leaf=leaf):
                 name = dcc._rar_archive_disk_name(os.path.join("lib", leaf))
                 self.assertFalse(platform_compat.is_windows_reserved(name), name)
-                self.assertEqual(name, leaf + "_.rar")
+                # A digest now, not the fixed "_" suffix (#1249 review) -
+                # see test_it_cannot_collide_with_a_folder_named_like_the_fix
+                # for why.
+                self.assertTrue(name.startswith(leaf + "-"), name)
+                self.assertTrue(name.endswith(".rar"), name)
+
+    def test_it_cannot_collide_with_a_folder_named_like_the_fix(self):
+        """#1249 review, confirmed: "AUX" and a folder already named "AUX_"
+        both used to become "AUX_.rar" - windows_safe_name()'s own fixed
+        suffix is not itself reserved, so the second path passed through
+        untouched and landed on the exact name the first was given. `rar a`
+        adds to an existing archive rather than replacing it, so the second
+        requester silently received both albums packed together - the same
+        #162 finding #7 this function exists to prevent, reached a
+        different way."""
+        old = dcc.config.FILE_DIRECTORY
+        dcc.config.FILE_DIRECTORY = os.path.abspath("lib")
+        self.addCleanup(setattr, dcc.config, "FILE_DIRECTORY", old)
+        reserved = dcc._rar_archive_disk_name(os.path.join("lib", "AUX"))
+        already_suffixed = dcc._rar_archive_disk_name(os.path.join("lib", "AUX_"))
+        self.assertNotEqual(reserved, already_suffixed)
+        self.assertEqual(already_suffixed, "AUX_.rar")
+
+    def test_the_digest_is_stable_and_ordinary_names_are_unchanged(self):
+        old = dcc.config.FILE_DIRECTORY
+        dcc.config.FILE_DIRECTORY = os.path.abspath("lib")
+        self.addCleanup(setattr, dcc.config, "FILE_DIRECTORY", old)
+        first = dcc._rar_archive_disk_name(os.path.join("lib", "AUX"))
+        second = dcc._rar_archive_disk_name(os.path.join("lib", "AUX"))
+        self.assertEqual(first, second)
+        self.assertEqual(dcc._rar_archive_disk_name(os.path.join("lib", "Greatest Hits")),
+                         "Greatest_Hits.rar")
 
     def test_a_device_folder_below_another_keeps_the_name_it_had(self):
         """"Music_AUX.rar" was never a device name; nothing about it changes."""
@@ -164,6 +195,27 @@ class FetchedNameTests(unittest.TestCase):
 
     def test_an_ordinary_nick_is_unchanged(self):
         self.assertEqual(list_fetch._sanitize_bot_dir_name("Console"), "Console")
+
+    def test_it_cannot_collide_with_a_bot_named_like_the_fix(self):
+        """#1249 review, confirmed: "AUX" and a bot literally named "AUX_"
+        both used to come out as "AUX_" - windows_safe_name()'s own fixed
+        suffix is not itself reserved, so the second nick passed through
+        unchanged and landed in the exact directory the first was given,
+        one bot's held lists overwriting the other's."""
+        reserved = list_fetch._sanitize_bot_dir_name("AUX")
+        already_suffixed = list_fetch._sanitize_bot_dir_name("AUX_")
+        self.assertNotEqual(reserved, already_suffixed)
+        self.assertEqual(already_suffixed, "AUX_")
+
+    def test_the_digest_is_stable_and_case_insensitive(self):
+        """Lower-cased before hashing, since every caller (list_extract_dir()
+        and friends) lower-cases the result anyway - "AUX" and "Aux" are one
+        nick on IRC and must still land on one directory, not two."""
+        first = list_fetch._sanitize_bot_dir_name("AUX")
+        second = list_fetch._sanitize_bot_dir_name("AUX")
+        self.assertEqual(first, second)
+        self.assertEqual(list_fetch._sanitize_bot_dir_name("AUX").lower(),
+                         list_fetch._sanitize_bot_dir_name("Aux").lower())
 
 
 if __name__ == "__main__":

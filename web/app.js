@@ -5994,13 +5994,20 @@
     var wanted = {};
     (state.settingsCategories || []).forEach(function (category) {
       category.fields.forEach(function (field) {
-        if (field.name !== "THEME" && field.name.indexOf("CUSTOM_THEME_") !== 0) {
+        var isSearchEnabled = field.name === "SEARCH_ENABLED";
+        if (field.name !== "THEME" && field.name.indexOf("CUSTOM_THEME_") !== 0 && !isSearchEnabled) {
           return;
         }
-        wanted[field.name] = Object.prototype.hasOwnProperty.call(
-          state.settingsDirty, field.name)
+        var current = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name)
           ? state.settingsDirty[field.name]
-          : settingsValueToString(field.value);
+          : field.value;
+        // SEARCH_ENABLED (#1249 review): the advert sample's "Search: ON/OFF"
+        // followed the SAVED setting regardless of what the operator had
+        // just toggled, because the preview request never carried the
+        // unsaved value at all. Sent as a real boolean, not stringified
+        // like THEME/CUSTOM_THEME_* - those are genuinely text, this is not,
+        // and the server reads it as one.
+        wanted[field.name] = isSearchEnabled ? Boolean(current) : settingsValueToString(current);
       });
     });
 

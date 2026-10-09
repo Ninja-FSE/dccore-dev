@@ -189,7 +189,7 @@ class OffKeepsTheAudioFallback(SearchCase):
         self.assertEqual(self.rows(got), expected_rows)
         border, separator, textbox, _r, _b, value, _a, _x = theme.blocks()
         self.assertEqual([self.text(line) for line in self.from_lines(got)],
-                         [f"{border} {separator} {textbox} From: {value}" + list_mod.LIST_FOLDER_PREFIX
+                         [f"From: {border} {separator} {textbox} {value}" + list_mod.LIST_FOLDER_PREFIX
                           + "Rock" + BS + "Some Band" + BS + "1999 - Some Album"
                           + f" {separator} {border} "])
 
@@ -205,7 +205,7 @@ class OnGroupsByFolder(SearchCase):
         for line in reply_as_before(USER, "some song", CHANNEL)[1:]:
             old[re.search(r"(\S+)  ::INFO::", line).group(1)] = line
         lines = self.on()
-        prefix = "   From: D:" + BS + "MEDIA" + BS
+        prefix = "From:    D:" + BS + "MEDIA" + BS
         self.assertEqual(lines[1:], [
             old["00-some_song-loose.flac"],
             f"PRIVMSG {USER} :" + prefix + "Live" + BS + "Zeta Band" + BS + "2003 - Live Somewhere   \r\n",
@@ -244,14 +244,33 @@ class OnGroupsByFolder(SearchCase):
         self.assertEqual(froms, sorted(froms, key=str.casefold))
 
     def test_a_folder_line_never_starts_with_a_bang(self):
-        """Under every theme, and with an accent override of "!": after the
-        frame the line reads "From: "."""
+        """Under every theme, and with each of the roles the From: line's
+        own frame actually uses set to an attacker-shaped string (#1249
+        review): the raw wire text - not just the colour-stripped label -
+        starts with "From: ", under BOTH readings control codes could hide
+        a leading one behind.
+
+        BORDER/SEPARATOR/TEXTBOX are the roles this template puts BEFORE
+        "From: " in theme.blocks()'s own order - VALUE and ACCENT land
+        after it and were already safe; ALERT is unused by this template.
+        The confirmed repro: CUSTOM_THEME_BORDER = "!othernick" put that
+        text, unescaped, at the very start of the line - a real request to
+        another bot, pasted into a channel."""
+        roles = ("BORDER", "SEPARATOR", "TEXTBOX", "VALUE", "ACCENT")
         for name in theme.THEMES:
-            for accent in (None, "!"):
-                with self.subTest(theme=name, accent=accent):
-                    for line in self.from_lines(self.on(THEME=name, CUSTOM_THEME_ACCENT=accent)):
+            for role in roles:
+                overrides = {f"CUSTOM_THEME_{role}": "!othernick"}
+                with self.subTest(theme=name, role=role):
+                    for line in self.from_lines(self.on(THEME=name, **overrides)):
+                        text = self.text(line)
+                        # The raw wire text, lstripped but with control codes
+                        # still in it - what a leading \x03 would hide a "!"
+                        # behind, the gap an earlier version of this test had.
+                        self.assertTrue(text.lstrip().startswith("From: "), text)
+                        # And the same check again after stripping codes, in
+                        # case a role's override ever precedes "From: " with
+                        # something that is itself a control code sequence.
                         self.assertTrue(self.label(line).startswith("From: "), line)
-                        self.assertFalse(self.text(line).lstrip().startswith("!"), line)
 
     def test_the_result_lines_are_unchanged(self):
         expected = self.rows(reply_as_before(USER, "some song", CHANNEL))
@@ -285,7 +304,9 @@ class OnGroupsByFolder(SearchCase):
 
     def test_the_folder_is_the_lists_heading_never_a_disk_path(self):
         for line in self.from_lines(self.on(THEME="plain")):
-            self.assertTrue(self.label(line).startswith("From: " + list_mod.LIST_FOLDER_PREFIX), line)
+            label = self.label(line)
+            self.assertTrue(label.startswith("From:"), label)
+            self.assertIn(list_mod.LIST_FOLDER_PREFIX, label.split("From:", 1)[1])
             self.assertNotIn(self.tree.music, line)
 
     def test_plain_sends_no_colour_code_on_a_folder_line(self):
@@ -294,12 +315,16 @@ class OnGroupsByFolder(SearchCase):
             self.assertIsNone(re.search("[" + chr(2) + chr(3) + chr(15) + chr(22) + chr(31) + "]", text), text)
 
     def test_the_line_is_framed_like_the_header(self):
-        """Reported: the From: line did not follow the theme."""
+        """Reported: the From: line did not follow the theme. "From: " now
+        comes before the frame rather than after it (#1249 review, a
+        confirmed finding: a free-text BORDER/SEPARATOR/TEXTBOX override put
+        unescaped text at the very start of the line) - the frame itself is
+        otherwise unchanged, still closing the same way the header does."""
         palette = theme.THEMES["midnight"]
         for line in self.from_lines(self.on(THEME="midnight")):
             text = self.text(line)
-            self.assertTrue(text.startswith(f"{palette['border']} {palette['separator']} "
-                                            f"{palette['textbox']} From: {palette['value']}"), text)
+            self.assertTrue(text.startswith(f"From: {palette['border']} {palette['separator']} "
+                                            f"{palette['textbox']} {palette['value']}"), text)
             self.assertTrue(text.endswith(f" {palette['separator']} {palette['border']} "), text)
 
 
@@ -341,9 +366,10 @@ class TheLeftCut(SearchCase):
         lines = self.reply("some song", SEARCH_SHOW_FOLDER=True, THEME="plain",
                            SEARCH_FOLDER_MAX_CHARS=20)
         froms = [self.label(line) for line in self.from_lines(lines)]
-        self.assertIn("From: ...2001 - Last Album", froms)
+        self.assertIn("From:    ...2001 - Last Album", froms)
         for text in froms:
-            self.assertEqual(len(text), len("From: ") + 20, text)
+            self.assertTrue(text.startswith("From:"), text)
+            self.assertEqual(len(text.split("From:", 1)[1].lstrip()), 20, text)
 
     def test_the_line_still_fits_the_irc_budget(self):
         self.set_config(SEARCH_FOLDER_MAX_CHARS=5000)

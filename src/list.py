@@ -2218,12 +2218,18 @@ def execute_search(irc_sock, user, search_term, channel):
                 BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
 
                 # The From: line (#1228), framed like the header above it so it
-                # follows the theme. After the frame the text is always
-                # "From: ", so copying several reply lines at once never
-                # pastes it as a request.
+                # follows the theme. "From: " comes BEFORE the frame, not
+                # after it (#1249 review): CUSTOM_THEME_BORDER/SEPARATOR/
+                # TEXTBOX are free-text settings only the operator can set,
+                # and framing first meant a border set to e.g. "!othernick"
+                # put that text, unescaped, at the very start of the line -
+                # a real request to another bot, pasted into a channel.
+                # "From: " first means the line always starts with that
+                # literal text, under any theme or custom colour, matching
+                # the guarantee this feature's own changelog entry promised.
                 def _build_folder(shown_folder):
-                    return (f"PRIVMSG {user} :{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} "
-                            f"From: {V}{shown_folder} {BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n")
+                    return (f"PRIVMSG {user} :From: {BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} "
+                            f"{V}{shown_folder} {BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n")
 
                 folder_cap = getattr(config, 'SEARCH_FOLDER_MAX_CHARS', 80)
                 previous_folder = None
