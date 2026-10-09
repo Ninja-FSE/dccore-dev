@@ -89,6 +89,125 @@ than one channel with it meant every request risked landing where it serves noth
   `tests/test_a_refused_grab_is_not_a_try.py`, `tests/test_clear_spares_a_newer_request.py` and
   `tests/test_clear_failed_tells_the_other_bot.py`.
 
+### 📦 A folder's late archive is matched against the row it actually belongs to (#1244)
+
+Found in a post-merge review of #1234 (#1233). #1234's one-at-a-time dispatch promotes a bot's NEXT folder the
+moment one times out, so by the time a slow bot's archive for the FIRST (now-failed) one finally arrived, the
+bot-alone match handed it to the row that replaced it instead - confirmed live, in a long batch, as every label
+after the slow one shifting by one and the true last archive being lost outright. Separately, a "file" row back in
+"pending" (a busy-bot retry, silence, or disk space) could have its real answer claimed by an unrelated "folder"
+row offered for the same bot, since a plain folder match only ever tests the bot - never the name - and #1234 made
+an offered folder row for the same bot the ordinary case rather than a rare one.
+
+- A late folder answer is now matched the same way a late file or list answer already was - included in the SAME
+  candidate pool a live folder match is drawn from, so the existing oldest-wins tie-break naturally prefers the
+  failed row (it was asked for first) over the one promoted after it, and a named pack row's predicted name still
+  finds it even failed.
+- A pending file row that was genuinely asked for before (not merely queued) is now checked, by its exact name,
+  before any bot-alone "list"/"folder" match gets a chance at an offer.
+- The dashboard's Download selected now reports a folder post that failed outright alongside the files that
+  queued successfully, instead of showing total success and silently dropping the failure.
+- **Tests:** `tests/test_dcc_fetch.py` (7 new tests: `ALateFolderAnswerClaimsTheRightRow`,
+  `APendingFileRowIsMatchedBeforeABotAloneFolderClaim`).
+
+### 🔐 An ignore set from the dashboard could race the flood sweep and reconnect the bot (#1248)
+
+Found in a post-merge review of #1223. `config.banned_users` is written from the Flask (dashboard) and console
+threads (`ignore_user()`, `lift_ban()`) while the IRC read thread's own flood sweep reads and prunes the same dict on
+a timer - neither side took any lock. An ignore or lift landing mid-sweep raised "dictionary changed size during
+iteration", reaching the read loop's own outer exception handler, which closed the socket and reconnected the bot.
+Separately, `lift_ban()`'s check-then-delete could raise `KeyError` (a 500 on the dashboard) if the sweep expired the
+same nick in the gap between the two statements.
+
+- `security.banned_users_lock` (bound from a new `runtime.banned_users_lock`, the same pattern every other
+  reloadable module's lock already uses, so `!rehash` reloading `security.py` can never rebind it to a second,
+  uncoordinated lock) now guards every touch of `config.banned_users`: `ignore_user()`'s write, the sweep's own
+  read-and-prune, and `lift_ban()`, which also switched from check-then-`del` to an atomic `pop(key, None)`.
+- **Tests:** `tests/test_banned_users_lock.py` (5 tests) - the same deterministic forced-interleaving technique
+  `test_channel_users_lock.py` already uses for the equivalent `channel_users` race: a control test shows the
+  unlocked pattern really does raise, and a second shows the real, now-locked functions do not.
+
+### 🔒 A private request keeps the channel its sender shares with the bot (#1242)
+
+A file asked for by private message was stored with the bot's own nick as its channel, so `announce_channel_for()`
+fell back to the first configured channel. That channel then labelled the feed (SENDING, SENT and QUEUED "in
+#first-channel"), decided the requester's notices by its own mode (#1204) instead of the requester's channel, and
+received the ANNOUNCE_TRANSFERS "Sent" line. Someone in none of the bot's channels was served when a slot was free,
+and frozen then dropped when they had to queue.
+
+Built to the maintainer's decision on #1242:
+
+1. **Not a message:** `irc.names_a_file_request()` (the `!<nick> <file>` check, on every name `get_bot_aliases()`
+   returns) is what the dispatcher's `is_file_request` uses. `announce.record_private_message()` refuses such a line
+   before its cooldown, so a file request never appears on the dashboard's Messages page or in its count. Real
+   messages, including `!SomeOtherBot ...` and a bare `!SomeBot`, are kept.
+2. **The requester must share a channel with the bot:** `library.shared_channel(user)` gives the first list-bound
+   channel of ours the user is in. On an install where no channel is bound, it gives the first channel the
+   catch-all primary serves that the user is in. The debug channel never counts. `mode_for_request()` reads
+   through it, with identical results.
+   - The check runs first in `handle_download_request()`, so a free slot and a queue give the same answer.
+   - Sharing none, the request is refused silently, with no notice, row or feed event; a console and a debug line
+     say why. `list.send_file_list()` refuses the same way, before its "Preparing full list" notice.
+   - A user who leaves later is frozen and dropped as before (`freeze_absent_user()`, `FREEZE_TIMEOUT`).
+   - While the bot is still re-learning channel members after a reconnect, nobody is known to share a channel, so
+     a private request is refused until it has.
+3. **No announcement:** `send_transfer_complete(..., private=True)` tells no channel, and `start_dcc_send()` passes
+   it from `dcc.is_private_row()`.
+4. **The real channel for the operator:** the row stores the shared channel with `"private": True`. REQUEST, QUEUED,
+   SENDING, SENT, FAIL and the freeze lines name it, and its mode decides the notices. The REQUEST line says
+   "by private message (in #chan)".
+
+**Unchanged:**
+- **Old queue rows** (the bot's nick as channel, no flag) load and send. `is_private_row()` recognises them,
+  `announce_channel_for()` resolves their shared channel when they are sent, and gives `""`, never the first
+  configured channel, when there is none.
+- **Channel requests** keep the same keys and lines, with no presence check.
+
+- **Tests:** `tests/test_a_private_request_keeps_its_real_channel.py` (36 tests; 22/22 mutations caught).
+  - Four tests that pinned the old fallback now expect the shared channel and no Sent line:
+    `test_a_private_requests_sent_line_goes_to_a_channel`, `test_the_sweep_could_not_see_a_pm_requester`,
+    `test_path_security` and `test_a_private_rar_request_is_routed_by_its_label`.
+  - `test_irc_dispatch`'s harness binds `names_a_file_request`.
+
+### 🔀 The queue controls work on the real queue (#1245)
+
+A review of #1206's queue controls against #1205's list-first rule found five places where they acted on a queue
+that was not the one being served.
+
+- **Moving a nick broke the #1032 order.** `move_waiting_user()` re-stamped every waiting nick in `queue_order()`'s
+  order, which is list-first: a nick with a list at its head got the oldest stamp, `go_to_the_back(keep_place=True)`
+  kept it once the list had gone, and its files jumped the whole line. A move now swaps the wait stamps of the nick
+  and its neighbour and touches no other nick's. Equal stamps (after a restart none has one) are first spread apart
+  by `_untie_waits()`, the tied nicks only, in the order they already stand. A list going first is not a wait, so no
+  swap can move a nick past one: that move is refused, with the place the nick keeps. The reply reads the line
+  after the move; "alfa up" against a list used to say "number 1" while alfa was still second.
+- **The Queue page showed another line.** `build_queue_payload()` sorted by the wait alone, so a waiting list was
+  shown last while it was served first, and the arrows moved against a line the page did not show. The page,
+  `queue_order()` and so `queue` now share one function, `dcc.slot_order()`, with the dispatcher's
+  `list_first_rank()`. `a_list_may_go_first()` takes a copy of the transfers for the page, which reads without the
+  lock.
+- **A queued file being sent could be moved past, or removed.** The guard looked for the row's path in
+  `active_transfers`, and only a send that never queued has a path there. The claims for a queued row (both
+  dispatch paths) and for a packed archive now carry the row itself as `queue_row`, and `dcc.queued_row_in_flight()`
+  goes by that. `queueremove` and the page's remove refuse it ("That file is being sent right now, so it cannot be
+  removed."); before, the nick was told the file was removed while it kept arriving.
+- **The pack guard took the packing row to be the first.** A list sent to the front while a folder packs is the
+  first. The pack job now holds its row (`_begin_pack_job(..., row=)`), so the guard finds the row itself. A packing
+  folder is not removed either: the reply points to `packcancel`.
+- **"The queue has changed" compared names.** Two albums each holding an `Intro.mp3`: after the file ahead
+  finished, removing place 2 by the name the page showed removed the other album's file, and a route with no name
+  checked nothing. `/api/queue` rows now carry `file_ids`, one `dcc.queue_row_id()` per file: a short hash of the
+  path the row was queued for (its folder for a packed one), so the path never reaches the page. `move-file` and
+  `remove-file` take `id` instead of `file`, and it is required; a missing id is a 400 that says to reload the
+  page. The console still goes by the numbers `queue <nick>` shows.
+- **Smaller:** `build_queue_clear_result()` reads the count under `queue_lock`; the stale comments in `app.js` and
+  `build_queue_payload()` that said a file being sent is never in `dcc_queue` are corrected (a queued file keeps its
+  row until the send settles it).
+- **Tests:** `tests/test_queue_control_keeps_the_real_order.py` (40 tests, through the real
+  `handle_download_request`, `check_queue_and_send`, packer and routes; 18/18 mutations caught). In
+  `test_the_queue_can_be_controlled`, the transfers faked with a `"path"` now have the claim dcc.py makes, the pack
+  job holds its row, and the routes send the file's id.
+
 ### 🔕 Search can be turned off (#1237)
 
 The channel advert said `Search: ON` and every `@find` reply header `Search Result: ON`, but both were fixed text: no
@@ -354,10 +473,10 @@ The commands and the dashboard had them; the mIRC menus did not.
 
 The operator could clear a whole queue and nothing else: no way to let one nick go first, to change which of a nick's files comes next, or to drop a single file.
 
-- **Who goes next.** The dispatcher gives a free slot to the nick that has waited longest (#1032). `queuemove <nick> up|down` swaps two nicks' wait stamps - every waiting nick is re-stamped in its new place, since after a restart none has a stamp and a swap of two zeros would change nothing. `queue` and the Queue page now list the nicks in that order (the console used to list dict order, which is arrival order only until someone finishes a send). The order is kept in memory only, as the stamps are: a restart puts it back to first-come.
+- **Who goes next.** The dispatcher gives a free slot to the nick that has waited longest (#1032). `queuemove <nick> up|down` swaps two nicks' wait stamps - and, since #1245, only theirs (it re-stamped every waiting nick, which leaked the list-first order into the waits). `queue` and the Queue page now list the nicks in that order (the console used to list dict order, which is arrival order only until someone finishes a send). The order is kept in memory only, as the stamps are: a restart puts it back to first-come.
 - **Which file next.** `queuemove <nick> <number> up|down` swaps a file with its neighbour in the nick's own queue; the dispatcher sends a queue from the top. A file being sent, or the folder being packed, is not moved and nothing is moved past it: the send settles its row by identity and a user could otherwise be left with the wrong file in flight.
 - **Remove one file.** `queueremove <nick> <number>` takes the same route as the nick's own `@<bot>-remove <file>` - one function, `_take_rows_out()`, now does the removal for both - so a packed folder's temp archive goes with its row, a frozen nick unfreezes with its last file, and the nick gets the same `Removed "<file>" from your queue.` notice. A refused change sends nothing. `queue <nick>` numbers the files.
-- **Dashboard, Queue page:** each nick has *earlier* / *later* arrows and *Clear* (it asks first, with the count, then calls the same function as `clearqueue`); each file has *earlier* / *later* / remove. A page remembers which nicks' file lists were open across its refresh - they used to shut every few seconds, which would have made the buttons inside them unusable. Routes: `POST /api/queue/move-user`, `/move-file`, `/remove-file`, `/clear`. A move or remove sends the file's place **and its name**; if the queue changed since the page was drawn the answer is "The queue has changed - look again" instead of acting on whatever slid into that place.
+- **Dashboard, Queue page:** each nick has *earlier* / *later* arrows and *Clear* (it asks first, with the count, then calls the same function as `clearqueue`); each file has *earlier* / *later* / remove. A page remembers which nicks' file lists were open across its refresh - they used to shut every few seconds, which would have made the buttons inside them unusable. Routes: `POST /api/queue/move-user`, `/move-file`, `/remove-file`, `/clear`. A move or remove sends the file's place **and its id** (its name until #1245); if the queue changed since the page was drawn the answer is "The queue has changed - look again" instead of acting on whatever slid into that place.
 - **mIRC menus:** see part 3.
 - **Tests:** `test_the_queue_can_be_controlled` (50): the order and the dispatcher's walk, the ends, stale names, a file being sent or packed, duplicate names, the notice matching `@<bot>-remove`, temp archives, frozen nicks, the console, the routes, the page wiring and strings.
 

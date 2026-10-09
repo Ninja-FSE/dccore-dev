@@ -237,7 +237,7 @@ PLAIN_HELP = {
     'FETCH_HISTORY_DAYS': 'How many days a finished download from another bot stays in the Downloads table. The downloaded file itself is kept regardless.',
     'FETCH_HISTORY_MAX_ROWS': 'The most finished downloads kept in that table, whatever their age.',
     'ANNOUNCE_INTERVAL': 'How often the bot posts its advert in the channel, in seconds. 300 is every five minutes. Do not go much lower - channels do not like a bot that advertises constantly.',
-    'ANNOUNCE_TRANSFERS': 'Post a line in the channel each time a file has been sent. Everything else about a transfer is private to the person who asked; this is the only public part.',
+    'ANNOUNCE_TRANSFERS': 'Post a line in the channel each time a file has been sent. Everything else about a transfer is private to the person who asked; this is the only public part. A file asked for by private message is never announced.',
     'BROADCAST_SEARCH_CHANNEL': 'The one channel used when you search all bots at once from the dashboard. Leave empty to use your first channel.',
     'BROADCAST_SEARCH_COOLDOWN': 'How many seconds must pass between two of those search-all-bots searches, to be polite to the other bots in the channel.',
     'CTCP_VERSION_REPLY': 'Answer when somebody asks the bot what software it runs (a CTCP VERSION request). The answer goes only to the person who asked. Turn off to stay quiet about it.',
