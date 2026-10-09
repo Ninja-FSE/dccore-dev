@@ -287,7 +287,7 @@ class TheScriptVersionMovedOn(unittest.TestCase):
     def test_the_version_is_at_least_1_13(self):
         """The changelog tells operators to reload the script for this; the
         bot reads the version from `hello` (adminchat compares tuples)."""
-        found = re.search(r"^alias dccore\.ver \{ return (\d+)\.(\d+) \}$", script(), re.M)
+        found = re.search(r"^alias dccore\.ver \{ return (\d+)\.(\d+)(?:\.\d+)? \}$", script(), re.M)
 
         self.assertIsNotNone(found)
         self.assertGreaterEqual((int(found.group(1)), int(found.group(2))), (1, 13))

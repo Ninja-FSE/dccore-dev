@@ -3160,6 +3160,114 @@ def build_fetch_delete_result(request_id, only_states=None):
     return 200, result
 
 
+def build_fetch_delete_many_result(request_ids, only_states=None):
+    """Delete several rows in ONE pass (#1246 review), for `dlcancel all` /
+    `dlcancel <id> <id> ...` - dccore.mrc's own "Remove all" calls this
+    through the same console command.
+
+    Before this, each id went through build_fetch_delete_result() on its
+    own: a separate acquire-and-release of the fetch lock, a separate
+    another_row_wants_locked() SCAN of the whole queue, and a separate
+    persist_fetch_history() REWRITE OF THE WHOLE HISTORY FILE - all of it
+    repeated once per id. Measured: 500 pending + 500 finished took 6.0s;
+    2000 pending took 39.8s, the console taking no other command meanwhile
+    (dict mutation and the history write both run under a lock a console
+    command is also subject to). The same pattern build_fetch_clear_result()
+    already uses for the Downloads page's Clear buttons, generalised to an
+    explicit id list instead of a state-selected one: one hold of the lock
+    for the whole batch, one scan for "is anything else still waiting on
+    this exact file" per row but all under that SAME hold rather than a
+    fresh acquire each time, and one persist at the very end.
+
+    Deletes a file from disk for a row that has one (same reasoning as
+    build_fetch_delete_result() - unreachable for the current caller's
+    "pending"/"offered"/"queued" states, since none of them has received a
+    byte yet, but kept here so this function's own contract does not
+    silently depend on which states a caller happens to pass today).
+
+    Returns (http_status, {"cancelled": [ids], "refused": [{"id":, "error":}]})
+    - always 200: a per-id refusal (already in flight, gone, or wrong
+    state) is reported per id, not failed as a whole request, the same as
+    build_fetch_clear_result()'s own "nothing to clear is not an error".
+    """
+    import dcc
+    import dcc_fetch
+
+    cancelled = []
+    refused = []
+    still_held = []
+    removed_files = []
+    with dcc_fetch._fetch_lock():
+        queue = dcc_fetch._ensure_fetch_queue()
+        for request_id in dict.fromkeys(request_ids):
+            row = queue.get(request_id)
+            if row is None:
+                refused.append({"id": request_id, "error": "Unknown fetch request."})
+                continue
+            if only_states is not None and row.get("state") not in only_states:
+                refused.append({"id": request_id, "error": "That download is no longer waiting."})
+                continue
+            if row.get("state") not in ("complete", "failed", "pending", "queued", "offered"):
+                refused.append({"id": request_id, "error": "A fetch already in progress cannot be deleted."})
+                continue
+            stored_filename = row.get("stored_filename")
+            at_the_bot = ((row.get("state") in ("offered", "queued")
+                          or (row.get("state") == "failed" and row.get("reason") == "no response"))
+                         and row.get("request_type", "file") == "file")
+            bot = row.get("bot")
+            asked_for = row.get("requested_filename") or row.get("filename")
+            channel = row.get("channel")
+            del queue[request_id]
+            never_sent = dcc_fetch.take_back_unsent_request(row)
+            if at_the_bot and not never_sent:
+                still_held.append((bot, asked_for, channel))
+            if stored_filename:
+                removed_files.append(stored_filename)
+            cancelled.append(request_id)
+        # Never for a file a newer row (one of THIS batch's own survivors,
+        # or one outside it) still waits on there (#1083) - checked once
+        # the whole batch has already been popped, under the SAME lock
+        # hold, not a fresh another_row_wants_locked() scan per id.
+        still_held = [(bot, asked_for, channel) for bot, asked_for, channel in still_held
+                     if not dcc_fetch.another_row_wants_locked(queue, bot, asked_for)]
+        # Two of THIS batch's own rows can both be "at_the_bot" for the same
+        # bot and file (the exact #1083 shape, both sides now gone): the
+        # check above lets both through since neither sees the other in the
+        # queue by the time it runs. One "@bot-remove" clears our entry
+        # there regardless of how many local rows pointed at it, so only
+        # the first is kept.
+        seen = set()
+        deduped = []
+        for bot, asked_for, channel in still_held:
+            key = (bot, asked_for)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append((bot, asked_for, channel))
+        still_held = deduped
+
+    directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+    for stored_filename in removed_files:
+        target = os.path.join(directory, stored_filename)
+        if not dcc.is_safe_path(directory, target):
+            print(f"[WEBUI] Refused to delete {stored_filename!r}: outside FETCHED_FILES_DIR.")
+            continue
+        try:
+            os.remove(platform_compat.long_path(target))
+        except FileNotFoundError:
+            pass
+        except OSError as remove_err:
+            print(f"[WEBUI] Could not delete fetched file {stored_filename!r}: {remove_err}")
+
+    for bot, asked_for, channel in still_held:
+        dcc_fetch.drop_our_request_at(bot, asked_for, channel=channel)
+
+    if cancelled:
+        dcc_fetch.persist_fetch_history()
+
+    return 200, {"cancelled": cancelled, "refused": refused}
+
+
 # Which finished rows POST /api/fetch/clear may forget, by what the operator asked for.
 FETCH_CLEAR_STATES = {
     "finished": ("complete", "failed"),
