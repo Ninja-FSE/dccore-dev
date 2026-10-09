@@ -113,6 +113,7 @@
   "download.state.rejected": "Rechazado",
   "download.couldNotQueue": "No se pudo encolar la descarga: {error}",
   "download.queuedForFetch": "Se encolaron {count} archivo(s) para obtener - ver Cola → Descargas.",
+  "download.partialFailure": "Una parte no se pudo encolar: {error}",
   "filelists.collapseAll": "Contraer todo",
   "filelists.downloadSelectedTitle": "Marque los archivos que desea. Mayús+clic en una segunda casilla selecciona todo lo que hay entre ella y la última que tocó.",
   "filelists.expandAll": "Expandir todo",

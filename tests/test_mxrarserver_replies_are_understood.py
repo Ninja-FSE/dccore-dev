@@ -198,14 +198,23 @@ class ALateList(DCCoreTestCase):
 
         self.assertEqual(self.claim(bot="SomeoneElse"), (None, None))
 
-    def test_not_for_a_failed_folder_request(self):
-        """A folder request names nothing either; the bot alone is not enough
-        to give it a file after it gave up."""
+    def test_a_failed_folder_request_is_taken_too(self):
+        """#1244 review: a folder request names nothing either, so it used
+        to be refused the same late-offer allowance a list already gets -
+        but #1234's one-at-a-time dispatch promotes a bot's NEXT folder the
+        moment one times out, so a slow bot's archive for the FIRST
+        (now-failed) one arriving late was claimed by the row that replaced
+        it instead. A failed folder row's late answer is now taken by the
+        bot-alone match, exactly like a failed list row's already was."""
         rid = dcc_fetch.enqueue_fetch(BOT, "!rar Artist/Album", request_type="folder")
         config.fetch_queue[rid].update(state="failed", reason="no response",
                                        offered_at=time.time() - 300)
 
-        self.assertEqual(self.claim(name="Album.rar"), (None, None))
+        claimed_id, row = self.claim(name="Album.rar")
+
+        self.assertEqual(claimed_id, rid)
+        self.assertEqual(row["state"], "receiving")
+        self.assertNotIn("reason", row)
 
     def test_a_request_still_waiting_comes_first(self):
         self.failed_list_row()

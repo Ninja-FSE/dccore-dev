@@ -3195,7 +3195,17 @@
         if (!queued) {
           showFilelistsFetchStatus(t("download.couldNotQueue").replace("{error}", failure), true);
         } else {
-          showFilelistsFetchStatus(t("download.queuedForFetch").replace("{count}", queued), false);
+          // A mixed files+folders tick (#1244 review): the files post and
+          // the folder post are two separate requests, and only the files
+          // one succeeding used to report total success - a folder post
+          // refused outright (409 for an outstanding list, 413 over 500
+          // rows, the bot absent) was silently dropped, every box unticked
+          // regardless, as if nothing had gone wrong.
+          var message = t("download.queuedForFetch").replace("{count}", queued);
+          if (failure) {
+            message += " " + t("download.partialFailure").replace("{error}", failure);
+          }
+          showFilelistsFetchStatus(message, Boolean(failure));
           Array.prototype.forEach.call(checked, function (box) { box.checked = false; });
           // Re-read the page so the rows just queued say so. The marks are
           // stamped server-side when a page is built, so without this they
