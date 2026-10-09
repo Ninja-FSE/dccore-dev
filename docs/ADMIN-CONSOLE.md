@@ -244,9 +244,9 @@ prefix.
 |---|---|
 | `ban <pattern>` | add a permanent wildcard ban |
 | `unban <pattern>` | remove one |
-| `queuemove <nick> up\|down` | move a nick one place up or down the line for a free slot (#1206); `queue` lists the nicks in that order. The order is kept in memory only: a restart puts it back to first-come |
-| `queuemove <nick> <number> up\|down` | move one of a nick's queued files up or down in its own queue — the one at the top is sent first. A file being sent or packed stays put. The number is the one `queue <nick>` shows |
-| `queueremove <nick> <number>` | take one file out of a nick's queue, as if they had typed `@<bot>-remove <file>`: same notice to them, `clearqueue` removes the lot |
+| `queuemove <nick> up\|down` | move a nick one place up or down the line for a free slot (#1206); `queue` lists the nicks in that order. Only the two nicks swap places; nobody else's moves. A nick with a list waiting is served first, so nobody is moved past it - that is refused, with the place the nick keeps. The order is kept in memory only: a restart puts it back to first-come |
+| `queuemove <nick> <number> up\|down` | move one of a nick's queued files up or down in its own queue — the one at the top is sent first. A file being sent or packed stays put and nothing is moved past it. The number is the one `queue <nick>` shows |
+| `queueremove <nick> <number>` | take one file out of a nick's queue, as if they had typed `@<bot>-remove <file>`: same notice to them, `clearqueue` removes the lot. A file being sent is not removed, nor a folder being packed (`packcancel` stops that) |
 | `ignore <nick> <minutes>` | drop one nick's requests for a while, 1 to 10080 minutes (#1206). It is a timed ban: kept across a restart, ends by itself, listed by `bans` with the time left. Its queued files stay; `clearqueue` removes them |
 | `unignore <nick>` | end a timed ignore - or a flood ban - now |
 | `clearqueue <nick>` | force-clear another user's queue |
