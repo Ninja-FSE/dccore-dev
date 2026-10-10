@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **New: the dashboard's settings over the admin console**, for the settings window coming to `dccore.mrc`: `settings` lists every setting with its value, `set <KEY> <value>` changes one (or `setbegin` ... `setcommit` saves many with one rehash), and `served`, `folders`, `onconnect`, `setpreview` and `banlist` cover the lists and channels, the folders, the on-connect commands, the theme preview and the bans. They run the dashboard's own checks and save, so a value one refuses the other refuses too. See `docs/ADMIN-CONSOLE.md`, "Settings over the console".
+- **New: the dashboard's settings over the admin console**, for the settings window coming to `dccore.mrc`: `settings` lists every setting with its value, `set <KEY> <value>` changes one (or `setbegin` ... `setcommit` saves many with one rehash), and `served`, `folders`, `onconnect`, `setpreview` and `banlist` cover the lists and channels, the folders, the on-connect commands, the theme preview and the bans. They run the dashboard's own checks and save, so a value one refuses the other refuses too, and they need the admin password as the dashboard does: a script logged in with its paired token can read the settings, and changes them only after `unlock <password>` once in that session. See `docs/ADMIN-CONSOLE.md`, "Settings over the console".
 - **Fixed: a letter like ö or é in a long line typed into the admin console could arrive as two � marks**, when it fell where the bot read the line in two parts. And `nan` or `inf` is no longer accepted as a number by the Settings page or for the delay between on-connect commands.
 
 ## v1.16.1 — The Bot Forgets on Purpose

@@ -68,12 +68,28 @@ work is `src/console_settings.py`, reached only from `adminchat.COMMANDS`; the l
   And the window's "..." browse buttons were greyed out on a bot running on the same PC: a DCC chat arrives from the
   public address the client advertises, never 127.0.0.1, so the address cannot say "same machine". The `CAPS` line
   ends with `machine:<this computer's name>` for the window to compare with its own.
+- **Settings changes need the admin password, not only a paired token.** A paired token is kept in clear text in
+  `dccore.ini`, and these commands do what the dashboard asks the password for - serve any directory, read and resend
+  the on-connect commands (an X login holds a password), point `ADMIN_TOKENS_FILE` or `ADMIN_HOSTMASKS` anywhere. The
+  Session now records how it logged in (`unlocked`, `paired_as`, set by `_check_password()`; locked until then). A
+  token session reads (`settings`, `served`, `folders`, `banlist`, `setpreview`, `consolecaps`) and may buffer `set`
+  lines, but `setcommit`, a lone `set`, `served`/`folders`/`onconnect commit`, `onconnect resend`, the `onconnect`
+  listing, `pair` and `unpair` of another token answer `DCCORE LOCKED <command> ...` - the transaction stays open -
+  until `unlock <password>` (the login's own check, three tries, never logged) answers `DCCORE UNLOCKED`. The
+  dashboard's Console counts as the password. `CAPS` adds `unlock:1`.
+- **A revert before the rehash is saved; `SETAPPLIED` says when the rehash has run.** "Unchanged" was judged against
+  the running config, but a save's rehash first waits up to `REHASH_TRANSFER_WAIT` for transfers, and putting a
+  setting back in that window was "Nothing changed" while the file kept the new value. It is judged against what
+  `settings.conf` holds for the setting now (config only when the file does not set it). And
+  `apply_settings_changes()` takes an `on_applied` callback, run when its rehash has finished: the console sends
+  `DCCORE SETAPPLIED` then, always after its `SETDONE ok`, so the window reloads its page when the values are live.
 - **Tests:** `tests/test_console_settings_commands.py` (the encoding; framing and counts; every setting round-tripped
   with no save; one save per commit, through the real `settings_file.save()`; per-key errors; abort; the
   debug-channel confirmation; the preview's unsaved values; served lists, folders and on-connect round trips; the ban
   rows; that nothing but the console reaches these commands; the outbox bound; help and the guide),
   `tests/test_console_settings_edge_cases.py` (each review finding, through the real Session, writer and reader
-  loop), `tests/test_the_mirc_menu_has_every_command.py` (the new commands are the window's plumbing, not menu items).
+  loop), `tests/test_console_settings_need_the_password.py` (the lock, unlock, the revert during a held rehash,
+  `SETAPPLIED`), `tests/test_the_mirc_menu_has_every_command.py` (the new commands are the window's plumbing, not menu items).
 
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 

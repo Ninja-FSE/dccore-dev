@@ -275,6 +275,7 @@ prefix.
 | `onconnect` | the commands sent to the server once registered, in full (an X login with its password included, as the dashboard shows it - never in the bot's log), and the seconds between them; `onconnect begin`, `onconnect delay`, `onconnect line` rows and `onconnect commit` replace them (`onconnect abort` drops it); `onconnect resend` sends the saved ones again now |
 | `banlist` | the permanent ban patterns and the timed bans and ignores with the seconds left, as rows for the settings window; `bans` is the same for a person |
 | `consolecaps` | which of the settings window's commands this bot has, and their protocol versions |
+| `unlock <password>` | let a session that logged in with a paired token change settings: the admin password, checked as the login checks it, once per session. A session that logged in with the password is unlocked already. Three wrong passwords close the session, as at the login; the line is never logged |
 | `help` | the command list |
 | `hello <client> <version>` | switch this session to the structured feed (below) |
 | `pair <client> <version>` | mint a login token for a script (below) |
@@ -648,10 +649,16 @@ host the bot is known to have (`bothost`); otherwise the window says so and the
 script stops reconnecting until you `/dccore connect`. A script with no
 `bothost` yet learns the host the first time it is known, as for the token.
 
-What a token does **not** do is open the dashboard. The web login checks the
-admin password hash and nothing else - the token store is never read there -
-so a stolen token costs you a console session and nothing more, and one
-`unpair` ends even that. For `dccore.mrc` the file that holds it is
+What a token does **not** do is open the dashboard, or change the bot's
+settings. The web login checks the admin password hash and nothing else - the
+token store is never read there. In the console, a session that logged in
+with a token can read the settings, the served lists, the folders and the
+bans, and drive the feed and the queue commands as before; changing a
+setting, the lists, the folders or the on-connect commands, reading or
+resending the on-connect commands (an X login among them holds a password),
+and pairing or revoking another script need the password, once per session:
+`unlock <password>` (see "Settings over the console"). A stolen token still
+costs you a console session, and one `unpair` ends it. For `dccore.mrc` the file that holds it is
 `dccore.ini` beside the script, and it is clear text: mIRC's hash-table save
 writes the token readable. The `.mrc` itself carries nothing. Keep `dccore.ini`
 as you would a password file - a copied mIRC folder or a shared PC is where it
@@ -690,6 +697,19 @@ The commands `settings`, `set`, `setbegin`, `setcommit`, `setabort`,
 runs the dashboard's own code - the same list of settings, the same checks,
 the same save, the same rehash - so the console can never accept a value the
 page would refuse, or the other way round.
+
+**Settings changes need the admin password, not only a paired token.** A
+session that logged in with the password can do all of it. One that logged in
+with a paired token - kept in clear text in `dccore.ini` - can read `settings`,
+`served`, `folders`, `banlist`, `setpreview` and `consolecaps`, and buffer
+`set` lines in a transaction, but is answered `DCCORE LOCKED <command>` for
+`setcommit`, a lone `set`, `served commit`, `folders commit`, `onconnect commit`,
+`onconnect resend`, the `onconnect` listing itself (an X login holds a
+password), `pair`, and `unpair` of anything but its own token - until
+`unlock <password>` succeeds once in that session. A refused commit leaves its
+transaction open, so the window can ask for the password, unlock, and send the
+commit again. The dashboard's own Console is behind the dashboard login, which
+is the password, and is never locked.
 
 They are console commands only. The admin commands typed in a channel are a
 fixed handful (`!rehash`, `!update`, `!ban`, `!unban`, `!clearqueue`) and never
@@ -762,14 +782,18 @@ first field, and its last field is always a sentence to show.
 
 | line | when | fields |
 |---|---|---|
-| `DCCORE CAPS <name>:<version> ... machine:<name>` | `consolecaps` | today `settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1`, then `machine:` and this computer's name (spaces and colons as `-`), which a client compares with its own to know whether the bot is on the same machine - the console's address cannot tell, since a DCC chat to a bot on the same PC arrives from the public address. A bot without these commands answers `DCCORE OUT Unknown command: consolecaps. Type 'help'.` - say "update the bot" then. A version goes up when a field of that part moves; a part added later is a new name |
+| `DCCORE CAPS <name>:<version> ... machine:<name>` | `consolecaps` | today `settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1 unlock:1`, then `machine:` and this computer's name (spaces and colons as `-`), which a client compares with its own to know whether the bot is on the same machine - the console's address cannot tell, since a DCC chat to a bot on the same PC arrives from the public address. A bot without these commands answers `DCCORE OUT Unknown command: consolecaps. Type 'help'.` - say "update the bot" then. A version goes up when a field of that part moves; a part added later is a new name |
 | `DCCORE SETBEGIN <n>` / `DCCORE SETF <KEY> <type> <value>` / `DCCORE SETEND <n>` | `settings [<word>]` | one `SETF` per setting, in the Settings page's order; `type` is `str`, `int`, `float`, `bool` or `list`, the value last (empty: the line ends after the type - for `WEBUI_CONSOLE_ENABLED` that means "not set"). `ADMIN_PASSWORD_HASH` is never among them. Labels, help, units and choices are the dashboard's metadata, not sent here |
+| `DCCORE LOCKED <command> <sentence>` | any of the commands above that change something, on a session that logged in with a token and has not unlocked | `command` is what was refused, one or two words (`setcommit`, `set`, `served commit`, `folders commit`, `onconnect commit`, `onconnect resend`, `onconnect`, `pair`, `unpair`); the sentence says to unlock. Nothing was saved; an open transaction stays open |
+| `DCCORE UNLOCKED` | `unlock <password>` | the session may change settings now (also the answer when it already could) |
+| `DCCORE UNLOCK error <message>` | `unlock` with a wrong password | still locked; the third wrong one closes the session instead |
 | `DCCORE SETOPEN <dropped>` | `setbegin` | `dropped`: changes buffered by a transaction that was still open, now gone (0 normally) |
 | `DCCORE SETERR <KEY> <message>` | `set` refused | the Settings page's reason. `KEY` is the name as sent, uppercased |
-| `DCCORE SETDONE ok <written> <unchanged> <restart> <message>` | `setcommit`, or `set` outside a transaction | saved in one call, rehash started; `unchanged` counts the values equal to the current ones, not written; `restart` is the comma-separated settings that need a restart of the bot (`WEBUI_*`, `SERVER`, `PORT`), or `-` |
+| `DCCORE SETDONE ok <written> <unchanged> <restart> <message>` | `setcommit`, or `set` outside a transaction | saved in one call, rehash started; `unchanged` counts the values equal to the current ones - what `settings.conf` holds for the setting, or the running value when the file does not set it - not written; `restart` is the comma-separated settings that need a restart of the bot (`WEBUI_*`, `SERVER`, `PORT`), or `-` |
 | `DCCORE SETDONE error <message>` | | nothing was saved; the transaction is closed |
 | `DCCORE SETDONE confirm <question>` | | the commit clears `DEBUG_CHANNEL`, and the bot leaves that channel at once: ask, then send `setcommit confirm` (or `setabort`). A transaction from `setbegin` stays open meanwhile. After a lone `set` the question holds only until the next line: anything but `setcommit confirm` or `setabort` first ends it with `SETDONE aborted <n>`, and is then run as usual - so a later lone `set` saves at once, as it says |
 | `DCCORE SETDONE aborted <n>` | `setabort` | `n` buffered changes dropped |
+| `DCCORE SETAPPLIED` | after `SETDONE ok` with something written | the save's rehash has finished, so the new values are in effect - reload the page now, not at `SETDONE`: the rehash first waits up to `REHASH_TRANSFER_WAIT` for transfers, and until it reloads, `settings` still shows the old values. Always after the `SETDONE ok` it belongs to; none for a save that wrote nothing or failed |
 | `DCCORE PVBEGIN 2` / `DCCORE PVLINE <advert\|notice> <line>` / `DCCORE PVEND 2` | `setpreview` | the sample advert and transfer notice, encoded like every other value - colour codes as `%03`, runs of spaces as `%20` - so a client decodes it and echoes it in colour. (mIRC collapses runs of spaces in a chat line, and a theme's frame is made of them.) |
 | `DCCORE SRVBEGIN <lists> <source> <max>` / `DCCORE SRVLIST <n> <primary> <name>` / `DCCORE SRVCHAN <n> <channel> <mode>` / `DCCORE SRVFOLDER <n> <label> <path>` / `DCCORE SRVEND <lists> <channels> <folders>` | `served` | per list, in order: its `SRVLIST` (`n` from 1, `primary` `1` or `0`, the name last), then a `SRVCHAN` per channel bound to it (`channel` a token, `mode` `normal`, `quiet` or `request_only`), then a `SRVFOLDER` per folder (`label` a token, the path last). `source` is `file` (`lists.json`) or `implied` (none: one list over the served folders - sending it back unchanged does not create the file). `max` is how many lists there may be |
 | `DCCORE SRVOPEN <dropped>` | `served begin` | then `served list <n> <0\|1> <name>` (`n` the next number), `served chan <n> <channel> <mode>`, `served folder <n> <label> <path>`, and `served commit` or `served abort` |
@@ -814,7 +838,8 @@ token the bot answers with in `dccore.ini` beside the script (in clear
 text - see "What a token does not do" above), and from then on connects
 and logs in without you: on `/dccore connect`, when mIRC connects to IRC,
 and whenever the bot's nick joins a channel you share. The token opens the
-console and nothing else; the password never touches the disk.
+console and nothing else: changing settings asks for the password once in the
+session (`unlock`). The password never touches the disk.
 
 If your client cannot be dialled and the bot offers the chat back (path
 2), mIRC shows its usual incoming-chat dialog the first time - accept it,
