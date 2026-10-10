@@ -61,6 +61,51 @@ def real_session(case, start_writer=True):
     return session, far
 
 
+def small_buffers(*socks):
+    """Shrink a socket pair's buffers to a few KB, macOS-sized.
+
+    A Unix socket pair on macOS buffers about 8 KB; Linux's and Windows'
+    hold far more. A test that wrote a long row BEFORE starting the thread
+    that reads it passed on those two and hung for ever on macOS (the CI
+    shard was killed after 30 minutes). Small buffers make that mistake hang
+    on a platform that honours them; Windows' loopback pair does not (tried),
+    so the real protection is feed_while_reading() below, which starts the
+    reader before it writes.
+    """
+    for sock in socks:
+        for option in (socket.SO_SNDBUF, socket.SO_RCVBUF):
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, option, 4096)
+            except OSError:
+                pass
+
+
+def feed_while_reading(case, far, payload, session, seconds=10):
+    """Run the real _reader_loop on `session` and write `payload` to the far
+    end WHILE it reads, then close the far end's sending side.
+
+    The reader starts first and the write happens on a thread of its own,
+    so a payload bigger than the socket buffer drains as it is written
+    rather than blocking on a reader that has not started. A reader that
+    closes the session part way (Line too long) breaks the pipe: that is
+    the case under test, not an error.
+    """
+    reader = threading.Thread(target=adminchat._reader_loop, args=(session,), daemon=True)
+    reader.start()
+
+    def write():
+        try:
+            far.sendall(payload)
+            far.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+    writer = threading.Thread(target=write, daemon=True)
+    writer.start()
+    reader.join(seconds)
+    case.assertFalse(reader.is_alive(), "the reader loop did not finish")
+    writer.join(seconds)
+
+
 def read_until(sock, done, limit=30.0):
     """Every line `sock` receives until done(lines) holds or `limit` passes."""
     sock.settimeout(0.5)
@@ -153,6 +198,7 @@ class ACharacterSplitAcrossTwoReadsSurvives(DCCoreTestCase):
         near, far = socket.socketpair()
         self.addCleanup(near.close)
         self.addCleanup(far.close)
+        small_buffers(near, far)
         session = adminchat.Session(near, "192.0.2.1", "alfa", "alfa.example")
         session.authenticated = True
         session.send = lambda *a, **k: None
@@ -166,11 +212,7 @@ class ACharacterSplitAcrossTwoReadsSurvives(DCCoreTestCase):
         filler = "x" * (1024 - head - 1 - 1) + "\n"     # the o-umlaut's two bytes straddle 1024
         payload = (filler + row + "\n").encode("utf-8")
         self.assertEqual(payload.index("\u00f6".encode("utf-8")), 1023)
-        far.sendall(payload)
-        far.shutdown(socket.SHUT_WR)
-        reader = threading.Thread(target=adminchat._reader_loop, args=(session,))
-        reader.start()
-        reader.join(10)
+        feed_while_reading(self, far, payload, session)
         self.assertEqual([l for l in seen if l.startswith("folders row 2")], [row])
 
 
@@ -286,6 +328,7 @@ class ALongLegalRowIsNotTooLong(DCCoreTestCase):
         near, far = socket.socketpair()
         self.addCleanup(near.close)
         self.addCleanup(far.close)
+        small_buffers(near, far)
         session = adminchat.Session(near, "192.0.2.1", "alfa", "alfa.example")
         session.authenticated = authenticated
         closed = []
@@ -297,11 +340,7 @@ class ALongLegalRowIsNotTooLong(DCCoreTestCase):
         real = adminchat.handle_command
         adminchat.handle_command = lambda s, line: seen.append(line)
         self.addCleanup(setattr, adminchat, "handle_command", real)
-        far.sendall(payload.encode("utf-8"))
-        far.shutdown(socket.SHUT_WR)
-        thread = threading.Thread(target=adminchat._reader_loop, args=(session,))
-        thread.start()
-        thread.join(10)
+        feed_while_reading(self, far, payload.encode("utf-8"), session)
         return seen, closed
 
     def test_a_folder_row_with_the_longest_label_and_path_goes_through(self):
