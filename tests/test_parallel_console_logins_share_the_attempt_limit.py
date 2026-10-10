@@ -148,6 +148,32 @@ class ParallelLogins(LoginCase):
         refused = [s for s in sessions if s.closed and not s.unlock_failures]
         self.assertEqual(len(refused), tries - adminchat.MAX_PASSWORD_ATTEMPTS)
 
+    def test_a_wrong_encoded_unlock_is_counted_once(self):
+        """The settings window sends a spaced password encoded (#1281), and
+        unlock_password_matches() verifies it as sent and then decoded - under
+        the one reservation, so it costs the address one attempt."""
+        import console_settings
+        s = self.session()
+        s.authenticated = True
+        s.unlocked = False
+        with contextlib.redirect_stdout(self.out):
+            console_settings.cmd_unlock(s, "%20guess  %20")
+        self.assertFalse(s.unlocked)
+        self.assertEqual(s.unlock_failures, 1)
+        self.assertEqual(adminchat._bad_ips[ADDRESS][0], 1)
+
+    def test_a_right_encoded_unlock_clears_the_address(self):
+        import console_settings
+        self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash(" right ", iterations=1000))
+        s = self.session()
+        s.authenticated = True
+        s.unlocked = False
+        with contextlib.redirect_stdout(self.out):
+            console_settings.cmd_unlock(s, "guess")
+            console_settings.cmd_unlock(s, "%20right%20")
+        self.assertTrue(s.unlocked)
+        self.assertNotIn(ADDRESS, adminchat._bad_ips)
+
     def test_a_blocked_address_cannot_unlock_even_with_the_password(self):
         import console_settings
         first = self.session()

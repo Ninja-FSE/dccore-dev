@@ -14,7 +14,7 @@ Reported privately (an audit of the admin console and admin access) and fixed be
   state `in`, and takes TOKEN only when it sent `pair` in this chat (`pairsent`, set beside both `dccore.send pair`)
   and the peer was checked: peerok said yes (`vetted`, set at both peerok call sites) or the operator typed the
   password (`typed`). `dccore.connect` and `on CHATCLOSE` forget all three. A token the script did not ask for is
-  ignored, and the window says so. `dccore.ver` is 1.19.2.
+  ignored, and the window says so. `dccore.ver` is 1.19.4.
 - **Auto mode's fallback listener took the first peer from anywhere.** When the dial to the operator failed,
   `_connect_and_serve()` called `_listen_and_serve()` without an address, so #680's check covered listen mode only.
   It now passes `_fallback_expected_ip()`: the advertised address, or - when that is a LAN, link-local or CGNAT
@@ -40,7 +40,10 @@ Reported privately (an audit of the admin console and admin access) and fixed be
   verify; a right password clears the address. A chat whose address was blocked meanwhile is closed at its next
   attempt. `unlock <password>` on a token session (#1264, `console_settings.cmd_unlock()`) reserves the same way,
   so unlocks sent side by side share the limit too. A `DCCORE PASSWORD <value>` line (#1273) is verified as sent and
-  then decoded under the one reservation, so it is one attempt too.
+  then decoded under the one reservation, so it is one attempt too, and so is an encoded `unlock` from the settings
+  window (#1281: `cmd_unlock()` reserves, then calls `unlock_password_matches()`).
+  `tests/test_the_settings_window_unlock_keeps_its_spaces.py` counts the address through the reservation as well as
+  `note_bad_ip()`, which this branch no longer calls on a wrong unlock.
 - **Docs:** `docs/ADMIN-CONSOLE.md` (the token rule, auto mode's fallback, the shared attempt limit, what `pair` and
   `unpair` say on a failed write, a deleted `admin_config.py` line).
 - **Tests:** `tests/test_the_mirc_script_takes_a_token_only_when_it_asked.py` (15, runs the TOKEN guards as written
@@ -48,8 +51,35 @@ Reported privately (an audit of the admin console and admin access) and fixed be
   (9), `tests/test_a_rehash_that_cannot_read_settings_keeps_the_admin_gates.py` (7),
   `tests/test_a_line_removed_from_admin_config_is_gone_after_a_rehash.py` (5),
   `tests/test_pair_and_unpair_say_what_was_stored.py` (7),
-  `tests/test_parallel_console_logins_share_the_attempt_limit.py` (11, logins, unlocks and the spaced-password
-  line). 29/29 mutations caught.
+  `tests/test_parallel_console_logins_share_the_attempt_limit.py` (13, logins, unlocks, the spaced-password line
+  and the encoded unlock). 30/30 mutations caught.
+
+### 🔧 Three follow-ups from the audit fixes (#1281)
+
+Each was left as a note in the PR that fixed the audit finding next to it (#1273, #1271, #1270).
+
+- **The settings window's Unlock keeps the spaces in a password.** #1273 made the console login take a password with
+  a run of spaces or a space at either end (`DCCORE PASSWORD <encoded>`), but the window's unlock prompt (#1264) put
+  `$input`'s answer in a `/var` and sent `unlock %pw`, and mIRC closes those spaces up in a `/var` as in a command's
+  parameters: such a password could log in but never unlock. `dccore.sw.unlockask` now hands the answer straight to
+  `$dccore.sw.unlockarg` in one nested expression, which returns it encoded with `$dccore.sw.enc` when it has such
+  spaces and as typed otherwise, and `dccore.sw.unlocksend` sends it. On the bot,
+  `console_settings.unlock_password_matches()` tries the argument as it is, then decoded - one attempt either way,
+  counted once against the address. A bot from before this still unlocks every password without such spaces, which
+  the window sends exactly as before. `dccore.mrc` is 1.19.3.
+- **The kick notice no longer promises a rejoin that won't come.** With `REJOIN_ATTEMPTS = 0` the bot never rejoins
+  (#1271 drops the member list at once for that reason), but the notice said "Will try to rejoin on the next
+  advert". `irc.kicked_notice()` now says "Not rejoining: REJOIN_ATTEMPTS is 0." in that case; with rejoining on, the
+  text is unchanged.
+- **The List Browser's filter matches a name in either Unicode form.** #1270 made `@find` match a name whether it is
+  written composed (NFC) or decomposed (NFD), as a library copied from a Mac writes it. The cross-list index
+  (`list_index.py`, FTS5) did not: unicode61 folds a single Latin accent either way, but a Vietnamese letter with two
+  marks, a Cyrillic short i, a kana with its voicing mark or a Hangul syllable split into other tokens, so a filter
+  typed in one form missed a list holding the other. The indexed name and the query now go through
+  `list_index.match_form()` (NFC, the rule `list.search_form()` uses); a name the two forms write differently also
+  keeps the list's own form in a new `original` column, and that is what a row shows and a request names. The index
+  schema is 3: an older index - or one an older version wrote to after a downgrade, since every version writes its
+  number on every open - is rebuilt once from the held lists, `folders` included.
 
 ### 🛡️ Names and text from other people are kept in their place
 

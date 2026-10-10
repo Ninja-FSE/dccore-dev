@@ -227,10 +227,30 @@ def refused_while_locked(session, what):
     return True
 
 
+def unlock_password_matches(supplied):
+    """Whether `supplied`, the argument of `unlock`, is the admin password:
+    as it is, then decoded (#1281).
+
+    The settings window sends a password with a run of spaces, or one at
+    either end, encoded as a value is (encode_value()), since mIRC closes
+    those up in a command's parameters - as the login's `DCCORE PASSWORD`
+    form does (#1273). Every other password goes as typed, which is what a
+    bot from before this checks, so the argument is tried as it is first:
+    a password that merely looks encoded still unlocks. One call is one
+    attempt, however many forms it tries."""
+    import adminchat
+    stored = getattr(config, "ADMIN_PASSWORD_HASH", "")
+    if adminchat.verify_password(stored, supplied):
+        return True
+    decoded = decode_value(supplied)
+    return bool(decoded) and decoded != supplied and adminchat.verify_password(stored, decoded)
+
+
 def cmd_unlock(session, args):
     """`unlock <password>`: the admin password, checked the way the login
     checks it, unlocks a token session for the rest of its life. Wrong three
-    times, the session is closed, as at the login."""
+    times, the session is closed, as at the login. The password may come
+    encoded (unlock_password_matches())."""
     import adminchat
     if not is_locked(session):
         _say(session, "UNLOCKED", "This session can change settings.")
@@ -239,13 +259,14 @@ def cmd_unlock(session, args):
     # Counted against the address before it is verified, as at the login
     # (adminchat.reserve_password_attempt()): unlocks sent side by side from
     # one address share the attempt limit instead of each getting their own.
+    # One reservation covers both forms unlock_password_matches() tries.
     if not adminchat.reserve_password_attempt(getattr(session, "peer_ip", "")):
         _log(session, f"was refused an unlock: the address is blocked after "
                       f"{adminchat.MAX_PASSWORD_ATTEMPTS} failed attempts.")
         session.close(announce_text="Too many failed password attempts from this address. Try again later.")
         adminchat._forget(session)
         return
-    if adminchat.verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied):
+    if unlock_password_matches(supplied):
         session.unlocked = True
         session.unlock_failures = 0
         adminchat.clear_bad_ip(getattr(session, "peer_ip", ""))
