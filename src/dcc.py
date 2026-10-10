@@ -1430,8 +1430,21 @@ def get_total_queued_count():
         total += len(files)
     return total
 
+def dcc_address():
+    """The address a DCC offer carries: MY_IP_OR_DOCK when the operator
+    pinned one, otherwise the one irc.refresh_dcc_address() detected, or ""
+    while nothing is known (#1271).
+
+    Two names because they are two facts. The detection used to be written
+    into MY_IP_OR_DOCK, and from then on it read as a pin, so it was never
+    looked up again for the life of the process.
+    """
+    pinned = str(getattr(config, "MY_IP_OR_DOCK", "") or "").strip()
+    return pinned or str(runtime.dcc_address_detected or "").strip()
+
+
 def get_public_ip_long():
-    """Convert config.MY_IP_OR_DOCK into the mIRC-compatible long format, or 0
+    """Convert dcc_address() (MY_IP_OR_DOCK, or the detected address) into the mIRC-compatible long format, or 0
     if it is blank or not a dotted-quad at all.
 
     Deliberately a pure converter, and it stays one. An earlier version of this
@@ -1442,7 +1455,7 @@ def get_public_ip_long():
     that purpose. Only the file-transfer path needs the stricter rule, so the
     stricter rule lives there - see is_offerable_to_strangers() below.
     """
-    text = str(getattr(config, "MY_IP_OR_DOCK", "") or "").strip()
+    text = dcc_address()
     if not text:
         return 0
     try:
@@ -1476,8 +1489,7 @@ def is_offerable_to_strangers(ip_text=None):
     """
     import ipaddress
 
-    text = str(ip_text if ip_text is not None
-               else getattr(config, "MY_IP_OR_DOCK", "") or "").strip()
+    text = str(ip_text if ip_text is not None else dcc_address()).strip()
     if not text:
         return False
     try:
@@ -1610,8 +1622,12 @@ def frozen_users_channel_is_synced(user_key):
     chan = announce_channel_for(rows[0]) if rows else None
     if not chan:
         return True
+    # Under the server's casemapping (#1271): a row queued before the read
+    # loop carried the configured spelling may still hold the server's.
+    import irc
+    key = irc.channel_key(chan)
     with runtime.channel_users_lock():
-        return str(chan).lower() in getattr(config, "channel_users", {})
+        return key in getattr(config, "channel_users", {})
 
 
 def freeze_absent_user(irc_sock, user, target_chan):
@@ -4194,10 +4210,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             reason = ("this bot has no usable public address configured, so it "
                       "cannot offer a transfer")
             print(f"[DCC CRITICAL ABORT] No usable public address "
-                  f"(MY_IP_OR_DOCK={getattr(config, 'MY_IP_OR_DOCK', '')!r}); refused "
+                  f"({dcc_address()!r}); refused "
                   f"the send for {user} rather than offering one nobody can dial. "
                   f"Set MY_IP_OR_DOCK in admin_config.py. Not settings.conf "
-                  f"(#465): this address is detected at startup rather than "
+                  f"(#465): this address is detected when the bot connects rather than "
                   f"read from a file, so it is not a setting that file carries.")
         else:
             reason = "file access issue or empty payload. Please try again"

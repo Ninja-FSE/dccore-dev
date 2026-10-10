@@ -50,6 +50,85 @@ functions.
   (3: a stand-in walk everywhere, real folders where the filesystem tells case apart). Five existing tests updated for
   the new rules.
 
+### 🧭 Fetching from bots: each answer, file and list stays with what it belongs to (#1269)
+
+Four findings from an audit of fetching from other bots, each confirmed by running the real functions.
+
+- **A late file answer reaches its pending row - the #1244 claim actually runs now.** #1244 checks a "file" row
+  back in "pending" (a busy reply, silence, a full disk, a restart, a passive offer with every slot in use) by its
+  exact name before a bot-alone folder or list row can take the offer. It tested `offered_at`, and every one of
+  those ways back to pending sets `offered_at=None`, so it never matched: a folder row offered to the same bot
+  still took the file, and without one the answer was refused as unsolicited. Its tests built a state no real path
+  produces. A row now carries `asked_before` (`dcc_fetch._note_it_was_asked()`, set on each of those paths while the
+  request had really gone out), and the claim tests that. A line dropped from the send queue before it went out
+  (`requests_not_sent()`) does not count as asked. The #1244 tests now reach "pending" through the real busy reply.
+- **Deleting an old finished fetch no longer deletes a newer fetch's file.** Once the operator moved a finished
+  `cover.jpg` out of the Downloads folder, a later fetch of the same name from another bot was promoted to the same
+  plain name, and both rows named one file - deleting the old row removed the new one's file. The promotion now
+  leaves a plain name another row still names alone (`_promote_clean_filename(..., queue=)`, under the fetch lock),
+  and the single and batch deletes leave a file another row still names (`another_row_holds_file_locked()`), for
+  histories written before this.
+- **A list request stays in its own channel.** The dispatcher's fallback to another channel the bot is in is right
+  for a file, not for a list whose channel means something. A second channel's request (`secondary_channel_tick()`)
+  that fell back to the bot's main channel came back with the main list, was merged as that channel's own, and
+  dropped the main and RAR lists and their index rows. A main-list refresh that fell back to a channel held as a
+  second channel's list replaced Main with it and dropped that channel's marker. Now a second channel's request goes
+  out in that channel or fails, and a main refresh is not sent to a channel held as a second channel's
+  (`dcc_fetch._list_channel_refusal()`). `list_fetch._install_fetched_list()` refuses both answers too, before
+  anything is extracted (`held_channel_role()`), so what is held stays as it was. A main refresh still falls back to
+  a channel nothing held came from, as #1232 does.
+- **Purging a bot removes its second channels' lists.** `forget_bot()` removed only the bot's own folder;
+  `lists/_channels/<bot>/` (up to `MAX_LIST_TEXT_SIZE` per channel) stayed on disk for good, from a single purge and
+  the bulk purges alike. It is removed now, with its folder tables, and the purge reports it if it could not be.
+- **Tests:** `tests/test_fetching_keeps_each_answer_its_own.py` (17 tests) and the rewritten #1244 tests in
+  `tests/test_dcc_fetch.py`. 13/13 mutations caught.
+
+### 🔌 IRC connection audit: late channel sync, the DCC address on reconnect, given-up channels, casemapping (#1271)
+
+Four findings from the 2026-10-10 audit of the IRC connection, each confirmed by running the real `irc_loop()`.
+
+- **Channel sync is claimed when the member list arrives late.** When every configured channel refused the first
+  JOIN (a +r channel and an X login slower than the JOIN, or bans at connect), the watchdog activated with
+  `channel_users` empty and rightly did not set `config.bot_joined_channel`. The activation runs once per
+  connection, so when the rejoin on the advert timer got the bot in and NAMES arrived, nothing set the flag until
+  the next reconnect. Until then cross-bot fetches waited as "joining", debug-channel lines piled up unsent, users
+  who left were never frozen, and auto-refetch stayed off. The claim is now `irc.claim_channel_sync()`, shared by
+  the activation and the 366 handler. An activation that finds nobody records that its connection is waiting
+  (`runtime.channel_sync_waiting`), and the first End of NAMES on that connection claims sync and starts what the
+  activation would have started. The ordinary path is unchanged: a 366 before the activation's settle is the
+  activation's to claim, and `runtime.channel_sync_lock` makes the claim once per connection.
+- **The DCC address is looked up again on reconnect.** It was looked up once, before the reconnect loop, and
+  written into `MY_IP_OR_DOCK`, the name that means "pinned", so it could never be looked up again. A bot that
+  started before the network was up refused every send until a restart, and one whose ISP reconnect brought a new
+  public address kept offering the old one. The detected address is now kept in `runtime.dcc_address_detected`, and
+  `MY_IP_OR_DOCK` is only ever the operator's pin. `dcc.dcc_address()` returns the pin or the detection, and
+  `get_public_ip_long()`, `is_offerable_to_strangers()` and the console's DCC CHAT offer read it.
+  `irc.refresh_dcc_address()` runs at startup and again (off the read thread) at every registration when nothing
+  is pinned. It looks again when the last lookup failed or found something more than 300 s ago
+  (`DCC_ADDRESS_RECHECK_SECONDS`), so a flapping link does not hammer the lookup service. A failed lookup keeps the
+  address found before it.
+- **A channel given up on forgets its members.** After a kick from a configured channel, the member list is kept
+  for the rejoin. When the rejoin was refused `REJOIN_ATTEMPTS` times, the list stayed for the rest of the
+  connection, so everyone in it stayed "present" to `dcc.py`: offered to, never frozen, never reaped. The refusal
+  that uses up the last attempt now drops it (`note_join_refused()`, every numeric). A kick with `REJOIN_ATTEMPTS`
+  at 0, where no rejoin is coming, drops it at once (`note_kicked_from()`).
+- **Channel names are compared under the server's casemapping.** On ircu, and on any server whose 005 says
+  `CASEMAPPING=rfc1459`, `#music[1]` and `#music{1}` are one channel. `str.lower()` does not fold those, so a
+  configured `#music[1]` that the server spells `#music{1}` was never confirmed. The advert skipped it, the rejoin
+  went out every advert cycle, and its members were filed under a key no per-channel lookup used. `irc.irc_lower()`
+  folds by the 005 `CASEMAPPING` (`rfc1459` by default and reset at each connection, plus `strict-rfc1459` and
+  `ascii`; an unknown mapping folds like `ascii`). `irc.channel_key()` maps any spelling of a configured channel to
+  the configured one, lower-cased, which is the key every other module already looks up. It is used for
+  `channel_users`, `kicked_channels`, the 353/366/JOIN/PART/KICK/refusal handlers, the per-channel advert
+  signature, `!debugnames`, the debug channel's de-duplication, `dcc.frozen_users_channel_is_synced()`,
+  `dcc_fetch.bot_in_our_channel()` and DCCore Chat's WHO rounds. A channel PRIVMSG's target is carried on in the
+  configured spelling. Nick comparisons still use `str.lower()`.
+- **Tests:** `tests/test_audit_irc_connection.py` (29 tests). These drive `irc_loop()` against scripted sockets for
+  each finding, and test `claim_channel_sync()`, `refresh_dcc_address()`, `dcc_address()`, `irc_lower()`,
+  `isupport_casemapping()`, `channel_key()` and the WHO round directly. 13/13 mutations caught.
+  `tests/test_list_freshness.py` and `tests/test_the_sweep_could_not_see_a_pm_requester.py` now read the claim's
+  order in `claim_channel_sync()`. `tests/support.py` resets the new runtime values between tests.
+
 ### 🧪 The pack-cancel test waits for its own rar
 
 `test_a_cancel_terminates_that_process_and_removes_the_partial_archive` failed now and then in CI with

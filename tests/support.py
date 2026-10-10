@@ -361,6 +361,14 @@ def reset_config(**overrides):
                         # earlier test - minutes - so a queue that test expects
                         # to expire is kept.
                         ("freeze_clock_paused_at", None),
+                        # #1271: a connection's late channel sync, the
+                        # server's casemapping and the detected DCC address
+                        # belong to the test that drove irc_loop(). A
+                        # detected address left behind would make the next
+                        # test's blank MY_IP_OR_DOCK look offerable.
+                        ("channel_sync_waiting", None),
+                        ("server_casemapping", "rfc1459"),
+                        ("dcc_address_detected", ""), ("dcc_address_found_at", None),
                         # #1182: one test's background audio reading, or
                         # its result, is not the next one's.
                         ("audio_reading", None), ("audio_reading_last", None),
