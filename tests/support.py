@@ -283,6 +283,9 @@ _ORPHANED_QUEUE_SINK = os.path.join(_ORPHANED_WRITE_DIR, "dcc_queue.txt")
 _ORPHANED_SPEED_RECORD_SINK = os.path.join(_ORPHANED_WRITE_DIR, "speed_record.txt")
 _ORPHANED_DOWNLOAD_COUNTS_SINK = os.path.join(_ORPHANED_WRITE_DIR, "download_counts.json")
 _ORPHANED_TRANSFER_LOG_SINK = os.path.join(_ORPHANED_WRITE_DIR, "transfers.db")
+# A recorded private message is written from a thread of its own a moment later
+# (announce._save_private_messages_soon()), which can outlive its test.
+_ORPHANED_PRIVATE_MESSAGES_SINK = os.path.join(_ORPHANED_WRITE_DIR, "private_messages.json")
 
 
 def reset_config(**overrides):
@@ -1158,7 +1161,13 @@ class DCCoreTestCase(unittest.TestCase):
         # a target at any point in the run.
         db.FETCH_HISTORY_FILE = _ORPHANED_WRITE_SINK
         db.NOTICES_FILE = self._real_notices_file
-        db.PRIVATE_MESSAGES_FILE = self._real_pm_file
+        # NOT RESTORED either, for the fetch history's reason: a recorded
+        # private message is written from a thread of its own. Anything still
+        # waiting is written into this test's own file first, so that thread
+        # finds nothing left to do; one started after this line writes a sink.
+        import announce
+        announce.flush_private_messages()
+        db.PRIVATE_MESSAGES_FILE = _ORPHANED_PRIVATE_MESSAGES_SINK
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
         db.LIST_GRABS_FILE = self._real_list_grabs_file
         db.SECONDARY_CHANNEL_GRABS_FILE = self._real_secondary_channel_grabs_file

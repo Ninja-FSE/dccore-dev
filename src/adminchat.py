@@ -195,8 +195,10 @@ def host_pattern_of(mask):
 
 
 def _compile(pattern):
-    """Wildcard pattern to anchored regex, matching security.py's hard-ban idiom."""
-    return re.compile("^" + re.escape(pattern).replace(r"\*", ".*") + "$")
+    """Wildcard pattern to anchored regex - security.mask_regex() itself, so
+    "*" and "?" mean here exactly what they mean in a hard ban."""
+    import security
+    return security.mask_regex(pattern)
 
 
 def admin_host_patterns():
@@ -242,18 +244,18 @@ def broad_host_patterns():
     broad = []
     for pattern in admin_host_patterns():
         literal = pattern
-        for separator in "*!@":
+        for separator in "*?!@":
             literal = literal.replace(separator, "")
         labels = [label for label in literal.split(".") if label]
         if not labels:
             continue  # refused outright by is_admin_host()
-        if "*" not in pattern:
+        if "*" not in pattern and "?" not in pattern:
             continue  # one host, spelled out
         if len(labels) == 1:
             broad.append((pattern, f"it names the whole top-level domain .{labels[0]}"))
             continue
         head, _dot, rest = pattern.partition(".")
-        if rest.lower() in SHARED_ACCOUNT_HOST_SUFFIXES and set(head) <= set("*"):
+        if rest.lower() in SHARED_ACCOUNT_HOST_SUFFIXES and set(head) <= set("*?"):
             broad.append((pattern, f"every logged-in user of the network has a {rest} host; "
                                    f"the account name goes where the * is"))
     return broad
@@ -276,8 +278,8 @@ def is_admin_host(prefix_or_line):
     would admit every host on the network and make the whole gate decorative.
     security.py refuses an all-wildcard hard ban for the mirror-image reason.
 
-    Strips "*!@." - the same four characters security.py's own hard-ban guard
-    strips, not just "*". A HOST cannot contain "!" or "@" (only a full
+    Strips "*?!@." - the same characters security.py's own hard-ban guard
+    strips, not just "*" ("?" is a one-character wildcard in both). A HOST cannot contain "!" or "@" (only a full
     <nick>!<ident>@<host> hostmask can), so those two are no-ops here - but a
     host is made of dot-separated labels, and "*.*" reduces to a lone "." under
     a stars-only strip: truthy, so it passed and compiled to a pattern
@@ -289,7 +291,7 @@ def is_admin_host(prefix_or_line):
         return False
     for pattern in admin_host_patterns():
         residue = pattern
-        for separator in "*!@.":
+        for separator in "*?!@.":
             residue = residue.replace(separator, "")
         if not residue:
             print(f"[ADMINCHAT] Refusing dangerously broad ADMIN_HOSTMASKS entry: {pattern!r}")

@@ -458,6 +458,17 @@ def startup(setup_page=None):
     if config.fetched_bot_lists:
         print(f"[STARTUP] Fetched lists: {len(config.fetched_bot_lists)} bot(s) remembered.")
 
+        # A held list whose directory name changed - a nick or channel that
+        # had to be cleaned up to make one now carries a short tag, so two
+        # of them can never share a directory - is moved to it once, here,
+        # before anything reads or replaces it.
+        try:
+            import list_fetch
+            list_fetch.migrate_held_list_directories()
+        except Exception as err:
+            print(f"[STARTUP] Could not move held lists to their new folders ({err}); "
+                  f"each is still read where it is.")
+
         # And index any of them the search index has never seen. Only a fetch
         # writes that index, while these lists survive restarts - so an
         # operator upgrading with lists already held had a full map and an
@@ -710,6 +721,13 @@ def _shut_down():
         try:
             import irc as _irc_flush
             _irc_flush._flush_known_bots(force=True)
+        except Exception:
+            pass
+        # A private message is written a moment after it arrives, off the
+        # read thread; one that came in just before the stop is written now.
+        try:
+            import announce as _announce_flush
+            _announce_flush.flush_private_messages()
         except Exception:
             pass
         # A background audio reading (#1182) is the rebuild's own process

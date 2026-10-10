@@ -2676,6 +2676,11 @@ def _resolve_destination_path(request_id, raw_filename):
 # name built by that function.
 _REQUEST_ID_PREFIX_RE = re.compile(r"^[0-9a-f]{12}_")
 
+# Names at the top of FETCHED_FILES_DIR that DCCore itself uses, compared
+# without case (Windows would). "lists" is where list_fetch.list_extract_dir()
+# extracts every fetched list; a fetched file must never take that name.
+_RESERVED_FETCHED_NAMES = frozenset({"lists"})
+
 
 def names_one_file(directory, name, other):
     """Whether two stored names in `directory` are one file on disk (#1269).
@@ -2760,6 +2765,12 @@ def _promote_clean_filename(dest_dir, stored_name, queue=None, row=None):
         return stored_name
     plain_name = stored_name[match.end():]
     if not plain_name:
+        return stored_name
+    # Never onto a name the fetch area keeps for itself. A file offered as
+    # "lists", on an install that had not fetched a list yet, became the plain
+    # file FETCHED_FILES_DIR/lists, and every list fetch from every bot then
+    # failed to make its directory there until someone deleted it by hand.
+    if plain_name.rstrip(" .").lower() in _RESERVED_FETCHED_NAMES:
         return stored_name
 
     old_path = os.path.join(dest_dir, stored_name)

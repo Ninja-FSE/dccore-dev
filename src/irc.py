@@ -3568,7 +3568,13 @@ def irc_loop():
                     # :Closing Link: <nick> (Max SendQ exceeded)" and the
                     # like. That line is the answer, and it was being read,
                     # matched by nothing, and dropped.
-                    recent_lines.append(line.strip()[:200])
+                    #
+                    # Printable text only: these are other people's lines too
+                    # (any channel member's message), printed to the
+                    # operator's terminal on the next drop, and an escape
+                    # sequence in one would act on that terminal (#670's
+                    # rule, on a path it did not cover).
+                    recent_lines.append(list.printable_text(line.strip())[:200])
                     # Our own modes (221), a hidden host (396) and a MODE on
                     # ourselves, for the check that the on-connect commands
                     # worked (#1066). Returns at once for anything else.
@@ -3583,18 +3589,18 @@ def irc_loop():
                     # setting nobody has on when the thing they need it for
                     # happens.
                     if line.startswith("ERROR ") or line.startswith("ERROR:"):
-                        print(f"[SERVER ERROR] {line.strip()}")
+                        print(f"[SERVER ERROR] {list.printable_text(line.strip())}")
                     if getattr(config, 'DEBUG_MODE', False):
                         is_channel_traffic = " PRIVMSG #" in line
                         is_for_me = f"PRIVMSG {config.NICKNAME}" in line or f" {config.NICKNAME} " in line or f"@{config.NICKNAME.lower()}" in line.lower()
                         if not is_channel_traffic or is_for_me or "ERROR" in line:
-                            print(f"[RAW IN] {line.strip()}")
+                            print(f"[RAW IN] {list.printable_text(line.strip())}")
                     # The server's last word before it hangs up (#663). It
                     # was read and dropped: a throttled reconnect printed
                     # "Server closed connection" and nothing about why, and
                     # the retry cadence that caused it stayed the same.
                     if line.startswith("ERROR ") or line.startswith("ERROR:"):
-                        print(f"[SERVER] {line}")
+                        print(f"[SERVER] {list.printable_text(line)}")
                         lowered = line.lower()
                         if "throttl" in lowered or "too fast" in lowered:
                             print("[SERVER] The server refuses a client that comes back too "

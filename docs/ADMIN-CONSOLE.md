@@ -126,13 +126,14 @@ ADMIN_HOSTMASKS = ["operator.users.undernet.org"]        # bare host
 ADMIN_HOSTMASKS = ["*!*@operator.users.undernet.org"]    # familiar IRC form
 ```
 
-Wildcards work, and more than one entry is allowed:
+Wildcards work as they do everywhere on IRC - `*` is any run of characters and
+`?` exactly one - and more than one entry is allowed:
 
 ```python
 ADMIN_HOSTMASKS = ["operator.users.undernet.org", "operator2.users.undernet.org"]
 ```
 
-A pattern that reduces to bare `*` is refused and logged — it would admit the
+A pattern made of nothing but wildcards and dots is refused and logged — it would admit the
 whole network and make the gate decorative. A pattern that is accepted but
 names far more than one operator is warned about at start-up, on `!rehash` and
 by `setup_check.py`, and still works as written: `*.users.undernet.org` puts
@@ -242,7 +243,7 @@ prefix.
 
 | Command | Effect |
 |---|---|
-| `ban <pattern>` | add a permanent wildcard ban |
+| `ban <pattern>` | add a permanent wildcard ban: `*` is any run of characters, `?` exactly one (`ban *!*@10.0.0.?`) |
 | `unban <pattern>` | remove one |
 | `queuemove <nick> up\|down` | move a nick one place up or down the line for a free slot (#1206); `queue` lists the nicks in that order. Only the two nicks swap places; nobody else's moves. A nick with a list waiting is served first, so nobody is moved past it - that is refused, with the place the nick keeps. The order is kept in memory only: a restart puts it back to first-come |
 | `queuemove <nick> <number> up\|down` | move one of a nick's queued files up or down in its own queue — the one at the top is sent first. A file being sent or packed stays put and nothing is moved past it. The number is the one `queue <nick>` shows |

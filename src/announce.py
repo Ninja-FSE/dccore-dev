@@ -1152,7 +1152,83 @@ PRIVATE_MESSAGES_MAX = 50
 # only, deliberately - the point of it is to stop one person filling the panel
 # in one sitting, and an operator restarting the bot is entitled to see that
 # somebody is still trying.
+#
+# Oldest first: a sender recorded again is moved to the end, so whatever has
+# outlived the cooldown is always at the front and is dropped from there
+# (_forget_quiet_senders()). It used to keep every sender for the life of the
+# process - a new nick, or a set of clones cycling through nicks, grew it
+# without end.
 _pm_last_recorded = {}
+
+# The most senders remembered at once. Only a burst of more distinct nicks
+# than this inside one cooldown reaches it; the oldest are forgotten first,
+# and the worst that costs is one more row each on a page that keeps 50.
+PRIVATE_MESSAGE_SENDERS_REMEMBERED = 2000
+
+# How long a recorded message waits to be written, so that a burst is one
+# write rather than one per line. The write happens on a thread of its own,
+# never on the IRC read thread that records the message.
+PRIVATE_MESSAGES_SAVE_DELAY = 2.0
+
+
+def _forget_quiet_senders(now, cooldown):
+    """Drop senders whose cooldown is over - they can no longer stop a
+    message being recorded - and the oldest beyond the cap."""
+    while _pm_last_recorded:
+        oldest = next(iter(_pm_last_recorded))
+        if (len(_pm_last_recorded) <= PRIVATE_MESSAGE_SENDERS_REMEMBERED
+                and now - _pm_last_recorded[oldest] < cooldown):
+            break
+        del _pm_last_recorded[oldest]
+
+
+def _save_private_messages_soon():
+    """Have the private messages written shortly, off this thread. Every
+    message recorded before that happens shares the one write."""
+    with runtime.private_messages_save_guard:
+        if runtime.private_messages_save_pending:
+            return
+        runtime.private_messages_save_pending = True
+        wake = threading.Event()
+        saver = threading.Thread(target=_save_private_messages_after_a_moment,
+                                 args=(wake,), name="pm-save", daemon=True)
+        runtime.private_messages_saver = (saver, wake)
+    saver.start()
+
+
+def _save_private_messages_after_a_moment(wake):
+    wake.wait(PRIVATE_MESSAGES_SAVE_DELAY)
+    flush_private_messages()
+
+
+def flush_private_messages():
+    """Write the private messages now if a recorded one is still waiting to
+    be. True if this wrote them. Called by the saving thread, and on the way
+    out so a message that arrived just before a stop is not lost - a saving
+    thread still waiting is then woken and let finish, as it has nothing left
+    to write."""
+    with runtime.private_messages_save_guard:
+        if not runtime.private_messages_save_pending:
+            return False
+        runtime.private_messages_save_pending = False
+        saver = runtime.private_messages_saver
+        runtime.private_messages_saver = None
+    if saver is not None and saver[0] is not threading.current_thread():
+        saver[1].set()
+        try:
+            saver[0].join(5.0)
+        except RuntimeError:
+            pass  # not started yet: it will find the Event set and nothing to write
+    try:
+        import db
+        # The live objects, as every other writer of this file passes them:
+        # db copies them under its disk lock, so whichever write lands last
+        # holds the newest state, never an older copy taken before it.
+        db.save_private_messages(config.private_messages,
+                                 config.private_message_state)
+    except Exception as err:
+        print(f"[PM] Could not save the private messages: {err}")
+    return True
 
 
 def record_private_message(nick, text):
@@ -1195,7 +1271,10 @@ def record_private_message(nick, text):
     last = _pm_last_recorded.get(key, 0)
     if cooldown and (now - last) < cooldown:
         return None
-    _pm_last_recorded[key] = now
+    _pm_last_recorded.pop(key, None)
+    if cooldown:
+        _pm_last_recorded[key] = now
+    _forget_quiet_senders(now, cooldown)
 
     with runtime.private_messages_lock:
         highest = (config.private_messages[-1]["id"]
@@ -1209,12 +1288,10 @@ def record_private_message(nick, text):
         while len(config.private_messages) > PRIVATE_MESSAGES_MAX:
             config.private_messages.pop(0)
 
-    try:
-        import db
-        db.save_private_messages(config.private_messages,
-                                 config.private_message_state)
-    except Exception as err:
-        print(f"[PM] Could not save the private messages: {err}")
+    # Not written here: this runs on the IRC read thread, and anybody can send
+    # a private message. Every stranger's line used to cost an fsync'd write
+    # under the shared disk lock before the next server line was read.
+    _save_private_messages_soon()
     print(f"[PM] {name} sent something the bot does not answer; recorded.")
     return entry
 
