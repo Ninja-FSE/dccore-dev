@@ -51,6 +51,7 @@ class TokenStoreCase(DCCoreTestCase):
         s = adminchat.Session(socket.socket(), "127.0.0.1", nick, "alfa.host.example")
         self.addCleanup(s.close, None)
         s.authenticated = True
+        s.unlocked = True        # logged in with the password
         return s
 
     def run_command(self, session, line):
