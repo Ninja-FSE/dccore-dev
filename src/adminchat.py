@@ -68,6 +68,7 @@ listen-mode work, and tests/test_adminchat.py drives it end to end.
 """
 
 import binascii
+import codecs
 import collections
 import hashlib
 import hmac
@@ -99,6 +100,17 @@ MAX_PASSWORD_ATTEMPTS = 3
 WRONG_PASSWORD_DELAY = 1.0    # slows scripted guessing without tying up the reader
 BAD_IP_BLOCK_SECONDS = 900.0
 OUTBOX_MAX = 500              # bounded: a stalled client drops lines, never grows
+# A framed snapshot (`served`, `settings`, ...) is queued with back-pressure
+# instead (#1264 review): it waits for the writer to make room, keeping this
+# many lines free for the live feed, and gives up - saying so - when the
+# client has not taken a line for BULK_WAIT seconds.
+BULK_HEADROOM = 100
+BULK_WAIT = 15.0
+# The longest line a client may send: before the password, and after it - a
+# `served folder` row holds a label and a path of up to 4096 characters each
+# (webserver.MAX_FOLDER_PATH_LEN), and an escaped character is three.
+PASSWORD_LINE_MAX = 4096
+LINE_MAX = 32768
 
 PBKDF2_ITERATIONS = 200_000
 
@@ -1081,6 +1093,26 @@ class Session:
         self._wake = threading.Event()
         self._lock = threading.Lock()
         self._writer = None
+        # The settings window's open transactions (#1264), one per page kind:
+        # see console_settings.py. On the session, so a disconnect - or a
+        # login that takes the console over - drops them with it.
+        self.settings_txn = None
+        self.served_txn = None
+        self.folders_txn = None
+        self.onconnect_txn = None
+        # HOW this session logged in (#1264 audit). The password unlocks it
+        # from the start; a paired token - kept in clear text in the script's
+        # dccore.ini - does not: changing settings, reading the on-connect
+        # commands (an X login holds a password) and minting tokens need
+        # `unlock <password>` once in the session. Locked until
+        # _check_password() says otherwise.
+        self.unlocked = False
+        self.paired_as = None
+        self.unlock_failures = 0
+
+    # A DCC CHAT session keeps state between its lines, so it can hold a
+    # transaction; the dashboard Console's per-request stand-in cannot.
+    holds_transactions = True
 
     # -- output ------------------------------------------------------------
 
@@ -1102,6 +1134,33 @@ class Session:
             self.dropped += 1
         self._outbox.append(text)
         self._wake.set()
+
+    def send_lines(self, lines):
+        """Queue a framed snapshot WITHOUT dropping any of it (#1264 review).
+
+        send() lets a full outbox drop its oldest line, which is right for
+        the live feed and wrong for a snapshot: `served` within the
+        dashboard's own limits is ~700 lines, queued by the reader thread
+        far faster than the writer sends, so the client got DROPPED and no
+        SRVBEGIN - every time. This waits for room instead, leaving
+        BULK_HEADROOM lines for the feed. A client that takes nothing for
+        BULK_WAIT seconds is not waited for: the snapshot ends there with a
+        line saying so, and its missing END is what a client's count check
+        catches. Returns whether every line was queued.
+        """
+        for line in lines:
+            deadline = time.monotonic() + BULK_WAIT
+            while len(self._outbox) >= OUTBOX_MAX - BULK_HEADROOM:
+                if self.closed:
+                    return False
+                if time.monotonic() >= deadline:
+                    self.send("The rest of that list was not sent: this window stopped "
+                              "reading it. Ask for it again.")
+                    return False
+                self._wake.set()
+                time.sleep(0.01)
+            self.send(line)
+        return True
 
     def start_writer(self):
         self._writer = threading.Thread(target=self._writer_loop, daemon=True)
@@ -2323,6 +2382,9 @@ def _cmd_pair(session, args):
     import datetime
     import secrets
     import db
+    import console_settings
+    if console_settings.refused_while_locked(session, "pair"):
+        return
     name = (args.split() or ["client"])[0]
     token = secrets.token_urlsafe(32)
     tokens = db.load_admin_tokens()
@@ -2350,8 +2412,12 @@ def _cmd_pair(session, args):
 def _cmd_unpair(session, args):
     """`unpair [name]`: list the paired clients, or revoke one."""
     import db
-    tokens = db.load_admin_tokens()
     name = (args.split() or [""])[0]
+    import console_settings
+    if (not name or name != getattr(session, "paired_as", None)) \
+            and console_settings.refused_while_locked(session, "unpair"):
+        return
+    tokens = db.load_admin_tokens()
     if not name:
         if not tokens:
             session.send("No paired clients.")
@@ -2401,6 +2467,34 @@ def _cmd_chat(session, args):
     # person at a plain console is told it went.
     if not ok or not session.structured:
         session.send(message)
+
+
+# --------------------------------------------------------------------------
+# The settings window's commands (#1264). The work is console_settings.py's,
+# over the dashboard's own functions in webserver.py; imported per call, as
+# webserver itself is above, so importing this module pulls in neither.
+# --------------------------------------------------------------------------
+
+def _settings_command(name):
+    def run(session, args):
+        import console_settings
+        getattr(console_settings, "cmd_" + name)(session, args)
+    run.__name__ = "_cmd_" + name
+    return run
+
+
+_cmd_settings = _settings_command("settings")
+_cmd_set = _settings_command("set")
+_cmd_setbegin = _settings_command("setbegin")
+_cmd_setcommit = _settings_command("setcommit")
+_cmd_setabort = _settings_command("setabort")
+_cmd_setpreview = _settings_command("setpreview")
+_cmd_served = _settings_command("served")
+_cmd_folders = _settings_command("folders")
+_cmd_onconnect = _settings_command("onconnect")
+_cmd_banlist = _settings_command("banlist")
+_cmd_consolecaps = _settings_command("consolecaps")
+_cmd_unlock = _settings_command("unlock")
 
 
 def _cmd_help(session, args):
@@ -2453,6 +2547,18 @@ COMMANDS = {
     "dlagain":    (_cmd_dlagain,    "ask again for a download that failed", "dlagain <id>"),
     "dlclear":    (_cmd_dlclear,    "forget the finished downloads",     "dlclear"),
     "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan|*|nick text]"),
+    "settings":   (_cmd_settings,   "every setting the dashboard's Settings page offers", "settings [word]"),
+    "set":        (_cmd_set,        "change a setting (buffered inside setbegin)", "set <KEY> <value>"),
+    "setbegin":   (_cmd_setbegin,   "start buffering set lines, to save as one", "setbegin"),
+    "setcommit":  (_cmd_setcommit,  "save the buffered settings in one go", "setcommit [confirm]"),
+    "setabort":   (_cmd_setabort,   "drop the buffered settings",        "setabort"),
+    "setpreview": (_cmd_setpreview, "the advert and notice in the theme being set", "setpreview"),
+    "served":     (_cmd_served,     "the lists served, their channels and folders", "served [begin|list|chan|folder|commit|abort]"),
+    "folders":    (_cmd_folders,    "the served folders of a one-list bot", "folders [begin|row|commit|abort]"),
+    "onconnect":  (_cmd_onconnect,  "the commands sent on connect; resend them", "onconnect [begin|delay|line|commit|abort|resend]"),
+    "banlist":    (_cmd_banlist,    "the bans, as rows for the settings window", "banlist"),
+    "consolecaps": (_cmd_consolecaps, "which settings-window commands this bot has", "consolecaps"),
+    "unlock":     (_cmd_unlock,     "let a token login change settings (once per session)", "unlock <password>"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),
@@ -2468,19 +2574,62 @@ COMMANDS = {
 CONSOLE_SOURCE = "DCC-CONSOLE"
 
 
+# The settings window's commands (#1264) are logged by their command word,
+# and their subcommand when it is a real one - never the rest of the line.
+# An on-connect command is very often an X login with its password
+# (on_connect.py never logs one), a `set` may name ADMIN_PASSWORD_HASH with a
+# value - refused, but not after being printed - and a typo such as
+# `onconnect lines 1 ...` must not print what follows it either. The rows a
+# window sends one per field or folder are not logged at all, which would
+# bury the log; the commits log what they saved, by name.
+_SETTINGS_FAMILY = {
+    "settings": (), "set": (), "setbegin": (), "setcommit": ("confirm",), "setabort": (),
+    "setpreview": (), "banlist": (), "consolecaps": (), "unlock": (),
+    "served": ("begin", "list", "chan", "folder", "commit", "abort"),
+    "folders": ("begin", "row", "commit", "abort"),
+    "onconnect": ("begin", "delay", "line", "commit", "abort", "resend"),
+}
+_UNLOGGED_ROWS = {("set", ""), ("served", "list"), ("served", "chan"), ("served", "folder"),
+                  ("folders", "row"), ("onconnect", "line"), ("onconnect", "delay")}
+
+
+def _logged(command, stripped, args):
+    """The line as handle_command() logs it, or None to log nothing."""
+    if command not in _SETTINGS_FAMILY:
+        return stripped
+    sub = args.strip(" ").split(" ", 1)[0].lower()
+    sub = sub if sub in _SETTINGS_FAMILY[command] else ""
+    if (command, sub) in _UNLOGGED_ROWS:
+        return None
+    return f"{command} {sub}".rstrip()
+
+
 def handle_command(session, text):
-    """Dispatch one authenticated line."""
-    stripped = text.strip()
+    """Dispatch one authenticated line.
+
+    Stripped of ASCII spaces and tabs only (#1264 review): str.strip() also
+    takes a no-break or ideographic space, and a settings value may end in
+    one - it would be saved without it."""
+    stripped = text.strip(" \t")
     if not stripped:
         return
     command, _, args = stripped.partition(" ")
+    if command.lower() == "unlock":
+        # The password verbatim, as the login takes it (#622): a trailing
+        # space is part of it, and the strip above took it off.
+        args = text.lstrip(" \t").partition(" ")[2]
     entry = COMMANDS.get(command.lower())
     if entry is None:
         session.send(f"Unknown command: {command}. Type 'help'.")
         return
     session.last_activity = time.time()
-    print(f"[ADMINCHAT] {session.nick} ran: {stripped}")
+    logged = _logged(command.lower(), stripped, args)
+    if logged is not None:
+        print(f"[ADMINCHAT] {session.nick} ran: {logged}")
     try:
+        if getattr(getattr(session, "settings_txn", None), "implicit", False):
+            import console_settings
+            console_settings.end_implicit_transaction(session, command.lower(), args)
         entry[0](session, args)
     except Exception as err:
         # One bad command must not take the session down with it.
@@ -2548,6 +2697,11 @@ def _promote(session):
 
 def _reader_loop(session):
     buffer = ""
+    # One decoder for the session's life (#1264 review): each recv() decoded
+    # on its own turned a character whose UTF-8 bytes straddle two chunks
+    # into two U+FFFD, and a settings window sending a page of rows at once
+    # saved a folder with two replacement characters where one letter was.
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
     try:
         while not session.closed:
             if session.expired():
@@ -2563,7 +2717,7 @@ def _reader_loop(session):
                 break
 
             session.last_activity = time.time()
-            buffer += data.decode("utf-8", "replace")
+            buffer += decoder.decode(data)
             # Clients disagree about the terminator; normalise before splitting.
             buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
             while "\n" in buffer:
@@ -2574,8 +2728,11 @@ def _reader_loop(session):
                     handle_command(session, line)
                 else:
                     _check_password(session, line)
-            # A client that never sends a newline must not grow the buffer forever.
-            if len(buffer) > 4096:
+            # A client that never sends a newline must not grow the buffer
+            # forever. Before the password, a line is a password and 4096 is
+            # plenty; after it, a settings row can carry a folder label and a
+            # path of up to webserver.MAX_FOLDER_PATH_LEN characters each.
+            if len(buffer) > (LINE_MAX if session.authenticated else PASSWORD_LINE_MAX):
                 session.close(announce_text="Line too long.")
                 break
     finally:
@@ -2612,6 +2769,8 @@ def _check_password(session, line):
         print(f"[ADMINCHAT] {session.nick} logged in with the token paired as {paired!r}.")
     if paired or verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied):
         session.authenticated = True
+        session.paired_as = paired
+        session.unlocked = not paired
         session.last_activity = time.time()
         clear_bad_ip(session.peer_ip)
         replaced = _promote(session)
