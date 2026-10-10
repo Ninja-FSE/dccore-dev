@@ -3168,6 +3168,12 @@ def build_fetch_delete_result(request_id, only_states=None):
         bot = row.get("bot")
         asked_for = row.get("requested_filename") or row.get("filename")
         del config.fetch_queue[request_id]
+        directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+        if stored_filename and dcc_fetch.another_row_holds_file_locked(
+                config.fetch_queue, directory, stored_filename):
+            # Another row's file now (#1269): a newer fetch of the same name
+            # took the plain name after this row's file was moved away.
+            stored_filename = None
         never_sent = dcc_fetch.take_back_unsent_request(row)
         if at_the_bot and dcc_fetch.another_row_wants_locked(config.fetch_queue, bot, asked_for):
             # Another row still waits on the same file there (#1083).
@@ -3178,7 +3184,6 @@ def build_fetch_delete_result(request_id, only_states=None):
         removed_at_bot = dcc_fetch.drop_our_request_at(bot, asked_for, channel=row.get("channel"))
 
     if stored_filename:
-        directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
         target = os.path.join(directory, stored_filename)
         if not dcc.is_safe_path(directory, target):
             print(f"[WEBUI] Refused to delete {stored_filename!r}: outside FETCHED_FILES_DIR.")
@@ -3266,6 +3271,12 @@ def build_fetch_delete_many_result(request_ids, only_states=None):
             if stored_filename:
                 removed_files.append(stored_filename)
             cancelled.append(request_id)
+        # Never a file a row left in the queue still names as its own
+        # (#1269) - checked once the whole batch is popped, so two rows of
+        # this batch sharing one file still remove it.
+        directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+        still_named = dcc_fetch.files_other_rows_hold_locked(queue, directory, removed_files)
+        removed_files = [name for name in dict.fromkeys(removed_files) if name not in still_named]
         # Never for a file a newer row (one of THIS batch's own survivors,
         # or one outside it) still waits on there (#1083) - checked once
         # the whole batch has already been popped, under the SAME lock
@@ -3288,7 +3299,6 @@ def build_fetch_delete_many_result(request_ids, only_states=None):
             deduped.append((bot, asked_for, channel))
         still_held = deduped
 
-    directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
     for stored_filename in removed_files:
         target = os.path.join(directory, stored_filename)
         if not dcc.is_safe_path(directory, target):
@@ -6141,7 +6151,10 @@ def validate_setup_form(form, lang="en"):
     if not channels:
         errors.append(("CHANNEL", say("setup.error.channel_needed",
                                       "At least one channel is needed, like #mychannel.")))
-    elif any(not c.startswith("#") or " " in c for c in channels):
+    elif settings_file.channels_problem(channel):
+        # settings_file's rule, not a copy of it (#1272): configure.py and the
+        # Settings page accepted what this refused, so "the files the page
+        # writes are the files the terminal writes" was not true of CHANNEL.
         errors.append(("CHANNEL", say("setup.error.channel_shape",
                                       "Each channel starts with # and has no spaces; "
                                       "separate several with commas.")))
@@ -6237,6 +6250,13 @@ def apply_setup(changes, password_hash, log=print, settings_path=None, admin_pat
     # it. The writer prints the warning to the daemon's window; the person
     # at the form is in a browser and never saw it - so it is returned, and
     # the saved page says it too.
+    # BUT ONLY ONCE settings.conf IS KNOWN TO TAKE THE SAVE (#1272). A
+    # settings.conf with one malformed line cannot be edited, so the second
+    # write failed after the first had already replaced ADMIN_PASSWORD_HASH:
+    # the page showed a write error and the password had changed anyway.
+    # check_save() runs every check save() runs and writes nothing, so a save
+    # that is going to fail fails here, with both files untouched.
+    settings_file.check_save(vars(config), changes, path=settings_path)
     shadow = configure.write_admin_config_password(password_hash, path=admin_path)
     configure.write_settings_conf(changes, path=settings_path)
     settings_file.apply_to(vars(config), path=settings_path, log=log)

@@ -588,6 +588,40 @@ def get_formatted_stats_strings():
     today_str = f"{stats[4]} Files [as of {time_now_str}]"
     return total_str, yesterday_str, today_str
 
+# The ANNOUNCE_INTERVAL the floor below was last reported for, so the log says
+# it once per value rather than once per advert.
+_floored_interval_reported = None
+
+
+def advert_interval():
+    """Seconds to wait between two adverts: ANNOUNCE_INTERVAL, never less
+    than settings_file.MINIMUMS allows (#1272).
+
+    settings.conf and the Settings page refuse a smaller value in coerce(),
+    but admin_config.py is Python and reaches config without it. And a 0
+    got through there is not "no advert": time.sleep(0) made this worker
+    rebuild and queue the advert in a tight loop, one core busy and the
+    channel adverted to every MSG_DELAY. A value that is not a number at
+    all used to raise here, which the worker's catch-all turned into an
+    advert every ten seconds. Both now get the floor, said once in the log.
+    """
+    global _floored_interval_reported
+    import settings_file
+    floor = settings_file.MINIMUMS["ANNOUNCE_INTERVAL"]
+    raw = getattr(config, "ANNOUNCE_INTERVAL", floor)
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        seconds = None
+    if seconds is not None and seconds == seconds and seconds >= floor:
+        return seconds
+    if _floored_interval_reported != repr(raw):
+        _floored_interval_reported = repr(raw)
+        print(f"[ANNOUNCE] ANNOUNCE_INTERVAL {raw!r} is below the minimum of "
+              f"{floor} seconds - adverting every {floor} seconds instead.")
+    return floor
+
+
 # Live traffic statistics, measured in real time by dcc.py
 # The id of the thread currently entitled to run
 current_worker_id = 0
@@ -820,7 +854,7 @@ def announce_worker():
                         print(f"[ANNOUNCE ERROR] Could not advertise to {chan}: {chan_err}")
                         continue
 
-                time.sleep(config.ANNOUNCE_INTERVAL)
+                time.sleep(advert_interval())
             else:
                 time.sleep(5)
                 

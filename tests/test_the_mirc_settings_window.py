@@ -756,8 +756,8 @@ class TheExamplesAreInvented(unittest.TestCase):
 
 class TheVersion(unittest.TestCase):
 
-    def test_the_script_is_1_19_0(self):
-        self.assertIn("\nalias dccore.ver { return 1.19.0 }\n", code())
+    def test_the_script_is_1_19_1(self):
+        self.assertIn("\nalias dccore.ver { return 1.19.1 }\n", code())
 
 
 class TheReviewOfTheFirstVersion(unittest.TestCase):
@@ -1275,7 +1275,7 @@ class TheAuditOfBothHalves(unittest.TestCase):
         unreleased = text[text.index("## Unreleased"):]
         unreleased = unreleased[:unreleased.index("\n## ", 5)]
         versions = set(re.findall(r"`dccore\.mrc` to (\d+\.\d+\.\d+)", unreleased))
-        self.assertEqual(versions, {"1.19.0"})
+        self.assertEqual(versions, {"1.19.1"})
 
 
 if __name__ == "__main__":
