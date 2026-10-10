@@ -1081,6 +1081,17 @@ class Session:
         self._wake = threading.Event()
         self._lock = threading.Lock()
         self._writer = None
+        # The settings window's open transactions (#1264), one per page kind:
+        # see console_settings.py. On the session, so a disconnect - or a
+        # login that takes the console over - drops them with it.
+        self.settings_txn = None
+        self.served_txn = None
+        self.folders_txn = None
+        self.onconnect_txn = None
+
+    # A DCC CHAT session keeps state between its lines, so it can hold a
+    # transaction; the dashboard Console's per-request stand-in cannot.
+    holds_transactions = True
 
     # -- output ------------------------------------------------------------
 
@@ -2403,6 +2414,33 @@ def _cmd_chat(session, args):
         session.send(message)
 
 
+# --------------------------------------------------------------------------
+# The settings window's commands (#1264). The work is console_settings.py's,
+# over the dashboard's own functions in webserver.py; imported per call, as
+# webserver itself is above, so importing this module pulls in neither.
+# --------------------------------------------------------------------------
+
+def _settings_command(name):
+    def run(session, args):
+        import console_settings
+        getattr(console_settings, "cmd_" + name)(session, args)
+    run.__name__ = "_cmd_" + name
+    return run
+
+
+_cmd_settings = _settings_command("settings")
+_cmd_set = _settings_command("set")
+_cmd_setbegin = _settings_command("setbegin")
+_cmd_setcommit = _settings_command("setcommit")
+_cmd_setabort = _settings_command("setabort")
+_cmd_setpreview = _settings_command("setpreview")
+_cmd_served = _settings_command("served")
+_cmd_folders = _settings_command("folders")
+_cmd_onconnect = _settings_command("onconnect")
+_cmd_banlist = _settings_command("banlist")
+_cmd_consolecaps = _settings_command("consolecaps")
+
+
 def _cmd_help(session, args):
     session.send("Available commands:")
     for name in sorted(COMMANDS):
@@ -2453,6 +2491,17 @@ COMMANDS = {
     "dlagain":    (_cmd_dlagain,    "ask again for a download that failed", "dlagain <id>"),
     "dlclear":    (_cmd_dlclear,    "forget the finished downloads",     "dlclear"),
     "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan|*|nick text]"),
+    "settings":   (_cmd_settings,   "every setting the dashboard's Settings page offers", "settings [word]"),
+    "set":        (_cmd_set,        "change a setting (buffered inside setbegin)", "set <KEY> <value>"),
+    "setbegin":   (_cmd_setbegin,   "start buffering set lines, to save as one", "setbegin"),
+    "setcommit":  (_cmd_setcommit,  "save the buffered settings in one go", "setcommit [confirm]"),
+    "setabort":   (_cmd_setabort,   "drop the buffered settings",        "setabort"),
+    "setpreview": (_cmd_setpreview, "the advert and notice in the theme being set", "setpreview"),
+    "served":     (_cmd_served,     "the lists served, their channels and folders", "served [begin|list|chan|folder|commit|abort]"),
+    "folders":    (_cmd_folders,    "the served folders of a one-list bot", "folders [begin|row|commit|abort]"),
+    "onconnect":  (_cmd_onconnect,  "the commands sent on connect; resend them", "onconnect [begin|delay|line|commit|abort|resend]"),
+    "banlist":    (_cmd_banlist,    "the bans, as rows for the settings window", "banlist"),
+    "consolecaps": (_cmd_consolecaps, "which settings-window commands this bot has", "consolecaps"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),
@@ -2468,6 +2517,25 @@ COMMANDS = {
 CONSOLE_SOURCE = "DCC-CONSOLE"
 
 
+# Lines that carry a value, left out of the bot's log (#1264). An on-connect
+# command is very often an X login with its password (on_connect.py never
+# logs one), a `set` may name ADMIN_PASSWORD_HASH with a value - refused, but
+# not after being printed - and the settings window sends a row per field or
+# folder, which would bury the log. The commits log what they saved, by name.
+_UNLOGGED = {"set": None, "served": ("list", "chan", "folder"),
+             "folders": ("row",), "onconnect": ("line", "delay")}
+
+
+def _logged(command, stripped, args):
+    """The line as handle_command() logs it, or None to log nothing."""
+    if command not in _UNLOGGED:
+        return stripped
+    subcommands = _UNLOGGED[command]
+    if subcommands is None:
+        return None
+    return None if (args.split(None, 1) or [""])[0].lower() in subcommands else stripped
+
+
 def handle_command(session, text):
     """Dispatch one authenticated line."""
     stripped = text.strip()
@@ -2479,7 +2547,9 @@ def handle_command(session, text):
         session.send(f"Unknown command: {command}. Type 'help'.")
         return
     session.last_activity = time.time()
-    print(f"[ADMINCHAT] {session.nick} ran: {stripped}")
+    logged = _logged(command.lower(), stripped, args)
+    if logged is not None:
+        print(f"[ADMINCHAT] {session.nick} ran: {logged}")
     try:
         entry[0](session, args)
     except Exception as err:

@@ -4,6 +4,49 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚙️ The dashboard's settings pages, over the admin console (#1264, phase A)
+
+The bot side of a settings window for `dccore.mrc`: console commands that run the dashboard's OWN Settings-page code,
+so the window (phase B) can change the bot's settings from mIRC with nothing validated or saved a second way. The
+work is `src/console_settings.py`, reached only from `adminchat.COMMANDS`; the line protocol is defined in
+`docs/ADMIN-CONSOLE.md`, "Settings over the console".
+
+- **`settings`** lists every setting `build_settings_payload()` offers, read under the same reload lock, as
+  `SETBEGIN <n>` / `SETF <KEY> <type> <value>` / `SETEND <n>`. `ADMIN_PASSWORD_HASH` never appears. A value crosses
+  in its `settings.conf` form (a colour as its `\x03` escape text, as the page shows it), with a small `%HH` encoding
+  for the rare value a space-collapsing client would damage - an empty value, a leading, trailing or doubled space, a
+  control character. An ordinary value, `%admin%` and `%nick%` included, crosses unchanged.
+- **`setbegin` / `set` / `setcommit` / `setabort`**: `setcommit` saves every buffered change in ONE
+  `apply_settings_changes()` call, so Apply is one rehash. Each `set` is checked as it arrives by the save's own
+  per-value check (the new `settings_file.check_change()`), so an error comes back per setting, in the page's words;
+  one refused value saves nothing. A value equal to the current one is not written at all - the window can send a
+  whole page back and only what changed is saved, and a full round trip of every setting writes nothing. `set`
+  outside a transaction saves at once. Clearing `DEBUG_CHANNEL` asks first, as the page's confirm() does:
+  `SETDONE confirm ...`, then `setcommit confirm`. A second `setbegin` replaces the first and says how many changes it
+  dropped; the transaction lives on the session, so a disconnect drops it.
+- **`setpreview`**: the dashboard's theme preview with the unsaved `THEME` / `CUSTOM_THEME_*` / `SEARCH_ENABLED`, as
+  raw IRC lines to echo in colour.
+- **`served`**, **`folders`** and **`onconnect`**: the served lists (names, primary, channel bindings and each
+  channel's Normal / Quiet / Request only mode, folders), the one-list bot's folders, and the on-connect commands with
+  their delay - each a snapshot plus a begin / rows / commit transaction over `apply_list_changes()`,
+  `apply_folder_changes()` and `apply_on_connect_changes()`, whose whole-set checks come back one problem per line.
+  A set sent back unchanged writes nothing (an implied list does not become a `lists.json`). `onconnect resend` is
+  the dashboard's Resend button.
+- **`banlist`**: the permanent patterns and the running timed bans/ignores with seconds left, framed for a window
+  (`bans` stays the prose); `ban`, `unban`, `ignore` and `unignore` already cover changing both kinds.
+- **`consolecaps`** answers `DCCORE CAPS settings:1 preview:1 ...`, so the window can tell an older bot (which
+  answers "Unknown command") and say to update it.
+- **Never a value in the log.** `handle_command()` no longer prints `set` lines or a transaction's rows - an
+  on-connect command is often an X login with its password, and `set ADMIN_PASSWORD_HASH ...` was printed before it
+  was refused. A commit logs the names of what it saved.
+- **The dashboard's Console refuses the transactions** (each request is a new session, so a `setbegin` there would be
+  gone before the next `set`, which would then save at once).
+- **Tests:** `tests/test_console_settings_commands.py` (the encoding; framing and counts; every setting round-tripped
+  with no save; one save per commit, through the real `settings_file.save()`; per-key errors; abort; the
+  debug-channel confirmation; the preview's unsaved values; served lists, folders and on-connect round trips; the ban
+  rows; that nothing but the console reaches these commands; the outbox bound; help and the guide),
+  `tests/test_the_mirc_menu_has_every_command.py` (the new commands are the window's plumbing, not menu items).
+
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 
 ### 🧹 Purge every held list, to clear a channel stuck wrong from before v1.16 (#1260)

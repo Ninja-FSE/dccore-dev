@@ -264,6 +264,17 @@ prefix.
 | `dlclear` | forget every finished download (the files stay on disk) |
 | `chat [#channel\|* <text>]` | say something in DCCore Chat, as the bot, in one channel or (`*`) the fewest that reach the other DCCore bots - **public**, see below; alone, the channels it can chat in |
 | `chat peers` / `chat who` | the other DCCore bots seen by WHO, and ask WHO again now |
+| `settings [<word>]` | every setting the dashboard's Settings page offers, with its value, grouped as the page groups them; with a word, only the settings whose name contains it (#1264) |
+| `set <KEY> <value>` | change one setting through the Settings page's own save, which starts a rehash; an empty value clears it. Inside `setbegin` it is buffered instead. Refused with the page's own reason - a value it would not save, a name it does not offer, and `ADMIN_PASSWORD_HASH` always. Clearing `DEBUG_CHANNEL` asks first: `setcommit confirm` goes ahead, `setabort` does not |
+| `setbegin` | start buffering `set` lines, to save as one: Apply in the settings window is one save and one rehash, not one per field. A second `setbegin` drops the first transaction (it says how many changes it dropped); a disconnect drops it too |
+| `setcommit [confirm]` | save everything buffered since `setbegin` in one go - or nothing, if any `set` in it was refused. A value equal to the current one is not written at all, so sending a page back untouched saves nothing |
+| `setabort` | drop the buffered changes |
+| `setpreview` | the sample advert and transfer notice drawn in the theme the open transaction would save (`THEME`, the `CUSTOM_THEME_*` colours, `SEARCH_ENABLED`), or in the saved one when none is open - the dashboard's preview, in colour |
+| `served` | the lists this bot serves: their names, which is primary, the channels each is bound to with the channel's mode (`normal`, `quiet`, `request_only`), and their folders. `served begin`, then `served list` / `served chan` / `served folder` rows and `served commit` replace the whole set, as the dashboard's lists page does (`served abort` drops it) |
+| `folders` | the served folders of a bot with one list (the dashboard's folder rows on "Your list"); `folders begin`, `folders row` rows and `folders commit` replace them (`folders abort` drops it) |
+| `onconnect` | the commands sent to the server once registered, in full (an X login with its password included, as the dashboard shows it - never in the bot's log), and the seconds between them; `onconnect begin`, `onconnect delay`, `onconnect line` rows and `onconnect commit` replace them (`onconnect abort` drops it); `onconnect resend` sends the saved ones again now |
+| `banlist` | the permanent ban patterns and the timed bans and ignores with the seconds left, as rows for the settings window; `bans` is the same for a person |
+| `consolecaps` | which of the settings window's commands this bot has, and their protocol versions |
 | `help` | the command list |
 | `hello <client> <version>` | switch this session to the structured feed (below) |
 | `pair <client> <version>` | mint a login token for a script (below) |
@@ -669,6 +680,100 @@ unpair dccore.mrc-3f9a12c0   revoke one; its next login is a wrong password
 `pair` and `unpair` are console commands: you have to be logged in - with
 the password or with a token - to mint or revoke one. The file lives where
 **Settings → Advanced → Paired console scripts file** points.
+
+## Settings over the console
+
+The commands `settings`, `set`, `setbegin`, `setcommit`, `setabort`,
+`setpreview`, `served`, `folders`, `onconnect`, `banlist` and `consolecaps`
+(#1264) give the console what the dashboard's Settings page has, for
+`dccore.mrc`'s settings window and for a person at a plain console. Each one
+runs the dashboard's own code - the same list of settings, the same checks,
+the same save, the same rehash - so the console can never accept a value the
+page would refuse, or the other way round.
+
+They are console commands only. The admin commands typed in a channel are a
+fixed handful (`!rehash`, `!update`, `!ban`, `!unban`, `!clearqueue`) and never
+reach them. The dashboard's own Console page can run `settings`, `set`,
+`setpreview` and the listings, but not a transaction: it forgets everything
+between commands, so `setbegin` there would be gone before the first `set` -
+which would then save at once. It says so instead.
+
+A plain session gets sentences; a structured one (after `hello`) gets the
+lines below. Whatever the bot's log shows of these commands, it is never a
+value: the rows of a transaction are not logged at all, and a commit logs the
+names of what it saved.
+
+### The value encoding
+
+A value crosses in **one line, in its `settings.conf` form**: `true`/`false`
+for a switch, a number as written in the file (sizes in bytes, as stored - the
+dashboard only divides them for display), a list as its entries joined by
+`, `, a `CUSTOM_THEME_*` colour as its `\x03`-style escape text (exactly what
+the Settings page shows), and nothing at all for an empty value. A value that
+is the **last field** of its line is the rest of the line. Into that, exactly
+these characters are written as `%HH`, two hex digits of the character:
+
+- a control character, `%00`-`%1F` and `%7F`;
+- a space at the start or the end of the value, and every space that follows
+  another space, as `%20`;
+- a `%` that would otherwise read as one of these escapes, as `%25`.
+
+Those are the only escapes there are - `%00`-`%1F`, `%20`, `%25`, `%2D`, `%7F`,
+in either case - so `%admin%`, `%nick%` and `100%` cross as they are. An
+ordinary value is sent unchanged, and nothing on a line depends on a run of
+spaces surviving the trip (mIRC collapses them). To decode, replace every
+escape with its character in one pass, left to right (`%2520` is `%20`, not a
+space); in mIRC, `$regsubex(%v,/%(0[0-9a-f]|1[0-9a-f]|2[05d]|7f)/gi,$chr($base(\1,16,10)))`.
+Encode what you send back the same way. An empty value is a line that ends
+after the field before it: `set DEBUG_CHANNEL` clears the debug channel.
+
+A value that is **not** the last field (a folder's label, a channel) must stay
+one word, so it is a *token*: the same encoding with every space written as
+`%20`, `-` for an empty value, and `%2D` for a value that is exactly `-`.
+
+### Machine-readable output
+
+Every snapshot is framed like the Download queues window's (`DQBEGIN` ...
+`DQEND`): a `...BEGIN` line, the rows, a `...END` line, both carrying the
+counts. A client checks that it received as many rows as the counts say
+before it lets anyone edit them - the session's 500-line outbox drops the
+oldest lines for a client that stops reading (`DCCORE DROPPED <n>` says so),
+and a page edited from half a snapshot would save half a configuration. A
+transaction's rows mirror its snapshot's rows word for word (`DCCORE SRVLIST`
+becomes `served list`, and so on), so a page sent back untouched is the
+snapshot's own lines, and saves nothing.
+
+A transaction replies to its rows only when one is refused; its commit always
+ends with exactly one `...DONE` line, after any `...ERR` lines. A row that was
+refused makes the commit save nothing. `...DONE` carries its status as the
+first field, and its last field is always a sentence to show.
+
+| line | when | fields |
+|---|---|---|
+| `DCCORE CAPS <name>:<version> ...` | `consolecaps` | today `settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1`. A bot without these commands answers `DCCORE OUT Unknown command: consolecaps. Type 'help'.` - say "update the bot" then. A version goes up when a field of that part moves; a part added later is a new name |
+| `DCCORE SETBEGIN <n>` / `DCCORE SETF <KEY> <type> <value>` / `DCCORE SETEND <n>` | `settings [<word>]` | one `SETF` per setting, in the Settings page's order; `type` is `str`, `int`, `float`, `bool` or `list`, the value last (empty: the line ends after the type - for `WEBUI_CONSOLE_ENABLED` that means "not set"). `ADMIN_PASSWORD_HASH` is never among them. Labels, help, units and choices are the dashboard's metadata, not sent here |
+| `DCCORE SETOPEN <dropped>` | `setbegin` | `dropped`: changes buffered by a transaction that was still open, now gone (0 normally) |
+| `DCCORE SETERR <KEY> <message>` | `set` refused | the Settings page's reason. `KEY` is the name as sent, uppercased |
+| `DCCORE SETDONE ok <written> <unchanged> <restart> <message>` | `setcommit`, or `set` outside a transaction | saved in one call, rehash started; `unchanged` counts the values equal to the current ones, not written; `restart` is the comma-separated settings that need a restart of the bot (`WEBUI_*`, `SERVER`, `PORT`), or `-` |
+| `DCCORE SETDONE error <message>` | | nothing was saved; the transaction is closed |
+| `DCCORE SETDONE confirm <question>` | | the commit clears `DEBUG_CHANNEL`, and the bot leaves that channel at once: ask, then send `setcommit confirm` (or `setabort`). The transaction stays open meanwhile - after a lone `set` too |
+| `DCCORE SETDONE aborted <n>` | `setabort` | `n` buffered changes dropped |
+| `DCCORE PVBEGIN 2` / `DCCORE PVLINE <advert\|notice> <line>` / `DCCORE PVEND 2` | `setpreview` | the sample advert and transfer notice, RAW - mIRC colour codes and all, not encoded - to echo as they are |
+| `DCCORE SRVBEGIN <lists> <source> <max>` / `DCCORE SRVLIST <n> <primary> <name>` / `DCCORE SRVCHAN <n> <channel> <mode>` / `DCCORE SRVFOLDER <n> <label> <path>` / `DCCORE SRVEND <lists> <channels> <folders>` | `served` | per list, in order: its `SRVLIST` (`n` from 1, `primary` `1` or `0`, the name last), then a `SRVCHAN` per channel bound to it (`channel` a token, `mode` `normal`, `quiet` or `request_only`), then a `SRVFOLDER` per folder (`label` a token, the path last). `source` is `file` (`lists.json`) or `implied` (none: one list over the served folders - sending it back unchanged does not create the file). `max` is how many lists there may be |
+| `DCCORE SRVOPEN <dropped>` | `served begin` | then `served list <n> <0\|1> <name>` (`n` the next number), `served chan <n> <channel> <mode>`, `served folder <n> <label> <path>`, and `served commit` or `served abort` |
+| `DCCORE SRVERR <message>` | a row refused, or one problem of a refused set | |
+| `DCCORE SRVDONE ok <lists> <message>` / `DCCORE SRVDONE unchanged <message>` / `DCCORE SRVDONE error <message>` / `DCCORE SRVDONE aborted <n>` | `served commit` / `served abort` | `ok`: written, and the lists need a rebuild to be published. An empty set (`served begin` then `served commit`) goes back to one list over the served folders |
+| `DCCORE FLDBEGIN <n> <source>` / `DCCORE FLDROW <n> <label> <path>` / `DCCORE FLDEND <n>` | `folders` | `source` is `file`, `file_directory` (the one `FILE_DIRECTORY`) or `none`; `label` a token, the path last |
+| `DCCORE FLDOPEN <dropped>` | `folders begin` | then `folders row <n> <label> <path>`, and `folders commit` or `folders abort` |
+| `DCCORE FLDERR <message>` / `DCCORE FLDDONE ok <n> <message>` / `DCCORE FLDDONE unchanged <message>` / `DCCORE FLDDONE error <message>` / `DCCORE FLDDONE aborted <n>` | | as for `served`. An empty set goes back to the single `FILE_DIRECTORY` |
+| `DCCORE OCBEGIN <n> <delay> <max_commands> <max_delay>` / `DCCORE OCLINE <n> <command>` / `DCCORE OCEND <n>` | `onconnect` | the commands in the order they are sent, the seconds between them, and the two limits. A command is shown whole - it may be an X login with its password, which is why it is never logged |
+| `DCCORE OCOPEN <dropped>` | `onconnect begin` | then `onconnect delay <seconds>` (unsent: the saved delay is kept), `onconnect line <n> <command>`, and `onconnect commit` or `onconnect abort`. An empty set clears them |
+| `DCCORE OCERR <message>` / `DCCORE OCDONE ok <n> <message>` / `DCCORE OCDONE unchanged <message>` / `DCCORE OCDONE error <message>` / `DCCORE OCDONE aborted <n>` | | as for `served`; a problem names the command by its number, never by its text. Saved commands go out at the next connect, or now with `onconnect resend` |
+| `DCCORE OCRESEND ok <sent> <message>` / `DCCORE OCRESEND error <message>` | `onconnect resend` | the dashboard's Resend button |
+| `DCCORE BANBEGIN <permanent> <timed>` / `DCCORE BANP <pattern>` / `DCCORE BANT <seconds_left> <nick>` / `DCCORE BANEND <permanent> <timed>` | `banlist` | the permanent wildcard patterns (`hard_bans.txt`), then every timed ban or ignore still running - the bot keeps the two in one table, so it cannot say which a timed one is. At most 200 rows of each kind; the counts are the true totals. Change them with `ban` / `unban <pattern>` and `ignore <nick> <minutes>` / `unignore <nick>`; `ban` and `unban` run in the background and report with a `LOG` line, so ask `banlist` again after it |
+
+Lines a `DCCORE PVLINE` carries are the only ones here sent raw; every other
+free-text value is encoded as above, and every message is plain text.
 
 ## The window, in mIRC
 

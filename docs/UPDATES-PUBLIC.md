@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **New: the dashboard's settings over the admin console**, for the settings window coming to `dccore.mrc`: `settings` lists every setting with its value, `set <KEY> <value>` changes one (or `setbegin` ... `setcommit` saves many with one rehash), and `served`, `folders`, `onconnect`, `setpreview` and `banlist` cover the lists and channels, the folders, the on-connect commands, the theme preview and the bans. They run the dashboard's own checks and save, so a value one refuses the other refuses too. See `docs/ADMIN-CONSOLE.md`, "Settings over the console".
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.
