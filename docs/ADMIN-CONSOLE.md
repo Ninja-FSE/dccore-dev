@@ -893,7 +893,7 @@ sent at all: what is off there never reaches the script.
 later, mIRC 6.17 or later): the bot's own settings, as the dashboard's Settings
 page has them, over the console commands above. Six tabs - **General**,
 **Sharing**, **Downloads**, **Security**, **Dashboard & Console**, **Advanced** -
-each with its pages in a list on the left, and **Apply**, **OK** and **Cancel**
+each with its pages as a column of buttons on the left, and **Apply**, **OK** and **Cancel**
 at the bottom.
 
 - **The labels, units, choices and help are the dashboard's.** Point at a

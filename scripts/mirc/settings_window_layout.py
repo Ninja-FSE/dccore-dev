@@ -6,8 +6,8 @@ labels, units, choices, types and help texts from the bot's own metadata
 dialog into a marked block of dccore.mrc. Nothing here is mIRC code and
 nothing here is a position: move a setting by moving its line.
 
-The grouping is the settings-window mockup's: six tabs, a list of pages on
-the left of each, sections inside a page, in the mockup's order. It is NOT the
+The grouping is the settings-window mockup's: six tabs, a column of page
+buttons on the left of each, sections inside a page, in the mockup's order. It is NOT the
 dashboard's SETTINGS_CATEGORIES order on purpose - the mockup moved the
 switches used most onto General Settings, so SEARCH_ENABLED is there and not
 on Search.

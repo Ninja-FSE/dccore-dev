@@ -110,7 +110,11 @@ def wrapped_lines(text, width_dbu):
 
 DIALOG_W, DIALOG_H = 420, 298
 TABS = (4, 2, 412, 14)
-PAGE_LIST = (4, 18, 84, 250)
+# The pages of the chosen tab: a column of push-style radio buttons, one per
+# slot, as many slots as the tab with the most pages has. Not a listbox: a
+# listbox's row height cannot be set from a script, and at a display scale
+# above 100% its highlight was shorter than the text, which looked cut.
+PAGE_SLOT_X, PAGE_SLOT_Y, PAGE_SLOT_W, PAGE_SLOT_H, PAGE_SLOT_GAP = 4, 20, 84, 15, 2
 CONTENT_X, CONTENT_Y, CONTENT_W, CONTENT_H = 94, 18, 322, 226
 HELP = (94, 246, 322, 24)                   # three lines of the hovered setting's help
 CONNECTED = (4, 272, 254, 8)
@@ -133,7 +137,8 @@ HEADER_PITCH, SECTION_GAP = 10, 2
 # options dialog's (1-703) and the download queues' (1-6) all the same, so a
 # grep for an id finds one dialog.
 TAB_IDS = range(1001, 1007)
-PAGE_LIST_ID, HELP_ID, CONNECTED_ID, STATUS_ID = 1010, 1012, 1013, 1018
+FIRST_SLOT_ID = 1020                        # the page buttons: 1020, 1021, ...
+HELP_ID, CONNECTED_ID, STATUS_ID = 1012, 1013, 1018
 FIRST_TEXT_ID = 1100                        # section headers and notes
 FIRST_ITEM_ID, ITEM_STRIDE = 2000, 4        # +0 label, +1 control, +2 browse button / background combo
 
@@ -604,7 +609,17 @@ def render(builder):
             out.append('  tab "%s", %d, %d %d %d %d' % ((static(group), cid) + TABS))
         else:
             out.append('  tab "%s", %d' % (static(group), cid))
-    out.append("  list %d, %d %d %d %d, vsbar" % ((PAGE_LIST_ID,) + PAGE_LIST))
+    slots = max(len(pages) for _group, pages in layout.GROUPS)
+    for number in range(slots):
+        y = PAGE_SLOT_Y + number * (PAGE_SLOT_H + PAGE_SLOT_GAP)
+        if y + PAGE_SLOT_H > CONNECTED[1] - 2 or FIRST_SLOT_ID + number >= FIRST_TEXT_ID:
+            raise LayoutError("%d pages in one tab do not fit in the column of page buttons" % slots)
+        out.append('  radio "", %d, %d %d %d %d, push%s' % (FIRST_SLOT_ID + number, PAGE_SLOT_X, y, PAGE_SLOT_W,
+                                                         PAGE_SLOT_H, " group" if number == 0 else ""))
+    for _group, pages in layout.GROUPS:
+        for name, _sections in pages:
+            if text_px(name) + BUTTON_PAD_PX > PAGE_SLOT_W * PX_PER_DBU:
+                raise LayoutError("the page name %r does not fit its button" % name)
     out.append('  text "", %d, %d %d %d %d' % ((HELP_ID,) + HELP))
     out.append('  text "", %d, %d %d %d %d' % ((CONNECTED_ID,) + CONNECTED))
     out.append('  text "", %d, %d %d %d %d' % ((STATUS_ID,) + STATUS))
@@ -619,6 +634,7 @@ def render(builder):
     # The lookup data. Built into a hash table once per opening of the window.
     data = list(builder.data)
     data.insert(0, ("groups", str(len(groups))))
+    data.insert(1, ("slots", str(max(len(pages) for _group, pages in layout.GROUPS))))
     data.append(("pages", str(len(builder.pages))))
     for number, _group, name in builder.pages:
         data.append(("p.%d" % number, hash_text(name)))

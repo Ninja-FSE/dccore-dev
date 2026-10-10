@@ -1,7 +1,7 @@
 """#1264: dccore.mrc's settings window - the bot's settings, edited from mIRC.
 
 `/dccore settings` opens `dialog dccore.set`: six tabs, the pages of the
-chosen tab in a list, Apply / OK / Cancel. It speaks the console protocol
+chosen tab as a column of buttons, Apply / OK / Cancel. It speaks the console protocol
 docs/ADMIN-CONSOLE.md defines under "Settings over the console".
 
 mIRC cannot run here, so the script is read as source. Comment lines are
@@ -25,7 +25,8 @@ import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc")
-for path in (os.path.join(REPO_ROOT, "src"), os.path.join(REPO_ROOT, "tests")):
+for path in (os.path.join(REPO_ROOT, "src"), os.path.join(REPO_ROOT, "tests"),
+             os.path.join(REPO_ROOT, "scripts", "mirc")):
     if path not in sys.path:
         sys.path.insert(0, path)
 
@@ -97,7 +98,7 @@ def untext(text):
 
 
 CONTROL = re.compile(
-    r'^\s+(check|text|button|box|edit|combo|list|tab) (?:"([^"]*)", )?(\d+)(?:, (\d+) (\d+) (\d+) (\d+))?(?:, (.*))?$',
+    r'^\s+(check|text|button|box|edit|combo|list|tab|radio) (?:"([^"]*)", )?(\d+)(?:, (\d+) (\d+) (\d+) (\d+))?(?:, (.*))?$',
     re.M)
 
 
@@ -123,7 +124,12 @@ def page_ids(data):
     return pages
 
 
-GLOBAL_IDS = set(range(1001, 1007)) | {1010, 1012, 1013, 1014, 1015, 1016, 1017, 1018}
+def slot_ids():
+    """The page buttons: one per slot, 1020 up, as many as the busiest tab has pages."""
+    return set(range(1020, 1020 + int(generated_data()["slots"])))
+
+
+GLOBAL_IDS = set(range(1001, 1007)) | {1012, 1013, 1014, 1015, 1016, 1017, 1018} | slot_ids()
 
 
 # ---------------------------------------------------------------------------
@@ -944,6 +950,84 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
         self.assertIn("if (!%at) { return $1 }", alias("dccore.sw.srv.modelabel"))
         self.assertEqual(statements(alias("dccore.sw.pickline")),
                          ["if ($2) { did -c dccore.set $1 $2 }", "else { did -u dccore.set $1 }"])
+
+
+
+class ThePageButtons(unittest.TestCase):
+    """The pages of a tab are a column of push-style radio buttons. They were a
+    listbox, whose row height a script cannot set: at a display scale above
+    100% its highlight was shorter than the text, which looked cut."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.data = generated_data()
+        cls.slots = int(cls.data["slots"])
+        cls.controls = dialog("dccore.set")
+
+    def test_there_is_no_page_list_any_more(self):
+        self.assertNotIn("1010", code())
+        self.assertFalse([c for c in self.controls if c[0] == "list" and c[3] < 94])
+
+    def test_one_button_per_slot_enough_for_the_busiest_tab(self):
+        import settings_window_layout as layout
+        self.assertEqual(self.slots, max(len(pages) for _group, pages in layout.GROUPS))
+        buttons = [c for c in self.controls if c[0] == "radio"]
+        self.assertEqual([c[2] for c in buttons], sorted(slot_ids()))
+        self.assertEqual([c[7] for c in buttons], ["push group"] + ["push"] * (self.slots - 1))
+        for kind, _label, cid, x, y, w, h, _style in buttons:
+            self.assertEqual((x, w), (4, 84), cid)
+            self.assertGreaterEqual(h, 14, cid)
+        tops = [c[4] for c in buttons]
+        self.assertTrue(all(b - a >= buttons[0][6] for a, b in zip(tops, tops[1:])), tops)
+
+    def test_every_page_name_fits_its_button(self):
+        width = 84 * PX_PER_DBU
+        for page in range(1, int(self.data["pages"]) + 1):
+            name = untext(self.data["p.%d" % page])
+            self.assertLessEqual(text_px(name) + 8, width, name)
+
+    def test_every_page_is_reachable(self):
+        """Each tab's pages fit its slots, and a click on slot N shows the
+        tab's Nth page."""
+        pages = set()
+        for group in range(1, int(self.data["groups"]) + 1):
+            numbers = self.data["g.%d.pages" % group].split()
+            self.assertLessEqual(len(numbers), self.slots)
+            pages.update(numbers)
+        self.assertEqual(pages, {str(n) for n in range(1, int(self.data["pages"]) + 1)})
+        click = alias("dccore.sw.click")
+        self.assertIn("if (%id >= 1020) && (%id < $calc(1020 + $dccore.sw.m(slots))) {", click)
+        self.assertIn("var %p = $gettok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$calc(%id - 1019),32)",
+                      click)
+        self.assertIn("if (%p) { dccore.sw.page %p }", click)
+
+    def test_a_tab_names_its_buttons_and_hides_the_spare_ones(self):
+        body = statements(alias("dccore.sw.tab"))
+        self.assertIn("while (%i <= $dccore.sw.m(slots)) {", body)
+        self.assertIn("if (%i <= $numtok(%pages,32)) {", body)
+        self.assertIn("did -ra dccore.set $calc(1019 + %i) $replace($dccore.sw.untext($dccore.sw.m(p. $+ "
+                      "$gettok(%pages,%i,32))),&,&&)", body)
+        self.assertIn("did -v dccore.set $calc(1019 + %i)", body)
+        self.assertIn("else { did -h dccore.set $calc(1019 + %i) }", body)
+
+    def test_the_page_shown_has_its_button_pressed_and_only_it(self):
+        body = statements(alias("dccore.sw.page"))
+        self.assertIn("var %at = $findtok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$1,1,32), %i = 1", body)
+        self.assertIn("if (%i == %at) { did -c dccore.set $calc(1019 + %i) }", body)
+        self.assertIn("else { did -u dccore.set $calc(1019 + %i) }", body)
+
+    def test_the_slot_arithmetic_agrees_with_the_ids(self):
+        """1019 + N is slot N's button, for every slot (the mSL above), and
+        the generator starts the buttons at 1020."""
+        import build_settings_window as generator
+        self.assertEqual(generator.FIRST_SLOT_ID, 1020)
+        for n in range(1, self.slots + 1):
+            self.assertIn(1019 + n, slot_ids())
+
+    def test_a_refused_setting_still_shows_its_page(self):
+        goto = alias("dccore.sw.goto")
+        self.assertIn("dccore.sw.tab %g", goto)
+        self.assertIn("hadd dccore.sws last. $+ %g %page", goto)
 
 
 if __name__ == "__main__":

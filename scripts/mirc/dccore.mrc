@@ -1931,7 +1931,7 @@ on *:dialog:dccore.opt:sclick:502: {
 ; ---------------------------------------------------------------------
 ;
 ;  /dccore settings, or Settings... in the menus. Six tabs along the top,
-;  the pages of the chosen tab in a list on the left, Apply / OK / Cancel
+;  the pages of the chosen tab in a column of buttons on the left, Apply / OK / Cancel
 ;  at the bottom. Everything goes through the console (docs/ADMIN-CONSOLE.md,
 ;  "Settings over the console"), so the bot checks and saves a value
 ;  exactly as its dashboard's Settings page does, and says why it refused
@@ -2119,12 +2119,20 @@ alias dccore.sw.enable {
   }
 }
 
-; $1 a tab: its pages into the list on the left, and the one last shown in it
+; $1 a tab: its pages onto the buttons on the left (push-style radio buttons,
+; 1020 up, one per slot; the slots it does not need hidden), and the page
+; last shown in it.
 alias dccore.sw.tab {
   hadd dccore.sws tab $1
-  did -r dccore.set 1010
   var %pages = $dccore.sw.m(g. $+ $1 $+ .pages), %i = 1
-  while (%i <= $numtok(%pages,32)) { did -a dccore.set 1010 $dccore.sw.untext($dccore.sw.m(p. $+ $gettok(%pages,%i,32))) | inc %i }
+  while (%i <= $dccore.sw.m(slots)) {
+    if (%i <= $numtok(%pages,32)) {
+      did -ra dccore.set $calc(1019 + %i) $replace($dccore.sw.untext($dccore.sw.m(p. $+ $gettok(%pages,%i,32))),&,&&)
+      did -v dccore.set $calc(1019 + %i)
+    }
+    else { did -h dccore.set $calc(1019 + %i) }
+    inc %i
+  }
   var %last = $dccore.sw.s(last. $+ $1)
   if (%last == $null) { %last = $gettok(%pages,1,32) }
   dccore.sw.page %last
@@ -2136,8 +2144,13 @@ alias dccore.sw.page {
   hadd dccore.sws page $1
   hadd dccore.sws last. $+ $dccore.sw.s(tab) $1
   dccore.sw.showpage $1 -v
-  var %at = $findtok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$1,1,32)
-  if (%at) { did -c dccore.set 1010 %at }
+  ; its button pressed, every other one not
+  var %at = $findtok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$1,1,32), %i = 1
+  while (%i <= $dccore.sw.m(slots)) {
+    if (%i == %at) { did -c dccore.set $calc(1019 + %i) }
+    else { did -u dccore.set $calc(1019 + %i) }
+    inc %i
+  }
   did -r dccore.set 1012
   var %asks = $dccore.sw.m(p. $+ $1 $+ .ask), %i = 1
   while (%i <= $numtok(%asks,32)) {
@@ -2782,8 +2795,9 @@ alias dccore.sw.closed {
 alias dccore.sw.click {
   var %id = $1
   if (%id isnum 1001-1006) { dccore.sw.tab $calc(%id - 1000) | return }
-  if (%id == 1010) {
-    var %p = $gettok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$did(dccore.set,1010).sel,32)
+  ; a page button: slot N of the tab shown is its Nth page
+  if (%id >= 1020) && (%id < $calc(1020 + $dccore.sw.m(slots))) {
+    var %p = $gettok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$calc(%id - 1019),32)
     if (%p) { dccore.sw.page %p }
     return
   }
@@ -3270,7 +3284,12 @@ dialog dccore.set {
   tab "Security", 1004
   tab "Dashboard && Console", 1005
   tab "Advanced", 1006
-  list 1010, 4 18 84 250, vsbar
+  radio "", 1020, 4 20 84 15, push group
+  radio "", 1021, 4 37 84 15, push
+  radio "", 1022, 4 54 84 15, push
+  radio "", 1023, 4 71 84 15, push
+  radio "", 1024, 4 88 84 15, push
+  radio "", 1025, 4 105 84 15, push
   text "", 1012, 94 246 322 24
   text "", 1013, 4 272 254 8
   text "", 1018, 4 281 254 16
@@ -3686,6 +3705,7 @@ alias dccore.sw.data {
   if ($hget(dccore.swm)) { hfree dccore.swm }
   hmake dccore.swm 100
   hadd dccore.swm groups 6
+  hadd dccore.swm slots 6
   hadd dccore.swm g.1 General
   hadd dccore.swm g.1.pages 1 2 3 4 5 6
   hadd dccore.swm g.2 Sharing

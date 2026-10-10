@@ -8,8 +8,10 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 `/dccore settings` (and **Bot Settings** / **Settings...** in the menus) opens `dialog dccore.set`: the bot's settings
 as the dashboard's Settings page has them, laid out as the settings-window mockup - six tabs (General, Sharing,
-Downloads, Security, Dashboard & Console, Advanced), each tab's pages in a list on the left, Apply / OK / Cancel and a
-status line at the bottom. Plain mIRC, no DLL. `dccore.mrc` is 1.19.0.
+Downloads, Security, Dashboard & Console, Advanced), each tab's pages as a column of buttons on the left, Apply / OK /
+Cancel and a status line at the bottom. Plain mIRC, no DLL. `dccore.mrc` is 1.19.0. The pages are push-style radio
+buttons, not a listbox: a script cannot set a listbox's row height, and at a display scale above 100% its highlight
+was shorter than the text (found in the first real-mIRC test).
 
 - **Generated, not hand-kept.** `scripts/mirc/build_settings_window.py` writes one marked block of `dccore.mrc` - the
   dialog table (420 controls, positions computed, labels measured with the options dialog's Tahoma table so a long
@@ -61,7 +63,7 @@ status line at the bottom. Plain mIRC, no DLL. `dccore.mrc` is 1.19.0.
 - **Tests:** `tests/test_the_settings_window_generator.py` (21: the block is up to date and `--check` catches a stale
   one; every setting placed once or excluded; the mockup's tabs and pages; the generator refuses a key placed twice, a
   key with no place, a check too wide and a page that cannot fit; labels, units, choices and help are the bot's) and
-  `tests/test_the_mirc_settings_window.py` (72: the decoder and encoder, re-run in Python from the script's own
+  `tests/test_the_mirc_settings_window.py` (80: the decoder and encoder, re-run in Python from the script's own
   patterns, agree with `console_settings` on a battery of values, and a preview line comes out as the bot's line with
   no plain space for `echo` to collapse; every documented reply type is routed and has a branch; every command sent is
   a console command with a real subcommand; Apply sends setbegin, sets, setcommit and no `set` is ever sent outside a
