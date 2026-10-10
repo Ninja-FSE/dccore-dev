@@ -367,9 +367,11 @@ def bot_in_our_channel(bot, channel):
     same membership config.channel_users already tracks for
     dcc.channel_containing_user(), just asked about one channel instead of
     searched across all of them (#1232)."""
+    import irc
     wanted = str(bot).strip().lower()
+    key = irc.channel_key(channel)  # the server's casemapping (#1271)
     with runtime.channel_users_lock():
-        users = (getattr(config, "channel_users", {}) or {}).get(str(channel).strip().lower())
+        users = (getattr(config, "channel_users", {}) or {}).get(key)
         return bool(users) and wanted in {str(u).lower() for u in users}
 
 
@@ -399,7 +401,7 @@ def _resolve_fetch_channel(bot, preferred):
     configured = {chan.lower(): chan for chan in irc.configured_channels()}
 
     def _usable(raw):
-        chan = configured.get(str(raw or "").strip().lower())
+        chan = configured.get(irc.channel_key(raw))
         return chan if chan and bot_in_our_channel(bot, chan) else None
 
     chosen = _usable(preferred)
