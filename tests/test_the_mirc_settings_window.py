@@ -756,8 +756,8 @@ class TheExamplesAreInvented(unittest.TestCase):
 
 class TheVersion(unittest.TestCase):
 
-    def test_the_script_is_1_19_1(self):
-        self.assertIn("\nalias dccore.ver { return 1.19.1 }\n", code())
+    def test_the_script_is_1_19_3(self):
+        self.assertIn("\nalias dccore.ver { return 1.19.3 }\n", code())
 
 
 class TheReviewOfTheFirstVersion(unittest.TestCase):
@@ -1174,14 +1174,20 @@ class TheAuditOfBothHalves(unittest.TestCase):
     def test_the_password_is_masked_and_goes_nowhere_but_the_unlock_line(self):
         body = statements(alias("dccore.sw.unlockask"))
         ask = next(line for line in body if "$input(" in line)
-        match = re.fullmatch(r"var %pw = \$input\(([^,]+),po,DCCore - Unlock\)", ask)
-        self.assertIsNotNone(match, ask)                             # p: masked; no comma in the prompt
-        uses = [line for line in body if re.search(r"%pw(?![\w.])", line)]
-        self.assertEqual(uses, [ask, "if (%pw == $null) { dccore.sw.unlockdrop Not saved: no password was given. | return }",
-                                "dccore.send unlock %pw"])
-        # a local variable, gone when the alias returns: in no table, in no other alias
-        self.assertNotRegex(handwritten().replace(alias("dccore.sw.unlockask"), ""), r"%pw(?![\w.])")
-        self.assertNotRegex(alias("dccore.sw.unlockask"), r"hadd[^\n]*%pw|echo[^\n]*%pw|dccore\.sys[^\n]*%pw")
+        # p: masked; no comma in the prompt. Never in a /var (#1281): the
+        # answer goes straight into $dccore.sw.unlockarg, nested.
+        match = re.fullmatch(r"dccore\.sw\.unlocksend \$dccore\.sw\.unlockarg\("
+                             r"\$input\(([^,]+),po,DCCore - Unlock\)\)", ask)
+        self.assertIsNotNone(match, ask)
+        self.assertEqual(body, ["if (!$dialog(dccore.set)) { return }", ask])
+        self.assertEqual(statements(alias("dccore.sw.unlocksend")), [
+            "if ($1- == $null) { dccore.sw.unlockdrop Not saved: no password was given. | return }",
+            "hadd dccore.sws unlocking 1",
+            "dccore.sw.wait unlock",
+            "dccore.send unlock $1-"])
+        # held in no variable, no table, no echo - in none of the three aliases
+        for name in ("dccore.sw.unlockask", "dccore.sw.unlockarg", "dccore.sw.unlocksend"):
+            self.assertNotRegex(alias(name), r"\bvar\b|%pw|hadd[^\n]*\$1|echo|dccore\.sys", name)
 
     def test_a_typed_unlock_is_never_echoed(self):
         for window in ("@DCCore", "@DCCore-console"):
@@ -1275,7 +1281,7 @@ class TheAuditOfBothHalves(unittest.TestCase):
         unreleased = text[text.index("## Unreleased"):]
         unreleased = unreleased[:unreleased.index("\n## ", 5)]
         versions = set(re.findall(r"`dccore\.mrc` to (\d+\.\d+\.\d+)", unreleased))
-        self.assertEqual(versions, {"1.19.1"})
+        self.assertEqual(versions, {"1.19.3"})
 
 
 if __name__ == "__main__":

@@ -1324,6 +1324,15 @@ def note_kicked_from(channel, by=""):
     return True
 
 
+def kicked_notice(channel, by):
+    """What the operator is told when the bot is kicked from a channel it
+    serves. With REJOIN_ATTEMPTS at 0 no rejoin follows, so it says that
+    instead of promising one on the next advert (#1281)."""
+    if int(getattr(config, "REJOIN_ATTEMPTS", 3)) <= 0:
+        return f"Kicked from {channel} by {by}. Not rejoining: REJOIN_ATTEMPTS is 0."
+    return f"Kicked from {channel} by {by}. Will try to rejoin on the next advert."
+
+
 def note_user_kicked(nick, channel):
     """Somebody else was thrown out of `channel`. The same fact a PART
     carries, mirrored the same way: out of config.channel_users, and into
@@ -4133,8 +4142,7 @@ def irc_loop():
                                                          config.NICKNAME)).lower():
                             if note_kicked_from(kicked_chan, kicker):
                                 announce.send_debug(
-                                    f"Kicked from {kicked_chan} by {kicker}. "
-                                    f"Will try to rejoin on the next advert.",
+                                    kicked_notice(kicked_chan, kicker),
                                     category="PART", notice="warning")
                             else:
                                 # Not coming back, so nothing will ever

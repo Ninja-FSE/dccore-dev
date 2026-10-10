@@ -638,6 +638,9 @@ whose input closes up runs of spaces - mIRC's does - sends a password that has
 such spaces this way; any other password goes as it is typed. The line as it
 arrives is tried first, so a password that really reads like this still opens
 the console, and a wrong one is one of the three attempts like any other.
+`unlock <password>` takes the password the same way (#1281): the argument is
+tried as it is, then decoded, and is one attempt either way. The settings
+window sends a password with such spaces encoded and any other as typed.
 
 **The script only sends the token to the bot it paired with.** It dials the
 bot's nick by itself, and on Undernet anyone can take a nick while the bot is
