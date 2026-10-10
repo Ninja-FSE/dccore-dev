@@ -46,9 +46,11 @@ login with a password in it - is shown to the operator who asks, as the
 dashboard shows it, and is never logged (on_connect.py's own rule).
 """
 
+import math
 import re
 
 import defaults as config
+import runtime
 
 # The protocol this module speaks, for `consolecaps`. A client reads it to
 # tell a bot that has these commands from one that answers "Unknown command",
@@ -129,6 +131,37 @@ def decode_token(token):
 # --------------------------------------------------------------------------
 # Replies
 # --------------------------------------------------------------------------
+
+def _fields(text, maxsplit):
+    """`text` split on runs of ASCII spaces, at most `maxsplit` times; the
+    last part keeps everything after it. ASCII spaces ONLY (#1264 review):
+    str.split() and str.strip() also take a no-break space, U+3000 and the
+    like, which the encoding does not escape - so a folder label
+    "My<no-break space>Music" sent back unchanged came back as "My"."""
+    text = str(text or "").strip(" ")
+    return re.split(" +", text, maxsplit=maxsplit) if text else []
+
+
+def _finite(text):
+    """`text` as a finite float, or None: float() also reads nan and inf."""
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _send_lines(session, lines):
+    """Send a snapshot whole: Session.send_lines() waits for room in the
+    outbox rather than letting it drop the snapshot's first lines; a session
+    without one (the dashboard Console's) just collects them."""
+    bulk = getattr(session, "send_lines", None)
+    if bulk is not None:
+        bulk(lines)
+        return
+    for line in lines:
+        session.send(line)
+
 
 def _structured(session):
     return bool(getattr(session, "structured", False))
@@ -217,23 +250,24 @@ def settings_lines(fields):
 def cmd_settings(session, args):
     """`settings [word]`: every setting the dashboard's Settings page offers,
     with its value - or only those whose name contains `word`."""
-    word = str(args or "").strip().upper()
+    word = str(args or "").strip(" ").upper()
     fields = [(label, field) for label, field in _settings_fields()
               if not word or word in field["name"]]
     if _structured(session):
-        for line in settings_lines(fields):
-            session.send(line)
+        _send_lines(session, settings_lines(fields))
         return
     if not fields:
         session.send(f"No setting's name contains {word}." if word else "No settings.")
         return
+    out = []
     shown = None
     for label, field in fields:
         if label != shown:
-            session.send(f"[{label}]")
+            out.append(f"[{label}]")
             shown = label
-        session.send(f"  {field['name']} = {encode_value(field_text(field))}")
-    session.send(f"{len(fields)} setting(s). Change one with: set <KEY> <value>")
+        out.append(f"  {field['name']} = {encode_value(field_text(field))}")
+    out.append(f"{len(fields)} setting(s). Change one with: set <KEY> <value>")
+    _send_lines(session, out)
 
 
 class SettingsTransaction:
@@ -244,6 +278,9 @@ class SettingsTransaction:
         self.fields = {field["name"]: field for _label, field in fields}
         self.changes = {}
         self.refused = []
+        # Opened by a lone `set` that is waiting for `setcommit confirm`;
+        # see end_implicit_transaction().
+        self.implicit = False
 
 
 def _same_as_now(name, text):
@@ -271,12 +308,17 @@ def _refusal(txn, name, text):
                 "form on the dashboard's Settings page, or run python src/adminchat.py.")
     if name not in txn.fields:
         return "not a setting the dashboard's Settings page offers."
-    if _same_as_now(name, text):
-        return None
-    try:
-        settings_file.check_change(vars(config), name, text)
-    except settings_file.SettingsWriteError as err:
-        return str(err)
+    # Under the reload lock, as build_settings_payload() reads (#1264
+    # review): inside a rehash's reload window config briefly holds
+    # defaults.py's literals, and a value judged against that is judged
+    # against a setting nobody has.
+    with runtime.config_reload_lock:
+        if _same_as_now(name, text):
+            return None
+        try:
+            settings_file.check_change(vars(config), name, text)
+        except settings_file.SettingsWriteError as err:
+            return str(err)
     return None
 
 
@@ -293,10 +335,10 @@ def _buffer(session, txn, name, text):
 
 def _parse_set(args):
     """(KEY, decoded value) from `set`'s arguments, or (None, None)."""
-    name, _, raw = str(args or "").strip().partition(" ")
-    if not name:
+    parts = _fields(args, 1)
+    if not parts:
         return None, None
-    return name.upper(), decode_value(raw.strip())
+    return parts[0].upper(), decode_value(parts[1] if len(parts) > 1 else "")
 
 
 def cmd_setbegin(session, args):
@@ -348,7 +390,7 @@ def cmd_setcommit(session, args):
         _say(session, "SETDONE error No transaction is open - send setbegin first.",
               "No transaction is open - start one with setbegin.")
         return
-    confirmed = str(args or "").strip().lower() == "confirm"
+    confirmed = str(args or "").strip(" ").lower() == "confirm"
     _commit(session, txn, confirmed=confirmed, single=False)
 
 
@@ -366,11 +408,15 @@ def _commit(session, txn, confirmed, single):
 
     changes = {}
     unchanged = 0
-    for name, text in txn.changes.items():
-        if _same_as_now(name, text):
-            unchanged += 1
-        else:
-            changes[name] = text
+    # The reads under the reload lock (see _refusal()); the save itself is
+    # not, since its rehash takes the lock on a thread of its own.
+    with runtime.config_reload_lock:
+        for name, text in txn.changes.items():
+            if _same_as_now(name, text):
+                unchanged += 1
+            else:
+                changes[name] = text
+        old_debug = str(getattr(config, "DEBUG_CHANNEL", "") or "").strip()
     if not changes:
         session.settings_txn = None
         _say(session, f"SETDONE ok 0 {unchanged} - Nothing changed; nothing was saved.",
@@ -380,7 +426,6 @@ def _commit(session, txn, confirmed, single):
     # The question the dashboard's Save asks in a confirm() popup before it
     # sends confirm_debug_channel_removed (#1008 follow-up) - asked here, and
     # the transaction kept, so the answer is one more line: `setcommit confirm`.
-    old_debug = str(getattr(config, "DEBUG_CHANNEL", "") or "").strip()
     clearing = ("DEBUG_CHANNEL" in changes and not changes["DEBUG_CHANNEL"].strip()
                 and bool(old_debug))
     if clearing and not confirmed:
@@ -392,6 +437,7 @@ def _commit(session, txn, confirmed, single):
             session.send(question + " Clear it on the dashboard's Settings page, which asks first.")
             return
         session.settings_txn = txn
+        txn.implicit = txn.implicit or single
         _say(session, f"SETDONE confirm {question}",
              f"{question} Type setcommit confirm to save{' it' if single else ''}, or setabort.")
         return
@@ -411,6 +457,22 @@ def _commit(session, txn, confirmed, single):
     if restart:
         message += f" Restart the bot to apply {', '.join(restart)}."
     _say(session, f"SETDONE ok {len(changes)} {unchanged} {','.join(restart) or '-'} {message}", message)
+
+
+def end_implicit_transaction(session, command, args):
+    """A lone `set` that asked for confirmation left a transaction open for
+    `setcommit confirm`. Anything else the console is sent closes it first -
+    `SETDONE aborted <n>` - so a later lone `set` saves at once, as it says,
+    instead of being buffered silently into a transaction nobody opened."""
+    txn = getattr(session, "settings_txn", None)
+    if txn is None or not getattr(txn, "implicit", False):
+        return
+    if command == "setabort" or (command == "setcommit"
+                                 and str(args or "").strip(" ").lower() == "confirm"):
+        return
+    session.settings_txn = None
+    _say(session, f"SETDONE aborted {len(txn.changes)}",
+         f"Not saved: {', '.join(txn.changes) or 'nothing'} (it was waiting for setcommit confirm).")
 
 
 def _preview_body(txn):
@@ -484,14 +546,14 @@ def served_lines(payload):
     chans = folders = 0
     for index, row in enumerate(rows, start=1):
         lines.append(f"DCCORE SRVLIST {index} {1 if row.get('primary') else 0} "
-                     f"{encode_value(row.get('name', ''))}".rstrip())
+                     f"{encode_value(row.get('name', ''))}".rstrip(" "))
         for channel in row.get("channels") or []:
             chans += 1
             lines.append(f"DCCORE SRVCHAN {index} {encode_token(channel)} {_mode_of(row, channel)}")
         for folder in row.get("folders") or []:
             folders += 1
             lines.append(f"DCCORE SRVFOLDER {index} {encode_token(folder.get('name', ''))} "
-                         f"{encode_value(folder.get('path', ''))}".rstrip())
+                         f"{encode_value(folder.get('path', ''))}".rstrip(" "))
     lines.append(f"DCCORE SRVEND {len(rows)} {chans} {folders}")
     return lines
 
@@ -533,7 +595,7 @@ def _served_index(txn, word):
 def _served_row(session, txn, sub, rest):
     import library
     if sub == "list":
-        parts = rest.split(None, 2)
+        parts = _fields(rest, 2)
         if len(parts) < 2:
             _served_problem(session, txn, "served list needs <n> <primary 0|1> <name>.")
             return
@@ -543,11 +605,11 @@ def _served_row(session, txn, sub, rest):
         if parts[1] not in ("0", "1"):
             _served_problem(session, txn, f"served list {parts[0]}: primary is 0 or 1, not {parts[1]}.")
             return
-        txn.lists.append({"name": decode_value(parts[2].strip() if len(parts) > 2 else ""),
+        txn.lists.append({"name": decode_value(parts[2] if len(parts) > 2 else ""),
                           "primary": parts[1] == "1", "channels": [], "modes": {}, "folders": []})
         return
     if sub == "chan":
-        parts = rest.split()
+        parts = _fields(rest, 3)
         index = _served_index(txn, parts[0]) if parts else None
         if index is None or len(parts) != 3:
             _served_problem(session, txn, "served chan needs <n> <channel> <mode>, <n> a list already sent.")
@@ -562,13 +624,13 @@ def _served_row(session, txn, sub, rest):
             row["modes"][channel.lower()] = mode
         return
     if sub == "folder":
-        parts = rest.split(None, 2)
+        parts = _fields(rest, 2)
         index = _served_index(txn, parts[0]) if parts else None
         if index is None or len(parts) < 2:
             _served_problem(session, txn, "served folder needs <n> <label> <path>, <n> a list already sent.")
             return
         txn.lists[index - 1]["folders"].append(
-            {"name": decode_token(parts[1]), "path": decode_value(parts[2].strip() if len(parts) > 2 else "")})
+            {"name": decode_token(parts[1]), "path": decode_value(parts[2] if len(parts) > 2 else "")})
 
 
 def _served_commit(session, txn):
@@ -596,24 +658,24 @@ def cmd_served(session, args):
     """`served`: the lists this bot serves; `served begin|list|chan|folder|
     commit|abort ...`: replace them, as the dashboard's lists page does."""
     import webserver
-    sub, _, rest = str(args or "").strip().partition(" ")
+    sub, _, rest = str(args or "").strip(" ").partition(" ")
     sub = sub.lower()
     if not sub:
         payload = webserver.build_lists_payload()
         if _structured(session):
-            for line in served_lines(payload):
-                session.send(line)
+            _send_lines(session, served_lines(payload))
             return
         rows = payload.get("lists") or []
         implied = " (none configured: this is the one list over the served folders)" \
             if payload.get("source") == "implied" else ""
-        session.send(f"{len(rows)} list(s){implied}:")
+        out = [f"{len(rows)} list(s){implied}:"]
         for index, row in enumerate(rows, start=1):
-            session.send(f"  {index}. {row.get('name')}{' (primary)' if row.get('primary') else ''}")
+            out.append(f"  {index}. {row.get('name')}{' (primary)' if row.get('primary') else ''}")
             for channel in row.get("channels") or []:
-                session.send(f"       {channel}  {_mode_of(row, channel)}")
+                out.append(f"       {channel}  {_mode_of(row, channel)}")
             for folder in row.get("folders") or []:
-                session.send(f"       {folder.get('name')} = {folder.get('path')}")
+                out.append(f"       {folder.get('name')} = {folder.get('path')}")
+        _send_lines(session, out)
         return
     if sub not in ("begin", "list", "chan", "folder", "commit", "abort"):
         session.send("Usage: served   |   served begin, served list <n> <0|1> <name>, "
@@ -641,7 +703,7 @@ def cmd_served(session, args):
     if sub == "commit":
         _served_commit(session, txn)
         return
-    _served_row(session, txn, sub, rest.strip())
+    _served_row(session, txn, sub, rest)
 
 
 # --------------------------------------------------------------------------
@@ -660,7 +722,7 @@ def folders_lines(payload):
     lines = [f"DCCORE FLDBEGIN {len(rows)} {payload.get('source', 'none')}"]
     for index, row in enumerate(rows, start=1):
         lines.append(f"DCCORE FLDROW {index} {encode_token(row.get('name', ''))} "
-                     f"{encode_value(row.get('path', ''))}".rstrip())
+                     f"{encode_value(row.get('path', ''))}".rstrip(" "))
     lines.append(f"DCCORE FLDEND {len(rows)}")
     return lines
 
@@ -675,18 +737,18 @@ def cmd_folders(session, args):
     """`folders`: the served folders; `folders begin|row|commit|abort ...`:
     replace them, as the dashboard's folder rows do."""
     import webserver
-    sub, _, rest = str(args or "").strip().partition(" ")
+    sub, _, rest = str(args or "").strip(" ").partition(" ")
     sub = sub.lower()
     if not sub:
         payload = webserver.build_folders_payload()
         if _structured(session):
-            for line in folders_lines(payload):
-                session.send(line)
+            _send_lines(session, folders_lines(payload))
             return
         rows = payload.get("folders") or []
-        session.send(f"{len(rows)} served folder(s) (source: {payload.get('source')}):")
+        out = [f"{len(rows)} served folder(s) (source: {payload.get('source')}):"]
         for index, row in enumerate(rows, start=1):
-            session.send(f"  {index}. {row.get('name')} = {row.get('path')}")
+            out.append(f"  {index}. {row.get('name')} = {row.get('path')}")
+        _send_lines(session, out)
         return
     if sub not in ("begin", "row", "commit", "abort"):
         session.send("Usage: folders   |   folders begin, folders row <n> <label> <path>, "
@@ -710,14 +772,14 @@ def cmd_folders(session, args):
         _say(session, f"FLDDONE aborted {len(txn.folders)}", "Dropped; nothing was saved.")
         return
     if sub == "row":
-        parts = rest.split(None, 2)
+        parts = _fields(rest, 2)
         if len(parts) < 2 or parts[0] != str(len(txn.folders) + 1):
             message = f"folders row needs <n> <label> <path>, <n> being {len(txn.folders) + 1}."
             txn.problems.append(message)
             _say(session, f"FLDERR {message}", f"Refused: {message}")
             return
         txn.folders.append({"name": decode_token(parts[1]),
-                            "path": decode_value(parts[2].strip() if len(parts) > 2 else "")})
+                            "path": decode_value(parts[2] if len(parts) > 2 else "")})
         return
     # commit
     session.folders_txn = None
@@ -761,7 +823,7 @@ def onconnect_lines(payload):
     lines = [f"DCCORE OCBEGIN {len(commands)} {_seconds(payload.get('delay_seconds', 0))} "
              f"{payload.get('max_commands', 0)} {_seconds(payload.get('max_delay_seconds', 0))}"]
     for index, command in enumerate(commands, start=1):
-        lines.append(f"DCCORE OCLINE {index} {encode_value(command)}".rstrip())
+        lines.append(f"DCCORE OCLINE {index} {encode_value(command)}".rstrip(" "))
     lines.append(f"DCCORE OCEND {len(commands)}")
     return lines
 
@@ -783,19 +845,19 @@ def cmd_onconnect(session, args):
     `onconnect begin|delay|line|commit|abort ...`: replace them;
     `onconnect resend`: send the saved ones again now."""
     import webserver
-    sub, _, rest = str(args or "").strip().partition(" ")
+    sub, _, rest = str(args or "").strip(" ").partition(" ")
     sub = sub.lower()
     if not sub:
         payload = webserver.build_on_connect_payload()
         if _structured(session):
-            for line in onconnect_lines(payload):
-                session.send(line)
+            _send_lines(session, onconnect_lines(payload))
             return
         commands = payload.get("commands") or []
-        session.send(f"{len(commands)} on-connect command(s), "
-                     f"{_seconds(payload.get('delay_seconds', 0))} s apart:")
+        out = [f"{len(commands)} on-connect command(s), "
+               f"{_seconds(payload.get('delay_seconds', 0))} s apart:"]
         for index, command in enumerate(commands, start=1):
-            session.send(f"  {index}. {command}")
+            out.append(f"  {index}. {command}")
+        _send_lines(session, out)
         return
     if sub == "resend":
         status, result = webserver.build_on_connect_resend_result()
@@ -831,18 +893,20 @@ def cmd_onconnect(session, args):
         _say(session, f"OCDONE aborted {len(txn.commands)}", "Dropped; nothing was saved.")
         return
     if sub == "delay":
-        try:
-            txn.delay = float(rest.strip())
-        except ValueError:
-            _onconnect_problem(session, txn, f"the delay is a number of seconds, not {rest.strip() or 'nothing'}.")
+        delay = _finite(rest.strip(" "))
+        if delay is None:
+            _onconnect_problem(session, txn, f"the delay is a number of seconds, not {rest.strip(' ') or 'nothing'}.")
+            return
+        txn.delay = delay
         return
     if sub == "line":
-        number, _, command = rest.strip().partition(" ")
+        parts = _fields(rest, 1)
+        number, command = (parts + ["", ""])[:2]
         if number != str(len(txn.commands) + 1):
             # Never the command itself in the answer: it may be a login.
             _onconnect_problem(session, txn, f"onconnect line needs <n> <command>, <n> being {len(txn.commands) + 1}.")
             return
-        txn.commands.append(decode_value(command.strip()))
+        txn.commands.append(decode_value(command))
         return
     # commit
     session.onconnect_txn = None
@@ -910,11 +974,9 @@ def cmd_banlist(session, args):
     import security
     patterns, timed = current_bans()
     if _structured(session):
-        for line in banlist_lines(patterns, timed):
-            session.send(line)
+        _send_lines(session, banlist_lines(patterns, timed))
         return
-    session.send(f"{len(patterns)} permanent pattern(s), {len(timed)} timed:")
-    for pattern in patterns[:BANLIST_MAX]:
-        session.send(f"  {pattern}")
-    for nick, left in timed[:BANLIST_MAX]:
-        session.send(f"  {nick}  ({security.format_ban_duration(left)} left)")
+    out = [f"{len(patterns)} permanent pattern(s), {len(timed)} timed:"]
+    out += [f"  {pattern}" for pattern in patterns[:BANLIST_MAX]]
+    out += [f"  {nick}  ({security.format_ban_duration(left)} left)" for nick, left in timed[:BANLIST_MAX]]
+    _send_lines(session, out)

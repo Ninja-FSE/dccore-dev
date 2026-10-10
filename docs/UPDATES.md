@@ -36,16 +36,38 @@ work is `src/console_settings.py`, reached only from `adminchat.COMMANDS`; the l
   (`bans` stays the prose); `ban`, `unban`, `ignore` and `unignore` already cover changing both kinds.
 - **`consolecaps`** answers `DCCORE CAPS settings:1 preview:1 ...`, so the window can tell an older bot (which
   answers "Unknown command") and say to update it.
-- **Never a value in the log.** `handle_command()` no longer prints `set` lines or a transaction's rows - an
-  on-connect command is often an X login with its password, and `set ADMIN_PASSWORD_HASH ...` was printed before it
-  was refused. A commit logs the names of what it saved.
+- **Never a value in the log.** `handle_command()` logs the settings commands by their command word, and the
+  subcommand when it is a real one, never the rest of the line - an on-connect command is often an X login with its
+  password, `set ADMIN_PASSWORD_HASH ...` was printed before it was refused, and a typo like `onconnect lines 1 ...`
+  must not print what follows it. A transaction's rows are not logged at all; a commit logs the names it saved.
 - **The dashboard's Console refuses the transactions** (each request is a new session, so a `setbegin` there would be
   gone before the next `set`, which would then save at once).
+- **What a review of it found, fixed before it shipped:**
+  - *A big snapshot lost its head.* `served` within the dashboard's own limits (16 lists of 40 folders) is ~700 lines,
+    queued by the reader far faster than the writer sends, so the 500-line outbox dropped SRVBEGIN every time. A
+    snapshot now goes through `Session.send_lines()`, which waits for room (keeping 100 lines for the live feed) and,
+    if the client takes nothing for 15 seconds, stops with a `DCCORE OUT` line and no END. Every dump uses it.
+  - *A character split across two reads was garbled.* The reader decoded each 1024-byte `recv()` on its own, so a
+    character whose UTF-8 bytes straddled two of them became two U+FFFD - in a folder path, saved that way. Older than
+    this feature, but a page of rows sent at once made it likely. One incremental decoder per session now.
+  - *`nan` and `inf` were numbers.* `onconnect delay nan` was saved and read back as the 60-second maximum. Refused
+    there, in `on_connect.problems()` (the dashboard's save too), and in `settings_file.coerce()` for every float
+    setting - a settings.conf line saying `inf` now keeps the default, with the reason.
+  - *A no-break space split a field.* Python's `split()`/`strip()` take it (and U+3000) as whitespace, the encoding
+    does not escape it, so a label holding one came back cut short and the commit was refused. The protocol now splits
+    on the ASCII space only, and `handle_command()` (and the dashboard Console) strips only ASCII whitespace.
+  - *A commit read config outside the reload lock*, so inside a rehash's reload window a `set` back to the shipped
+    value was judged unchanged and dropped. The reads now take `runtime.config_reload_lock`; the save does not.
+  - *A legal row was "too long".* The reader closed the session at 4096 characters, and a folder path may be 4096 on
+    its own. 32768 once logged in; 4096 before the password, as before.
+  - *A lone `set` waiting for its confirmation swallowed the next one.* Anything but `setcommit confirm` or `setabort`
+    now ends that implicit transaction first, with `SETDONE aborted <n>`.
 - **Tests:** `tests/test_console_settings_commands.py` (the encoding; framing and counts; every setting round-tripped
   with no save; one save per commit, through the real `settings_file.save()`; per-key errors; abort; the
   debug-channel confirmation; the preview's unsaved values; served lists, folders and on-connect round trips; the ban
   rows; that nothing but the console reaches these commands; the outbox bound; help and the guide),
-  `tests/test_the_mirc_menu_has_every_command.py` (the new commands are the window's plumbing, not menu items).
+  `tests/test_console_settings_edge_cases.py` (each review finding, through the real Session, writer and reader
+  loop), `tests/test_the_mirc_menu_has_every_command.py` (the new commands are the window's plumbing, not menu items).
 
 ### 🎨 dccore.mrc: nicks, channels and the search term in colours of their own (#1259)
 
