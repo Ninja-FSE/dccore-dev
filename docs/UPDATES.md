@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The pack-cancel test waits for its own rar
+
+`test_a_cancel_terminates_that_process_and_removes_the_partial_archive` failed now and then in CI with
+`IndexError` on `self.rars[0]`. Its "a pack has started" check was "some pack is writing": on a slow runner the
+previous test's packer can outlive its cleanup's join, its job is the one `pack_status()` reports, and the request
+made here is still queued behind it. The wait now requires this test's own rar and an archive in this test's
+`TMP_ZIP_DIR`, and `setUp` lets a leftover packer finish first. Test-only; no behaviour changes.
+
 ### 🖥️ The settings window in `dccore.mrc` (#1264, phase B)
 
 `/dccore settings` (and **Bot Settings** / **Settings...** in the menus) opens `dialog dccore.set`: the bot's settings
