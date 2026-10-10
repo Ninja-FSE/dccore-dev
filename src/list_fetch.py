@@ -183,6 +183,48 @@ def _ensure_fetched_bot_lists():
 # easier to recognise in a file manager.
 _BOT_DIR_CHARSET_RE = re.compile(r'[^\w\-\.\[\]{}^`]')
 
+# Where every bot's SECONDARY channel lists live, inside lists/ beside the
+# per-bot directories (#1240) - so a name DCCore itself uses there, never a
+# bot's. A peer is free to pick "_channels" as its nick, and before this was
+# reserved its own list directory WAS this one: fetching or forgetting its list
+# held aside and deleted every other bot's secondary lists.
+_SECONDARY_ROOT_NAME = "_channels"
+
+# _hold_existing_list() sets a directory aside under this suffix while a
+# re-fetch is checked, then deletes it. A directory that already ends with it
+# would be mistaken for some other directory's held copy.
+_HELD_SUFFIX = ".previous"
+
+# The tag a changed or reserved name carries: "-" and six hex digits of the
+# real name. A name that merely LOOKS tagged is tagged again, so no peer can
+# pick a nick that spells out another bot's tagged directory.
+_DIR_TAG_RE = re.compile(r"-[0-9a-f]{6}$", re.IGNORECASE)
+
+
+def _name_digest(text):
+    """Six hex digits of `text`, lower-cased first: IRC compares nicks and
+    channels without case, and every caller lower-cases the directory."""
+    return hashlib.sha1(str(text).strip().lower().encode("utf-8", "replace")).hexdigest()[:6]
+
+
+def _needs_dir_tag(name, real):
+    """Whether directory name `name`, made from `real`, must carry a digest of
+    `real` to stay unique: sanitising changed it, Windows will not create it,
+    DCCore uses it itself, or it already looks like a tagged name.
+
+    THE SANITISING IS NOT ONE-TO-ONE. "Good|Bot" and "Good_Bot" are two nicks
+    and both clean to "Good_Bot", so they shared one directory and a fetch from
+    either replaced the other's list. Only a name that came through unchanged
+    is its own proof of uniqueness; any other is tagged with a digest of the
+    real one, as list.list_slug() does for list names.
+    """
+    lowered = name.lower()
+    return (name != real
+            or platform_compat.is_windows_reserved(name)
+            or lowered == _SECONDARY_ROOT_NAME
+            or lowered.endswith(_HELD_SUFFIX)
+            or bool(_DIR_TAG_RE.search(name)))
+
 
 def _advert_snapshot(bot):
     """What `bot` is advertising right now, as far as we have seen.
@@ -225,6 +267,7 @@ def _sanitize_bot_dir_name(bot):
     what is legal in a path are different sets, and only one of them is ours to
     choose.
     """
+    real = str(bot).strip()
     name = list_mod.strip_control_codes(str(bot))
     name = name.replace('\x00', '')
     name = name.replace('/', '_').replace('\\', '_')
@@ -237,9 +280,12 @@ def _sanitize_bot_dir_name(bot):
     # Lower-cased before hashing, since every caller lower-cases the result
     # anyway (list_extract_dir() and friends) - two spellings of the same
     # nick, "AUX" and "Aux", must still land on one directory, not two.
-    if platform_compat.is_windows_reserved(name):
-        digest = hashlib.sha1(name.strip().lower().encode("utf-8", "replace")).hexdigest()[:6]
-        name = f"{name}-{digest}"
+    #
+    # The same tag now covers every name that is not its own proof of being
+    # unique - see _needs_dir_tag(). A nick that needed no change keeps
+    # exactly its directory, so an ordinary bot's held list does not move.
+    if _needs_dir_tag(name, real):
+        name = f"{name or 'unknown_bot'}-{_name_digest(real)}"
     return platform_compat.windows_safe_name(name) or "unknown_bot"
 
 
@@ -271,6 +317,26 @@ def _channel_marker_name(channel):
     name = str(channel or "").strip().lstrip("#")
     name = _BOT_DIR_CHARSET_RE.sub("_", name)
     return name.strip("-_ .") or "channel"
+
+
+def _channel_dir_name(channel):
+    """The directory a secondary channel's list is extracted into, under its
+    bot's: _channel_marker_name(), tagged with a digest of the channel itself
+    whenever that is not its own proof of being unique (_needs_dir_tag()).
+
+    "#a|b" and "#a_b" are two channels with distinct markers
+    (_disambiguate_marker()), but both sanitise to "a_b": they shared one
+    directory, so both markers ended up pointing at whichever list was
+    fetched last. Compared against the name with its one leading "#" taken
+    off, which is all the marker name means to drop - "##a" and "&a" are
+    other channels than "#a" and are tagged.
+    """
+    real = str(channel or "").strip()
+    bare = real[1:] if real.startswith("#") else real
+    name = _channel_marker_name(channel)
+    if _needs_dir_tag(name, bare):
+        name = f"{name}-{_name_digest(real)}"
+    return platform_compat.windows_safe_name(name) or "channel"
 
 
 def _disambiguate_marker(candidate, channel, reserved_lower):
@@ -318,9 +384,9 @@ def secondary_channel_extract_dir(bot, channel):
     that ever touches the primary's own directory can reach this one.
     """
     base = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
-    channels_root = os.path.join(base, "lists", "_channels")
+    channels_root = os.path.join(base, "lists", _SECONDARY_ROOT_NAME)
     candidate = os.path.join(channels_root, _sanitize_bot_dir_name(bot).lower(),
-                             _channel_marker_name(channel).lower())
+                             _channel_dir_name(channel).lower())
     if not dcc.is_safe_path(channels_root, candidate):
         candidate = os.path.join(channels_root, "unknown_bot", "channel")
     return candidate
@@ -2397,6 +2463,150 @@ def get_fetched_bot_page(entry, offset, limit, search_words=None):
     page, total_folders, total_rows, row_capped = list_mod.page_folder_groups(
         groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
     return page, total_folders, total_rows, row_capped, None
+
+
+def _held_list_records(entry):
+    """Every dict in a held entry that carries a "list_path": the entry
+    itself (its main list, mirrored there for older readers) and each of
+    its "lists"."""
+    records = [entry]
+    lists = entry.get("lists")
+    if isinstance(lists, dict):
+        records.extend(info for info in lists.values() if isinstance(info, dict))
+    return [record for record in records if record.get("list_path")]
+
+
+_LONG_PATH_PREFIX = "\\\\?\\"
+_LONG_UNC_PREFIX = _LONG_PATH_PREFIX + "UNC\\"
+
+
+def _plain_path(path):
+    """`path` without platform_compat.long_path()'s Windows prefix, which a
+    stored list_path can carry: compared or made relative with the prefix on,
+    one spelling of a path looks like another drive entirely."""
+    text = str(path)
+    if text.startswith(_LONG_UNC_PREFIX):
+        return "\\\\" + text[len(_LONG_UNC_PREFIX):]
+    if text.startswith(_LONG_PATH_PREFIX):
+        return text[len(_LONG_PATH_PREFIX):]
+    return text
+
+
+def _same_path(first, second):
+    return (os.path.normcase(os.path.abspath(_plain_path(first)))
+            == os.path.normcase(os.path.abspath(_plain_path(second))))
+
+
+def _inside(path, directory):
+    """Is `path` `directory` itself or anywhere under it."""
+    path = os.path.normcase(os.path.abspath(_plain_path(path)))
+    directory = os.path.normcase(os.path.abspath(_plain_path(directory))).rstrip("\\/")
+    return path == directory or path.startswith(directory + os.sep)
+
+
+def migrate_held_list_directories(log=print):
+    """Move each held list into the directory its bot is given now. Returns
+    how many directories moved. Run once at startup, after the held lists are
+    loaded.
+
+    Directory names became collision-free (_needs_dir_tag()): a nick or a
+    channel whose name had to be changed to make a directory, or that names
+    one of DCCore's own, now carries a short digest. An ordinary nick keeps
+    its directory and nothing here touches it. A list held from before still
+    has its files under the old name - every reader would go on finding them
+    there, but the next fetch extracts to the new one and a purge removes the
+    new one, so the old directory would be left behind for good.
+
+    So it is renamed, and the entry's paths are rewritten to match - but only
+    when that is certainly safe. A directory is left where it is when another
+    held list also has files in it, when it contains another list's new
+    directory, or when the new one already exists. That is the case the change
+    is for: two bots that used to share one directory cannot both have it,
+    and whichever does not own it under the new names gets its own at its
+    next fetch. Nothing is ever deleted here.
+    """
+    base = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+    lists_root = os.path.join(base, "lists")
+    moved = 0
+    with _lock():
+        store = _ensure_fetched_bot_lists()
+        # (key, record, current directory, expected directory) per held list.
+        refs = []
+        for key, entry in store.items():
+            if not isinstance(entry, dict):
+                continue
+            bot = str(entry.get("bot") or key).strip()
+            main_channel = str(entry.get("channel") or "").strip().lower()
+            for record in _held_list_records(entry):
+                channel = str(record.get("channel") or "").strip()
+                secondary = bool(channel) and channel.lower() != main_channel
+                if secondary:
+                    expected = secondary_channel_extract_dir(bot, channel)
+                else:
+                    expected = list_extract_dir(bot)
+                try:
+                    depth = len(os.path.relpath(expected, lists_root).split(os.sep))
+                    parts = os.path.relpath(_plain_path(record["list_path"]),
+                                            lists_root).split(os.sep)
+                except ValueError:
+                    continue  # another drive: not under lists/ at all
+                if parts[0] == os.pardir or len(parts) <= depth:
+                    continue
+                # A secondary list is moved only from where a secondary fetch
+                # puts one - never a subfolder of some bot's own directory.
+                if secondary and parts[0].lower() != _SECONDARY_ROOT_NAME:
+                    continue
+                current = os.path.join(lists_root, *parts[:depth])
+                refs.append((key, record, current, expected))
+
+        groups = {}
+        for ref in refs:
+            groups.setdefault(os.path.normcase(ref[2]), []).append(ref)
+
+        rewritten = set()
+        for group in groups.values():
+            # One owner, wanting one new directory - two bots that shared
+            # this one (the old naming's collision) are left as they are.
+            owners = {(ref[0], os.path.normcase(ref[3])) for ref in group}
+            if len(owners) != 1:
+                continue
+            key, _record, current, expected = group[0]
+            if _same_path(current, expected):
+                continue
+            mine = {id(ref[1]) for ref in group}
+            if any(id(ref[1]) not in mine and (_inside(ref[1]["list_path"], current)
+                                               or _inside(ref[3], current))
+                   for ref in refs):
+                log(f"[LIST-FETCH] {key}'s held list shares {current!r} with another "
+                      f"bot's; it moves to a directory of its own at its next fetch.")
+                continue
+            if (not dcc.is_safe_path(lists_root, current)
+                    or not dcc.is_safe_path(lists_root, expected)
+                    or not os.path.isdir(platform_compat.long_path(current))
+                    or os.path.exists(platform_compat.long_path(expected))):
+                continue
+            try:
+                os.makedirs(platform_compat.long_path(os.path.dirname(expected)), exist_ok=True)
+                os.rename(platform_compat.long_path(current), platform_compat.long_path(expected))
+            except OSError as err:
+                log(f"[LIST-FETCH] Could not move {key}'s held list from {current!r} "
+                    f"to {expected!r} ({err}); it stays where it is.")
+                continue
+            for ref in group:
+                record = ref[1]
+                stored = str(record["list_path"])
+                moved_to = os.path.join(expected, os.path.relpath(_plain_path(stored), current))
+                # In the form it was stored in, prefix and all.
+                record["list_path"] = (platform_compat.long_path(moved_to)
+                                       if stored.startswith(_LONG_PATH_PREFIX) else moved_to)
+            list_mod.forget_folder_tables(under=current)
+            rewritten.add(key)
+            moved += 1
+        if rewritten:
+            db.save_fetched_bot_lists(dict(store))
+    if moved:
+        log(f"[LIST-FETCH] Moved {moved} held list folder(s) to their new names.")
+    return moved
 
 
 def forget_bot(bot):

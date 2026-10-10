@@ -4,6 +4,60 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🛡️ Names and text from other people are kept in their place
+
+Reported privately and fixed before it was made public: each of these takes a nick, a channel name, a file name or a
+message that another IRC user chooses.
+
+- **A bot's list folder can no longer be another one's.** `list_fetch._sanitize_bot_dir_name()` reserved nothing
+  except Windows device names, so a nick could name a folder DCCore uses itself (`lists/_channels`, where every bot's
+  secondary-channel lists live, #1240), and cleaning a name for the file system is not one-to-one, so two nicks - or
+  two channels under one bot - could come out as one folder. Fetching or forgetting one bot's list could then delete
+  or replace lists that were not its own. A name that had to be changed, that DCCore uses itself (`_channels`, a
+  `.previous` held copy), or that already looks like a tagged name now carries a short digest of the real one
+  (`_needs_dir_tag()`, the rule `list.list_slug()` follows for list names); a secondary channel's folder goes through
+  the same rule (`_channel_dir_name()`), which also makes a channel named like a Windows device safe there. An
+  ordinary nick or channel keeps exactly the folder it had.
+- **Held lists move once.** `list_fetch.migrate_held_list_directories()`, called by `oserve.startup()` after the held
+  lists load, renames a held list's folder to its new name and rewrites the entry's paths. It moves a folder only
+  when it is certainly one bot's: one that two bots shared under the old names, or one that holds another list, is
+  left where it is, and that list is fetched into its own folder next time. Nothing is deleted.
+- **A fetched file is never stored as `lists`.** `dcc_fetch._promote_clean_filename()` keeps the request-id prefix
+  on a name the fetch area reserves (`_RESERVED_FETCHED_NAMES`), so a file offered under that name can no longer sit
+  where every list fetch makes its folder.
+- **The dashboard keys nothing a peer names into a plain object.** `web/app.js` grouped the List Browser's bots, the
+  @find broadcast replies, the filter's switched-off bots and the queue's open rows in `{}` objects, where some names
+  already exist on every object. A nick that is one of them could empty the sidebar and keep the dashboard marked
+  disconnected, or break a tab's broadcast results until reload. Every such map is now
+  `Object.create(null)` (the channel maps of the Served lists editor too), and the broadcast poll stops before it
+  draws the replies, so a reply that cannot be drawn cannot keep it running.
+- **Nothing other people typed reaches the terminal as a terminal command.** The disconnect report kept the last
+  server lines raw - a channel member's message among them - and printed them on every drop; the `[RAW IN]`,
+  `[SERVER ERROR]` and `[SERVER]` lines printed server text the same way. All four now keep `list.printable_text()`,
+  #670's rule. And `platform_compat`'s console proxy, which every printed line passes through, now removes anything a
+  terminal acts on (`terminal_safe()`: escape sequences, C0 controls but tab/newline/return, DEL, C1) from the window
+  and the console log alike, so peer text inside any other message is covered too. DCCore printed no colours of its
+  own; werkzeug's request lines are already off.
+- **A `?` in a mask matches one character.** Hard bans (`security.py`) and `ADMIN_HOSTMASKS` (`adminchat.py`) took
+  `?` literally, so `!ban *!*@10.0.0.?` was confirmed and listed as active but matched nobody (#225's shape). Both
+  now build the pattern in `security.mask_regex()`: `*` is any run, `?` exactly one. The guards that refuse a mask
+  matching everyone strip `?` with `*`, so `?*!*@*` is still refused, and the broad-mask warning counts `?` as a
+  wildcard. docs/ADMIN-CONSOLE.md says so.
+- **A stranger's private message costs no disk write on the read thread.** `announce.record_private_message()`
+  wrote the whole private-messages file, fsync'd under the shared disk lock, on the IRC read thread for every
+  recorded message. It is now written from a thread of its own `PRIVATE_MESSAGES_SAVE_DELAY` (2 s) later - one write
+  for every message recorded before it runs - and flushed on the way out (`oserve._shut_down()`). The pending flag,
+  the saving thread and their lock live in `runtime.py`. The per-sender cooldown table forgets a sender once its
+  cooldown is over and keeps at most `PRIVATE_MESSAGE_SENDERS_REMEMBERED` (2000), oldest first; with the cooldown at
+  0 it keeps nothing.
+- **Tests:** `tests/test_a_peer_name_cannot_reach_another_lists_folder.py` (22),
+  `tests/test_the_dashboard_keys_peer_names_safely.py` (9; the real functions under node, and the source where there
+  is none), `tests/test_peer_text_cannot_drive_the_operators_terminal.py` (7, the real read loop),
+  `tests/test_a_question_mark_in_a_mask_matches_one_character.py` (11) and
+  `tests/test_a_strangers_message_is_not_written_on_the_read_thread.py` (7). `tests/support.py` writes any waiting
+  private messages at teardown and parks the file on a sink, as it does the fetch history. Four existing tests follow
+  a changed statement. 32/32 mutations caught.
+
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 
 ### 🧹 Purge every held list, to clear a channel stuck wrong from before v1.16 (#1260)

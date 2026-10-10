@@ -465,6 +465,15 @@ private_message_decline_sends = []
 # payload, so a second lock would buy nothing but an ordering question.
 private_messages_lock = threading.Lock()
 
+# announce.py's save of the private messages, which is made from a thread of
+# its own a moment after a message is recorded - off the IRC read thread - and
+# shared by every message recorded before it runs. Whether one is on its way,
+# and that thread with the Event that cuts its wait short. Here rather than in
+# announce.py because !rehash reloads that module.
+private_messages_save_guard = threading.Lock()
+private_messages_save_pending = False
+private_messages_saver = None   # (thread, wake event) while one is waiting
+
 kicked_channels = {}
 kicked_channels_lock = threading.Lock()
 

@@ -11,6 +11,7 @@
 # ---------------------------------------------------------------------
 
 import os
+import re
 import shutil
 import socket
 import sys
@@ -213,6 +214,35 @@ def install_console_encoding_guard(streams=None):
 # wraps it, so a later reconfigure() must still reach the real one. Not a
 # platform difference - a console-hygiene one, kept with its sibling.
 
+# Every character a terminal acts on rather than prints - C0 controls other
+# than tab, newline and carriage return, DEL, and the C1 range (a terminal in
+# UTF-8 can read U+009B as CSI). ESC is one of them.
+_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+# What terminal_safe() removes: a whole terminated OSC/DCS/SOS/PM/APC string,
+# a whole CSI sequence, or any other single control character. An OSC that is
+# never terminated loses only its ESC: what follows it is then plain text, and
+# swallowing it would hide whatever the line went on to say.
+_TERMINAL_SEQUENCE_RE = re.compile(
+    r"\x1b[\]PX^_][^\x07\x1b]*(?:\x07|\x1b\\)"
+    r"|\x1b\[[0-?]*[ -/]*[@-~]"
+    r"|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def terminal_safe(text):
+    r"""`text` with everything a terminal would act on taken out.
+
+    The console prints what other people typed: a channel member's line in the
+    disconnect report, a bot's notice, a file name. "\x1b]0;...\x07" retitles
+    the window and "\x1b[2J" clears it; "\x1b[8m" would hide every line after
+    it. Tab, newline and carriage return are kept - they are how lines are
+    laid out. Text with none of the rest is returned as it is.
+    """
+    if _TERMINAL_CONTROL_RE.search(text) is None:
+        return text
+    return _TERMINAL_SEQUENCE_RE.sub("", text)
+
+
 class _TimestampedStream:
     """A stream proxy that prefixes every LINE with the time it was written.
 
@@ -222,6 +252,11 @@ class _TimestampedStream:
     tracks whether the last character it saw ended a line, and stamps the
     start of every line that begins on this stream, however the text was
     split up to reach it.
+
+    And never anything a terminal acts on (terminal_safe()): every line the
+    daemon prints passes through here, so this is the one place that covers
+    text from other people wherever a message happens to include it - the
+    window and the console log both get the cleaned text.
 
     Everything else - encoding, isatty(), fileno(), reconfigure(), flush() -
     is delegated to the real stream untouched, so code that inspects
@@ -256,10 +291,19 @@ class _TimestampedStream:
                 f"write() argument must be str, not {type(text).__name__}")
         if not text:
             return 0
+        given = len(text)
+        safe = terminal_safe(text)
         fmt = self._formatter()
         log = _console_log if _console_log.active() else None
         if not fmt and log is None:
-            return self._stream.write(text)
+            if safe is text:
+                return self._stream.write(text)
+            if safe:
+                self._stream.write(safe)
+            return given
+        text = safe
+        if not text:
+            return given
         with self._lock:
             out = []
             logged = []
@@ -285,7 +329,7 @@ class _TimestampedStream:
         # Report what the CALLER wrote, not what reached the stream. A caller
         # comparing the return value to len(text) must not be told its write
         # was longer than the text it gave.
-        return len(text) if written else 0
+        return given if written else 0
 
     def writelines(self, lines):
         for line in lines:

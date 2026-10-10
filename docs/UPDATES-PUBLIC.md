@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (security): names and text from other IRC users are kept in their place.** A bot's nick could make DCCore keep its fetched list in a folder that held other bots' lists, so fetching or removing that list could delete or replace theirs; a file fetched under one particular name could make every later list fetch fail; some bot nicks could empty the List Browser's sidebar or break the @find results on the dashboard; text typed in a channel could act on the operator's terminal when the bot printed it; and each private message from a stranger cost a disk write while the bot was reading from the server. A list held under a nick or channel whose folder name changed is moved once, when the bot starts. Also fixed: a `?` in a ban mask (and in `ADMIN_HOSTMASKS`) now matches one character, as on IRC - before, a ban written with `?` was accepted but matched nobody.
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.
