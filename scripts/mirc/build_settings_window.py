@@ -719,6 +719,19 @@ def splice(script_text, block_lines):
     return script_text[:start] + newline.join(block_lines) + script_text[end:]
 
 
+def shown_path(path):
+    """`path` relative to the repository when it can be, else as it is.
+
+    os.path.relpath() raises on Windows when the two are on different
+    drives - and a CI Windows runner checks the repository out on D: with
+    its temporary folder on C:, where a test points SCRIPT at a copy.
+    """
+    try:
+        return os.path.relpath(path, REPO_ROOT)
+    except ValueError:
+        return path
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--check", action="store_true", help="exit 1 if the block in dccore.mrc is stale")
@@ -736,7 +749,7 @@ def main(argv=None):
     if wanted != current:
         with io.open(SCRIPT, "w", encoding="ascii", newline="") as handle:
             handle.write(wanted)
-        print("Rewrote the settings window block in %s." % os.path.relpath(SCRIPT, REPO_ROOT))
+        print("Rewrote the settings window block in %s." % shown_path(SCRIPT))
     else:
         print("The settings window block was already up to date.")
     return 0

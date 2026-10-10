@@ -78,6 +78,17 @@ class TheBlockIsUpToDate(unittest.TestCase):
             status = generator.main(["--check"])
         self.assertEqual(status, 0, out.getvalue())
 
+    def test_a_script_on_another_drive_is_named_as_it_is(self):
+        # A CI Windows runner has the repository on D: and TEMP on C:, and
+        # relpath() raises across drives; the rewrite above then failed
+        # there alone. Faked here so it fails on every machine.
+        def other_drive(path, start=None):
+            raise ValueError("path is on mount 'C:', start on mount 'D:'")
+        real = generator.os.path.relpath
+        generator.os.path.relpath = other_drive
+        self.addCleanup(setattr, generator.os.path, "relpath", real)
+        self.assertEqual(generator.shown_path("C:/elsewhere/dccore.mrc"), "C:/elsewhere/dccore.mrc")
+
     def test_check_fails_on_a_stale_block_and_the_rewrite_fixes_it(self):
         """Mutation check of the guard above: one changed line in the block of
         a copy of the script, and --check says so; running the script puts it
