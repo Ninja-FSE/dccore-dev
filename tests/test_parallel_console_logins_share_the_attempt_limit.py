@@ -74,8 +74,13 @@ class TheLockLivesInRuntime(LoginCase):
 
 class ParallelLogins(LoginCase):
 
-    def test_logins_in_flight_together_get_no_more_than_the_limit(self):
-        tries = 2 * adminchat.MAX_PASSWORD_ATTEMPTS
+    def all_at_once(self, attempts):
+        """Run every callable in `attempts` on a thread of its own, with
+        verify_password() held until each is being verified or has been
+        turned away; how many were being verified at once.
+
+        The bot's log is caught once around the lot: redirect_stdout() on
+        each thread would restore stdout in the wrong order."""
         inside = []
         finished = []
         release = threading.Event()
@@ -88,21 +93,27 @@ class ParallelLogins(LoginCase):
         adminchat.verify_password = held_verify
         self.addCleanup(setattr, adminchat, "verify_password", real_verify)
 
+        def run(attempt):
+            attempt()
+            finished.append(attempt)
+        threads = [threading.Thread(target=run, args=(attempt,), daemon=True) for attempt in attempts]
+        with contextlib.redirect_stdout(self.out):
+            for thread in threads:
+                thread.start()
+            arrived = wait_for(lambda: len(inside) + len(finished) == len(attempts))
+            verified_together = len(inside)
+            release.set()
+            for thread in threads:
+                thread.join(10)
+        self.assertTrue(arrived, "the attempts never all arrived")
+        return verified_together
+
+    def test_logins_in_flight_together_get_no_more_than_the_limit(self):
+        tries = 2 * adminchat.MAX_PASSWORD_ATTEMPTS
         sessions = [self.session() for _ in range(tries)]
 
-        def run(s):
-            self.attempt(s, "guess")
-            finished.append(s)
-        threads = [threading.Thread(target=run, args=(s,), daemon=True) for s in sessions]
-        for thread in threads:
-            thread.start()
-        # Every login is either being verified or has been turned away.
-        self.assertTrue(wait_for(lambda: len(inside) + len(finished) == tries),
-                        "the logins never all arrived")
-        verified_together = len(inside)
-        release.set()
-        for thread in threads:
-            thread.join(10)
+        verified_together = self.all_at_once(
+            [lambda s=s: adminchat._check_password(s, "guess") for s in sessions])
 
         self.assertEqual(verified_together, adminchat.MAX_PASSWORD_ATTEMPTS,
                          f"{verified_together} passwords from one address were being "
@@ -111,6 +122,60 @@ class ParallelLogins(LoginCase):
         refused = [s for s in sessions if s.closed and s.attempts == 0]
         self.assertEqual(len(refused), tries - adminchat.MAX_PASSWORD_ATTEMPTS)
         self.assertIn("refused: the address is blocked", self.out.getvalue())
+
+    def test_unlocks_in_flight_together_get_no_more_than_the_limit(self):
+        """`unlock <password>` on a token session (#1264) checks the same
+        password, so it shares the same limit: token sessions from one
+        address sending unlocks side by side get no more guesses."""
+        import console_settings
+        tries = 2 * adminchat.MAX_PASSWORD_ATTEMPTS
+        sessions = []
+        for _ in range(tries):
+            s = self.session()
+            s.authenticated = True
+            s.unlocked = False
+            s.paired_as = "dccore.mrc-0a1b2c3d"
+            sessions.append(s)
+
+        verified_together = self.all_at_once(
+            [lambda s=s: console_settings.cmd_unlock(s, "guess") for s in sessions])
+
+        self.assertEqual(verified_together, adminchat.MAX_PASSWORD_ATTEMPTS,
+                         f"{verified_together} unlock passwords from one address were being "
+                         f"checked at once; the limit is {adminchat.MAX_PASSWORD_ATTEMPTS}")
+        self.assertTrue(adminchat.is_bad_ip(ADDRESS))
+        self.assertFalse(any(s.unlocked for s in sessions))
+        refused = [s for s in sessions if s.closed and not s.unlock_failures]
+        self.assertEqual(len(refused), tries - adminchat.MAX_PASSWORD_ATTEMPTS)
+
+    def test_a_blocked_address_cannot_unlock_even_with_the_password(self):
+        import console_settings
+        first = self.session()
+        with contextlib.redirect_stdout(self.out):
+            for _ in range(adminchat.MAX_PASSWORD_ATTEMPTS):
+                adminchat._check_password(first, "guess")
+        token_session = self.session()
+        token_session.authenticated = True
+        token_session.unlocked = False
+
+        with contextlib.redirect_stdout(self.out):
+            console_settings.cmd_unlock(token_session, "right")
+
+        self.assertFalse(token_session.unlocked)
+        self.assertTrue(token_session.closed)
+
+    def test_each_wrong_unlock_is_counted_once(self):
+        import console_settings
+        s = self.session()
+        s.authenticated = True
+        s.unlocked = False
+        with contextlib.redirect_stdout(self.out):
+            console_settings.cmd_unlock(s, "guess")
+        self.assertEqual(adminchat._bad_ips[ADDRESS][0], 1)
+        with contextlib.redirect_stdout(self.out):
+            console_settings.cmd_unlock(s, "right")
+        self.assertTrue(s.unlocked)
+        self.assertNotIn(ADDRESS, adminchat._bad_ips)
 
     def test_a_session_opened_before_the_block_is_not_verified_after_it(self):
         """The same hole one at a time: the chat was let in while the address

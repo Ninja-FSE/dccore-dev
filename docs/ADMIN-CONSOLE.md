@@ -1257,7 +1257,8 @@ Three wrong passwords from that IP. Wait 15 minutes, or restart the daemon — t
 block lives in memory only. The limit is per address, not per chat: a password is
 counted before it is checked, so chats opened side by side share the three, and a
 chat that was already open when the address was blocked is closed at its next
-attempt with "Too many failed password attempts from this address."
+attempt with "Too many failed password attempts from this address." An
+`unlock <password>` counts the same way, against the same three.
 
 **Locked out entirely.**
 Edit `admin_config.py` and restart. While `ADMIN_CHANNEL_COMMANDS` is on (it

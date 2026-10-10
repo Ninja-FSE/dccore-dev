@@ -259,7 +259,7 @@ class TheFlagsAreSetWhereTheyMeanSomething(unittest.TestCase):
         self.assertIn("return", gate)
 
     def test_the_version_is_bumped(self):
-        self.assertIn("alias dccore.ver { return 1.19.1 }", code())
+        self.assertIn("alias dccore.ver { return 1.19.2 }", code())
 
 
 if __name__ == "__main__":

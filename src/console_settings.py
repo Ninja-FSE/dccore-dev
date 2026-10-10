@@ -236,6 +236,15 @@ def cmd_unlock(session, args):
         _say(session, "UNLOCKED", "This session can change settings.")
         return
     supplied = str(args or "")
+    # Counted against the address before it is verified, as at the login
+    # (adminchat.reserve_password_attempt()): unlocks sent side by side from
+    # one address share the attempt limit instead of each getting their own.
+    if not adminchat.reserve_password_attempt(getattr(session, "peer_ip", "")):
+        _log(session, f"was refused an unlock: the address is blocked after "
+                      f"{adminchat.MAX_PASSWORD_ATTEMPTS} failed attempts.")
+        session.close(announce_text="Too many failed password attempts from this address. Try again later.")
+        adminchat._forget(session)
+        return
     if adminchat.verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied):
         session.unlocked = True
         session.unlock_failures = 0
@@ -244,7 +253,7 @@ def cmd_unlock(session, args):
         _say(session, "UNLOCKED", "Unlocked: this session can change settings now.")
         return
     session.unlock_failures = getattr(session, "unlock_failures", 0) + 1
-    adminchat.note_bad_ip(getattr(session, "peer_ip", ""))
+    # Already counted against the address by reserve_password_attempt().
     _log(session, f"gave a wrong unlock password, attempt {session.unlock_failures}/{UNLOCK_ATTEMPTS}.")
     if session.unlock_failures >= UNLOCK_ATTEMPTS:
         session.close(announce_text="Incorrect Password.")
