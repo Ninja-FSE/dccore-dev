@@ -6151,7 +6151,10 @@ def validate_setup_form(form, lang="en"):
     if not channels:
         errors.append(("CHANNEL", say("setup.error.channel_needed",
                                       "At least one channel is needed, like #mychannel.")))
-    elif any(not c.startswith("#") or " " in c for c in channels):
+    elif settings_file.channels_problem(channel):
+        # settings_file's rule, not a copy of it (#1272): configure.py and the
+        # Settings page accepted what this refused, so "the files the page
+        # writes are the files the terminal writes" was not true of CHANNEL.
         errors.append(("CHANNEL", say("setup.error.channel_shape",
                                       "Each channel starts with # and has no spaces; "
                                       "separate several with commas.")))
@@ -6247,6 +6250,13 @@ def apply_setup(changes, password_hash, log=print, settings_path=None, admin_pat
     # it. The writer prints the warning to the daemon's window; the person
     # at the form is in a browser and never saw it - so it is returned, and
     # the saved page says it too.
+    # BUT ONLY ONCE settings.conf IS KNOWN TO TAKE THE SAVE (#1272). A
+    # settings.conf with one malformed line cannot be edited, so the second
+    # write failed after the first had already replaced ADMIN_PASSWORD_HASH:
+    # the page showed a write error and the password had changed anyway.
+    # check_save() runs every check save() runs and writes nothing, so a save
+    # that is going to fail fails here, with both files untouched.
+    settings_file.check_save(vars(config), changes, path=settings_path)
     shadow = configure.write_admin_config_password(password_hash, path=admin_path)
     configure.write_settings_conf(changes, path=settings_path)
     settings_file.apply_to(vars(config), path=settings_path, log=log)

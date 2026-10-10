@@ -466,8 +466,43 @@ def install_console_log(settings):
 _console_timestamp_format = ""
 
 
+# Where the format comes from once the daemon has its config (#1272): a
+# callable returning the setting's CURRENT value, and the last value it gave.
+_console_timestamp_source = None
+_console_timestamp_seen = None
+
+
+def follow_console_timestamp_format(source):
+    """Read the format from `source()` on every line from now on.
+
+    CONSOLE_TIMESTAMP_FORMAT was applied once, in oserve's __main__, so a
+    change saved on the Settings page did nothing until a restart - and the
+    page did not say so, since a rehash runs on every save. The neighbouring
+    CONSOLE_LOG_FILE is read per line and takes effect at once; this makes
+    the stamp behave the same. A new value goes through
+    set_console_timestamp_format(), so an invalid one is refused there, said
+    once, and the previous format kept. None stops following.
+    """
+    global _console_timestamp_source, _console_timestamp_seen
+    _console_timestamp_source = source
+    _console_timestamp_seen = None
+
+
 def console_timestamp_format():
     """The strftime format currently stamped on every console line, or ""."""
+    global _console_timestamp_seen
+    source = _console_timestamp_source
+    if source is not None:
+        try:
+            wanted = source()
+        except Exception:
+            wanted = _console_timestamp_seen
+        if wanted != _console_timestamp_seen:
+            # Remembered BEFORE it is applied: an invalid format is reported
+            # with a print(), which comes back through this very function on
+            # its way to the console, and must find nothing new to apply.
+            _console_timestamp_seen = wanted
+            set_console_timestamp_format(wanted)
     return _console_timestamp_format
 
 
@@ -530,6 +565,33 @@ def install_console_timestamps(fmt="%H:%M:%S"):
         setattr(sys, name, _TimestampedStream(stream, console_timestamp_format))
         changed.append(name)
     return changed
+
+
+def ignores_case(directory):
+    """True when the filesystem holding `directory` treats two names that
+    differ only in case as one file - NTFS and APFS by default, not ext4.
+
+    Asked of the filesystem rather than of the OS (#1272): a Linux box can
+    mount an NTFS or exFAT drive and a Mac can have a case-sensitive volume.
+    Read-only: an entry already in the directory is looked up with its case
+    swapped. A directory with nothing to try it on answers False, which is
+    the old, case-sensitive behaviour.
+    """
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return False
+    for name in entries:
+        swapped = name.swapcase()
+        if swapped == name:
+            continue
+        first = os.path.join(directory, name)
+        second = os.path.join(directory, swapped)
+        try:
+            return os.path.exists(second) and os.path.samefile(first, second)
+        except OSError:
+            return False
+    return False
 
 
 # ---------------------------------------------------------------------

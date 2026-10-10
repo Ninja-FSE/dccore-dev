@@ -71,7 +71,8 @@
 
 # The name your list files start with (for example DCCore-2026-09-18.txt).
 # Normally the same as the bot's nickname, which is what happens if you leave
-# it alone.
+# it alone. Letters, digits and - _ . [ ] { } ^ ` only, so it is a file name
+# on every system.
 #
 # Names every generated list file ("<LIST_BASE_NAME>-<date>.txt" and its
 # .zip/.rar counterparts). Automatically takes NICKNAME's own value once
@@ -124,8 +125,9 @@
 # REQUIRED - the daemon refuses to start until this is set.
 #ADMIN_NICK = 
 
-# The channel(s) the bot serves in, separated by commas. The first one is
-# where announcements go unless a request came from another channel. Required.
+# The channel(s) the bot serves in, each starting with #, separated by commas.
+# The first one is where announcements go unless a request came from another
+# channel. Required.
 #
 # The channel(s) to serve in, comma-separated; the first one is where announcements go by default
 # REQUIRED - the daemon refuses to start until this is set.
@@ -786,10 +788,10 @@
 
 [channel advertising (the advert clock)]
 # How often the bot posts its advert in the channel, in seconds. 300 is every
-# five minutes. Do not go much lower - channels do not like a bot that
+# five minutes. 60 is the least it accepts - channels do not like a bot that
 # advertises constantly.
 #
-# Time between each channel advert, in seconds
+# Time between each channel advert, in seconds (at least 60)
 #ANNOUNCE_INTERVAL = 300
 
 

@@ -14,7 +14,6 @@
 # now, and are bound below in section 8. See that module's docstring for why:
 # !rehash reloads THIS file, which reset every one of them.
 import os
-import re
 import sys
 import runtime
 
@@ -543,7 +542,7 @@ ANNOUNCE_TRANSFERS: bool = True
 # ---------------------------------------------------------------------
 # 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
 # ---------------------------------------------------------------------
-ANNOUNCE_INTERVAL: int = 300     # Time between each channel advert, in seconds
+ANNOUNCE_INTERVAL: int = 300     # Time between each channel advert, in seconds (at least 60)
 
 # ---------------------------------------------------------------------
 # 5. LIMITS, SLOTS AND QUEUE CONTROL
@@ -1561,13 +1560,12 @@ if not BROADCAST_SEARCH_CHANNEL and CHANNEL:
 # is legal in a path are different sets, and only one of them is ours to
 # choose. Not imported from there - list.py and list_fetch.py both `import
 # defaults as config`, and defaults.py loads first.
-_LIST_BASE_NAME_CHARSET_RE = re.compile(r'[^\w\-.\[\]{}^`]')
-
-
+#
+# The rule itself lives in settings_file (#1272), which also refuses a typed
+# LIST_BASE_NAME that breaks it: the derived name and the typed one are now
+# held to the same charset, and settings_file is imported above.
 def _sanitize_list_base_name(name):
-    cleaned = _LIST_BASE_NAME_CHARSET_RE.sub('_', str(name or ''))
-    cleaned = cleaned.strip().strip('.').strip()
-    return cleaned or "DCCore"
+    return settings_file.sanitize_list_base_name(name)
 
 
 def derive_list_base_name():

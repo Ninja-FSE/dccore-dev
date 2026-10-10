@@ -768,8 +768,25 @@ def _prune_superseded_lists(keep, directory=None):
         print(f"[LIST-CLEAN ERROR] Could not read {directory}: {err}")
         return
 
+    # IN THE FILESYSTEM'S OWN TERMS (#1272). On NTFS and APFS "musicbot-..." and
+    # "MusicBot-..." are one name, so after the nickname was recapitalised the
+    # old lists were never matched below and never removed - and Windows'
+    # case-blind glob in find_latest_list() went on finding them. On a
+    # case-sensitive filesystem the two really are different names, and this
+    # stays exactly as strict as it was.
+    if platform_compat.ignores_case(directory):
+        def same(name):
+            return name.casefold()
+    else:
+        def same(name):
+            return name
+    keep = {same(name) for name in keep}
+    side_files = {same(os.path.basename(str(getattr(config, setting, ""))))
+                  for setting in ("LIST_SIZE_FILE", "LIST_RAWBYTES_FILE")}
+    prefix = same(config.LIST_BASE_NAME + "-")
+
     for item in entries:
-        if item in keep:
+        if same(item) in keep:
             continue
         # The HYPHEN is the point. Every generated list is
         # f"{LIST_BASE_NAME}-{today}.txt" or f"{LIST_BASE_NAME}-RAR-{today}.txt",
@@ -784,18 +801,17 @@ def _prune_superseded_lists(keep, directory=None):
         # bytes, on every interval, for ever - and the log line for it read
         # "[LIST-CLEAN] Removed 2 superseded list(s)", which sounds like
         # housekeeping working. Found by audit.
-        if not item.startswith(config.LIST_BASE_NAME + "-"):
+        if not same(item).startswith(prefix):
             continue
 
         # Belt and braces: never remove a file this run just wrote, whatever
         # the name matching decides.
-        if item in (os.path.basename(str(getattr(config, "LIST_SIZE_FILE", ""))),
-                    os.path.basename(str(getattr(config, "LIST_RAWBYTES_FILE", "")))):
+        if same(item) in side_files:
             continue
         # ".rar" is here because LIST_FORMAT can publish one. Only names that
         # also start with LIST_BASE_NAME are considered, and this is the lists
         # directory, so no album archive a user is waiting on is in reach.
-        if not item.endswith((".txt", ".zip", ".rar")):
+        if not same(item).endswith((".txt", ".zip", ".rar")):
             continue
         try:
             os.remove(os.path.join(directory, item))
@@ -947,6 +963,39 @@ def migrate_list_base_name(log=print):
     return moved
 
 
+def _same_file(first, second):
+    """True when the two paths name one file - on a case-insensitive
+    filesystem, two spellings of the same name."""
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def _rename_through_a_temporary_name(old_path, new_path):
+    """Rename `old_path` to `new_path` when the filesystem already calls
+    them the same file (#1272).
+
+    Two steps, through a name of its own: a rename onto what the filesystem
+    considers the same name is not one every platform will do in one step.
+    POSIX rename() is a successful no-op when both names are already links
+    to one file, which leaves the temporary name behind - removed here, since
+    `new_path` is that same file.
+    """
+    temporary = old_path + ".case-rename"
+    platform_compat.replace_with_retry(old_path, temporary)
+    try:
+        platform_compat.replace_with_retry(temporary, new_path)
+    except OSError:
+        try:
+            platform_compat.replace_with_retry(temporary, old_path)
+        except OSError:
+            pass
+        raise
+    if os.path.lexists(temporary) and _same_file(temporary, new_path):
+        os.remove(temporary)
+
+
 def _migrate_one_list_directory(directory, log=print):
     """migrate_list_base_name() for ONE list's directory. Returns the
     (old, new) basenames actually moved."""
@@ -987,10 +1036,18 @@ def _migrate_one_list_directory(directory, log=print):
         new_name = config.LIST_BASE_NAME + item[len(previous):]
         old_path = os.path.join(directory, item)
         new_path = os.path.join(directory, new_name)
+        rename = platform_compat.replace_with_retry
         if os.path.exists(new_path):
-            continue
+            # A CASE-ONLY RENAME (#1272): "musicbot" -> "MusicBot". On NTFS and
+            # APFS the new name "exists" because it is this very file, so every
+            # file was skipped, the marker kept the old name, and the bot stayed
+            # on its old list for good. Only a DIFFERENT file at the new name
+            # is the rebuild that already happened and wins.
+            if not _same_file(old_path, new_path):
+                continue
+            rename = _rename_through_a_temporary_name
         try:
-            platform_compat.replace_with_retry(old_path, new_path)
+            rename(old_path, new_path)
             moved.append((item, new_name))
         except OSError as err:
             log(f"[MIGRATE] Could not rename {item} to {new_name}: {err}. "
