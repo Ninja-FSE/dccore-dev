@@ -644,9 +644,59 @@ class TheWindowsBehaviour(unittest.TestCase):
         self.assertEqual(with_options, 3)
         self.assertIn("\n  Bot Settings:dccore.settings\n", block("menu @DCCore {"))
 
-    def test_the_preview_window_draws_the_raw_lines(self):
+    def test_the_preview_window_draws_the_decoded_lines(self):
         body = alias("dccore.sw.line")
-        self.assertIn("echo @DCCore-preview $+($chr(3),14,$2,:,$chr(15)) $3-", body)
+        self.assertIn("echo @DCCore-preview $+($chr(3),14,$2,:,$chr(15)) $dccore.sw.pvtext($3-)", body)
+
+
+def mirc_pvtext(text):
+    """$dccore.sw.pvtext, in Python: the script's own decoder pattern, then
+    every space a non-breaking one."""
+    (statement,) = statements(alias("dccore.sw.pvtext"))
+    decoder = statements(alias("dccore.sw.dec"))[0][len("return "):]
+    assert statement == "return $replace(%s,$chr(32),$chr(160))" % decoder, statement
+    return mirc_dec(text).replace(" ", "\u00a0")
+
+
+class ThePreviewKeepsItsFrame(unittest.TestCase):
+    """The theme preview's lines arrive encoded (colour codes as %03, runs of
+    spaces as %20): mIRC hands a chat line to a script with each run of
+    spaces collapsed, and echo collapses them again - and a theme's frame is
+    runs of spaces painted with a background colour."""
+
+    LINES = ["\x0301,01   \x0300,04 Files \x0301,01   \x0f 12,345 \x0308|\x0f end ",
+             "  \x0302,02    \x0300,01 Sent: Some Album  (1.2 GB) \x0302,02    ",
+             "plain line", " ", "100% %nick% \x0304red\x03"]
+
+    def chat_text(self, line):
+        """What the PVLINE handler's $3- holds: the bot's line as mIRC passes
+        it on - every run of spaces collapsed to one."""
+        out = console_settings.preview_lines({"advert": line, "notice": "x"})[1]
+        self.assertTrue(out.startswith("DCCORE PVLINE advert "))
+        text = out[len("DCCORE PVLINE advert "):]
+        return re.sub(" +", " ", text).strip(" ")
+
+    def test_a_line_decodes_to_the_bots_line_exactly(self):
+        for line in self.LINES:
+            with self.subTest(line=line):
+                drawn = mirc_pvtext(self.chat_text(line))
+                self.assertEqual(drawn.replace("\u00a0", " "), line)
+
+    def test_what_is_echoed_has_no_plain_space_to_collapse(self):
+        for line in self.LINES:
+            with self.subTest(line=line):
+                self.assertNotIn(" ", mirc_pvtext(self.chat_text(line)))
+
+    def test_the_colour_codes_survive(self):
+        drawn = mirc_pvtext(self.chat_text(self.LINES[0]))
+        self.assertEqual(drawn.count("\x03"), self.LINES[0].count("\x03"))
+        self.assertIn("\x0300,04\u00a0Files\u00a0", drawn)
+
+    def test_a_raw_line_would_have_lost_the_frame(self):
+        """Mutation check of the fixture: the same line sent raw comes out of
+        mIRC narrower, so the tests above test something."""
+        line = self.LINES[0]
+        self.assertNotEqual(re.sub(" +", " ", line).strip(" "), line)
 
     def test_the_window_needs_mirc_617_for_regsubex(self):
         self.assertIn("if ($version < 6.17) {", alias("dccore.settings"))

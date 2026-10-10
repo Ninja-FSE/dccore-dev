@@ -38,7 +38,9 @@ status line at the bottom. Plain mIRC, no DLL. `dccore.mrc` is 1.19.0.
   implied list's folders changed, so the list is not made real); Bans & ignores (lift, ignore for minutes, add/remove
   a pattern, re-asked two seconds after each, since `ban`/`unban` finish in the background); Appearance (theme and the
   six colours as foreground/background menus; Preview runs `setbegin`, the theme's `set`s, `setpreview`, `setabort`
-  and draws the two raw lines in `@DCCore-preview`).
+  and draws the two lines in `@DCCore-preview`: decoded (the bot now encodes them, colour codes as `%03` and runs of
+  spaces as `%20`) and with every space made a non-breaking one, since `echo` collapses runs of spaces and a theme's
+  frame is made of them - a coloured `$chr(160)` draws the same block).
 - **General Settings** has this mIRC's own switches too (open @DCCore / Chat / Downloads at start, reconnect), saved to
   `dccore.ini` by Apply or OK. **This mIRC window** opens the old Options dialog, unchanged; `/dccore options` is still
   that dialog. The "..." browse buttons work only when the console connection is 127.0.0.1 / ::1.
@@ -47,15 +49,16 @@ status line at the bottom. Plain mIRC, no DLL. `dccore.mrc` is 1.19.0.
 - **Tests:** `tests/test_the_settings_window_generator.py` (21: the block is up to date and `--check` catches a stale
   one; every setting placed once or excluded; the mockup's tabs and pages; the generator refuses a key placed twice, a
   key with no place, a check too wide and a page that cannot fit; labels, units, choices and help are the bot's) and
-  `tests/test_the_mirc_settings_window.py` (50: the decoder and encoder, re-run in Python from the script's own
-  patterns, agree with `console_settings` on a battery of values; every documented reply type is routed and has a
-  branch; every command sent is a console command with a real subcommand; Apply sends setbegin, sets, setcommit and no
-  `set` is ever sent outside a transaction; every snapshot is counted and times out; ids unique and clear of the other
-  dialogs; every control on exactly one page; labels fit; nothing overlaps; menus; version). Mutation-checked: a
-  removed handler, a broken decoder or encoder, a stale block, a key placed twice, a dropped count check, a `set`
-  outside setbegin and a dropped timeout each fail. `tests/test_the_mirc_menu_is_grouped_by_what_you_do.py` knows
-  **Bot Settings**; `tests/test_setup_check.py`'s one-copy guard skips `scripts/mirc`, whose layout names settings as
-  data.
+  `tests/test_the_mirc_settings_window.py` (54: the decoder and encoder, re-run in Python from the script's own
+  patterns, agree with `console_settings` on a battery of values, and a preview line comes out as the bot's line with
+  no plain space for `echo` to collapse; every documented reply type is routed and has a branch; every command sent is
+  a console command with a real subcommand; Apply sends setbegin, sets, setcommit and no `set` is ever sent outside a
+  transaction; every snapshot is counted and times out; ids unique and clear of the other dialogs; every control on
+  exactly one page; labels fit; nothing overlaps; menus; version). Mutation-checked: a removed handler, a broken
+  decoder or encoder, a preview line echoed raw or without its non-breaking spaces, a stale block, a key placed twice,
+  a dropped count check, a `set` outside setbegin and a dropped timeout each fail.
+  `tests/test_the_mirc_menu_is_grouped_by_what_you_do.py` knows **Bot Settings**; `tests/test_setup_check.py`'s
+  one-copy guard skips `scripts/mirc`, whose layout names settings as data.
 
 ### ⚙️ The dashboard's settings pages, over the admin console (#1264, phase A)
 

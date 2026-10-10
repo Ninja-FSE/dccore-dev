@@ -2009,6 +2009,13 @@ alias dccore.sw.enc {
   %v = $regsubex(%v,/([\x01-\x1f\x7f])/g,$chr(37) $+ $base($asc(\1),10,16,2))
   return %v
 }
+; A preview line: encoded like any value (its colour codes as %03, its runs
+; of spaces as %20), decoded here, then every space made a non-breaking one.
+; echo collapses a run of spaces, and a theme's frame IS runs of spaces on a
+; background colour; a coloured $chr(160) draws the same block. Decoded in
+; place rather than through dccore.sw.dec, whose return would drop a space
+; at the start or the end of the line.
+alias dccore.sw.pvtext { return $replace($regsubex($1,/%(0[0-9a-f]|1[0-9a-f]|2[05d]|7f)/gi,$chr($base(\1,16,10))),$chr(32),$chr(160)) }
 alias dccore.sw.tok {
   if ($1 == $null) { return - }
   if ($1 == -) { return $chr(37) $+ 2D }
@@ -2314,7 +2321,7 @@ alias dccore.sw.line {
   }
   if (%t == PVLINE) {
     hinc dccore.sws pvgot
-    echo @DCCore-preview $+($chr(3),14,$2,:,$chr(15)) $3-
+    echo @DCCore-preview $+($chr(3),14,$2,:,$chr(15)) $dccore.sw.pvtext($3-)
     return
   }
   if (%t == PVEND) {
