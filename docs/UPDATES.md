@@ -4,6 +4,57 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧺 Serving files: one answer to "may this archive go", and claims that follow the nick (#1268)
+
+An audit of the send path found seven gaps. Three share one cause: a packed archive's disk name comes from its
+FOLDER (`_rar_archive_disk_name()`), so every nick that asked for the same album names one file, and nothing kept
+track of which rows still needed it.
+
+- **One answer, by path: `dcc.temp_archive_in_use(path, ignoring=())`** (caller holds `queue_lock`). An archive is
+  needed while any queue row names it as a packed archive, a transfer is sending it (its own `path`, or its
+  `queue_row`'s) or the pack is writing it. Every place that deletes one now asks it:
+  - **A second nick's `!rar` of a folder** no longer deletes the first nick's waiting archive as "stale", and a
+    failed or cancelled run can no longer remove it. A finished archive another row still names is reused: the row is
+    pointed at it and sent, and rar does not run. The decision, the stale-file removal and the pack's registration
+    happen under one hold of `queue_lock`, so a send's cleanup cannot remove the file in between. An archive nobody
+    names is still removed before a fresh pack, because `rar a` adds to an existing file.
+  - **The freeze sweep and the freeze timer** call `discard_orphaned_temp_archives()` as `!clearqueue` and REMOVE
+    already did. Their own loops deleted every archive the expired queue named, including one another nick's row
+    was waiting to send.
+  - **The send's cleanup and `discard_orphaned_temp_archives()`** compared the OFFERED name, which is the leaf alone
+    (`Greatest_Hits.rar`). A different artist's album with the same leaf name kept a delivered archive in
+    `TMP_ZIP_DIR` for good. They compare paths now. The send's cleanup also removes the file under the lock that
+    answered.
+  - The name a user is offered is unchanged (AutoQ, #1208/#1215).
+- **`socket.socket()` failing (EMFILE) in `start_dcc_send()`** sat above the guarded block, so the thread died with
+  the slot in `active_transfers`, the nick in `user_processing_lock` and a pack handoff's `rar_inprogress` latched.
+  Creating the listener, `prepare_listener()` and the bind loop are now guarded. A failure takes the no-free-port
+  path: everything is released, the row stays queued uncharged, and a retry follows 45 s later.
+- **A `/nick` while rar runs** left the new nick in `user_processing_lock` for good. The packer released the nick it
+  started with, and the archive was offered to the old nick. The claim is now held in a holder,
+  `runtime.pack_owner = {"nick": ...}`, which `irc.note_nick_change()` renames under `queue_lock` in the same step that
+  moves the lock. The packer's release, notices and handoff (send target and transfer row) use the current nick. A
+  poisoned row is dropped by identity under whichever key holds it.
+- **A queued file from a folder the operator stopped sharing** was still sent: only pack rows were re-checked
+  against the live library. `dcc.drop_an_unshared_row()` checks the row in the dispatcher after the claim, in section A
+  and section B, outside `queue_lock` (#605). An unshared row loses its claim, is dropped without a retry, and the
+  user is told the file is no longer shared (by name, never by path). The slot then goes to the next nick.
+  `may_still_be_sent()` exempts what the bot makes itself: archives and lists in `TMP_ZIP_DIR`, lists in
+  `LOCAL_LIST_DIR`, and list rows.
+- **The user's own `@<bot>-remove` (and CTCP REMOVE) during their pack** said "removed", and the pack then finished and
+  was sent. Removing the row now stops its pack: `cancel_pack(row=...)` stops only a pack of that row and marks it
+  `withdrawn`, so the packer neither settles the row again nor says the operator cancelled it. The packer also checks
+  the row is still queued, under the lock that claims the slot, before it hands the archive to a send. That covers
+  a remove after rar has ended, which the pack job no longer marks. A removed folder is not sent, and its archive is
+  removed unless another row needs it.
+  **A file being sent** stays in the queue until its send ends. The notice says so ("... except "X", which is being
+  sent to you right now"; for `-remove <file>`, "is being sent to you right now, so it cannot be removed").
+- **Tests:** `tests/test_serving_keeps_shared_archives_and_claims_straight.py` (37 tests, all with the real
+  dispatcher, packer, freeze timer and remove handlers; the stand-in rar; one class sends over loopback).
+  20/20 mutations caught. Adjusted: `tests/support.py`'s `queue_row()` puts its path inside `FILE_DIRECTORY`, as a
+  real row's is. `tests/test_commands.py`'s streamed-archive transfer now carries its row, as real claims do.
+  `tests/test_audit_rar_pack_and_slots.py` reads the release by the current holder.
+
 ### 🗂️ Lists and search: eight findings from the audit (#1270)
 
 Found by a multi-agent audit of the list builder, the pack gate and the search, each confirmed by running the real

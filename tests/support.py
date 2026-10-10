@@ -568,10 +568,14 @@ def no_disk_writes(db_module):
 
 
 def queue_row(user="dave", filename="Song.flac", **extra):
-    """Build a dcc_queue entry in the shape dcc.py actually creates."""
+    """Build a dcc_queue entry in the shape dcc.py actually creates.
+
+    Its path is inside FILE_DIRECTORY, as a real row's is: the dispatcher
+    refuses a row whose file is no longer inside any shared folder (#1268).
+    """
     row = {
         "file": filename,
-        "path": "/srv/library/Artist/Album/" + filename,
+        "path": os.path.join(config.FILE_DIRECTORY or "/srv/library", "Artist", "Album", filename),
         "channel": "#dccore-test",
         "user_raw": user,
         "is_temporary_zip": False,
