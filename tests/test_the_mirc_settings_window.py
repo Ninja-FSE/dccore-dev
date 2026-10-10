@@ -165,12 +165,26 @@ def mirc_dec(text):
     return python_sub(pattern, flags, replacement, text)
 
 
+ENC_REPLACEMENTS = ("$chr(37) $+ 25", "$chr(37) $+ 20", r"$chr(37) $+ $base($asc(\1),10,16,2)")
+
+
 def mirc_enc(text):
-    calls = regsubex_calls("dccore.sw.enc")
-    assert len(calls) == 3, calls
-    for pattern, flags, replacement in calls:
+    """$dccore.sw.enc: three $regsubex nested in one expression (a /var in
+    between would close up runs of spaces), innermost first."""
+    (statement,) = statements(alias("dccore.sw.enc"))
+    assert statement.startswith("return $regsubex($regsubex($regsubex($1,/"), statement
+    patterns = re.findall(r",/([^/]+)/([gi]*),", statement)
+    assert len(patterns) == 3, patterns
+    for (pattern, flags), replacement in zip(patterns, ENC_REPLACEMENTS):
+        assert ",%s)" % replacement in statement, replacement
         text = python_sub(pattern, flags, replacement, text)
     return text
+
+
+def collapse(text):
+    """What a command's parameters do to a text in mIRC: every run of
+    spaces closed up to one, the spaces at either end gone."""
+    return re.sub(" +", " ", text).strip(" ")
 
 
 def mirc_tok(text):
@@ -352,7 +366,7 @@ class ApplyIsOneTransaction(unittest.TestCase):
         self.assertEqual(len(sets), 1)
         self.assertLess(begin, sets[0])
         self.assertLess(sets[0], commit)
-        self.assertIn("$dccore.sw.enc($dccore.sw.value($gettok(%keys,%i,32)))", body[sets[0]])
+        self.assertIn("$dccore.sw.wire($gettok(%keys,%i,32))", body[sets[0]])
         # the loop around the set is between the two
         self.assertTrue(any(line.startswith("while (%i <= $numtok(%keys,32))") for line in body[begin:commit]))
 
@@ -380,7 +394,7 @@ class ApplyIsOneTransaction(unittest.TestCase):
     def test_only_changed_settings_are_sent(self):
         self.assertIn("var %keys = $iif($dccore.sw.s(loaded),$dccore.sw.changed)", alias("dccore.sw.apply"))
         dirty = statements(alias("dccore.sw.dirty"))
-        self.assertIn("if ($+(=,$dccore.sw.shown($1)) === $dccore.sw.s(d. $+ $1)) { return $false }", dirty)
+        self.assertIn("if ($+(=,$dccore.sw.shownenc($1)) === $dccore.sw.s(d. $+ $1)) { return $false }", dirty)
 
     def test_ok_closes_only_once_the_bot_has_saved(self):
         done = alias("dccore.sw.done")
@@ -403,7 +417,12 @@ class ApplyIsOneTransaction(unittest.TestCase):
 
     def test_a_file_location_asks_before_it_is_sent(self):
         apply = alias("dccore.sw.apply")
-        self.assertLess(apply.index("if ($dccore.sw.risky(%keys)) {"), apply.index("dccore.send setbegin"))
+        ask = apply.index("if ($dccore.sw.risky(%keys)) && ($2 != asked) {")
+        self.assertLess(ask, apply.index("dccore.send setbegin"))
+        self.assertIn(".timerdccoreSwAsk -m 1 0 dccore.sw.riskyask", apply[ask:apply.index("dccore.send setbegin")])
+        riskyask = alias("dccore.sw.riskyask")
+        self.assertIn("if ($input(Change where the bot keeps its files?", riskyask)
+        self.assertIn("{ dccore.sw.apply %how asked | return }", riskyask)
         data = generated_data()
         files = data["confirm"].split()
         self.assertIn("TMP_ZIP_DIR", files)
@@ -588,7 +607,7 @@ class TheDialog(unittest.TestCase):
         buttons = {c[2]: c[1] for c in self.controls if c[0] == "button"}
         self.assertEqual((buttons[1014], buttons[1015], buttons[1016]), ("Apply", "OK", "Cancel"))
         click = alias("dccore.sw.click")
-        self.assertIn("if (%id == 1014) { dccore.sw.apply | return }", click)
+        self.assertIn("if (%id == 1014) { dccore.sw.apply apply | return }", click)
         self.assertIn("if (%id == 1015) { dccore.sw.apply close | return }", click)
         # OK is not mIRC's own "ok" button, which would close before the bot answers
         ok = next(c for c in self.controls if c[2] == 1015)
@@ -733,6 +752,198 @@ class TheVersion(unittest.TestCase):
 
     def test_the_script_is_1_19_0(self):
         self.assertIn("\nalias dccore.ver { return 1.19.0 }\n", code())
+
+
+class TheReviewOfTheFirstVersion(unittest.TestCase):
+    """What an independent review of the window's first version found, each
+    pinned here (and mutation-checked: putting the old line back fails)."""
+
+    def line_branch(self, kind):
+        body = alias("dccore.sw.line")
+        start = body.index("if (%%t == %s)" % kind)
+        end = body.find("\n  if (%t ==", start + 1)
+        return body[start:] if end < 0 else body[start:end]
+
+    # 1. A refused save keeps the lists' edits, so OK still refuses to close.
+    def test_a_refused_lists_save_keeps_its_edits(self):
+        self.assertNotIn("hdel dccore.sws srv.dirty", alias("dccore.sw.srv.save"))
+        done = self.line_branch("SRVDONE) || (%t == FLDDONE")
+        lines = {status: next(line for line in statements(done) if line.startswith("if ($2 == %s)" % status))
+                 for status in ("ok", "unchanged", "error")}
+        self.assertIn("hdel dccore.sws srv.dirty", lines["ok"])
+        self.assertIn("hdel dccore.sws srv.dirty", lines["unchanged"])
+        self.assertNotIn("srv.dirty", lines["error"])
+        self.assertIn("Your changes are still here", lines["error"])
+        self.assertIn("if ($dccore.sw.s(srv.dirty)) { return Lists & channels }", alias("dccore.sw.unsaved"))
+
+    # 2. The operator's data is compared case-sensitively.
+    def test_a_case_only_rename_is_a_change(self):
+        self.assertIn("($dccore.sw.srv.sig === $dccore.sw.s(srv.sig0))", alias("dccore.sw.srv.save"))
+
+    def test_no_operator_data_is_compared_ignoring_case(self):
+        """== and != ignore case in mSL. Every comparison of a name, a path,
+        a value or a signature is === (or a test for empty)."""
+        found = 0
+        for line in handwritten().split("\n"):
+            for left, op, right in re.findall(r"\((\S+) (===|==|!=) ([^)]*\)?)\)", line):
+                operands = left + " " + right
+                if not re.search(r"\.text\b|sig\b|sig0|oc\.s\.|%now|d\. \$\+|shownenc|\$did\(dccore\.set,1501,", operands):
+                    continue
+                found += 1
+                if "$null" in right:
+                    continue
+                self.assertEqual(op, "===", line.strip())
+        self.assertGreater(found, 5)
+
+    # 3. The confirm question's wait starts once it is answered.
+    def test_the_confirm_wait_starts_after_the_answer(self):
+        body = alias("dccore.sw.confirm")
+        asked = body.index("$input(%q,yq,DCCore - Settings)")
+        self.assertEqual(body.count("dccore.sw.wait settings"), 2)
+        self.assertGreater(body.index("dccore.sw.wait settings"), asked)
+        for send in ("dccore.send setcommit confirm", "dccore.send setabort"):
+            before = body[:body.index(send)]
+            self.assertGreater(before.rindex("dccore.sw.wait settings"), asked)
+
+    # A. Rows are kept encoded and sent back as they came.
+    def test_encoded_text_survives_a_commands_parameters(self):
+        """Why keeping the encoded form works: it has no run of spaces and no
+        space at either end, so /hadd and an alias's parameters leave it as
+        it is - where the decoded form would be closed up."""
+        for value in BATTERY:
+            with self.subTest(value=value):
+                encoded = console_settings.encode_value(value)
+                self.assertEqual(collapse(encoded), encoded)
+                self.assertEqual(mirc_dec(collapse(encoded)), value)
+        self.assertNotEqual(collapse("a  b"), "a  b")
+
+    def test_the_snapshots_are_stored_encoded(self):
+        self.assertIn("hadd dccore.sws v. $+ $2 = $+ $4-", self.line_branch("SETF"))
+        self.assertIn("hadd dccore.sws srv.l. $+ %id $3 $4-", self.line_branch("SRVLIST"))
+        self.assertIn("dccore.sw.srv.addfolder $dccore.sw.s(srv.n. $+ $2) $3 $4-", self.line_branch("SRVFOLDER"))
+        self.assertIn("hadd dccore.sws fld.r. $+ $dccore.sw.s(fld.got) $3 $4-", self.line_branch("FLDROW"))
+        self.assertIn("hadd dccore.sws oc.l. $+ $dccore.sw.s(oc.got) = $+ $3-", self.line_branch("OCLINE"))
+        for kind in ("SETF", "SRVLIST", "SRVFOLDER", "FLDROW", "OCLINE"):
+            self.assertNotIn("$dccore.sw.dec(", self.line_branch(kind), kind)
+
+    def test_the_lists_go_back_as_stored(self):
+        save = alias("dccore.sw.srv.save")
+        self.assertIn("dccore.send served list %i %l", save)
+        self.assertIn("dccore.send served folder %i $gettok(%row,2-,32)", save)
+        self.assertIn("dccore.send folders row %n $gettok(%row,2-,32)", save)
+        self.assertNotIn("$dccore.sw.enc(", save)
+
+    def test_what_the_operator_types_is_encoded_straight_from_the_control(self):
+        """Every name or path typed into Lists & channels is stored as
+        enc() or tok() of $did(...).text - never via a /var or a command's
+        parameters first."""
+        stored = 0
+        for name in ("dccore.sw.srv.addlist", "dccore.sw.srv.newfolder", "dccore.sw.srv.change"):
+            for line in statements(alias(name)):
+                if ("hadd dccore.sws srv." in line or "dccore.sw.srv.addfolder " in line) and "$did(" in line:
+                    stored += 1
+                    for use in re.findall(r"(\$\w[\w.]*)\(\$did\(dccore\.set,15(?:42|49)\)\.text\)", line):
+                        self.assertIn(use, ("$dccore.sw.enc", "$dccore.sw.tok"), line)
+                    self.assertNotRegex(line, r"(?<!\()\$did\(dccore\.set,15(?:42|49)\)\.text(?!\))", line)
+        self.assertGreaterEqual(stored, 4)
+
+    def test_an_untouched_on_connect_line_goes_back_byte_for_byte(self):
+        fill = alias("dccore.sw.oc.fill")
+        self.assertIn("hadd dccore.sws oc.s. $+ %i $+(=,$dccore.sw.enc($did(dccore.set,1501,%i)))", fill)
+        wire = statements(alias("dccore.sw.oc.wire"))
+        self.assertIn("var %now = $+(=,$dccore.sw.enc($did(dccore.set,1501,$1))), %k = 1", wire)
+        self.assertIn("if ($dccore.sw.s(oc.s. $+ %k) === %now) { return $mid($dccore.sw.s(oc.l. $+ %k),2) }",
+                      wire)
+        self.assertIn("dccore.send onconnect line %n $dccore.sw.oc.wire(%i)", alias("dccore.sw.oc.save"))
+
+    def test_the_on_connect_model(self):
+        """The same logic, run: what the bot sent, shown (and maybe closed up
+        by did -a), read back, then sent - untouched lines as they came,
+        edited lines as typed."""
+        sent = ["PRIVMSG X :LOGIN alfa  two  spaces", "MODE %nick% +x", " lead"]
+        stored = [console_settings.encode_value(c) for c in sent]
+        shown = [collapse(mirc_dec(e)) for e in stored]             # what the box shows
+        baseline = [mirc_enc(t) for t in shown]                      # oc.s.<n>
+        edited = list(shown)
+        edited[1] = "MODE %nick% +ix"
+
+        def wire(text):
+            now = mirc_enc(text)
+            for n, base in enumerate(baseline):
+                if base == now:
+                    return stored[n]
+            return now
+        out = [wire(t) for t in edited]
+        self.assertEqual(out[0], stored[0])
+        self.assertEqual(console_settings.decode_value(out[0]), sent[0])
+        self.assertEqual(console_settings.decode_value(out[1]), "MODE %nick% +ix")
+        self.assertEqual(out[2], stored[2])
+
+    # B. An untouched setting is never sent.
+    def test_the_dirty_baseline_is_what_the_control_shows(self):
+        fill = alias("dccore.sw.fill")
+        self.assertIn("hadd dccore.sws d. $+ $1 = $+ $dccore.sw.shownenc($1)", fill)
+        self.assertLess(fill.index("dccore.sw.put %id %v"), fill.index("$dccore.sw.shownenc($1)"))
+        shownenc = statements(alias("dccore.sw.shownenc"))
+        self.assertEqual(shownenc[-1], "return $dccore.sw.enc($did(dccore.set,$gettok($dccore.sw.m(k. $+ $1),1,32)).text)")
+
+    def test_an_edit_is_sent_encoded_from_the_control(self):
+        wire = statements(alias("dccore.sw.wire"))
+        self.assertEqual(wire[-1], "return $dccore.sw.enc($did(dccore.set,%id).text)")
+        self.assertIn("if (%kind == choice) && (!$did(dccore.set,%id).sel) { return $mid($dccore.sw.s(v. $+ $1),2) }",
+                      wire)
+        self.assertIn("if (%kind == colour) && ($did(dccore.set,%id).sel == 18) { return $mid($dccore.sw.s(v. $+ $1),2) }",
+                      wire)
+        for name in ("dccore.sw.apply", "dccore.sw.preview"):
+            body = alias(name)
+            self.assertNotIn("$dccore.sw.enc($dccore.sw.value(", body, name)
+            self.assertIn("$dccore.sw.wire(", body, name)
+
+    def test_the_settings_model(self):
+        """Run: a value with a run of spaces, shown closed up by did -a. The
+        baseline is the read-back, so leaving it alone sends nothing; typing
+        sends exactly what was typed."""
+        value = "a  b  "
+        shown = collapse(value)
+        baseline = mirc_enc(shown)
+        self.assertEqual(mirc_enc(shown), baseline)                  # untouched: not dirty
+        typed = "a   b c"
+        self.assertNotEqual(mirc_enc(typed), baseline)
+        self.assertEqual(console_settings.decode_value(mirc_enc(typed)), typed)
+
+    # C. $input never runs inside a dialog event.
+    def test_every_question_is_asked_from_a_timer(self):
+        section = handwritten()
+        asking = sorted(name for name in re.findall(r"\nalias (\S+) \{", section) if "$input(" in alias(name))
+        self.assertEqual(asking, ["dccore.sw.confirm", "dccore.sw.riskyask"])
+        for name in asking:
+            timer = ".timerdccoreSwAsk -m 1 0 %s" % name
+            self.assertIn(timer, section)
+            rest = section.replace(timer, "").replace("alias %s {" % name, "")
+            self.assertNotRegex(rest, r"(?<![\w.])%s(?![\w.])" % re.escape(name), "%s is called directly" % name)
+
+    # The nits.
+    def test_a_channels_refusal_is_named_by_its_label(self):
+        data = generated_data()
+        self.assertEqual(data["k.CHANNEL"].split()[3], "0")
+        self.assertEqual(untext(data["n.CHANNEL"]), "Channels")
+        self.assertEqual(statements(alias("dccore.sw.label")),
+                         ["var %name = $dccore.sw.m(n. $+ $1)",
+                          "return $iif(%name != $null,$dccore.sw.untext(%name),$1)"])
+
+    def test_an_as_set_colour_shows_all_of_itself(self):
+        self.assertIn("did -a dccore.set $1 As set: $2-", alias("dccore.sw.colourfill"))
+
+    def test_a_new_start_forgets_the_old_waits(self):
+        start = alias("dccore.sw.start")
+        self.assertLess(start.index("hdel -w dccore.sws w.*"), start.index("dccore.sw.put 1013 Not connected"))
+
+    def test_no_did_c_selects_line_0(self):
+        """$findtok answers 0 for something it does not find."""
+        self.assertNotRegex(handwritten(), r"did -c dccore\.set \S+ \$findtok\(")
+        self.assertIn("if (!%at) { return $1 }", alias("dccore.sw.srv.modelabel"))
+        self.assertEqual(statements(alias("dccore.sw.pickline")),
+                         ["if ($2) { did -c dccore.set $1 $2 }", "else { did -u dccore.set $1 }"])
 
 
 if __name__ == "__main__":

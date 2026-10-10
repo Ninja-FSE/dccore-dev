@@ -915,7 +915,8 @@ at the bottom.
   `#music -> Main - Normal`; select one to edit it, then **Save lists**), and
   **Bans & ignores** (lift a timed ban, ignore a nick for some minutes, add or
   remove a permanent pattern). **Channels** edits `CHANNEL` as a list and is
-  saved by Apply.
+  saved by Apply. A save the bot refuses keeps your edits there. A row or a
+  command you did not touch goes back exactly as the bot sent it.
 - **Appearance**: the theme and the six custom colours as menus of mIRC's
   sixteen. **Preview** draws the sample advert and notice, with the colours as
   chosen and not saved, in `@DCCore-preview`.

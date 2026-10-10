@@ -351,6 +351,7 @@ class Builder:
         self.locals = []
         self.browse = []
         self.page_widgets = {}
+        self.labels = {}            # KEY -> its label in the window, for the status line's errors
 
     # -- one control -------------------------------------------------------
 
@@ -479,7 +480,8 @@ class Builder:
                          role="local" if name in LOCAL_WIDGETS else "widget",
                          key=keys[0] if keys and number == 0 else "")
             for key in item.get("keys", ()):
-                self.keys.append((key, WIDGETS[name][0][0], "chanlist", 1, WIDGETS[name][0][0]))
+                self.keys.append((key, WIDGETS[name][0][0], "chanlist", 1, 0))
+                self.labels[key] = self.meta["labels"].get(key, key)
             return
         if isinstance(item, dict) and "local" in item:
             base = self.item_ids()
@@ -499,6 +501,7 @@ class Builder:
             self.check_fits(label, width)
             self.add("check", base + 1, x, y, width, CHECK_H, label, role="value", key=key)
             self.keys.append((key, base + 1, kind, factor, base + 1))
+            self.labels[key] = label
             return
         control_w = CONTROL_W[columns]
         label_w = width - control_w - LABEL_GAP
@@ -520,6 +523,7 @@ class Builder:
                          role="browse", key=key)
                 self.browse.append((base + 2, browse, key))
         self.keys.append((key, base + 1, kind, factor, base))
+        self.labels[key] = label
 
     def check_fits(self, label, width):
         """A check box does not wrap: its label is cut off instead."""
@@ -641,6 +645,7 @@ def render(builder):
     for key, cid, kind, factor, label_id in builder.keys:
         data.append(("k." + key, "%d %s %d %d" % (cid, kind, factor, label_id)))
         data.append(("pg." + key, str(builder.placed[key])))
+        data.append(("n." + key, hash_text(builder.labels[key])))
         if kind in ("choice",):
             choices = list(meta["choices"][key])
             data.append(("ch." + key, " ".join(str(c) for c in choices)))

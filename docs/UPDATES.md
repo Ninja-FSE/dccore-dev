@@ -46,17 +46,29 @@ status line at the bottom. Plain mIRC, no DLL. `dccore.mrc` is 1.19.0.
   that dialog. The "..." browse buttons work only when the console connection is 127.0.0.1 / ::1.
 - **Values** are decoded with the doc's `$regsubex` and encoded by `dccore.sw.enc` / `dccore.sw.tok`, the mSL twins of
   `console_settings.encode_value()` / `encode_token()`. The window needs mIRC 6.17 (`$regsubex`); an older mIRC is told.
+- **What a review of it found, fixed before it shipped:** a refused Save lists cleared the "not saved" mark, so OK
+  closed and dropped the edits (the mark now clears only on ok or unchanged); the implied-list shortcut compared with
+  `==`, which ignores case, so a case-only rename went through `folders` and was lost (`===`, as every comparison of
+  the operator's data now is); the debug-channel question's 30-second wait started before `$input`, so a question left
+  open timed out under itself (it starts once answered). And, since mIRC closes up runs of spaces in a command's
+  parameters: every value is now kept ENCODED as the bot sent it (settings, list names, folder paths, on-connect
+  lines) and decoded only for display; what the operator types is encoded straight from the control (`dccore.sw.wire`,
+  and `dccore.sw.enc` is one expression now, no `/var` in between); the dirty baseline is what the control shows after
+  filling, read back, so an untouched field is never sent and an untouched list row or on-connect line goes back byte
+  for byte. The File locations question is asked from a timer like the other one. A Channels refusal is named
+  "Channels" (each key's label is in the generated data as `n.<KEY>`), an "As set" colour shows all of itself, a new
+  start forgets the old waits, and no `did -c` selects line 0 when `$findtok` finds nothing.
 - **Tests:** `tests/test_the_settings_window_generator.py` (21: the block is up to date and `--check` catches a stale
   one; every setting placed once or excluded; the mockup's tabs and pages; the generator refuses a key placed twice, a
   key with no place, a check too wide and a page that cannot fit; labels, units, choices and help are the bot's) and
-  `tests/test_the_mirc_settings_window.py` (54: the decoder and encoder, re-run in Python from the script's own
+  `tests/test_the_mirc_settings_window.py` (72: the decoder and encoder, re-run in Python from the script's own
   patterns, agree with `console_settings` on a battery of values, and a preview line comes out as the bot's line with
   no plain space for `echo` to collapse; every documented reply type is routed and has a branch; every command sent is
   a console command with a real subcommand; Apply sends setbegin, sets, setcommit and no `set` is ever sent outside a
   transaction; every snapshot is counted and times out; ids unique and clear of the other dialogs; every control on
   exactly one page; labels fit; nothing overlaps; menus; version). Mutation-checked: a removed handler, a broken
   decoder or encoder, a preview line echoed raw or without its non-breaking spaces, a stale block, a key placed twice,
-  a dropped count check, a `set` outside setbegin and a dropped timeout each fail.
+  a dropped count check, a `set` outside setbegin, a dropped timeout and each review finding put back each fail.
   `tests/test_the_mirc_menu_is_grouped_by_what_you_do.py` knows **Bot Settings**; `tests/test_setup_check.py`'s
   one-copy guard skips `scripts/mirc`, whose layout names settings as data.
 
