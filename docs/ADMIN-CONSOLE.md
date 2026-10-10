@@ -770,7 +770,7 @@ first field, and its last field is always a sentence to show.
 | `DCCORE SETDONE error <message>` | | nothing was saved; the transaction is closed |
 | `DCCORE SETDONE confirm <question>` | | the commit clears `DEBUG_CHANNEL`, and the bot leaves that channel at once: ask, then send `setcommit confirm` (or `setabort`). A transaction from `setbegin` stays open meanwhile. After a lone `set` the question holds only until the next line: anything but `setcommit confirm` or `setabort` first ends it with `SETDONE aborted <n>`, and is then run as usual - so a later lone `set` saves at once, as it says |
 | `DCCORE SETDONE aborted <n>` | `setabort` | `n` buffered changes dropped |
-| `DCCORE PVBEGIN 2` / `DCCORE PVLINE <advert\|notice> <line>` / `DCCORE PVEND 2` | `setpreview` | the sample advert and transfer notice, RAW - mIRC colour codes and all, not encoded - to echo as they are |
+| `DCCORE PVBEGIN 2` / `DCCORE PVLINE <advert\|notice> <line>` / `DCCORE PVEND 2` | `setpreview` | the sample advert and transfer notice, encoded like every other value - colour codes as `%03`, runs of spaces as `%20` - so a client decodes it and echoes it in colour. (mIRC collapses runs of spaces in a chat line, and a theme's frame is made of them.) |
 | `DCCORE SRVBEGIN <lists> <source> <max>` / `DCCORE SRVLIST <n> <primary> <name>` / `DCCORE SRVCHAN <n> <channel> <mode>` / `DCCORE SRVFOLDER <n> <label> <path>` / `DCCORE SRVEND <lists> <channels> <folders>` | `served` | per list, in order: its `SRVLIST` (`n` from 1, `primary` `1` or `0`, the name last), then a `SRVCHAN` per channel bound to it (`channel` a token, `mode` `normal`, `quiet` or `request_only`), then a `SRVFOLDER` per folder (`label` a token, the path last). `source` is `file` (`lists.json`) or `implied` (none: one list over the served folders - sending it back unchanged does not create the file). `max` is how many lists there may be |
 | `DCCORE SRVOPEN <dropped>` | `served begin` | then `served list <n> <0\|1> <name>` (`n` the next number), `served chan <n> <channel> <mode>`, `served folder <n> <label> <path>`, and `served commit` or `served abort` |
 | `DCCORE SRVERR <message>` | a row refused, or one problem of a refused set | |
@@ -784,8 +784,8 @@ first field, and its last field is always a sentence to show.
 | `DCCORE OCRESEND ok <sent> <message>` / `DCCORE OCRESEND error <message>` | `onconnect resend` | the dashboard's Resend button |
 | `DCCORE BANBEGIN <permanent> <timed>` / `DCCORE BANP <pattern>` / `DCCORE BANT <seconds_left> <nick>` / `DCCORE BANEND <permanent> <timed>` | `banlist` | the permanent wildcard patterns (`hard_bans.txt`), then every timed ban or ignore still running - the bot keeps the two in one table, so it cannot say which a timed one is. At most 200 rows of each kind; the counts are the true totals. Change them with `ban` / `unban <pattern>` and `ignore <nick> <minutes>` / `unignore <nick>`; `ban` and `unban` run in the background and report with a `LOG` line, so ask `banlist` again after it |
 
-Lines a `DCCORE PVLINE` carries are the only ones here sent raw; every other
-free-text value is encoded as above, and every message is plain text.
+Every free-text value here is encoded as above, the preview lines too, and
+every message is plain text.
 
 ## The window, in mIRC
 

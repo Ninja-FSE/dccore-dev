@@ -449,7 +449,17 @@ class ThePreviewUsesTheUnsavedValues(SettingsCase):
         lines = run(self.session, "setpreview")
         self.assertEqual(lines[0], "DCCORE PVBEGIN 2")
         self.assertEqual(lines[-1], "DCCORE PVEND 2")
-        return dict(row.split(" ", 1) for row in rows(lines, "PVLINE"))
+        return {kind: console_settings.decode_value(text)
+                for kind, text in (row.split(" ", 1) for row in rows(lines, "PVLINE"))}
+
+    def test_a_run_of_spaces_survives_the_trip(self):
+        # mIRC collapses runs of spaces in a chat line's $1-, and a theme's
+        # frame is runs of coloured spaces: the line must carry them encoded.
+        lines = run(self.session, "setpreview")
+        for row in rows(lines, "PVLINE"):
+            with self.subTest(row=row[:20]):
+                self.assertNotIn("  ", row)
+                self.assertNotRegex(row, "[\x00-\x1f]")
 
     def test_with_no_transaction_it_is_the_saved_theme(self):
         expected = webserver.build_theme_preview(webserver.theme_preview_overrides({}))

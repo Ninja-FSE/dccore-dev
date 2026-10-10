@@ -493,17 +493,23 @@ def _preview_body(txn):
 
 
 def preview_lines(preview):
-    """The theme preview, raw - colour codes and all - for a client to echo:
+    """The theme preview, for a client to echo in colour:
 
         DCCORE PVBEGIN 2
-        DCCORE PVLINE advert <raw line>
-        DCCORE PVLINE notice <raw line>
+        DCCORE PVLINE advert <line>
+        DCCORE PVLINE notice <line>
         DCCORE PVEND 2
+
+    Each line is encoded like every other value (encode_value), colour codes
+    included. It used to go raw, and mIRC hands a chat line's text to a
+    script with every run of spaces collapsed to one - and a theme's frame
+    IS runs of spaces, painted with a background colour. Encoded, the runs
+    survive as %20 and the client puts them back.
     """
     rows = [("advert", preview.get("advert", "")), ("notice", preview.get("notice", ""))]
     lines = [f"DCCORE PVBEGIN {len(rows)}"]
     for kind, line in rows:
-        lines.append(f"DCCORE PVLINE {kind} " + str(line).replace("\r", " ").replace("\n", " "))
+        lines.append(f"DCCORE PVLINE {kind} " + encode_value(str(line).replace("\r", " ").replace("\n", " ")))
     lines.append(f"DCCORE PVEND {len(rows)}")
     return lines
 
