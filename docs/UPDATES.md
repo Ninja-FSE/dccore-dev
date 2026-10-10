@@ -4,6 +4,52 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗂️ Lists and search: eight findings from the audit (#1270)
+
+Found by a multi-agent audit of the list builder, the pack gate and the search, each confirmed by running the real
+functions.
+
+- **A failed publish lost the live list.** `_publish_artifacts()` recorded a pair for rollback only after both of its
+  renames had worked. When the second one failed (an AV scanner or an indexer holding the freshly written `.new` past
+  every retry), the live list had already been renamed to `.previous`, and nothing put it back. No
+  `<base>-*.txt` glob matches that name, so @find said there was no list, the advert was skipped and the counts read 0,
+  while the log said the previous list was still in use. A pair is now recorded the moment its old file is moved aside.
+  The audio-info rewrite goes through the same function.
+- **Every multi-disc album's `!rar` row was refused.** The builder writes one row for `Album/CD1` and `Album/CD2`,
+  naming `Album`. dcc.py's RAR_EXTENSIONS gate then looked only at `Album`'s own top level, found two folders and no
+  track, and refused it. The gate now uses `update_list.folder_holds_packable()`, which also looks through a chain of
+  disc folders (`_BOX_WORD_RE`). The row text is unchanged, so rows already queued in AutoQ still match. The builder's
+  side is `rar_row_folder()`: it cuts only where every segment after the cut is a disc folder, so a row always names a
+  folder the gate can follow (`Album/CD1/Bonus` now gets its own row instead of a refused `Album` one). The
+  RAR_EXTENSIONS help and `settings.conf.sample` say so.
+- **Rows for the library root and artist folders are no longer written.** A loose track in the scan folder or directly
+  in an artist folder published a row that dcc.py refuses as a root or artist root. Folders with fewer than three
+  segments (`<label>/<artist>/<album>`) get no row, and a list whose only packable folders are those ships no album
+  list. Their tracks are still listed by name.
+- **The file-count cache keeps one entry per list.** It held a single entry and cleared it before storing the next,
+  so with two lists every advert cycle and every Stats poll read every list end to end again. Each list now keeps its
+  own entry, replaced only when its own files change, with at most 16 kept.
+- **`-que` and `-stats` report the channel's own list.** Both asked for the primary list's count, date and size, so a
+  channel bound to another list heard two library sizes from one bot. They now go through
+  `library.list_name_for_request(target)`, as the advert does. A private message is still the primary.
+- **@find matches a name in either Unicode form.** A library copied from a Mac has decomposed accents (NFD); an IRC
+  client sends composed ones (NFC). The search words and the searched part of each row are NFC-normalised for the
+  comparison only (`list.search_form()`). The list keeps the filesystem's bytes, and a pure-ASCII row costs nothing
+  extra.
+- **The scan does not enter a Windows directory junction.** A junction is not a symlink to Python, so the walk entered
+  it. One pointing at an ancestor was walked 63 levels deep until Windows raised OSError 22, and every rebuild after
+  that kept the previous index. `update_list.is_link_dir()` treats a junction like a symlink: `DirEntry.is_junction()`
+  on Python 3.12+, the reparse tag before it.
+- **Folders that differ only in case stay contiguous.** On Linux `Band/Live` and `band/Live` are two folders. Their
+  rows interleaved by filename, so the list repeated both headings once per row, each with the whole folder's summary.
+  The sort now breaks the case-insensitive tie on the exact folder, then the exact name (`_row_order()`).
+- **Tests:** `tests/test_a_failed_publish_keeps_the_live_list.py` (4), `tests/test_every_album_row_is_one_the_bot_packs.py`
+  (11, every published row fed to the real `dcc.handle_download_request()`), `tests/test_each_list_keeps_its_own_count.py`
+  (7), `tests/test_a_search_matches_either_unicode_form.py` (5), `tests/test_the_scan_does_not_follow_a_junction.py`
+  (6: fakes that run everywhere, plus a real junction on Windows), `tests/test_folders_differing_in_case_stay_apart.py`
+  (3: a stand-in walk everywhere, real folders where the filesystem tells case apart). Five existing tests updated for
+  the new rules.
+
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 
 ### 🧹 Purge every held list, to clear a channel stuck wrong from before v1.16 (#1260)

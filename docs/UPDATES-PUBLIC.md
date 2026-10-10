@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fixed: a list rebuild that failed at the wrong moment could leave the bot with no list** until the next successful rebuild - @find said there was no list and the advert went quiet. The previous list is now always put back.
+- **Fixed: a multi-disc album (CD1, CD2 ...) can be packed with `!rar` again.** Its row in the album list was refused every time it was pasted. The row itself is unchanged, so requests already queued in AutoQ still match.
+- **Fixed: the album list no longer offers the library folder or an artist folder** just because a loose track sits in it. The bot always refused those. The tracks are still listed and requestable by name.
+- **Fixed: with more than one list, the file count is no longer re-read from disk on every advert and every Stats refresh.**
+- **Fixed: `-que` and `-stats` in a channel bound to a second list now report that list's file count, date and size**, the same as the advert there. They used to report the main list's.
+- **Fixed: @find finds accented names from a library copied off a Mac** (for example "é" stored as "e" plus an accent). The list itself is unchanged.
+- **Fixed (Windows): a directory junction inside the library is no longer walked into**, the same as a symlink. A junction pointing back up the library made every rebuild fail.
+- **Fixed (Linux): two folders whose names differ only in case** no longer have their files mixed together in the list under repeated headings.
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.

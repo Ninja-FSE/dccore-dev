@@ -3310,14 +3310,17 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             #
             # Checked with scandir and stopped at the first match: the pack
             # about to run walks this whole folder anyway.
+            #
+            # Through the disc folders too (#1270): a multi-disc album's row
+            # names the album above CD1 and CD2, whose own top level holds no
+            # track, and checking only that level refused every one of them.
+            # folder_holds_packable() is the rule update_list.rar_row_folder()
+            # writes those rows by, so the list and this gate cannot drift.
             packable = update_list.rar_extensions()
             if packable:
                 try:
-                    has_packable = any(
-                        entry.is_file()
-                        and update_list.is_packable_file(entry.name, packable)
-                        for entry in os.scandir(
-                            platform_compat.long_path(true_source_dir)))
+                    has_packable = update_list.folder_holds_packable(
+                        true_source_dir, packable)
                 except OSError as scan_err:
                     print(f"[PACK] Could not read {true_source_dir!r} to check "
                           f"what is in it: {scan_err}")
