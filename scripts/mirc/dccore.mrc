@@ -4104,7 +4104,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.CHANNEL 1520 chanlist 1 0
   hadd dccore.swm pg.CHANNEL 3
   hadd dccore.swm n.CHANNEL Channels
-  hadd dccore.swm h.CHANNEL The channel(s) the bot serves in~2C separated by commas. The first one is where announcements go unless a request came from another channel. Required.
+  hadd dccore.swm h.CHANNEL The channel(s) the bot serves in~2C each starting with ~23~2C separated by commas. The first one is where announcements go unless a request came from another channel. Required.
   hadd dccore.swm k.ADMIN_NICK 2073 str 1 2072
   hadd dccore.swm pg.ADMIN_NICK 4
   hadd dccore.swm n.ADMIN_NICK Admin nick(s)
@@ -4146,7 +4146,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.ANNOUNCE_INTERVAL 2105 int 1 2104
   hadd dccore.swm pg.ANNOUNCE_INTERVAL 6
   hadd dccore.swm n.ANNOUNCE_INTERVAL Advert interval (seconds)
-  hadd dccore.swm h.ANNOUNCE_INTERVAL How often the bot posts its advert in the channel~2C in seconds. 300 is every five minutes. Do not go much lower - channels do not like a bot that advertises constantly.
+  hadd dccore.swm h.ANNOUNCE_INTERVAL How often the bot posts its advert in the channel~2C in seconds. 300 is every five minutes. 60 is the least it accepts - channels do not like a bot that advertises constantly.
   hadd dccore.swm k.BROADCAST_SEARCH_CHANNEL 2109 str 1 2108
   hadd dccore.swm pg.BROADCAST_SEARCH_CHANNEL 6
   hadd dccore.swm n.BROADCAST_SEARCH_CHANNEL Broadcast search channel
@@ -4238,7 +4238,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.LIST_BASE_NAME 2189 str 1 2188
   hadd dccore.swm pg.LIST_BASE_NAME 9
   hadd dccore.swm n.LIST_BASE_NAME List base name
-  hadd dccore.swm h.LIST_BASE_NAME The name your list files start with (for example DCCore-2026-09-18.txt). Normally the same as the bot's nickname~2C which is what happens if you leave it alone.
+  hadd dccore.swm h.LIST_BASE_NAME The name your list files start with (for example DCCore-2026-09-18.txt). Normally the same as the bot's nickname~2C which is what happens if you leave it alone. Letters~2C digits and - _ . ~5B ~5D ~7B ~7D ^ ~60 only~2C so it is a file name on every system.
   hadd dccore.swm k.LIST_FORMAT 2193 choice 1 2192
   hadd dccore.swm pg.LIST_FORMAT 9
   hadd dccore.swm n.LIST_FORMAT List delivery format

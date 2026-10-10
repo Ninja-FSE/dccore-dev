@@ -1328,7 +1328,12 @@ def _check_writable(name, value, namespace, types):
     # and at the next restart it - and the dashboard the folder was set from -
     # did not come back. The browser setup page already refuses the same value.
     # Blank stays allowed: it is "not chosen yet".
-    if name == "FILE_DIRECTORY" and str(value or "").strip():
+    # Only a CHANGE is checked: the folder already configured may be on a
+    # drive that is unplugged right now, and re-saving it unchanged - the
+    # console's round trip, a client that sends a whole page - must not be
+    # refused for it.
+    if (name == "FILE_DIRECTORY" and str(value or "").strip()
+            and str(value).strip() != str(namespace.get("FILE_DIRECTORY") or "").strip()):
         problem = folder_problem(str(value))
         if problem:
             raise SettingsWriteError(f"FILE_DIRECTORY: {problem}")

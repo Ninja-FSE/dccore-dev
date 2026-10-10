@@ -115,6 +115,14 @@ class AMusicFolderMustExist(SettingsCase):
         self.save(FILE_DIRECTORY="")
         self.assertTrue(os.path.exists(self.path))
 
+    def test_the_folder_already_set_is_kept_while_its_drive_is_away(self):
+        """Only a change is checked: re-saving the configured folder while its
+        drive is unplugged - the console's unchanged round trip - is not refused."""
+        away = os.path.join(self.home, "UnpluggedDrive", "Music")
+        self.set_config(FILE_DIRECTORY=away)
+        self.assertEqual(settings_file.check_change(vars(config), "FILE_DIRECTORY", away), away)
+        self.assertIn("does not exist", self.refused_by_save(FILE_DIRECTORY=away + "2"))
+
     def test_the_settings_page_answers_400(self):
         typo = os.path.join(self.home, "Muisc")
         status, payload = webserver.apply_settings_changes({"FILE_DIRECTORY": typo})
