@@ -90,7 +90,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.17.2 }
+alias dccore.ver { return 1.18.0 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -115,7 +115,8 @@ alias dccore.dot { return $chr(183) }
 ; The spaces are non-breaking ones, $chr(160). A real space at the start of what
 ; an alias returns is dropped by mIRC, so the nick and "in" ran together
 ; ("FLACin #channel"); a non-breaking space is not a space to it and stays.
-alias dccore.in { if ($1 == $null) || ($1 == -) { return } | return $+($chr(160),in,$chr(160),$1) }
+; The channel itself goes through dccore.chan, its colour from Options (#1259).
+alias dccore.in { if ($1 == $null) || ($1 == -) { return } | return $+($chr(160),in,$chr(160),$dccore.chan($1)) }
 
 alias dccore.init {
   if (!$hget(dccore)) { hmake dccore 32 }
@@ -155,6 +156,14 @@ alias dccore.init {
   dccore.default col.console 6
   dccore.default col.name 2
   dccore.default col.head 2
+  ; The nick, the channel and the search term inside a feed line (#1259).
+  ; -1 is "same as the line": no colour codes at all, so nothing changes until
+  ; one is chosen. The term's "name" keeps it in the File names colour,
+  ; where it was before it had one of its own. The nick's "per" gives each
+  ; nick a colour of its own - see dccore.pernick.
+  dccore.default col.term name
+  dccore.default col.nick -1
+  dccore.default col.chan -1
   ; DCCore Chat (#371): only the channels ticked in its window, until
   ; "all my channels" is chosen; the window opens by itself for a line
   ; Listening on every channel is the default (#958 follow-up): only lines
@@ -731,27 +740,27 @@ alias dccore.structured {
   }
   if (%type == REQUEST) {
     if (!$dccore.opt(show.request)) { return }
-    dccore.msg $dccore.tag(REQUEST,request) $2 $+ $dccore.in($3) asked for $iif($4 == folder,the folder) $dccore.name($5-)
+    dccore.msg $dccore.tag(REQUEST,request) $dccore.nick($2) $+ $dccore.in($3) asked for $iif($4 == folder,the folder) $dccore.name($5-)
     return
   }
   if (%type == QUEUED) {
     if (!$dccore.opt(show.queued)) { return }
-    dccore.msg $dccore.tag(QUEUED,queued) $dccore.name($7-) for $2 $+ $dccore.in($3) at # $+ $4 ( $+ $5 $+ / $+ $6 slots busy)
+    dccore.msg $dccore.tag(QUEUED,queued) $dccore.name($7-) for $dccore.nick($2) $+ $dccore.in($3) at # $+ $4 ( $+ $5 $+ / $+ $6 slots busy)
     return
   }
   if (%type == SENDING) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.msg $dccore.tag(SENDING,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) (slot $4 $+ / $+ $5 $+ , $dccore.bytes($6) $+ )
+    dccore.msg $dccore.tag(SENDING,sends) $dccore.name($7-) to $dccore.nick($2) $+ $dccore.in($3) (slot $4 $+ / $+ $5 $+ , $dccore.bytes($6) $+ )
     return
   }
   if (%type == RESUMED) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.msg $dccore.tag(RESUMED,sends) $dccore.name($6-) for $2 $+ $dccore.in($3) at $dccore.bytes($4) of $dccore.bytes($5)
+    dccore.msg $dccore.tag(RESUMED,sends) $dccore.name($6-) for $dccore.nick($2) $+ $dccore.in($3) at $dccore.bytes($4) of $dccore.bytes($5)
     return
   }
   if (%type == SENT) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.msg $dccore.tag(SENT,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) $+ : $dccore.bytes($4) in $dccore.dur($5) $iif($6 > 0,at $dccore.speed($6),at n/a)
+    dccore.msg $dccore.tag(SENT,sends) $dccore.name($7-) to $dccore.nick($2) $+ $dccore.in($3) $+ : $dccore.bytes($4) in $dccore.dur($5) $iif($6 > 0,at $dccore.speed($6),at n/a)
     return
   }
   if (%type == FAIL) {
@@ -765,14 +774,14 @@ alias dccore.structured {
       %name = $left(%rest,$calc(%p - 1))
       %why = $mid(%rest,$calc(%p + 4))
     }
-    dccore.alert $dccore.tag(FAILED,fail) $dccore.name(%name) to $2 $+ $dccore.in($3) - %why ( $+ $dccore.bytes($4) of $dccore.bytes($5) arrived)
+    dccore.alert $dccore.tag(FAILED,fail) $dccore.name(%name) to $dccore.nick($2) $+ $dccore.in($3) - %why ( $+ $dccore.bytes($4) of $dccore.bytes($5) arrived)
     if ($dccore.opt(beep)) { beep 2 200 }
     return
   }
   if (%type == SEARCH) {
     hinc dccore.live searches
     if (!$dccore.opt(show.search)) { return }
-    dccore.msg $dccore.tag(SEARCH,search) $2 $+ $dccore.in($3) searched $dccore.name($5-) -> $4 result(s)
+    dccore.msg $dccore.tag(SEARCH,search) $dccore.nick($2) $+ $dccore.in($3) searched $dccore.term($5-) -> $4 result(s)
     return
   }
   if (%type == LOG) {
@@ -940,6 +949,53 @@ alias dccore.tag {
 }
 alias dccore.col { return $base($dccore.opt(col. $+ $1),10,10,2) }
 alias dccore.name { return $+($chr(3),$dccore.col(name),",$1-,",$chr(15)) }
+; The nick, the channel and the search term of a feed line (#1259), each in
+; its own colour from Options. Every line that names a nick or a channel
+; goes through these, so one choice colours them all alike.
+;
+; dccore.paint: $1 the colour, $2 the text. Anything that is not a colour
+; number - -1, "same as the line" - returns the text with no codes at all, so the
+; line reads exactly as it did before these options. A colour is always two
+; digits: ^C3 followed by a nick like 3bot would read as colour 33. The
+; $chr(15) after it ends the span the way the tag and the file name end
+; theirs: the rest of the line has no colour of its own to return to.
+alias dccore.paint {
+  if ($1 !isnum 0-15) { return $2 }
+  return $+($chr(3),$base($1,10,10,2),$2,$chr(15))
+}
+alias dccore.nick {
+  var %c = $dccore.opt(col.nick)
+  if (%c == per) { %c = $dccore.pernick($1) }
+  return $dccore.paint(%c,$1)
+}
+alias dccore.chan { return $dccore.paint($dccore.opt(col.chan),$1) }
+; The searched term, in quotes like a file name. "name" is the File names
+; colour, which is what the term had before it had a choice of its own.
+alias dccore.term {
+  if ($dccore.opt(col.term) == name) { return $dccore.name($1-) }
+  return $dccore.paint($dccore.opt(col.term),$+(",$1-,"))
+}
+; "per nick": the nick's own colour, from the first six hex digits of the
+; MD5 of the nick in lower case - the same nick the same colour every time,
+; whatever its case, on every machine. Picked from the colours that can be
+; read on the window's background (dccore.nickpal).
+alias dccore.pernick {
+  var %pal = $dccore.nickpal
+  var %n = $base($left($md5($lower($1)),6),16,10)
+  return $gettok(%pal,$calc((%n % $numtok(%pal,32)) + 1),32)
+}
+; The colours a nick may take, one list per background colour 0-15 (with
+; "none" in Options, mIRC's own background colour). Never white or black -
+; one of them is the line's own text colour - nor the background itself,
+; and only colours with a contrast of at least 3 to 1 against it (the WCAG
+; figure for large text, from the palette in dccore.rgb). Worked out once
+; and written here: the test re-computes it from dccore.rgb.
+alias dccore.nickpal {
+  var %bg = $dccore.opt(bg)
+  if (%bg !isnum 0-15) { %bg = $color(background) }
+  if (%bg !isnum 0-15) { %bg = 0 }
+  return $gettok(02 03 04 05 06 10 12 13 14/03 04 07 08 09 10 11 13 14 15/03 04 07 08 09 10 11 13 14 15/02 08 11/02 08 11/07 08 09 11 13 15/08 09 11 15/02 05 12/02 03 04 05 06 10 12 14/02 05 06 12/02 08/02 03 04 05 06 12 14/07 08 09 11 15/02 05/02 08 11/02 05 06 12,$calc(%bg + 1),47)
+}
 ; Bytes as people read them - 27.5MB, 1.06MB/s - formatted here rather
 ; than by $bytes().suffix, which on the first real run gave "27.5" and
 ; "1.06/s" with no unit at all. Two decimals up to 10, one up to 100,
@@ -1637,9 +1693,9 @@ alias dccore.options {
 
 dialog dccore.opt {
   title "DCCore window - options"
-  size -1 -1 322 316
+  size -1 -1 322 340
   option dbu
-  box "Show in @DCCore", 100, 5 3 312 102
+  box "Show in @DCCore", 100, 5 3 312 126
   check "Requests (who asked for what)", 101, 10 13 170 10
   check "Queue positions", 102, 10 24 170 10
   check "Sends: starting, resuming, done", 103, 10 35 170 10
@@ -1665,35 +1721,41 @@ dialog dccore.opt {
   text "min, 0 = off", 216, 268 71 49 8
   text "Panel headings", 217, 248 83 66 8
   combo 218, 248 91 52 70, drop
-  box "Window", 300, 5 108 312 58
-  check "Side panel: slots, queue and totals", 301, 10 118 170 10
-  check "Slots, queue and speed in the title bar", 302, 10 129 170 10
-  check "Console replies in a separate window", 303, 10 140 170 10
-  check "Beep on a failed transfer", 304, 192 118 118 10
-  check "Fixed-width font, size", 305, 192 129 100 10
-  edit "", 306, 294 128 18 11, autohs
-  text "Finished downloads to show", 309, 10 153 130 8
-  edit "", 310, 142 151 18 11, autohs
-  text "Background", 307, 192 142 48 8
-  combo 308, 242 140 56 70, drop
-  box "Connection", 400, 5 169 312 63
-  text "Bot nick", 401, 10 181 36 8
-  edit "", 402, 48 179 56 11, autohs
-  text "", 403, 110 181 204 8
-  check "Reconnect and log in by itself when the bot comes back", 404, 10 194 300 10
-  check "Console feed on (also requests and sends - not just status)", 405, 10 206 300 10
-  check "Check GitHub for a new DCCore version", 406, 10 218 260 10
-  box "DCCore Chat (public)", 600, 5 235 312 36
-  check "Listen on every channel the bot is in, not only the ticked ones", 601, 10 245 300 10
-  check "Open the chat window when a line arrives", 602, 10 256 300 10
-  box "Open when mIRC starts (minimised)", 700, 5 274 312 24
-  check "@DCCore", 701, 10 284 60 10
-  check "@DCCore-Chat", 702, 90 284 80 10
-  check "@DCCore-Downloads", 703, 192 284 110 10
-  button "OK", 1, 232 302 40 12, ok default
-  button "Cancel", 2, 276 302 40 12, cancel
-  button "Pair again...", 501, 5 302 46 12
-  button "Forget token", 502, 54 302 46 12
+  text "Search text", 220, 10 104 92 8
+  combo 221, 10 113 92 80, drop
+  text "Nicks", 222, 112 104 92 8
+  combo 223, 112 113 92 80, drop
+  text "Channels", 224, 214 104 92 8
+  combo 225, 214 113 92 80, drop
+  box "Window", 300, 5 132 312 58
+  check "Side panel: slots, queue and totals", 301, 10 142 170 10
+  check "Slots, queue and speed in the title bar", 302, 10 153 170 10
+  check "Console replies in a separate window", 303, 10 164 170 10
+  check "Beep on a failed transfer", 304, 192 142 118 10
+  check "Fixed-width font, size", 305, 192 153 100 10
+  edit "", 306, 294 152 18 11, autohs
+  text "Finished downloads to show", 309, 10 177 130 8
+  edit "", 310, 142 175 18 11, autohs
+  text "Background", 307, 192 166 48 8
+  combo 308, 242 164 56 70, drop
+  box "Connection", 400, 5 193 312 63
+  text "Bot nick", 401, 10 205 36 8
+  edit "", 402, 48 203 56 11, autohs
+  text "", 403, 110 205 204 8
+  check "Reconnect and log in by itself when the bot comes back", 404, 10 218 300 10
+  check "Console feed on (also requests and sends - not just status)", 405, 10 230 300 10
+  check "Check GitHub for a new DCCore version", 406, 10 242 260 10
+  box "DCCore Chat (public)", 600, 5 259 312 36
+  check "Listen on every channel the bot is in, not only the ticked ones", 601, 10 269 300 10
+  check "Open the chat window when a line arrives", 602, 10 280 300 10
+  box "Open when mIRC starts (minimised)", 700, 5 298 312 24
+  check "@DCCore", 701, 10 308 60 10
+  check "@DCCore-Chat", 702, 90 308 80 10
+  check "@DCCore-Downloads", 703, 192 308 110 10
+  button "OK", 1, 232 326 40 12, ok default
+  button "Cancel", 2, 276 326 40 12, cancel
+  button "Pair again...", 501, 5 326 46 12
+  button "Forget token", 502, 54 326 46 12
 }
 
 alias dccore.colours { return 00 white,01 black,02 navy,03 green,04 red,05 maroon,06 purple,07 orange,08 yellow,09 lime,10 teal,11 cyan,12 blue,13 pink,14 grey,15 silver }
@@ -1710,6 +1772,9 @@ on *:dialog:dccore.opt:init:0: {
   dccore.fillcombo 211 $dccore.opt(col.name)
   dccore.fillcombo 213 $dccore.opt(col.console)
   dccore.fillcombo 218 $dccore.opt(col.head)
+  dccore.fillspan 221 $dccore.opt(col.term) name -1
+  dccore.fillspan 223 $dccore.opt(col.nick) -1 per
+  dccore.fillspan 225 $dccore.opt(col.chan) -1
   did -ra dccore.opt 215 $dccore.opt(statusmin)
   if ($dccore.opt(panel)) { did -c dccore.opt 301 }
   if ($dccore.opt(titlebar)) { did -c dccore.opt 302 }
@@ -1749,6 +1814,32 @@ alias dccore.fillcombo {
   while (%i <= 16) { did -a dccore.opt $1 $gettok($dccore.colours,%i,44) | inc %i }
   did -c dccore.opt $1 $calc($2 + 1)
 }
+; The nick, channel and search text combos (#1259): their own lines first,
+; then the sixteen colours. $1 the combo, $2 the saved value, $3- the values
+; of the lines before the colours, in order (-1 "same as the line", per
+; "per nick", name "same as File names"). With N such lines, colour C is
+; line C + N + 1.
+alias dccore.fillspan {
+  var %own = $3-, %n = $numtok(%own,32), %i = 1
+  while (%i <= %n) { did -a dccore.opt $1 $dccore.spanlabel($gettok(%own,%i,32)) | inc %i }
+  %i = 1
+  while (%i <= 16) { did -a dccore.opt $1 $gettok($dccore.colours,%i,44) | inc %i }
+  var %at = $findtok(%own,$2,1,32)
+  if (!%at) { %at = $iif($2 isnum 0-15,$calc($2 + %n + 1),1) }
+  did -c dccore.opt $1 %at
+}
+alias dccore.spanlabel {
+  if ($1 == name) { return same as File names }
+  if ($1 == per) { return per nick }
+  return same as the line
+}
+; What the selected line of such a combo means: $1 the combo, $2 the same
+; values dccore.fillspan was given, as one argument.
+alias dccore.spanval {
+  var %sel = $did(dccore.opt,$1).sel, %n = $numtok($2,32)
+  if (%sel <= %n) { return $gettok($2,$iif(%sel < 1,1,%sel),32) }
+  return $calc(%sel - %n - 1)
+}
 on *:dialog:dccore.opt:sclick:1: {
   var %i = 1
   var %panel = $dccore.opt(panel)
@@ -1763,6 +1854,9 @@ on *:dialog:dccore.opt:sclick:1: {
   hadd dccore col.name $calc($did(dccore.opt,211).sel - 1)
   hadd dccore col.console $calc($did(dccore.opt,213).sel - 1)
   hadd dccore col.head $calc($did(dccore.opt,218).sel - 1)
+  hadd dccore col.term $dccore.spanval(221,name -1)
+  hadd dccore col.nick $dccore.spanval(223,-1 per)
+  hadd dccore col.chan $dccore.spanval(225,-1)
   hadd dccore statusmin $iif($did(dccore.opt,215).text isnum,$int($did(dccore.opt,215).text),5)
   hadd dccore panel $did(dccore.opt,301).state
   hadd dccore titlebar $did(dccore.opt,302).state

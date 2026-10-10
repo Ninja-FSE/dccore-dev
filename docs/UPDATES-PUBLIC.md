@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **New (mIRC): nicks, channels and the search term can have colours of their own** in the `@DCCore` window. `/dccore options` has *Search text*, *Nicks* and *Channels* under the Show checkboxes, and *Nicks* can be *per nick*: each nick always gets the same colour, picked to be readable on the window's background, so one person's searches and requests stand out. Until you pick one, the window looks exactly as before. Update `dccore.mrc` to 1.18.0 and reload it with `/reload -rs dccore.mrc`.
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.
