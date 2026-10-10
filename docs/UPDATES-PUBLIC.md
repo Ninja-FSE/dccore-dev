@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Fixed: an advert interval of 0 made the bot advert as fast as it could.** `ANNOUNCE_INTERVAL` now has to be at least 60 seconds; a smaller value is refused when saved and treated as 60 if it comes from `admin_config.py`.
+- **Fixed: with more than one list, an unplugged drive on the main list stopped the bot from starting** although the other lists were readable. It now starts while any list has something to serve, and names the list that has nothing.
+- **Fixed: changing only the capitalisation of the list name (or of the nickname it follows) kept the bot on its old list on Windows and macOS.** The old files are renamed at the next start and cleaned up by the next rebuild, and the newest list is chosen by its date.
+- **Fixed: one broken line in `settings.conf` made the bot offer the first-run setup, which could replace your admin password and then fail.** The bot now names the file and the line and stops, the setup check says the same, and neither setup writes anything until it knows `settings.conf` can take the answers.
+- **Fixed: the Settings page saved a music folder that does not exist**, and the bot then would not start. It is refused when you save, with a hint if the path has quotes around it.
+- **Fixed: `configure.py` and the Settings page accepted channel names the browser setup refuses**, such as `mychannel` or `#one #two`. All three now use the same rule: each channel starts with `#`, several are separated by commas.
+- **Fixed: a list name with a character like `|` saved fine and then broke every list rebuild on Windows.** It is refused, with the name to use instead.
+- **Fixed: `configure.py` said a folder pasted with quotes (Explorer's "Copy as path") does not exist.** The quotes are taken off, and only a full path is ever offered for creating.
+- **Fixed: a new console time format took effect only after a restart.** It now applies from the next line.
+- **Fixed: a `settings.conf` error named the line after the real one**, and sometimes a section the file does not have.
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.

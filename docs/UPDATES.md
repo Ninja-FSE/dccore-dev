@@ -4,6 +4,51 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧰 Settings and startup: ten gaps from the platform audit (#1272)
+
+- **`ANNOUNCE_INTERVAL = 0` flooded.** `coerce()` took any int, so the Settings page saved 0 and `announce_worker()`
+  ran `time.sleep(0)`: one core busy, thousands of advert lines queued a second, an advert every `MSG_DELAY`.
+  `settings_file.MINIMUMS` (checked in `coerce()`) refuses anything below 60, and `announce.advert_interval()` floors
+  a value that reaches config without `coerce()` (admin_config.py), said once in the log.
+- **A multi-list install would not boot with the primary list's drive unplugged.** `oserve.startup()` and
+  `setup_check.library_report()` asked `library.folders()`, the primary list alone. Both ask
+  `library.every_folder()` now, refuse only when nothing is readable, and name each list with nothing readable.
+- **A case-only `LIST_BASE_NAME` change left the bot on its old list** (NTFS/APFS). The migration saw the new name
+  "exist" (the same file) and skipped it; it now renames a same-file target through a temporary name. The prune
+  matches case-insensitively where `platform_compat.ignores_case()` probes the filesystem to, and
+  `list.find_latest_list()` picks by the parsed date (`newest_by_date()`) rather than `sorted()[-1]`.
+- **One malformed `settings.conf` line made a configured install look like a first run**, and the setup page then
+  replaced the admin password before its save failed. `startup()` now re-reads the file (`settings_file.recheck()`)
+  when the REQUIRED settings look unconfigured, and exits 1 naming the file and line - or the refused value - without
+  offering the page. `apply_setup()` and `configure.py` ask `settings_file.check_save()` (save()'s checks, nothing
+  written) before writing admin_config.py; `configure.py` refuses before the first question and never shows a
+  traceback. The setup check fails on the read error too. The rehash path is untouched.
+- **The Settings page saved a `FILE_DIRECTORY` that did not exist**, and the next restart refused to boot.
+  `_check_writable()` refuses it (a quoted path is told so); blank stays allowed.
+- **`configure.py` and the Settings page took channels the browser setup refused** (`music`, `#music #rock`).
+  `settings_file.channels_problem()`/`channel_problem()` are the one rule: `coerce()` for `CHANNEL`, `DEBUG_CHANNEL`
+  and `BROADCAST_SEARCH_CHANNEL`, configure.py's prompt check, and `validate_setup_form()`.
+- **`LIST_BASE_NAME = DJ|Music` saved and broke every rebuild on Windows.** The #427 sanitiser moved to
+  `settings_file.sanitize_list_base_name()` (defaults.py delegates to it) and `coerce()` refuses a name it would
+  change, suggesting the sanitised one.
+- **`configure.py` refused a quoted folder path** (Explorer's *Copy as path*, drag-and-drop) and on POSIX could create
+  a folder named with the quotes. `settings_file.unquote_path()` strips one matching pair (and POSIX backslash
+  escapes); a path that is not absolute is asked again, never created.
+- **`CONSOLE_TIMESTAMP_FORMAT` needed a restart.** `platform_compat.follow_console_timestamp_format()` makes the
+  stamp read the live setting per line (oserve's `current_console_timestamp_format()`), validated, the previous
+  format kept on a refused one.
+- **Parse errors named the wrong line** (one too high) **and the internal `[__dccore__]` section.**
+  `_describe_parse_error()` gives the file's own line and text, and says "the top of the file".
+- Help texts for `ANNOUNCE_INTERVAL`, `CHANNEL` and `LIST_BASE_NAME` (en/fr/es) and `settings.conf.sample` say the
+  new limits; INSTALL.md has a "Values that are refused" section.
+- **Tests:** `tests/test_the_settings_refuse_what_cannot_work.py`, `tests/test_settings_parse_errors_name_the_real_line.py`,
+  `tests/test_the_advert_interval_has_a_floor.py`, `tests/test_a_broken_settings_file_is_not_a_first_run.py`,
+  `tests/test_startup_serves_every_list.py`, `tests/test_a_case_only_list_rename.py` (each real case-insensitive
+  test probes the filesystem and skips, paired with a fake that runs everywhere - a hard link, or a stubbed probe),
+  `tests/test_configure_takes_a_pasted_folder_and_checks_channels.py`,
+  `tests/test_the_console_stamp_follows_the_setting.py`. Three advert-worker tests now stub `advert_interval()`
+  instead of relying on a 0.01 s setting. 26/26 mutations caught.
+
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 
 ### 🧹 Purge every held list, to clear a channel stuck wrong from before v1.16 (#1260)

@@ -450,10 +450,33 @@ def find_latest_list(name=None):
                              and not _has_marker(f, f"-{VIDEO_LIST_MARKER}-")
                              and not _has_marker(f, FULL_LIST_MARKER)]
         if true_master_lists:
-            return true_master_lists[-1]
+            return newest_by_date(true_master_lists, config.LIST_BASE_NAME + "-")
     except Exception as e:
         print(f"[SEARCH ERROR] Could not find the latest list: {e}")
     return None
+
+
+def newest_by_date(paths, prefix):
+    """The path whose name carries the latest date after `prefix`.
+
+    BY THE DATE, NOT BY THE WHOLE NAME (#1272). sorted(...)[-1] picked the
+    last name in code-point order, and that is only the newest while every
+    name starts with the same characters. Windows' glob ignores case, so
+    after the nickname was recapitalised it matched both "musicbot-..." and
+    "MusicBot-..." - and lowercase sorts after uppercase, so yesterday's
+    list under the old spelling beat every list built since, for @find and
+    for the advert alike. A name with no date after the prefix ranks below
+    every dated one; ties go to the name, as before.
+    """
+    def when(path):
+        name = os.path.basename(str(path))
+        stem = name[len(prefix):]
+        stem = stem.rsplit(".", 1)[0] if "." in stem else stem
+        try:
+            return (datetime.datetime.strptime(stem, "%Y-%m-%d"), name)
+        except ValueError:
+            return (datetime.datetime.min, name)
+    return max(paths, key=when)
 
 # The film-and-series list's name marker. update_list.py names that file
 # "<base>-VIDEO-<date>.txt", which the glob in find_latest_list() matches and
@@ -476,7 +499,8 @@ def find_latest_video_list(name=None):
             f"{glob.escape(config.LIST_BASE_NAME)}-{VIDEO_LIST_MARKER}-*.txt")
         found = sorted(glob.glob(pattern))
         if found:
-            return found[-1]
+            return newest_by_date(
+                found, f"{config.LIST_BASE_NAME}-{VIDEO_LIST_MARKER}-")
     except Exception as e:
         print(f"[SEARCH ERROR] Could not find the latest film list: {e}")
     return None
