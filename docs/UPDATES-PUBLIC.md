@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (security): the dashboard's login and sessions are harder to abuse.** Failed logins sent all at once are now counted like any others, and only a few passwords are checked at the same time. The dashboard refuses requests made under a web address it does not know, which stops a hostile page from locking you out of the login. Logging out, or changing the password, now ends the session on the server, so a copied session stops working. No other page can show the dashboard inside a frame. If you open the dashboard by a name rather than an IP address, `localhost` or your computer's own name (a router or VPN name, a reverse proxy), add that name to the new **`WEBUI_ALLOWED_HOSTS`** setting.
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.

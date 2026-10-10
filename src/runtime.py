@@ -590,6 +590,29 @@ def resolve_display_nick(nick):
 # for both flags, so a search and a rebuild cannot slip past each other.
 list_update_gate = threading.Lock()
 
+# The dashboard login (webserver.py) --------------------------------------
+#
+# web_login_lock guards webserver._web_bad_ips and _web_logins_in_flight,
+# and it makes "may this address try again?" and "this attempt counts" ONE
+# step. They used to be two: the login checked the address, spent a tenth
+# of a second hashing the password, and only then counted the failure - so
+# a burst of parallel POSTs from one address all passed the check before
+# any of them was counted, and the limit of MAX_PASSWORD_ATTEMPTS guesses
+# per block window became as many guesses as could be sent at once.
+#
+# web_password_checks caps how many dashboard passwords are hashed at the
+# same time, across every address. Each check is a deliberately slow PBKDF2
+# run, and a flood of logins - even from many addresses, each within its
+# own limit - must not take the CPU from the transfers.
+#
+# web_sessions_lock guards the dashboard's table of live sessions (kept per
+# app inside webserver.create_app()), which is what lets a logout end a
+# session on the server and not only in the browser that clicked it.
+WEB_PASSWORD_CHECKS_AT_ONCE = 2
+web_login_lock = threading.Lock()
+web_password_checks = threading.BoundedSemaphore(WEB_PASSWORD_CHECKS_AT_ONCE)
+web_sessions_lock = threading.Lock()
+
 # Live transfer rate ---------------------------------------------------------
 # Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
 # !rehash cannot reset it, and so readers that must not import the daemon can

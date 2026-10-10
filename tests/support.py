@@ -334,6 +334,10 @@ def reset_config(**overrides):
     webserver_module = sys.modules.get("webserver")
     if webserver_module is not None:
         webserver_module._web_bad_ips.clear()
+        # And the attempts a login claimed and a test left unsettled.
+        in_flight = getattr(webserver_module, "_web_logins_in_flight", None)
+        if in_flight is not None:
+            in_flight.clear()
 
     # What the version check (#572) last found. Read from runtime.py itself,
     # not through config, so reset there: a release "found" by one test would

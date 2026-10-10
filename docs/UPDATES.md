@@ -4,6 +4,52 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🛡️ The dashboard's login and sessions hold: parallel guesses, DNS rebinding, revocation, framing
+
+Reported privately and fixed before the release. Four findings against `webserver.py`, all in the login and session
+layer.
+
+- **Parallel logins got more guesses than the limit.** `login()` called `_is_bad_web_ip()`, spent a tenth of a
+  second in PBKDF2, and only then called `_note_bad_web_login()`, with nothing held in between. `app.run(threaded=True)`
+  gives each connection its own thread, so a burst of `POST /login` from one address all passed the check before any
+  was counted: `MAX_PASSWORD_ATTEMPTS` per block window became as many guesses as could be sent at once. Now
+  `_reserve_web_login()` claims the attempt before the hash, under the pool's lock, and refuses (429) once earlier
+  failures plus attempts still in flight reach the limit; `_settle_web_login()` counts or clears it afterwards. The
+  lock is `runtime.web_login_lock` (bound, not built, in `webserver.py`). A second limit,
+  `runtime.web_password_checks` (`WEB_PASSWORD_CHECKS_AT_ONCE = 2`), caps how many dashboard passwords are hashed at
+  once across all addresses; a login that waits more than 10 s for a slot is told the dashboard is busy (503) and is
+  not counted.
+- **DNS rebinding got past the cross-site login guard.** `_login_origin_ok()` (#609) compares Origin with the
+  request's own Host, and a rebound page sends its own name in both, so its wrong passwords were charged to
+  127.0.0.1 and the operator was locked out. The real app never looked at Host (the setup app does). Now
+  `require_login()` first refuses (403, uncounted) any Host that is not an IP literal, `localhost`, a name in the new
+  **`WEBUI_ALLOWED_HOSTS`** setting or `WEBUI_HOST` itself when that is a name, or - when the bind is not loopback -
+  this machine's own names (`socket.gethostname()`, `getfqdn()`, `<short>.local`). The port is not compared. `*`
+  turns the check off.
+- **Sessions could not be revoked.** The cookie was `{"authenticated": True}` and nothing else, so `/logout` only
+  forgot it in one browser and a password change left every copied cookie valid until a restart. Each login now gets
+  an id kept in a per-app table (`/logout` drops it; past `WEB_MAX_LIVE_SESSIONS = 100` the oldest goes) and an HMAC
+  stamp of `ADMIN_PASSWORD_HASH` under the app secret (`_password_stamp()`), checked on every request. A password
+  change ends every other session: `build_password_change_result()` now puts the new hash in `config` at once rather
+  than waiting for the rehash, and the route re-stamps the session that made the change. A cookie that fails either
+  check is cleared.
+- **No anti-framing header.** A page on another port of the same host is the same site, so the Lax cookie went with a
+  framed dashboard and lured clicks passed the Origin check. Every response of the dashboard and of the setup app now
+  carries `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'` (`_refuse_framing()`). The
+  dashboard frames nothing of its own.
+- **Upgrade note.** Anyone who opens the dashboard by a name other than an IP address, `localhost` or the computer's
+  own name (a router's DNS name, a reverse proxy, a VPN name) gets a 403 that names the setting: add the name to
+  `WEBUI_ALLOWED_HOSTS` in settings.conf or on the Settings page. Everyone is logged out once by the upgrade restart,
+  as on any restart.
+- **Tests:** `tests/test_parallel_logins_get_no_extra_guesses.py` (10), `tests/test_the_dashboard_answers_only_to_its_own_names.py`
+  (15), `tests/test_a_logout_or_password_change_ends_the_session.py` (13), `tests/test_no_page_can_frame_the_dashboard.py`
+  (6). The pure halves (claim, host rule, stamp, headers) run without Flask; the HTTP halves drive the real
+  `create_app()`. 13/13 mutations caught. `test_a_foreign_page_cannot_lock_the_operator_out_of_the_login.py`'s
+  case-and-port test now configures its host name; `test_runtime_state.py` and `test_commands.py` allow-list
+  `WEBUI_ALLOWED_HOSTS` as a setting re-read on a rehash.
+- **Not changed here:** the DCC CHAT console (`adminchat.is_bad_ip()`/`note_bad_ip()`) has the same check-then-count
+  shape; each attempt there needs its own DCC connection and session.
+
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 
 ### 🧹 Purge every held list, to clear a channel stuck wrong from before v1.16 (#1260)

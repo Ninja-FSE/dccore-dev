@@ -267,6 +267,7 @@ PLAIN_HELP = {
     'WEBUI_ENABLED': 'Turn the web dashboard on. Off by default so nothing opens a web page just because the bot was updated. Needs the Flask package installed.',
     'WEBUI_HOST': 'Which addresses the dashboard listens on. 127.0.0.1 means only this computer can open it. 0.0.0.0 makes it reachable from other devices on your home network - never forward it to the internet, the connection is not encrypted.',
     'WEBUI_PORT': "The dashboard's port. Open http://127.0.0.1:8420 (or whatever you set) in your browser.",
+    'WEBUI_ALLOWED_HOSTS': "Other names you open the dashboard by, separated by commas: a router's name for this computer, a reverse proxy, a VPN name. An IP address, localhost and this computer's own name always work; other names are refused. A single * turns the check off.",
     'WEBUI_CONSOLE_ENABLED': 'Show the Console page in the dashboard, which can run admin commands. Unset means on while the dashboard is reachable only from this computer, off otherwise - because on a network the dashboard is protected by the password alone.',
     'WEBUI_OPEN_BROWSER': 'Open the dashboard in your browser automatically when the bot starts. Only happens when the dashboard is limited to this computer.',
     'WEBUI_FOLDER_BROWSER_ENABLED': 'Show a folder picker on the Library page instead of typing paths. Off by default because it lets a logged-in dashboard user see the names of folders on this machine.',
