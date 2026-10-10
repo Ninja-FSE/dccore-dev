@@ -2023,9 +2023,24 @@ alias dccore.sw.untok {
   return $dccore.sw.dec($1)
 }
 
-; The console connection is local: the bot runs on this PC, so a path
-; picked with the "..." buttons is one it can read.
-alias dccore.sw.local { return $iif($istok(127.0.0.1 ::1,$chat($dccore.bot).ip,32),$true,$false) }
+; The bot runs on this PC, so a path picked with the "..." buttons is one it
+; can read: the console connection is loopback, or the bot's CAPS line ends
+; with machine:<its computer name> and that is this computer's. The address
+; alone cannot tell: a DCC chat to a bot on the same PC usually arrives from
+; the public address the client advertises, never 127.0.0.1. A bot from
+; before the machine token never counts as local over a real address.
+alias dccore.sw.local {
+  if ($istok(127.0.0.1 ::1,$chat($dccore.bot).ip,32)) { return $true }
+  var %bot = $dccore.sw.machine
+  if (%bot == $null) || (%bot == -) { return $false }
+  ; == on purpose: a computer's name is the same name in any case
+  return $iif(%bot == $dccore.sw.myhost,$true,$false)
+}
+; The bot's machine:<name> from its CAPS line, or nothing.
+alias dccore.sw.machine { return $gettok($wildtok($dccore.sw.s(caps),machine:*,1,32),2-,58) }
+; This computer's name made one token as the bot makes its own: a space, a
+; colon or a control character is "-".
+alias dccore.sw.myhost { return $regsubex($host,/[\x00-\x20:]/g,-) }
 
 ; Whether this bot has a part of the protocol (from its CAPS line), and the
 ; window is talking to it.

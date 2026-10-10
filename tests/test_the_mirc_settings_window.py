@@ -630,8 +630,8 @@ class TheDialog(unittest.TestCase):
 class TheWindowsBehaviour(unittest.TestCase):
 
     def test_the_browse_buttons_need_a_local_bot(self):
-        self.assertEqual(statements(alias("dccore.sw.local")),
-                         ["return $iif($istok(127.0.0.1 ::1,$chat($dccore.bot).ip,32),$true,$false)"])
+        self.assertEqual(statements(alias("dccore.sw.local"))[0],
+                         "if ($istok(127.0.0.1 ::1,$chat($dccore.bot).ip,32)) { return $true }")
         self.assertTrue(statements(alias("dccore.sw.browse"))[0].startswith("if (!$dccore.sw.local) {"))
         enable = alias("dccore.sw.enable")
         self.assertIn("if ($1) && (!$dccore.sw.local) {", enable)
@@ -793,10 +793,15 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
         for line in handwritten().split("\n"):
             for left, op, right in re.findall(r"\((\S+) (===|==|!=) ([^)]*\)?)\)", line):
                 operands = left + " " + right
-                if not re.search(r"\.text\b|sig\b|sig0|oc\.s\.|%now|d\. \$\+|shownenc|\$did\(dccore\.set,1501,", operands):
+                if not re.search(r"\.text\b|sig\b|sig0|oc\.s\.|%now|d\. \$\+|shownenc|\$did\(dccore\.set,1501,"
+                                 r"|%bot|myhost", operands):
                     continue
                 found += 1
-                if "$null" in right:
+                if "$null" in right or right.strip() == "-":
+                    continue
+                # A computer's name is the same name in any case: == is right
+                # for the machine check (dccore.sw.local), and only there.
+                if left == "%bot" and right.startswith("$dccore.sw.myhost"):
                     continue
                 self.assertEqual(op, "===", line.strip())
         self.assertGreater(found, 5)
@@ -1028,6 +1033,73 @@ class ThePageButtons(unittest.TestCase):
         goto = alias("dccore.sw.goto")
         self.assertIn("dccore.sw.tab %g", goto)
         self.assertIn("hadd dccore.sws last. $+ %g %page", goto)
+
+
+
+class TheBrowseButtonsKnowTheBotsMachine(unittest.TestCase):
+    """The "..." buttons pick a path on mIRC's computer, which is only the
+    bot's when both are the same machine. A DCC chat to a bot on the same PC
+    arrives from the public address, so the console's address cannot say;
+    the bot ends its CAPS line with machine:<its name> and the window
+    compares that with its own ($host)."""
+
+    def caps(self, name):
+        original = console_settings.machine_name
+        console_settings.machine_name = lambda: name
+        try:
+            return console_settings.caps_line()
+        finally:
+            console_settings.machine_name = original
+
+    def mirc_local(self, caps, ip, host):
+        """dccore.sw.local and its two helpers, run in Python from the
+        script's own statements."""
+        self.assertEqual(statements(alias("dccore.sw.machine")),
+                         ["return $gettok($wildtok($dccore.sw.s(caps),machine:*,1,32),2-,58)"])
+        (myhost,) = statements(alias("dccore.sw.myhost"))
+        match = re.fullmatch(r"return \$regsubex\(\$host,/(.+)/g,-\)", myhost)
+        self.assertIsNotNone(match, myhost)
+        self.assertEqual(statements(alias("dccore.sw.local")), [
+            "if ($istok(127.0.0.1 ::1,$chat($dccore.bot).ip,32)) { return $true }",
+            "var %bot = $dccore.sw.machine",
+            "if (%bot == $null) || (%bot == -) { return $false }",
+            "return $iif(%bot == $dccore.sw.myhost,$true,$false)"])
+        if ip in ("127.0.0.1", "::1"):
+            return True
+        token = next((t for t in caps.split(" ") if t.lower().startswith("machine:")), "")
+        bot = token.split(":", 1)[1] if ":" in token else ""
+        if bot in ("", "-"):
+            return False
+        mine = re.sub(match.group(1), "-", host)
+        return bot.lower() == mine.lower()                # mIRC's == ignores case
+
+    def test_the_machine_token_ends_the_caps_line(self):
+        line = self.caps("Desk-PC")
+        self.assertTrue(line.startswith("CAPS settings:1 "))
+        self.assertEqual(line.split(" ")[-1], "machine:Desk-PC")
+
+    def test_the_same_machine_in_another_case_is_local(self):
+        self.assertTrue(self.mirc_local(self.caps("DESK-PC"), "203.0.113.5", "desk-pc"))
+
+    def test_a_name_with_a_space_is_made_one_token_both_sides(self):
+        bot = "".join("-" if ch.isspace() or ch == ":" else ch for ch in "Desk PC")
+        self.assertTrue(self.mirc_local(self.caps(bot), "203.0.113.5", "Desk PC"))
+
+    def test_another_machine_is_not_local(self):
+        self.assertFalse(self.mirc_local(self.caps("Desk-PC"), "203.0.113.5", "Laptop"))
+
+    def test_an_older_bot_without_the_token_is_not_local(self):
+        self.assertFalse(self.mirc_local("CAPS settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1",
+                                         "203.0.113.5", "Desk-PC"))
+        self.assertFalse(self.mirc_local(self.caps("-"), "203.0.113.5", "-"))
+
+    def test_loopback_is_local_whatever_the_names(self):
+        self.assertTrue(self.mirc_local("CAPS settings:1", "127.0.0.1", "Laptop"))
+        self.assertTrue(self.mirc_local("CAPS settings:1", "::1", "Laptop"))
+
+    def test_a_remote_bot_is_still_told_to_type_the_path(self):
+        self.assertTrue(statements(alias("dccore.sw.browse"))[0].startswith(
+            "if (!$dccore.sw.local) { dccore.sw.status The bot runs on another computer: type the path as it is there."))
 
 
 if __name__ == "__main__":

@@ -43,9 +43,12 @@ was shorter than the text (found in the first real-mIRC test).
   and draws the two lines in `@DCCore-preview`: decoded (the bot now encodes them, colour codes as `%03` and runs of
   spaces as `%20`) and with every space made a non-breaking one, since `echo` collapses runs of spaces and a theme's
   frame is made of them - a coloured `$chr(160)` draws the same block).
-- **General Settings** has this mIRC's own switches too (open @DCCore / Chat / Downloads at start, reconnect), saved to
-  `dccore.ini` by Apply or OK. **This mIRC window** opens the old Options dialog, unchanged; `/dccore options` is still
-  that dialog. The "..." browse buttons work only when the console connection is 127.0.0.1 / ::1.
+- **General Settings** has this mIRC's own switches too (open @DCCore / Chat / Downloads at start, reconnect), saved
+  to `dccore.ini` by Apply or OK. **This mIRC window** opens the old Options dialog, unchanged; `/dccore options` is
+  still that dialog. The "..." browse buttons work only when the bot runs on this PC: the console connection is
+  127.0.0.1 / ::1, or the bot's `CAPS` line ends with `machine:<name>` and that is this computer's `$host` (spaces and
+  colons as `-`, compared ignoring case). A DCC chat to a bot on the same PC arrives from the public address, so the
+  address alone left the buttons greyed out in the first real-mIRC test.
 - **Values** are decoded with the doc's `$regsubex` and encoded by `dccore.sw.enc` / `dccore.sw.tok`, the mSL twins of
   `console_settings.encode_value()` / `encode_token()`. The window needs mIRC 6.17 (`$regsubex`); an older mIRC is told.
 - **What a review of it found, fixed before it shipped:** a refused Save lists cleared the "not saved" mark, so OK
@@ -63,7 +66,7 @@ was shorter than the text (found in the first real-mIRC test).
 - **Tests:** `tests/test_the_settings_window_generator.py` (21: the block is up to date and `--check` catches a stale
   one; every setting placed once or excluded; the mockup's tabs and pages; the generator refuses a key placed twice, a
   key with no place, a check too wide and a page that cannot fit; labels, units, choices and help are the bot's) and
-  `tests/test_the_mirc_settings_window.py` (80: the decoder and encoder, re-run in Python from the script's own
+  `tests/test_the_mirc_settings_window.py` (87: the decoder and encoder, re-run in Python from the script's own
   patterns, agree with `console_settings` on a battery of values, and a preview line comes out as the bot's line with
   no plain space for `echo` to collapse; every documented reply type is routed and has a branch; every command sent is
   a console command with a real subcommand; Apply sends setbegin, sets, setcommit and no `set` is ever sent outside a

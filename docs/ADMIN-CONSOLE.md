@@ -923,8 +923,9 @@ at the bottom.
 - **This mIRC window** opens the old **Options** dialog - `/dccore options` is
   still that one.
 - **Paths** are the bot's. The **...** buttons that browse for one work only when
-  the console connection is local (the bot runs on this PC); otherwise type the
-  path as it is on the bot's machine.
+  the bot runs on this PC - the console connection is 127.0.0.1, or the computer
+  name the bot reports (`machine:` in its `CAPS` line) is this one's; otherwise
+  type the path as it is on the bot's machine.
 - **A bot without these commands** answers `consolecaps` with "Unknown command",
   and the window says to update the bot; only this mIRC's own switches can be
   changed then. A snapshot that arrives cut short (the counts on its BEGIN and
