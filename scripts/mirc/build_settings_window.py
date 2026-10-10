@@ -155,6 +155,8 @@ WIDGETS = {
         (1503, "edit", "", 94, 61, 24, 11, "autohs"),
         (1504, "button", "Save on-connect commands", 170, 60, 100, 13, ""),
         (1505, "button", "Resend now", 274, 60, 48, 13, ""),
+        # the on-connect commands need the admin password on a token login (#1264)
+        (1506, "button", "Unlock", 122, 60, 44, 13, ""),
     ),
     "channels": (
         (1520, "list", "", 0, 0, 200, 50, "vsbar"),

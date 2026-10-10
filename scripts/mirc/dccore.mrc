@@ -449,6 +449,7 @@ on *:CHATCLOSE: {
   dccore.chat.title
   dccore.panel
   dccore.dl.draw
+  hdel dccore.live sw.unlocked
   dccore.sw.lost
   if (%was == taken) {
     ; another client took the session; reconnecting now would only take
@@ -648,7 +649,9 @@ alias dccore.structured {
     dccore.chat.title
     ; a Downloads window left open across a reconnect asks again (#1022)
     if ($window($dccore.dl.win)) { hdel dccore.live dlend | dccore.dl.tell | dccore.dl.draw }
-    ; an open settings window starts again on the new console (#1264)
+    ; an open settings window starts again on the new console (#1264),
+    ; which is locked until unlocked, whatever the one before was
+    hdel dccore.live sw.unlocked
     dccore.sw.lost
     return
   }
@@ -713,9 +716,18 @@ alias dccore.structured {
   if (%type == DQBEGIN) { hdel -w dccore.live dq.* | hdel dccore.live dqend | hadd dccore.live dqn 1 | return }
   if (%type == DQROW) { hadd dccore.live dq. $+ $dccore.st(dqn) $2- | hinc dccore.live dqn | return }
   if (%type == DQEND) { hadd dccore.live dqcount $2 | hadd dccore.live dqend 1 | dccore.dq.draw | return }
-  ; The settings window's lines (#1264) while it is open, and for a few
-  ; seconds after it closes; otherwise they are shown like any other.
-  if ($istok($dccore.sw.types,%type,32)) && (($dialog(dccore.set)) || ($dccore.st(sw.tail))) { dccore.sw.line $1- | return }
+  ; The settings window's lines (#1264), but only the ones it is waiting
+  ; for (and, for a few seconds after it closes, its late replies): the
+  ; same lines answering a command typed in this window - settings, set,
+  ; served - are shown here like any other, and leave the window alone.
+  if ($istok($dccore.sw.types,%type,32)) && (($dccore.sw.wants(%type)) || ($dccore.st(sw.tail))) { dccore.sw.line $1- | return }
+  ; The lock (#1264): a console logged in with the paired token may read
+  ; the settings but not change them until `unlock <password>`. What the
+  ; window did not ask for is said here.
+  if (%type == LOCKED) { dccore.sys $dccore.bot $+ : $iif($istok(commit resend,$3,32),$4-,$3-) | return }
+  if (%type == UNLOCKED) { hadd dccore.live sw.unlocked 1 | dccore.sys Unlocked: this console can change the bot's settings until it closes. | return }
+  if (%type == UNLOCK) { dccore.sys Not unlocked: $3- | return }
+  if (%type == SETAPPLIED) { dccore.sys The saved settings are in effect now. | return }
   ; an older bot's "Unknown command: consolecaps" is the window's answer
   if (%type == OUT) {
     if ($dccore.sw.old($2-)) { return }
@@ -1541,13 +1553,14 @@ on *:INPUT:@DCCore: {
     dccore.echo $dccore.prompt ********
     halt
   }
-  dccore.echo $dccore.prompt $1-
+  ; unlock <password> (#1264): the password is never shown
+  dccore.echo $dccore.prompt $iif($1 == unlock,unlock ********,$1-)
   dccore.send $1-
   halt
 }
 on *:INPUT:@DCCore-console: {
   if ($left($1,1) == /) && ($left($1,2) != //) { return }
-  echo -ti2 @DCCore-console $dccore.prompt $1-
+  echo -ti2 @DCCore-console $dccore.prompt $iif($1 == unlock,unlock ********,$1-)
   dccore.send $1-
   halt
 }
@@ -1973,8 +1986,35 @@ alias dccore.settings {
 
 ; The lines this window reads, routed here by dccore.structured while it is
 ; open (and for a few seconds after, so a late reply is not shown as noise).
-alias dccore.sw.types { return CAPS SETBEGIN SETF SETEND SETOPEN SETERR SETDONE PVBEGIN PVLINE PVEND SRVBEGIN SRVLIST SRVCHAN SRVFOLDER SRVEND SRVOPEN SRVERR SRVDONE FLDBEGIN FLDROW FLDEND FLDOPEN FLDERR FLDDONE OCBEGIN OCLINE OCEND OCOPEN OCERR OCDONE OCRESEND BANBEGIN BANP BANT BANEND }
+alias dccore.sw.types { return CAPS SETBEGIN SETF SETEND SETOPEN SETERR SETDONE SETAPPLIED LOCKED UNLOCKED UNLOCK PVBEGIN PVLINE PVEND SRVBEGIN SRVLIST SRVCHAN SRVFOLDER SRVEND SRVOPEN SRVERR SRVDONE FLDBEGIN FLDROW FLDEND FLDOPEN FLDERR FLDDONE OCBEGIN OCLINE OCEND OCOPEN OCERR OCDONE OCRESEND BANBEGIN BANP BANT BANEND }
 
+; Whether the window is waiting for a line of type $1: its phase, or the
+; wait (w.<what>) or flag (saving.srv, saving.oc, resending.oc, unlocking,
+; applying) of the request it answers. Anything else is somebody typing in
+; @DCCore and is shown there.
+alias dccore.sw.wants {
+  if (!$dialog(dccore.set)) || (!$hget(dccore.sws)) { return $false }
+  var %t = $1, %phase = $dccore.sw.s(phase)
+  if (%t == CAPS) { return $iif(%phase == caps,$true,$false) }
+  if ($istok(SETBEGIN SETF SETEND,%t,32)) { return $iif(%phase == load,$true,$false) }
+  if ($istok(SETOPEN SETERR SETDONE,%t,32)) { return $iif($istok(apply confirm aborting preview locked,%phase,32),$true,$false) }
+  if (%t == SETAPPLIED) { return $iif($dccore.sw.s(applying) != $null,$true,$false) }
+  if ($istok(PVBEGIN PVLINE PVEND,%t,32)) { return $iif(%phase == preview,$true,$false) }
+  if ($istok(SRVBEGIN SRVLIST SRVCHAN SRVFOLDER SRVEND,%t,32)) { return $iif($dccore.sw.s(w.served) != $null,$true,$false) }
+  if ($istok(FLDBEGIN FLDROW FLDEND,%t,32)) { return $iif($dccore.sw.s(w.folders) != $null,$true,$false) }
+  if ($istok(SRVOPEN SRVERR SRVDONE FLDOPEN FLDERR FLDDONE,%t,32)) { return $iif($dccore.sw.s(saving.srv),$true,$false) }
+  if ($istok(OCBEGIN OCLINE OCEND,%t,32)) { return $iif($dccore.sw.s(w.onconnect) != $null,$true,$false) }
+  if ($istok(OCOPEN OCERR OCDONE,%t,32)) { return $iif($dccore.sw.s(saving.oc),$true,$false) }
+  if (%t == OCRESEND) { return $iif($dccore.sw.s(resending.oc),$true,$false) }
+  if ($istok(BANBEGIN BANP BANT BANEND,%t,32)) { return $iif($dccore.sw.s(w.banlist) != $null,$true,$false) }
+  if (%t == LOCKED) {
+    if (%phase == apply) || ($dccore.sw.s(saving.srv)) || ($dccore.sw.s(saving.oc)) { return $true }
+    if ($dccore.sw.s(resending.oc)) || ($dccore.sw.s(w.onconnect) != $null) { return $true }
+    return $false
+  }
+  if ($istok(UNLOCKED UNLOCK,%t,32)) { return $iif($dccore.sw.s(unlocking),$true,$false) }
+  return $false
+}
 alias dccore.sw.m { return $hget(dccore.swm,$1) }
 alias dccore.sw.s { return $hget(dccore.sws,$1) }
 ; Set an item of dccore.sws, or delete it when there is nothing to keep (an
@@ -2169,7 +2209,7 @@ alias dccore.sw.page {
   did -r dccore.set 1012
   var %asks = $dccore.sw.m(p. $+ $1 $+ .ask), %i = 1
   while (%i <= $numtok(%asks,32)) {
-    if (!$dccore.sw.s(asked. $+ $gettok(%asks,%i,32))) { dccore.sw.ask $gettok(%asks,%i,32) }
+    if (!$dccore.sw.s(asked. $+ $gettok(%asks,%i,32))) && (!$dccore.sw.keeps($gettok(%asks,%i,32))) { dccore.sw.ask $gettok(%asks,%i,32) }
     inc %i
   }
 }
@@ -2229,9 +2269,15 @@ alias dccore.sw.old {
   dccore.sw.status This bot is too old for the settings window - update it. Only this mIRC's own switches can be changed here.
   return $true
 }
-; The console closed, or a new one opened (HELLO): start again.
+; The console closed, or a new one opened (HELLO): start again - but
+; edits not saved yet are kept (keep): the reload after it refreshes only
+; the controls nobody touched, and the structured pages with edits of their
+; own are not asked for again. Reload discards them.
 alias dccore.sw.lost {
   if (!$dialog(dccore.set)) { return }
+  if ($dccore.sw.s(loaded)) {
+    if ($dccore.sw.changed != $null) || ($dccore.sw.unsaved != $null) { hadd dccore.sws keep 1 }
+  }
   dccore.sw.start
 }
 alias dccore.sw.load {
@@ -2273,12 +2319,26 @@ alias dccore.sw.timeout {
     dccore.sw.status No complete answer from the bot - nothing changed here. Press Reload.
     return
   }
+  if ($1 == applied) {
+    hdel dccore.sws applying
+    dccore.sw.status Saved - the bot has not said it has applied them yet. Reload shows what it has now.
+    return
+  }
+  if ($1 == unlock) {
+    hdel dccore.sws unlocking
+    hdel dccore.sws relock
+    dccore.sw.status No answer to the password - nothing was saved. Your changes are still here.
+    return
+  }
   hdel dccore.sws asked. $+ $1
   dccore.sw.status No complete answer from the bot to $1 - press Refresh or open the page again.
 }
 alias dccore.sw.reload {
-  if ($istok(apply confirm aborting preview,$dccore.sw.s(phase),32)) { dccore.sw.status Still waiting for the bot... | return }
+  if ($istok(apply confirm aborting preview locked,$dccore.sw.s(phase),32)) { dccore.sw.status Still waiting for the bot... | return }
   hdel dccore.sws after
+  ; Reload is how kept edits are discarded
+  hdel dccore.sws keep
+  hdel dccore.sws srv.dirty
   dccore.sw.start
 }
 
@@ -2325,9 +2385,13 @@ alias dccore.sw.line {
       return
     }
     dccore.sw.enable 1
-    dccore.sw.fillall
+    dccore.sw.fillall $dccore.sw.s(keep)
     hadd dccore.sws loaded 1
     hadd dccore.sws phase idle
+    if ($dccore.sw.s(keep)) {
+      hdel dccore.sws keep
+      hadd dccore.sws after Reconnected - your unsaved changes are kept; press Reload to discard them.
+    }
     var %said = $iif($dccore.sw.s(after),$dccore.sw.s(after),Loaded $2 settings from $dccore.bot $+ .)
     hdel dccore.sws after
     if ($dccore.sw.s(unknown)) { %said = %said The bot has $dccore.sw.s(unknown) more this window has no place for - update dccore.mrc. }
@@ -2342,6 +2406,20 @@ alias dccore.sw.line {
     return
   }
   if (%t == SETDONE) { dccore.sw.done $2- | return }
+  ; the save's rehash has finished: now the bot's values are the new ones
+  if (%t == SETAPPLIED) {
+    dccore.sw.waited applied
+    var %said = Saved and applied $dccore.sw.s(applying) setting(s).
+    hdel dccore.sws applying
+    if ($dccore.sw.s(phase) != idle) || ($dccore.sw.changed != $null) { dccore.sw.status %said Your newer changes are not saved yet - Reload discards them. | return }
+    hadd dccore.sws after %said
+    dccore.sw.load
+    return
+  }
+  ; the lock: LOCKED <command> <sentence>, UNLOCKED, UNLOCK error <message>
+  if (%t == LOCKED) { dccore.sw.locked $2- | return }
+  if (%t == UNLOCKED) { dccore.sw.unlocked | return }
+  if (%t == UNLOCK) { dccore.sw.unlockfailed $3- | return }
   ; the theme preview: PVBEGIN 2, PVLINE <advert|notice> <raw line>, PVEND 2
   if (%t == PVBEGIN) {
     hadd dccore.sws pvgot 0
@@ -2412,6 +2490,7 @@ alias dccore.sw.line {
   if (%t == SRVOPEN) || (%t == FLDOPEN) || (%t == OCOPEN) { return }
   if (%t == SRVERR) || (%t == FLDERR) { dccore.sw.keep srv.errs $dccore.sw.s(srv.errs) $2- | return }
   if (%t == SRVDONE) || (%t == FLDDONE) {
+    hdel dccore.sws saving.srv
     var %errs = $dccore.sw.s(srv.errs)
     hdel dccore.sws srv.errs
     ; only a save that went through clears the edits: a refused one keeps
@@ -2463,6 +2542,7 @@ alias dccore.sw.line {
   }
   if (%t == OCERR) { dccore.sw.keep oc.errs $dccore.sw.s(oc.errs) $2- | return }
   if (%t == OCDONE) {
+    hdel dccore.sws saving.oc
     var %errs = $dccore.sw.s(oc.errs)
     hdel dccore.sws oc.errs
     if ($2 == ok) { dccore.sw.status $4- | dccore.sw.reask onconnect | return }
@@ -2471,6 +2551,7 @@ alias dccore.sw.line {
     return
   }
   if (%t == OCRESEND) {
+    hdel dccore.sws resending.oc
     if ($2 == ok) { dccore.sw.status $4- | return }
     dccore.sw.status Not sent: $3-
     return
@@ -2535,6 +2616,17 @@ alias dccore.sw.done {
     var %said = Saved $2 setting(s) $+ $iif($3 > 0,$chr(32) $+ $chr(40) $+ $3 unchanged $+ $chr(41)) $+ .
     if ($4 != -) { %said = %said Restart the bot to apply $replace($4,$chr(44),$chr(44) $+ $chr(32)) $+ . }
     if ($dccore.sw.s(close)) { dccore.sys Settings: %said | dialog -x dccore.set | return }
+    ; something written: the bot applies it with a rehash, which may first
+    ; wait for transfers, and says SETAPPLIED when it has. Until then the
+    ; values just sent are the baseline (a reload now would show the old
+    ; ones); the page is reloaded at SETAPPLIED.
+    if ($2 > 0) {
+      dccore.sw.rebase
+      hadd dccore.sws applying $2
+      hadd dccore.sws w.applied $calc($ctime + 300)
+      dccore.sw.status %said Applying...
+      return
+    }
     hadd dccore.sws after %said
     dccore.sw.load
     return
@@ -2546,7 +2638,8 @@ alias dccore.sw.done {
     return
   }
   ; aborted
-  if (%phase != preview) { dccore.sw.status Nothing was saved. }
+  if (%phase != preview) && ($dccore.sw.s(lockednote) == $null) { dccore.sw.status Nothing was saved. }
+  hdel dccore.sws lockednote
 }
 alias dccore.sw.confirm {
   if (!$dialog(dccore.set)) || ($dccore.sw.s(phase) != confirm) { return }
@@ -2556,12 +2649,108 @@ alias dccore.sw.confirm {
   if ($input(%q,yq,DCCore - Settings)) {
     hadd dccore.sws phase apply
     dccore.sw.wait settings
+    hadd dccore.sws lastcommit setcommit confirm
     dccore.send setcommit confirm
     return
   }
   hadd dccore.sws phase aborting
   dccore.sw.wait settings
   dccore.send setabort
+}
+
+; ---- the lock --------------------------------------------------------
+;
+;  A console logged in with the paired token (the script's own login) may
+;  read the settings but not change them: setcommit, served / folders /
+;  onconnect commit, onconnect resend and the on-connect listing (it holds
+;  an X login) answer LOCKED <command> until `unlock <password>`. A refused
+;  commit leaves its transaction open on the bot. The window asks for the
+;  password once, masked, from a timer; sends `unlock` straight from the
+;  prompt (the password goes in no table and no variable that outlives the
+;  ask, and is never shown or logged); and on UNLOCKED sends the refused
+;  command again. Cancel, or a wrong password, drops the open transaction
+;  and keeps the edits. The bot remembers the unlock for the rest of the
+;  connection (so does dccore.live sw.unlocked); a new one starts locked.
+
+; LOCKED <command - one or two words> <sentence>
+alias dccore.sw.locked {
+  var %what = $iif($istok(commit resend,$2,32),$1-2,$1)
+  ; the listing: the box says so, with Unlock beside it, rather than ask
+  ; for the password just because a page was opened
+  if (%what == onconnect) {
+    dccore.sw.waited onconnect
+    hdel dccore.sws oc.ok
+    dccore.sw.put 1501 Locked - press Unlock to see the on-connect commands.
+    did -b dccore.set 1501
+    dccore.sw.status The on-connect commands may hold a login: the bot shows them once it has the admin password (Unlock).
+    return
+  }
+  if (%what == setcommit) {
+    dccore.sw.waited settings
+    hadd dccore.sws phase locked
+  }
+  hadd dccore.sws relock %what
+  dccore.sw.status The bot needs the admin password to save this.
+  .timerdccoreSwUnlock -m 1 0 dccore.sw.unlockask
+}
+; Asked from a timer ($input waits for an answer, which a script event may
+; not do). Masked (p). No comma in the prompt: it would end the argument.
+alias dccore.sw.unlockask {
+  if (!$dialog(dccore.set)) { return }
+  var %pw = $input(The bot needs its admin password to change settings from this console. It unlocks this connection once and is not kept.,po,DCCore - Unlock)
+  if (%pw == $null) { dccore.sw.unlockdrop Not saved: no password was given. | return }
+  hadd dccore.sws unlocking 1
+  dccore.sw.wait unlock
+  dccore.send unlock %pw
+}
+; The Unlock button beside the on-connect box.
+alias dccore.sw.unlockbutton {
+  if (!$dccore.sw.can(unlock)) { dccore.sw.status This bot has nothing to unlock. | return }
+  if ($dccore.st(sw.unlocked)) { dccore.sw.reask onconnect | return }
+  hadd dccore.sws relock onconnect
+  .timerdccoreSwUnlock -m 1 0 dccore.sw.unlockask
+}
+alias dccore.sw.unlocked {
+  dccore.sw.waited unlock
+  hdel dccore.sws unlocking
+  hadd dccore.live sw.unlocked 1
+  var %what = $dccore.sw.s(relock)
+  hdel dccore.sws relock
+  if (%what == $null) || (%what == onconnect) {
+    dccore.sw.status Unlocked: the on-connect commands are on their way.
+    did -e dccore.set 1501
+    dccore.sw.reask onconnect
+    return
+  }
+  dccore.sw.status Unlocked - saving again...
+  if (%what == setcommit) {
+    hadd dccore.sws phase apply
+    dccore.sw.wait settings
+    dccore.send $dccore.sw.s(lastcommit)
+    return
+  }
+  dccore.send %what
+}
+; UNLOCK error <message>: still locked (a third wrong one closes the console)
+alias dccore.sw.unlockfailed {
+  dccore.sw.waited unlock
+  hdel dccore.sws unlocking
+  dccore.sw.unlockdrop Not unlocked: $1-
+}
+; No password, or a wrong one: the transaction left open on the bot is
+; dropped, the edits stay here.
+alias dccore.sw.unlockdrop {
+  var %what = $dccore.sw.s(relock)
+  hdel dccore.sws relock
+  hadd dccore.sws lockednote 1
+  if (%what == setcommit) {
+    hadd dccore.sws phase aborting
+    dccore.sw.wait settings
+    dccore.send setabort
+  }
+  elseif ($istok(served folders onconnect,$gettok(%what,1,32),32)) && ($gettok(%what,2,32) == commit) { dccore.send $gettok(%what,1,32) abort }
+  else { hdel dccore.sws resending.oc }
+  dccore.sw.status $1- Your changes are still here.
 }
 
 ; ---- the settings' controls ------------------------------------------
@@ -2600,11 +2789,16 @@ alias dccore.sw.fill {
   ; closed up a run of spaces, and an untouched field must never be sent
   hadd dccore.sws d. $+ $1 = $+ $dccore.sw.shownenc($1)
 }
+; $1 = 1 (kept over a reconnect): a control with an edit not saved yet is
+; left as it is, with its old baseline, and only the others are refreshed.
 alias dccore.sw.fillall {
   var %j = 1
   while (%j <= $dccore.sw.m(keys.n)) {
     var %keys = $dccore.sw.m(keys. $+ %j), %i = 1
-    while (%i <= $numtok(%keys,32)) { dccore.sw.fill $gettok(%keys,%i,32) | inc %i }
+    while (%i <= $numtok(%keys,32)) {
+      if (!$1) || (!$dccore.sw.dirty($gettok(%keys,%i,32))) { dccore.sw.fill $gettok(%keys,%i,32) }
+      inc %i
+    }
     inc %j
   }
 }
@@ -2725,7 +2919,7 @@ alias dccore.sw.label {
 ; that changed: setbegin, a set for each, setcommit - one save, one rehash.
 ; $2 = asked: the File locations question has been answered yes.
 alias dccore.sw.apply {
-  if ($istok(apply confirm aborting preview,$dccore.sw.s(phase),32)) { dccore.sw.status Still waiting for the bot... | return }
+  if ($istok(apply confirm aborting preview locked,$dccore.sw.s(phase),32)) { dccore.sw.status Still waiting for the bot... | return }
   if ($1 == close) && ($dccore.sw.unsaved) { dccore.sw.status $dccore.sw.unsaved has changes of its own not saved yet: save them there first, or Cancel to drop them. | return }
   var %local = $dccore.sw.savelocal
   var %keys = $iif($dccore.sw.s(loaded),$dccore.sw.changed)
@@ -2744,6 +2938,8 @@ alias dccore.sw.apply {
   }
   hadd dccore.sws phase apply
   dccore.sw.wait settings
+  hadd dccore.sws sent %keys
+  hadd dccore.sws lastcommit setcommit
   hadd dccore.sws close $iif($1 == close,1,0)
   hdel dccore.sws errs
   hdel dccore.sws errkey
@@ -2762,6 +2958,14 @@ alias dccore.sw.riskyask {
   hdel dccore.sws asking
   if ($input(Change where the bot keeps its files? A wrong path there can lose a queue or a statistics file.,yq,DCCore - Settings)) { dccore.sw.apply %how asked | return }
   dccore.sw.status Nothing was sent.
+}
+; What Apply sent is the baseline now (SETDONE ok, before SETAPPLIED).
+alias dccore.sw.rebase {
+  var %keys = $dccore.sw.s(sent), %i = 1
+  while (%i <= $numtok(%keys,32)) {
+    hadd dccore.sws d. $+ $gettok(%keys,%i,32) = $+ $dccore.sw.shownenc($gettok(%keys,%i,32))
+    inc %i
+  }
 }
 ; Whether a File locations path is among $1.
 alias dccore.sw.risky {
@@ -2787,9 +2991,20 @@ alias dccore.sw.savelocal {
 ; The structured page with edits of its own not saved, or nothing.
 alias dccore.sw.unsaved {
   if ($dccore.sw.s(srv.dirty)) { return Lists & channels }
-  if (!$dccore.sw.s(oc.ok)) { return }
-  if ($md5($dccore.sw.oc.text) === $dccore.sw.s(oc.loaded)) { return }
-  return IRC Server
+  if ($dccore.sw.ocdirty) { return IRC Server }
+  return
+}
+alias dccore.sw.ocdirty {
+  if (!$dccore.sw.s(oc.ok)) { return $false }
+  if ($md5($dccore.sw.oc.text) === $dccore.sw.s(oc.loaded)) { return $false }
+  return $true
+}
+; Whether the snapshot $1 would overwrite edits not saved yet (kept over a
+; reconnect): then it is not asked for by itself.
+alias dccore.sw.keeps {
+  if ($1 == served) || ($1 == folders) { return $iif($dccore.sw.s(srv.dirty),$true,$false) }
+  if ($1 == onconnect) { return $dccore.sw.ocdirty }
+  return $false
 }
 alias dccore.sw.closed {
   .timerdccoreSwCaps off
@@ -2797,6 +3012,7 @@ alias dccore.sw.closed {
   .timerdccoreSwBan off
   .timerdccoreSwTick off
   .timerdccoreSwAsk off
+  .timerdccoreSwUnlock off
   ; a transaction still open on the bot is dropped there too
   if ($chat($dccore.bot)) && ($istok(confirm preview,$dccore.sw.s(phase),32)) { dccore.send setabort }
   ; replies still on their way are not shown as noise in @DCCore
@@ -2825,7 +3041,8 @@ alias dccore.sw.click {
   if (%id == 1523) { if ($did(dccore.set,1520).sel) { did -d dccore.set 1520 $did(dccore.set,1520).sel } | return }
   ; IRC Server: the on-connect commands
   if (%id == 1504) { dccore.sw.oc.save | return }
-  if (%id == 1505) { if ($dccore.sw.can(onconnect)) { dccore.sw.status Sending the on-connect commands again... | dccore.send onconnect resend } | return }
+  if (%id == 1505) { if ($dccore.sw.can(onconnect)) { hadd dccore.sws resending.oc 1 | dccore.sw.status Sending the on-connect commands again... | dccore.send onconnect resend } | return }
+  if (%id == 1506) { dccore.sw.unlockbutton | return }
   ; Lists & channels
   if (%id == 1540) { dccore.sw.srv.pick | return }
   if (%id == 1550) { dccore.sw.browse %id 1549 dir | return }
@@ -2925,6 +3142,7 @@ alias dccore.sw.preview {
 ; ---- IRC Server: the on-connect commands ------------------------------
 
 alias dccore.sw.oc.fill {
+  did -e dccore.set 1501
   did -r dccore.set 1501
   var %i = 1
   while (%i <= $1) {
@@ -2953,6 +3171,7 @@ alias dccore.sw.oc.save {
   if (!$dccore.sw.s(oc.ok)) { dccore.sw.status The on-connect commands have not loaded. | return }
   var %delay = $did(dccore.set,1503).text
   if (%delay !isnum) { dccore.sw.status Seconds between commands is a number. | return }
+  hadd dccore.sws saving.oc 1
   dccore.send onconnect begin
   dccore.send onconnect delay %delay
   var %i = 1, %n = 0
@@ -3204,6 +3423,7 @@ alias dccore.sw.srv.save {
   if (!$dccore.sw.srv.ready) { return }
   var %order = $dccore.sw.s(srv.order), %f = $dccore.sw.s(srv.forder), %c = $dccore.sw.s(srv.corder)
   hdel dccore.sws srv.errs
+  hadd dccore.sws saving.srv 1
   ; === : a rename that changes only the case is a change (== ignores case)
   if ($dccore.sw.s(srv.src) == implied) && ($numtok(%order,32) == 1) && ($dccore.sw.srv.sig === $dccore.sw.s(srv.sig0)) && ($dccore.sw.can(folders)) {
     dccore.send folders begin
@@ -3333,6 +3553,7 @@ dialog dccore.set {
   edit "", 1503, 188 193 24 11, autohs
   button "Save on-connect commands", 1504, 264 192 100 13
   button "Resend now", 1505, 368 192 48 13
+  button "Unlock", 1506, 216 192 44 13
   text "The on/off switches used most, here from their own pages so there is one place to check.", 1103, 94 18 322 8
   text "Open when mIRC starts (minimised)", 1104, 94 31 322 8
   check "DCCore window", 2025, 94 41 322 10
@@ -3736,7 +3957,7 @@ alias dccore.sw.data {
   hadd dccore.swm pages 23
   hadd dccore.swm p.1 IRC Server
   hadd dccore.swm p.1.n 1
-  hadd dccore.swm p.1.1 1100,2000,2001,2004,2005,2008,2009,2012,2013,1101,2016,2017,2020,2021,1102,1500,1501,1502,1503,1504,1505
+  hadd dccore.swm p.1.1 1100,2000,2001,2004,2005,2008,2009,2012,2013,1101,2016,2017,2020,2021,1102,1500,1501,1502,1503,1504,1505,1506
   hadd dccore.swm p.1.w onconnect
   hadd dccore.swm p.1.ask onconnect
   hadd dccore.swm p.2 General Settings
@@ -4759,11 +4980,11 @@ alias dccore.sw.data {
   hadd dccore.swm br.2582 file PRIVATE_MESSAGES_FILE
   hadd dccore.swm br.2586 file DCC_QUEUE_FILE
   hadd dccore.swm bot.n 5
-  hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1504,1505,2041,2045,2049,2053,2057,2061,2065,2069,1520,1521,1522,1523,2073,2077,1610,1611,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2102,2105,2109,2113,2117,2121,2125,2129,2133,2137,2141
-  hadd dccore.swm bot.2 2145,2149,2153,2157,2161,2165,2169,2173,2177,2181,2185,2186,2189,2193,2197,2201,2205,2209,2213,2217,2218,2221,2225,2229,2230,2233,2237,1540,1541,1542,1543,1544,1545,1546,1547,1548,1549,1550,1551,1552,1553,1554,1555,1556,1557,2241,2245,2249,2253,2257
-  hadd dccore.swm bot.3 2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,1580,1581,1582,1583,1584,1585,1586,1587,1595,1596,1597,1598,2381,2385,2389,2393,2397,2401,2405,2409
-  hadd dccore.swm bot.4 2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2469,2473,2477,2478,2481,2485,2489,2493,2497,2498,2501,2502,2505,2506,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545,2546,2549,2550
-  hadd dccore.swm bot.5 2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586
+  hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1504,1505,1506,2041,2045,2049,2053,2057,2061,2065,2069,1520,1521,1522,1523,2073,2077,1610,1611,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2102,2105,2109,2113,2117,2121,2125,2129,2133,2137
+  hadd dccore.swm bot.2 2141,2145,2149,2153,2157,2161,2165,2169,2173,2177,2181,2185,2186,2189,2193,2197,2201,2205,2209,2213,2217,2218,2221,2225,2229,2230,2233,2237,1540,1541,1542,1543,1544,1545,1546,1547,1548,1549,1550,1551,1552,1553,1554,1555,1556,1557,2241,2245,2249,2253
+  hadd dccore.swm bot.3 2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,1580,1581,1582,1583,1584,1585,1586,1587,1595,1596,1597,1598,2381,2385,2389,2393,2397,2401,2405
+  hadd dccore.swm bot.4 2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2469,2473,2477,2478,2481,2485,2489,2493,2497,2498,2501,2502,2505,2506,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545,2546,2549
+  hadd dccore.swm bot.5 2550,2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586
   hadd dccore.swm confirm TMP_ZIP_DIR LOCAL_LIST_DIR FETCHED_FILES_DIR LIBRARY_FOLDERS_FILE LISTS_FILE BANS_FILE HARD_BANS_FILE STATS_FILE KNOWN_BOTS_FILE FETCHED_BOT_LISTS_FILE LIST_INDEX_FILE LIST_AUDIO_INFO_CACHE FETCH_HISTORY_FILE DOWNLOAD_COUNTS_FILE TRANSFER_LOG_FILE LIST_SIZE_FILE LIST_RAWBYTES_FILE LIST_PROGRESS_FILE ADMIN_TOKENS_FILE ON_CONNECT_FILE NOTICES_FILE PRIVATE_MESSAGES_FILE DCC_QUEUE_FILE
   hadd dccore.swm t.1500 Sent once the server has registered the bot~2C before it joins: one command per line~2C exactly as typed into a client. ~25nick~25 is the nickname the server gave it.
   hadd dccore.swm t.2384 That reply's wording (~25admin becomes the admin nick)

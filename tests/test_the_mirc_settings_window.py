@@ -293,7 +293,7 @@ class EveryReplyHasAHandler(unittest.TestCase):
 
     def test_the_structured_feed_routes_them_while_the_window_is_open(self):
         body = alias("dccore.structured")
-        self.assertIn("if ($istok($dccore.sw.types,%type,32)) && (($dialog(dccore.set)) || ($dccore.st(sw.tail))) "
+        self.assertIn("if ($istok($dccore.sw.types,%type,32)) && (($dccore.sw.wants(%type)) || ($dccore.st(sw.tail))) "
                       "{ dccore.sw.line $1- | return }", body)
         # and before the fallback that shows an unknown type as a line
         self.assertLess(body.index("dccore.sw.line $1-"), body.index("dccore.echo $dccore.tag(%type,info) $2-"))
@@ -926,11 +926,13 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
     def test_every_question_is_asked_from_a_timer(self):
         section = handwritten()
         asking = sorted(name for name in re.findall(r"\nalias (\S+) \{", section) if "$input(" in alias(name))
-        self.assertEqual(asking, ["dccore.sw.confirm", "dccore.sw.riskyask"])
+        self.assertEqual(asking, ["dccore.sw.confirm", "dccore.sw.riskyask", "dccore.sw.unlockask"])
         for name in asking:
-            timer = ".timerdccoreSwAsk -m 1 0 %s" % name
-            self.assertIn(timer, section)
-            rest = section.replace(timer, "").replace("alias %s {" % name, "")
+            timers = re.findall(r"\.timerdccoreSw(?:Ask|Unlock) -m 1 0 %s\b" % re.escape(name), section)
+            self.assertTrue(timers, name)
+            rest = section.replace("alias %s {" % name, "")
+            for timer in set(timers):
+                rest = rest.replace(timer, "")
             self.assertNotRegex(rest, r"(?<![\w.])%s(?![\w.])" % re.escape(name), "%s is called directly" % name)
 
     # The nits.
@@ -1100,6 +1102,180 @@ class TheBrowseButtonsKnowTheBotsMachine(unittest.TestCase):
     def test_a_remote_bot_is_still_told_to_type_the_path(self):
         self.assertTrue(statements(alias("dccore.sw.browse"))[0].startswith(
             "if (!$dccore.sw.local) { dccore.sw.status The bot runs on another computer: type the path as it is there."))
+
+
+
+class FakeSession:
+    """Enough of a console session for console_settings to answer on."""
+
+    def __init__(self):
+        self.structured = True
+        self.unlocked = False
+        self.sent = []
+
+    def send(self, line):
+        self.sent.append(line)
+
+
+class TheAuditOfBothHalves(unittest.TestCase):
+    """What an audit of the bot side and the window together found."""
+
+    # 1. The lock: a token login reads settings but does not change them
+    #    until `unlock <password>`.
+
+    LOCKABLE = ("setcommit", "set", "served commit", "folders commit", "onconnect commit", "onconnect resend",
+                "onconnect", "pair", "unpair")
+
+    def locked_line(self, what):
+        session = FakeSession()
+        self.assertTrue(console_settings.refused_while_locked(session, what))
+        (line,) = session.sent
+        self.assertTrue(line.startswith("DCCORE LOCKED "), line)
+        return line
+
+    def test_the_refused_command_is_read_from_the_right_words(self):
+        """dccore.sw.locked's first statement, run on the bot's own LOCKED
+        lines: one word, or two when the second is commit or resend."""
+        first = statements(alias("dccore.sw.locked"))[0]
+        self.assertEqual(first, "var %what = $iif($istok(commit resend,$2,32),$1-2,$1)")
+        for what in self.LOCKABLE:
+            with self.subTest(what=what):
+                words = self.locked_line(what).split(" ")[2:]      # $2- of the line: the handler's $1-
+                cmd = " ".join(words[:2]) if words[1] in ("commit", "resend") else words[0]
+                self.assertEqual(cmd, what)
+
+    def test_the_lock_line_typed_by_hand_is_said_in_the_window(self):
+        body = alias("dccore.structured")
+        self.assertIn("if (%type == LOCKED) { dccore.sys $dccore.bot $+ : $iif($istok(commit resend,$3,32),$4-,$3-) "
+                      "| return }", body)
+        self.assertIn("if (%type == UNLOCK) { dccore.sys Not unlocked: $3- | return }", body)
+        line = self.locked_line("pair")
+        words = line.split(" ")[1:]                                 # $1- of dccore.structured
+        sentence = " ".join(words[3:] if words[2] in ("commit", "resend") else words[2:])
+        self.assertTrue(sentence.startswith("Type unlock"), sentence)
+
+    def test_a_refused_save_asks_for_the_password_from_a_timer(self):
+        body = alias("dccore.sw.locked")
+        self.assertIn("hadd dccore.sws relock %what", body)
+        self.assertIn(".timerdccoreSwUnlock -m 1 0 dccore.sw.unlockask", body)
+        setcommit = body[body.index("if (%what == setcommit) {"):]
+        self.assertIn("dccore.sw.waited settings", setcommit)
+        self.assertIn("hadd dccore.sws phase locked", setcommit)
+
+    def test_the_on_connect_listing_says_locked_and_offers_unlock(self):
+        body = alias("dccore.sw.locked")
+        listing = body[body.index("if (%what == onconnect) {"):body.index("if (%what == setcommit) {")]
+        self.assertIn("dccore.sw.put 1501 Locked - press Unlock to see the on-connect commands.", listing)
+        self.assertIn("return", listing)
+        self.assertNotIn("unlockask", listing)
+        self.assertIn('button "Unlock", 1506,', block("dialog dccore.set {"))
+        self.assertIn("if (%id == 1506) { dccore.sw.unlockbutton | return }", alias("dccore.sw.click"))
+
+    def test_the_password_is_masked_and_goes_nowhere_but_the_unlock_line(self):
+        body = statements(alias("dccore.sw.unlockask"))
+        ask = next(line for line in body if "$input(" in line)
+        match = re.fullmatch(r"var %pw = \$input\(([^,]+),po,DCCore - Unlock\)", ask)
+        self.assertIsNotNone(match, ask)                             # p: masked; no comma in the prompt
+        uses = [line for line in body if re.search(r"%pw(?![\w.])", line)]
+        self.assertEqual(uses, [ask, "if (%pw == $null) { dccore.sw.unlockdrop Not saved: no password was given. | return }",
+                                "dccore.send unlock %pw"])
+        # a local variable, gone when the alias returns: in no table, in no other alias
+        self.assertNotRegex(handwritten().replace(alias("dccore.sw.unlockask"), ""), r"%pw(?![\w.])")
+        self.assertNotRegex(alias("dccore.sw.unlockask"), r"hadd[^\n]*%pw|echo[^\n]*%pw|dccore\.sys[^\n]*%pw")
+
+    def test_a_typed_unlock_is_never_echoed(self):
+        for window in ("@DCCore", "@DCCore-console"):
+            self.assertIn("$iif($1 == unlock,unlock ********,$1-)", block("on *:INPUT:%s: {" % window))
+
+    def test_unlocked_sends_the_refused_command_again(self):
+        body = alias("dccore.sw.unlocked")
+        self.assertIn("hadd dccore.live sw.unlocked 1", body)
+        self.assertIn("dccore.send $dccore.sw.s(lastcommit)", body)
+        self.assertIn("dccore.sw.reask onconnect", body)
+        self.assertTrue(statements(body)[-1] == "dccore.send %what")
+        self.assertIn("hadd dccore.sws lastcommit setcommit confirm", alias("dccore.sw.confirm"))
+        self.assertIn("hadd dccore.sws lastcommit setcommit", alias("dccore.sw.apply"))
+
+    def test_no_password_or_a_wrong_one_drops_the_transaction_and_keeps_the_edits(self):
+        body = alias("dccore.sw.unlockdrop")
+        self.assertIn("dccore.send setabort", body)
+        self.assertIn("dccore.send $gettok(%what,1,32) abort", body)
+        self.assertIn("Your changes are still here.", body)
+        self.assertIn("dccore.sw.unlockdrop Not unlocked: $1-", alias("dccore.sw.unlockfailed"))
+
+    def test_the_unlock_lasts_one_connection(self):
+        self.assertIn("hdel dccore.live sw.unlocked", block("on *:CHATCLOSE: {"))
+        hello = alias("dccore.structured")
+        hello = hello[hello.index("if (%type == HELLO) {"):hello.index("if (%type == STATUS)")]
+        self.assertIn("hdel dccore.live sw.unlocked", hello)
+
+    # 2. SETAPPLIED: reload when the rehash has finished, not at SETDONE.
+
+    def test_a_save_reloads_at_setapplied(self):
+        done = alias("dccore.sw.done")
+        ok = done[done.index("if ($1 == ok) {"):done.index("if ($1 == error) {", done.index("if ($1 == ok) {"))]
+        written = ok[ok.index("if ($2 > 0) {"):]
+        written = written[:written.index("return") + len("return")]
+        self.assertIn("dccore.sw.rebase", written)
+        self.assertIn("hadd dccore.sws applying $2", written)
+        self.assertIn("Applying...", written)
+        self.assertNotIn("dccore.sw.load", written)
+        # a save that wrote nothing: no SETAPPLIED comes, reload at once
+        self.assertLess(ok.index("if ($2 > 0) {"), ok.rindex("dccore.sw.load"))
+        applied = alias("dccore.sw.line")
+        applied = applied[applied.index("if (%t == SETAPPLIED) {"):]
+        applied = applied[:applied.index("\n  }") + 4]
+        self.assertIn("Saved and applied", applied)
+        self.assertIn("dccore.sw.load", applied)
+        self.assertLess(applied.index("$dccore.sw.changed != $null"), applied.index("dccore.sw.load"))
+
+    def test_what_was_sent_is_the_baseline_until_then(self):
+        self.assertIn("hadd dccore.sws sent %keys", alias("dccore.sw.apply"))
+        self.assertIn("hadd dccore.sws d. $+ $gettok(%keys,%i,32) = $+ $dccore.sw.shownenc($gettok(%keys,%i,32))",
+                      alias("dccore.sw.rebase"))
+
+    # 3. A reply is the window's only when it is waiting for it.
+
+    def test_only_awaited_replies_reach_the_window(self):
+        wants = alias("dccore.sw.wants")
+        for kind in statements(alias("dccore.sw.types"))[0].split(" ", 1)[1].split():
+            self.assertRegex(wants, r"\b%s\b" % kind, kind)
+        for fragment in ('if (%t == CAPS) { return $iif(%phase == caps,$true,$false) }',
+                         'if ($istok(SETBEGIN SETF SETEND,%t,32)) { return $iif(%phase == load,$true,$false) }',
+                         'if ($istok(SRVBEGIN SRVLIST SRVCHAN SRVFOLDER SRVEND,%t,32)) { return '
+                         '$iif($dccore.sw.s(w.served) != $null,$true,$false) }',
+                         'if ($istok(BANBEGIN BANP BANT BANEND,%t,32)) { return '
+                         '$iif($dccore.sw.s(w.banlist) != $null,$true,$false) }',
+                         'if (%t == SETAPPLIED) { return $iif($dccore.sw.s(applying) != $null,$true,$false) }'):
+            self.assertIn(fragment, wants)
+        self.assertEqual(statements(wants)[-1], "return $false")
+        for flag, where in (("saving.srv", "dccore.sw.srv.save"), ("saving.oc", "dccore.sw.oc.save")):
+            self.assertIn("hadd dccore.sws %s 1" % flag, alias(where))
+
+    # 4. A reconnect keeps edits not saved yet.
+
+    def test_a_reconnect_keeps_unsaved_edits(self):
+        lost = alias("dccore.sw.lost")
+        self.assertIn("if ($dccore.sw.changed != $null) || ($dccore.sw.unsaved != $null) { hadd dccore.sws keep 1 }", lost)
+        self.assertLess(lost.index("keep 1"), lost.index("dccore.sw.start"))
+        self.assertIn("if (!$1) || (!$dccore.sw.dirty($gettok(%keys,%i,32))) { dccore.sw.fill $gettok(%keys,%i,32) }",
+                      alias("dccore.sw.fillall"))
+        line = alias("dccore.sw.line")
+        self.assertIn("dccore.sw.fillall $dccore.sw.s(keep)", line)
+        self.assertIn("Reconnected - your unsaved changes are kept; press Reload to discard them.", line)
+        self.assertIn("(!$dccore.sw.keeps($gettok(%asks,%i,32)))", alias("dccore.sw.page"))
+        self.assertIn("hdel dccore.sws keep", alias("dccore.sw.reload"))
+        self.assertNotIn("keep", alias("dccore.sw.start"))
+
+    # 5. The public changelog names one version for dccore.mrc.
+
+    def test_the_public_changelog_names_one_script_version(self):
+        with io.open(os.path.join(REPO_ROOT, "docs", "UPDATES-PUBLIC.md"), encoding="utf-8") as handle:
+            text = handle.read()
+        unreleased = text[text.index("## Unreleased"):]
+        unreleased = unreleased[:unreleased.index("\n## ", 5)]
+        versions = set(re.findall(r"`dccore\.mrc` to (\d+\.\d+\.\d+)", unreleased))
+        self.assertEqual(versions, {"1.19.0"})
 
 
 if __name__ == "__main__":

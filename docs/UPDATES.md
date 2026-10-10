@@ -63,10 +63,21 @@ was shorter than the text (found in the first real-mIRC test).
   for byte. The File locations question is asked from a timer like the other one. A Channels refusal is named
   "Channels" (each key's label is in the generated data as `n.<KEY>`), an "As set" colour shows all of itself, a new
   start forgets the old waits, and no `did -c` selects line 0 when `$findtok` finds nothing.
+- **What an audit of both halves found, fixed:** a paired-token console may now read but not change settings (phase
+  A's `LOCKED`): the window asks for the admin password once, masked, from a timer, sends `unlock` straight from the
+  prompt (a local variable, in no table, never echoed - and `unlock` typed in @DCCore is echoed as `********`), and on
+  `UNLOCKED` sends the refused command again (`setcommit`, or `setcommit confirm`, a commit, a resend); no password or
+  a wrong one aborts the open transaction and keeps the edits; the on-connect box says "Locked" with an **Unlock**
+  button instead of failing; the unlock lasts one connection. The page reloads at `SETAPPLIED` ("Saved - Applying...",
+  then "Saved and applied"), with what was sent as the baseline until then; a save that wrote nothing reloads at once.
+  A reply reaches the window only when it is waiting for it (`dccore.sw.wants`: its phase, or the wait or flag of its
+  request), so `settings` or `served` typed in @DCCore is shown there and leaves the window alone. A console reconnect
+  keeps edits not saved (only untouched controls are refreshed, pages with edits of their own are not asked again;
+  Reload discards them). The public changelog's colours bullet says 1.19.0, like the window's.
 - **Tests:** `tests/test_the_settings_window_generator.py` (21: the block is up to date and `--check` catches a stale
   one; every setting placed once or excluded; the mockup's tabs and pages; the generator refuses a key placed twice, a
   key with no place, a check too wide and a page that cannot fit; labels, units, choices and help are the bot's) and
-  `tests/test_the_mirc_settings_window.py` (87: the decoder and encoder, re-run in Python from the script's own
+  `tests/test_the_mirc_settings_window.py` (101: the decoder and encoder, re-run in Python from the script's own
   patterns, agree with `console_settings` on a battery of values, and a preview line comes out as the bot's line with
   no plain space for `echo` to collapse; every documented reply type is routed and has a branch; every command sent is
   a console command with a real subcommand; Apply sends setbegin, sets, setcommit and no `set` is ever sent outside a

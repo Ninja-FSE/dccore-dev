@@ -934,6 +934,17 @@ at the bottom.
   stay. Clearing the debug channel asks first, as the dashboard does. A change
   on **File locations** asks before it is sent. **OK** is Apply, then closes once
   the bot has saved; **Cancel** closes and sends nothing.
+- **The admin password, once per connection.** The script logs in with its
+  paired token, which may read the settings but not change them. The first
+  time a save needs it, the window asks for the admin password (masked), sends
+  `unlock` with it, and saves; the password is not kept, shown or logged. No
+  password, or a wrong one, saves nothing and keeps your edits. The on-connect
+  commands, which may hold a login, show only after **Unlock** beside them. A
+  new connection starts locked again.
+- **After a save** the status line says *Applying...* until the bot has
+  reloaded (it may first wait for transfers to finish), then *Saved and
+  applied*, and the page shows the bot's values. If the console reconnects
+  while you have changes not saved, they are kept: **Reload** discards them.
 - **Structured pages** save with buttons of their own: the on-connect commands
   on **IRC Server** (and **Resend now**), the served lists, their folders and
   each channel's list and mode on **Lists & channels** (rows such as
