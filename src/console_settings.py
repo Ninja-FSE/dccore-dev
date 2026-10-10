@@ -199,8 +199,30 @@ def _log(session, text):
 # consolecaps
 # --------------------------------------------------------------------------
 
+def machine_name():
+    """This computer's name, as one token - what mIRC's $host gives on the
+    same machine.
+
+    The settings window's "..." buttons pick a path on the computer mIRC
+    runs on, which is only the bot's if both are the same machine. The
+    console connection's address cannot say so: a DCC chat to a bot on the
+    same PC arrives from the public address the client advertises, not
+    127.0.0.1 - the buttons were greyed out on exactly that setup, the
+    common one. Spaces and colons, which would break the CAPS line's
+    tokens, become "-".
+    """
+    import socket
+    try:
+        name = socket.gethostname()
+    except OSError:
+        name = ""
+    name = "".join("-" if ch.isspace() or ch == ":" or ord(ch) < 32 else ch for ch in str(name))
+    return name or "-"
+
+
 def caps_line():
-    return "CAPS " + " ".join(f"{name}:{version}" for name, version in CAPS)
+    return ("CAPS " + " ".join(f"{name}:{version}" for name, version in CAPS)
+            + " machine:" + machine_name())
 
 
 def cmd_consolecaps(session, args):
@@ -446,7 +468,9 @@ def _commit(session, txn, confirmed, single):
     body = dict(changes)
     if clearing:
         body["confirm_debug_channel_removed"] = True
-    status, result = webserver.apply_settings_changes(body)
+    import adminchat
+    status, result = webserver.apply_settings_changes(
+        body, source=(session.nick, adminchat.CONSOLE_SOURCE))
     if status != 200:
         message = str((result or {}).get("error") or "The settings could not be saved.")
         _say(session, f"SETDONE error {message}", f"Nothing was saved: {message}")

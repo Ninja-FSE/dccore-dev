@@ -33,6 +33,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import adminchat  # noqa: E402
+import commands  # noqa: E402
 import console_settings  # noqa: E402
 import defaults as config  # noqa: E402
 import library  # noqa: E402
@@ -214,6 +215,49 @@ class ACharacterSplitAcrossTwoReadsSurvives(DCCoreTestCase):
         self.assertEqual(payload.index("\u00f6".encode("utf-8")), 1023)
         feed_while_reading(self, far, payload, session)
         self.assertEqual([l for l in seen if l.startswith("folders row 2")], [row])
+
+
+class TheRehashNamesWhoSaved(DCCoreTestCase):
+    """A save from the console is logged as the console's, not the dashboard's.
+
+    The console saves through the dashboard's own apply_settings_changes(),
+    and that used to start its rehash as "WEB-DASHBOARD" whoever asked: the
+    first save from the mIRC settings window was logged "Rehash triggered by
+    WEB-DASHBOARD from WEB-DASHBOARD".
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.started = threading.Event()
+        self.args = []
+
+        def record(*args, **kwargs):
+            self.args.append(args)
+            self.started.set()
+        real = commands.handle_rehash_request
+        commands.handle_rehash_request = record
+        self.addCleanup(setattr, commands, "handle_rehash_request", real)
+        real_save = settings_file.save
+        settings_file.save = lambda namespace, changes: {"written": sorted(changes), "unchanged": []}
+        self.addCleanup(setattr, settings_file, "save", real_save)
+
+    def rehash_source(self):
+        self.assertTrue(self.started.wait(10), "no rehash was started")
+        return self.args[-1]
+
+    def test_a_console_commit_is_the_console_s(self):
+        session = make_session(self)
+        run(session, "setbegin")
+        run(session, "set MAX_USER_QUEUE " + str(int(config.MAX_USER_QUEUE) + 1))
+        run(session, "setcommit")
+        self.assertEqual(self.rehash_source(), (session.nick, adminchat.CONSOLE_SOURCE))
+
+    def test_the_dashboard_is_still_the_dashboard_s(self):
+        status, _result = webserver.apply_settings_changes(
+            {"MAX_USER_QUEUE": str(int(config.MAX_USER_QUEUE) + 1)})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.rehash_source(),
+                         (webserver.WEB_DASHBOARD_SOURCE, webserver.WEB_DASHBOARD_SOURCE))
 
 
 class NotANumber(SettingsCase):

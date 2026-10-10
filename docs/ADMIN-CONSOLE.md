@@ -762,7 +762,7 @@ first field, and its last field is always a sentence to show.
 
 | line | when | fields |
 |---|---|---|
-| `DCCORE CAPS <name>:<version> ...` | `consolecaps` | today `settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1`. A bot without these commands answers `DCCORE OUT Unknown command: consolecaps. Type 'help'.` - say "update the bot" then. A version goes up when a field of that part moves; a part added later is a new name |
+| `DCCORE CAPS <name>:<version> ... machine:<name>` | `consolecaps` | today `settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1`, then `machine:` and this computer's name (spaces and colons as `-`), which a client compares with its own to know whether the bot is on the same machine - the console's address cannot tell, since a DCC chat to a bot on the same PC arrives from the public address. A bot without these commands answers `DCCORE OUT Unknown command: consolecaps. Type 'help'.` - say "update the bot" then. A version goes up when a field of that part moves; a part added later is a new name |
 | `DCCORE SETBEGIN <n>` / `DCCORE SETF <KEY> <type> <value>` / `DCCORE SETEND <n>` | `settings [<word>]` | one `SETF` per setting, in the Settings page's order; `type` is `str`, `int`, `float`, `bool` or `list`, the value last (empty: the line ends after the type - for `WEBUI_CONSOLE_ENABLED` that means "not set"). `ADMIN_PASSWORD_HASH` is never among them. Labels, help, units and choices are the dashboard's metadata, not sent here |
 | `DCCORE SETOPEN <dropped>` | `setbegin` | `dropped`: changes buffered by a transaction that was still open, now gone (0 normally) |
 | `DCCORE SETERR <KEY> <message>` | `set` refused | the Settings page's reason. `KEY` is the name as sent, uppercased |
