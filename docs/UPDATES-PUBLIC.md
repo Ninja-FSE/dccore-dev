@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed: two people asking for the same folder no longer break each other's download.** The second request could delete the archive the first person was waiting for, or a failed attempt could remove it, so the first person got "Could not send". The waiting archive is now sent to both. A finished archive is also no longer deleted while someone else's queue still needs it, and one is no longer left on disk because a different album has the same name.
+- **Fixed: a queued file from a folder you stopped sharing is no longer sent.** A file queued from a folder you then removed on the dashboard's Folders page is dropped when its turn comes, and the user is told it is no longer shared.
+- **Fixed: `@<bot>-remove` during your own folder's packing now stops the pack.** Before, the user was told the queue was removed, and the folder was packed and sent anyway. A file already being sent stays, and the notice now says so.
+- **Fixed: a nick change while a folder was packed no longer locks that user out until a restart,** and the archive goes to the new nick. Running out of file handles at the moment a send starts no longer loses a slot either.
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.

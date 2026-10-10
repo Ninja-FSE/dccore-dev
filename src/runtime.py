@@ -74,6 +74,15 @@ packer_thread = None
 pack_job = None
 pack_lock = threading.Lock()
 
+# Who the folder packer holds user_processing_lock for, from the moment it
+# claims a nick until it releases it or hands the archive to its send (#1268):
+# {"nick": ...}. irc.note_nick_change() moves the lock to the new nick and
+# renames this holder under queue_lock in the same step, so the packer
+# releases the key the lock was moved to - not the nick it started with, which
+# left the new nick locked out for good. Here, with pack_job, because a
+# !rehash reloads dcc.py while a pack runs.
+pack_owner = None
+
 # The stop-file watcher (#1065, stopping.py): one per process, kept here so a
 # !rehash cannot start a second.
 stop_watcher_thread = None

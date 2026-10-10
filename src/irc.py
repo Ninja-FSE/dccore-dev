@@ -981,6 +981,15 @@ def note_nick_change(old_nick, new_nick):
             lock.discard(old_key)
             lock.add(new_key)
             moved.append("user_processing_lock")
+        # The folder packer holds its claim by nick (#1268): told here, in the
+        # same hold of queue_lock, so it lets go of - and sends to - the nick
+        # the lock was just moved to. It used to release the old one, and the
+        # new nick stayed "already claimed" until a restart.
+        owner = runtime.pack_owner
+        if isinstance(owner, dict) and str(owner.get("nick", "")).lower() == old_key:
+            owner["nick"] = new_nick
+            if "pack_owner" not in moved:
+                moved.append("pack_owner")
 
         # hasattr(..., "append"), not isinstance(transfers, list) - this
         # module already shadows the builtin with its own `import list`
