@@ -50,6 +50,11 @@ def make_session(case, structured=True):
     return session
 
 
+def read_bytes(path):
+    with open(path, "rb") as handle:
+        return handle.read()
+
+
 def run(session, line):
     """One console line, as the reader loop hands it over; returns the
     replies it produced and keeps the bot's log out of the test output."""
@@ -244,7 +249,7 @@ class EverySettingRoundTrips(SettingsCase):
         path = settings_file.settings_path()
         with io.open(path, "w", encoding="utf-8") as handle:
             handle.write("NICKNAME = alfa\n")
-        before_file = open(path, "rb").read()
+        before_file = read_bytes(path)
         found = setf(self.snapshot())
         before = {name: getattr(config, name) for name in found}
 
@@ -258,7 +263,7 @@ class EverySettingRoundTrips(SettingsCase):
         self.assertEqual(reply, [f"DCCORE SETDONE ok 0 {len(found)} - Nothing changed; nothing was saved."])
         self.assertEqual(self.apply.calls, [])
         self.assertEqual({name: getattr(config, name) for name in found}, before)
-        self.assertEqual(open(path, "rb").read(), before_file)
+        self.assertEqual(read_bytes(path), before_file)
 
     def test_each_value_written_through_the_real_save_reads_back_the_same(self):
         """And not only "recognised": every decoded value, put through the
@@ -304,7 +309,7 @@ class ATransaction(SettingsCase):
 
         self.assertTrue(reply[0].startswith("DCCORE SETDONE ok 2 0 "), reply)
         self.assertEqual(saves, [["MAX_DCC_SLOTS", "MAX_USER_QUEUE"]])
-        written = settings_file.parse(io.open(settings_file.settings_path(), encoding="utf-8").read())
+        written = settings_file.parse(read_bytes(settings_file.settings_path()).decode("utf-8"))
         self.assertEqual((written["MAX_DCC_SLOTS"], written["MAX_USER_QUEUE"]), ("4", "12"))
 
     def test_a_bad_value_is_refused_by_name_and_nothing_is_saved(self):
@@ -494,7 +499,7 @@ class TheServedLists(ServedCase):
 
     def test_sent_back_unchanged_it_is_the_same_payload_and_nothing_is_written(self):
         self.write_lists()
-        before = open(library.lists_file(), "rb").read()
+        before = read_bytes(library.lists_file())
         payload = webserver.build_lists_payload()
         lines = run(self.session, "served")
         run(self.session, "served begin")
@@ -503,7 +508,7 @@ class TheServedLists(ServedCase):
         self.assertEqual(self.session.served_txn.lists, payload["lists"])
         self.assertEqual(run(self.session, "served commit"),
                          ["DCCORE SRVDONE unchanged Nothing changed; nothing was saved."])
-        self.assertEqual(open(library.lists_file(), "rb").read(), before)
+        self.assertEqual(read_bytes(library.lists_file()), before)
 
     def test_and_saved_anyway_through_the_dashboards_save_it_reads_back_identical(self):
         self.write_lists()
@@ -572,7 +577,7 @@ class TheServedFolders(ServedCase):
 
     def test_sent_back_unchanged_nothing_is_written(self):
         library.save_folders([library.Folder("All  of it", self.music), library.Folder("-", self.rock)])
-        before = open(library.folders_file(), "rb").read()
+        before = read_bytes(library.folders_file())
         lines = run(self.session, "folders")
         self.assertEqual(lines[0], "DCCORE FLDBEGIN 2 file")
         self.assertEqual(lines[-1], "DCCORE FLDEND 2")
@@ -582,7 +587,7 @@ class TheServedFolders(ServedCase):
         self.assertEqual(self.session.folders_txn.folders, webserver.build_folders_payload()["folders"])
         self.assertEqual(run(self.session, "folders commit"),
                          ["DCCORE FLDDONE unchanged Nothing changed; nothing was saved."])
-        self.assertEqual(open(library.folders_file(), "rb").read(), before)
+        self.assertEqual(read_bytes(library.folders_file()), before)
 
     def test_a_change_goes_through_the_dashboards_save(self):
         run(self.session, "folders begin")
@@ -610,7 +615,7 @@ class TheOnConnectCommands(DCCoreTestCase):
         on_connect.save([self.LOGIN, "MODE %nick% +x"], 3)
 
     def test_the_snapshot_and_its_round_trip(self):
-        before = open(on_connect.on_connect_file(), "rb").read()
+        before = read_bytes(on_connect.on_connect_file())
         lines = run(self.session, "onconnect")
         self.assertEqual(lines[0], f"DCCORE OCBEGIN 2 3 {on_connect.MAX_COMMANDS} {on_connect.MAX_DELAY_SECONDS}")
         self.assertEqual(lines[-1], "DCCORE OCEND 2")
@@ -621,7 +626,7 @@ class TheOnConnectCommands(DCCoreTestCase):
         self.assertEqual(self.session.onconnect_txn.commands, [self.LOGIN, "MODE %nick% +x"])
         self.assertEqual(run(self.session, "onconnect commit"),
                          ["DCCORE OCDONE unchanged Nothing changed; nothing was saved."])
-        self.assertEqual(open(on_connect.on_connect_file(), "rb").read(), before)
+        self.assertEqual(read_bytes(on_connect.on_connect_file()), before)
 
     def test_a_change_and_the_delay_go_through_the_dashboards_save(self):
         run(self.session, "onconnect begin")

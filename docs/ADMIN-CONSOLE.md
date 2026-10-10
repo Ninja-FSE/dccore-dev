@@ -700,8 +700,11 @@ which would then save at once. It says so instead.
 
 A plain session gets sentences; a structured one (after `hello`) gets the
 lines below. Whatever the bot's log shows of these commands, it is never a
-value: the rows of a transaction are not logged at all, and a commit logs the
-names of what it saved.
+value: it shows the command word, and the subcommand when it is a real one
+(`served begin`), never the rest of the line - not even after a typo; the rows
+of a transaction are not logged at all, and a commit logs the names of what it
+saved. A line may be up to 32768 characters once logged in (a `served folder`
+row with the longest label and path the dashboard allows fits), 4096 before.
 
 ### The value encoding
 
@@ -731,14 +734,23 @@ A value that is **not** the last field (a folder's label, a channel) must stay
 one word, so it is a *token*: the same encoding with every space written as
 `%20`, `-` for an empty value, and `%2D` for a value that is exactly `-`.
 
+Fields are separated by the ASCII space only. Any other whitespace - a
+no-break space, U+3000, a tab escaped as `%09` - is part of the value, so a
+label like `My Music` written with a no-break space comes back as it went.
+Lines are UTF-8.
+
 ### Machine-readable output
 
 Every snapshot is framed like the Download queues window's (`DQBEGIN` ...
 `DQEND`): a `...BEGIN` line, the rows, a `...END` line, both carrying the
-counts. A client checks that it received as many rows as the counts say
-before it lets anyone edit them - the session's 500-line outbox drops the
-oldest lines for a client that stops reading (`DCCORE DROPPED <n>` says so),
-and a page edited from half a snapshot would save half a configuration. A
+counts. A snapshot is queued without dropping a line: the bot waits for the
+session's 500-line outbox to have room rather than letting it drop the
+snapshot's first lines, keeping 100 lines free for the live feed. A client
+that takes nothing for 15 seconds is not waited for: the snapshot stops there,
+with a `DCCORE OUT` line saying so and no `...END`. So a client still checks
+that it received the `...BEGIN`, the `...END` and as many rows as their counts
+say before it lets anyone edit them - a page edited from half a snapshot would
+save half a configuration. A
 transaction's rows mirror its snapshot's rows word for word (`DCCORE SRVLIST`
 becomes `served list`, and so on), so a page sent back untouched is the
 snapshot's own lines, and saves nothing.
@@ -756,7 +768,7 @@ first field, and its last field is always a sentence to show.
 | `DCCORE SETERR <KEY> <message>` | `set` refused | the Settings page's reason. `KEY` is the name as sent, uppercased |
 | `DCCORE SETDONE ok <written> <unchanged> <restart> <message>` | `setcommit`, or `set` outside a transaction | saved in one call, rehash started; `unchanged` counts the values equal to the current ones, not written; `restart` is the comma-separated settings that need a restart of the bot (`WEBUI_*`, `SERVER`, `PORT`), or `-` |
 | `DCCORE SETDONE error <message>` | | nothing was saved; the transaction is closed |
-| `DCCORE SETDONE confirm <question>` | | the commit clears `DEBUG_CHANNEL`, and the bot leaves that channel at once: ask, then send `setcommit confirm` (or `setabort`). The transaction stays open meanwhile - after a lone `set` too |
+| `DCCORE SETDONE confirm <question>` | | the commit clears `DEBUG_CHANNEL`, and the bot leaves that channel at once: ask, then send `setcommit confirm` (or `setabort`). A transaction from `setbegin` stays open meanwhile. After a lone `set` the question holds only until the next line: anything but `setcommit confirm` or `setabort` first ends it with `SETDONE aborted <n>`, and is then run as usual - so a later lone `set` saves at once, as it says |
 | `DCCORE SETDONE aborted <n>` | `setabort` | `n` buffered changes dropped |
 | `DCCORE PVBEGIN 2` / `DCCORE PVLINE <advert\|notice> <line>` / `DCCORE PVEND 2` | `setpreview` | the sample advert and transfer notice, RAW - mIRC colour codes and all, not encoded - to echo as they are |
 | `DCCORE SRVBEGIN <lists> <source> <max>` / `DCCORE SRVLIST <n> <primary> <name>` / `DCCORE SRVCHAN <n> <channel> <mode>` / `DCCORE SRVFOLDER <n> <label> <path>` / `DCCORE SRVEND <lists> <channels> <folders>` | `served` | per list, in order: its `SRVLIST` (`n` from 1, `primary` `1` or `0`, the name last), then a `SRVCHAN` per channel bound to it (`channel` a token, `mode` `normal`, `quiet` or `request_only`), then a `SRVFOLDER` per folder (`label` a token, the path last). `source` is `file` (`lists.json`) or `implied` (none: one list over the served folders - sending it back unchanged does not create the file). `max` is how many lists there may be |

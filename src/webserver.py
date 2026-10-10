@@ -5322,7 +5322,9 @@ def build_console_command_result(command_text, remote_addr=None):
     through the LOG half above, a few seconds later. A caller of this
     function only ever gets what handle_command() produced synchronously.
     """
-    stripped = str(command_text or "").strip()
+    # ASCII whitespace only, as adminchat.handle_command() strips (#1264
+    # review): a settings value may end in a no-break space.
+    stripped = str(command_text or "").strip(" \t\r\n")
     if not stripped:
         return 400, {"error": "No command given."}
 
