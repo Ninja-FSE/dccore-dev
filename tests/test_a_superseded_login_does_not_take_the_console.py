@@ -25,6 +25,7 @@ from tests.support import DCCoreTestCase  # noqa: E402
 
 import adminchat  # noqa: E402
 import announce  # noqa: E402
+import platform_compat  # noqa: E402
 
 PASSWORD = "correct horse"
 
@@ -78,6 +79,14 @@ class ASupersededLogin(DCCoreTestCase):
         newer_near, newer_far = socket.socketpair()
         self.addCleanup(newer_far.close)
         serving = []
+        # _serve() turns on TCP keepalive. A Linux socket pair is AF_UNIX and
+        # refuses TCP options (EOPNOTSUPP), so the thread died before it took
+        # the prompt - red on the Ubuntu runners only; macOS has no
+        # TCP_KEEPIDLE and Windows pairs over TCP. The bot's real connections
+        # are TCP. What is tested here is the race, not keepalive.
+        real_keepalive = platform_compat.apply_keepalive
+        platform_compat.apply_keepalive = lambda sock, *a, **k: sock
+        self.addCleanup(setattr, platform_compat, "apply_keepalive", real_keepalive)
 
         def a_newer_connection():
             # The real _serve(), on its own thread as the bot runs it: it
