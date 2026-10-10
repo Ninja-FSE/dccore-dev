@@ -52,6 +52,7 @@ Tests: `tests/test_the_stores_write_their_newest_copy_last.py`, `test_a_failed_f
 `_serve()` superseding mid-check) and `test_a_typed_password_keeps_its_spaces.py` (the alias read statement by
 statement and run through the settings window's `mirc_enc` emulation, then decoded by the bot), each mutation-checked.
 `tests/test_the_mirc_settings_window.py` and the public changelog name 1.19.1.
+
 ### 🧪 The pack-cancel test waits for its own rar
 
 `test_a_cancel_terminates_that_process_and_removes_the_partial_archive` failed now and then in CI with
