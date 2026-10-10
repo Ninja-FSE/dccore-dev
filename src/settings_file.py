@@ -42,6 +42,7 @@ clearly which line it ignored.
 
 import configparser
 import io
+import math
 import os
 import sys
 import re
@@ -983,9 +984,15 @@ def coerce(name, raw, default, declared=None):
 
     if kind is float:
         try:
-            return float(text)
+            number = float(text)
         except ValueError:
             raise ValueError(f"expected a number, got {raw!r}") from None
+        # float() also reads "nan" and "inf" (#1264 review). No setting has a
+        # meaning for either - a delay of inf never ends, and nan compares
+        # false with everything, so it slips past every range check.
+        if not math.isfinite(number):
+            raise ValueError(f"expected a number, got {raw!r}")
+        return number
 
     if kind is list:
         return [part.strip() for part in text.split(",") if part.strip()]
@@ -1425,6 +1432,19 @@ def _check_writable(name, value, namespace, types):
             f"{name}: {value!r} would be read back as {back!r}.")
 
     return text, value
+
+
+def check_change(namespace, name, value):
+    """save()'s own check of ONE value, without writing anything: the value
+    it would be read back as, or SettingsWriteError with the reason.
+
+    For the admin console's settings transaction (#1264), which answers
+    each `set` with that setting's own error as it arrives, so the window
+    can mark the field - save() stops at the first bad value of a batch.
+    The same function save() runs on every value, so the two cannot
+    disagree about what is writable.
+    """
+    return _check_writable(name, value, namespace, declared_types(namespace))[1]
 
 
 # The explanation appended above a setting that was not already in the file.
