@@ -25,7 +25,8 @@ layer.
   `require_login()` first refuses (403, uncounted) any Host that is not an IP literal, `localhost`, a name in the new
   **`WEBUI_ALLOWED_HOSTS`** setting or `WEBUI_HOST` itself when that is a name, or - when the bind is not loopback -
   this machine's own names (`socket.gethostname()`, `getfqdn()`, `<short>.local`). The port is not compared. `*`
-  turns the check off.
+  turns the check off. The setting is on the Settings page and on the mIRC settings window's Web dashboard page
+  (`scripts/mirc/settings_window_layout.py`, `dccore.mrc` regenerated).
 - **Sessions could not be revoked.** The cookie was `{"authenticated": True}` and nothing else, so `/logout` only
   forgot it in one browser and a password change left every copied cookie valid until a restart. Each login now gets
   an id kept in a per-app table (`/logout` drops it; past `WEB_MAX_LIVE_SESSIONS = 100` the oldest goes) and an HMAC
@@ -49,6 +50,7 @@ layer.
   `WEBUI_ALLOWED_HOSTS` as a setting re-read on a rehash.
 - **Not changed here:** the DCC CHAT console (`adminchat.is_bad_ip()`/`note_bad_ip()`) has the same check-then-count
   shape; each attempt there needs its own DCC connection and session.
+
 ### 🧪 The pack-cancel test waits for its own rar
 
 `test_a_cancel_terminates_that_process_and_removes_the_partial_archive` failed now and then in CI with
