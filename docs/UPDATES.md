@@ -53,6 +53,235 @@ Tests: `tests/test_the_stores_write_their_newest_copy_last.py`, `test_a_failed_f
 statement and run through the settings window's `mirc_enc` emulation, then decoded by the bot), each mutation-checked.
 `tests/test_the_mirc_settings_window.py` and the public changelog name 1.19.1.
 
+### 🧰 Settings and startup: ten gaps from the platform audit (#1272)
+
+- **`ANNOUNCE_INTERVAL = 0` flooded.** `coerce()` took any int, so the Settings page saved 0 and `announce_worker()`
+  ran `time.sleep(0)`: one core busy, thousands of advert lines queued a second, an advert every `MSG_DELAY`.
+  `settings_file.MINIMUMS` (checked in `coerce()`) refuses anything below 60, and `announce.advert_interval()` floors
+  a value that reaches config without `coerce()` (admin_config.py), said once in the log.
+- **A multi-list install would not boot with the primary list's drive unplugged.** `oserve.startup()` and
+  `setup_check.library_report()` asked `library.folders()`, the primary list alone. Both ask
+  `library.every_folder()` now, refuse only when nothing is readable, and name each list with nothing readable.
+- **A case-only `LIST_BASE_NAME` change left the bot on its old list** (NTFS/APFS). The migration saw the new name
+  "exist" (the same file) and skipped it; it now renames a same-file target through a temporary name. The prune
+  matches case-insensitively where `platform_compat.ignores_case()` probes the filesystem to, and
+  `list.find_latest_list()` picks by the parsed date (`newest_by_date()`) rather than `sorted()[-1]`.
+- **One malformed `settings.conf` line made a configured install look like a first run**, and the setup page then
+  replaced the admin password before its save failed. `startup()` now re-reads the file (`settings_file.recheck()`)
+  when the REQUIRED settings look unconfigured, and exits 1 naming the file and line - or the refused value - without
+  offering the page. `apply_setup()` and `configure.py` ask `settings_file.check_save()` (save()'s checks, nothing
+  written) before writing admin_config.py; `configure.py` refuses before the first question and never shows a
+  traceback. The setup check fails on the read error too. The rehash path is untouched.
+- **The Settings page saved a `FILE_DIRECTORY` that did not exist**, and the next restart refused to boot.
+  `_check_writable()` refuses it (a quoted path is told so); blank stays allowed.
+- **`configure.py` and the Settings page took channels the browser setup refused** (`music`, `#music #rock`).
+  `settings_file.channels_problem()`/`channel_problem()` are the one rule: `coerce()` for `CHANNEL`, `DEBUG_CHANNEL`
+  and `BROADCAST_SEARCH_CHANNEL`, configure.py's prompt check, and `validate_setup_form()`.
+- **`LIST_BASE_NAME = DJ|Music` saved and broke every rebuild on Windows.** The #427 sanitiser moved to
+  `settings_file.sanitize_list_base_name()` (defaults.py delegates to it) and `coerce()` refuses a name it would
+  change, suggesting the sanitised one.
+- **`configure.py` refused a quoted folder path** (Explorer's *Copy as path*, drag-and-drop) and on POSIX could create
+  a folder named with the quotes. `settings_file.unquote_path()` strips one matching pair (and POSIX backslash
+  escapes); a path that is not absolute is asked again, never created.
+- **`CONSOLE_TIMESTAMP_FORMAT` needed a restart.** `platform_compat.follow_console_timestamp_format()` makes the
+  stamp read the live setting per line (oserve's `current_console_timestamp_format()`), validated, the previous
+  format kept on a refused one.
+- **Parse errors named the wrong line** (one too high) **and the internal `[__dccore__]` section.**
+  `_describe_parse_error()` gives the file's own line and text, and says "the top of the file".
+- **Writes are strict, a file that loaded before still loads.** The refusals above are for a save (Settings page,
+  console, configure.py, browser setup). Reading `settings.conf` goes through `settings_file.load_value()`: a
+  `CHANNEL` list keeps its valid channels and drops the rest (refused only when none is valid - otherwise
+  `#music, jazz`, which joined #music yesterday, would leave the REQUIRED `CHANNEL` blank and stop the bot); an
+  `ANNOUNCE_INTERVAL` under the minimum is raised to it rather than reset to 300; a `LIST_BASE_NAME` is kept where
+  this platform takes it as a file name (`_file_name_works_here()`) - renaming it would rename the published list -
+  and sanitised where it does not. Each is logged once with its line (`report["repaired"]`).
+- Help texts for `ANNOUNCE_INTERVAL`, `CHANNEL` and `LIST_BASE_NAME` (en/fr/es) and `settings.conf.sample` say the
+  new limits; INSTALL.md has a "Values that are refused" section.
+- **Tests:** `tests/test_the_settings_refuse_what_cannot_work.py`, `tests/test_settings_parse_errors_name_the_real_line.py`,
+  `tests/test_the_advert_interval_has_a_floor.py`, `tests/test_a_broken_settings_file_is_not_a_first_run.py`,
+  `tests/test_startup_serves_every_list.py`, `tests/test_a_case_only_list_rename.py` (each real case-insensitive
+  test probes the filesystem and skips, paired with a fake that runs everywhere - a hard link, or a stubbed probe),
+  `tests/test_configure_takes_a_pasted_folder_and_checks_channels.py`,
+  `tests/test_the_console_stamp_follows_the_setting.py`, `tests/test_an_older_settings_file_still_loads.py` (the
+  load-versus-write rule, including a boot from a mixed channel list). Three advert-worker tests now stub
+  `advert_interval()` instead of relying on a 0.01 s setting. 32/32 mutations caught.
+
+### 🧺 Serving files: one answer to "may this archive go", and claims that follow the nick (#1268)
+
+An audit of the send path found seven gaps. Three share one cause: a packed archive's disk name comes from its
+FOLDER (`_rar_archive_disk_name()`), so every nick that asked for the same album names one file, and nothing kept
+track of which rows still needed it.
+
+- **One answer, by path: `dcc.temp_archive_in_use(path, ignoring=())`** (caller holds `queue_lock`). An archive is
+  needed while any queue row names it as a packed archive, a transfer is sending it (its own `path`, or its
+  `queue_row`'s) or the pack is writing it. Every place that deletes one now asks it:
+  - **A second nick's `!rar` of a folder** no longer deletes the first nick's waiting archive as "stale", and a
+    failed or cancelled run can no longer remove it. A finished archive another row still names is reused: the row is
+    pointed at it and sent, and rar does not run. The decision, the stale-file removal and the pack's registration
+    happen under one hold of `queue_lock`, so a send's cleanup cannot remove the file in between. An archive nobody
+    names is still removed before a fresh pack, because `rar a` adds to an existing file.
+  - **The freeze sweep and the freeze timer** call `discard_orphaned_temp_archives()` as `!clearqueue` and REMOVE
+    already did. Their own loops deleted every archive the expired queue named, including one another nick's row
+    was waiting to send.
+  - **The send's cleanup and `discard_orphaned_temp_archives()`** compared the OFFERED name, which is the leaf alone
+    (`Greatest_Hits.rar`). A different artist's album with the same leaf name kept a delivered archive in
+    `TMP_ZIP_DIR` for good. They compare paths now. The send's cleanup also removes the file under the lock that
+    answered.
+  - The name a user is offered is unchanged (AutoQ, #1208/#1215).
+- **`socket.socket()` failing (EMFILE) in `start_dcc_send()`** sat above the guarded block, so the thread died with
+  the slot in `active_transfers`, the nick in `user_processing_lock` and a pack handoff's `rar_inprogress` latched.
+  Creating the listener, `prepare_listener()` and the bind loop are now guarded. A failure takes the no-free-port
+  path: everything is released, the row stays queued uncharged, and a retry follows 45 s later.
+- **A `/nick` while rar runs** left the new nick in `user_processing_lock` for good. The packer released the nick it
+  started with, and the archive was offered to the old nick. The claim is now held in a holder,
+  `runtime.pack_owner = {"nick": ...}`, which `irc.note_nick_change()` renames under `queue_lock` in the same step that
+  moves the lock. The packer's release, notices and handoff (send target and transfer row) use the current nick. A
+  poisoned row is dropped by identity under whichever key holds it.
+- **A queued file from a folder the operator stopped sharing** was still sent: only pack rows were re-checked
+  against the live library. `dcc.drop_an_unshared_row()` checks the row in the dispatcher after the claim, in section A
+  and section B, outside `queue_lock` (#605). An unshared row loses its claim, is dropped without a retry, and the
+  user is told the file is no longer shared (by name, never by path). The slot then goes to the next nick.
+  `may_still_be_sent()` exempts what the bot makes itself: archives and lists in `TMP_ZIP_DIR`, lists in
+  `LOCAL_LIST_DIR`, and list rows.
+- **The user's own `@<bot>-remove` (and CTCP REMOVE) during their pack** said "removed", and the pack then finished and
+  was sent. Removing the row now stops its pack: `cancel_pack(row=...)` stops only a pack of that row and marks it
+  `withdrawn`, so the packer neither settles the row again nor says the operator cancelled it. The packer also checks
+  the row is still queued, under the lock that claims the slot, before it hands the archive to a send. That covers
+  a remove after rar has ended, which the pack job no longer marks. A removed folder is not sent, and its archive is
+  removed unless another row needs it.
+  **A file being sent** stays in the queue until its send ends. The notice says so ("... except "X", which is being
+  sent to you right now"; for `-remove <file>`, "is being sent to you right now, so it cannot be removed").
+- **Tests:** `tests/test_serving_keeps_shared_archives_and_claims_straight.py` (37 tests, all with the real
+  dispatcher, packer, freeze timer and remove handlers; the stand-in rar; one class sends over loopback).
+  20/20 mutations caught. Adjusted: `tests/support.py`'s `queue_row()` puts its path inside `FILE_DIRECTORY`, as a
+  real row's is. `tests/test_commands.py`'s streamed-archive transfer now carries its row, as real claims do.
+  `tests/test_audit_rar_pack_and_slots.py` reads the release by the current holder.
+
+### 🗂️ Lists and search: eight findings from the audit (#1270)
+
+Found by a multi-agent audit of the list builder, the pack gate and the search, each confirmed by running the real
+functions.
+
+- **A failed publish lost the live list.** `_publish_artifacts()` recorded a pair for rollback only after both of its
+  renames had worked. When the second one failed (an AV scanner or an indexer holding the freshly written `.new` past
+  every retry), the live list had already been renamed to `.previous`, and nothing put it back. No
+  `<base>-*.txt` glob matches that name, so @find said there was no list, the advert was skipped and the counts read 0,
+  while the log said the previous list was still in use. A pair is now recorded the moment its old file is moved aside.
+  The audio-info rewrite goes through the same function.
+- **Every multi-disc album's `!rar` row was refused.** The builder writes one row for `Album/CD1` and `Album/CD2`,
+  naming `Album`. dcc.py's RAR_EXTENSIONS gate then looked only at `Album`'s own top level, found two folders and no
+  track, and refused it. The gate now uses `update_list.folder_holds_packable()`, which also looks through a chain of
+  disc folders (`_BOX_WORD_RE`). The row text is unchanged, so rows already queued in AutoQ still match. The builder's
+  side is `rar_row_folder()`: it cuts only where every segment after the cut is a disc folder, so a row always names a
+  folder the gate can follow (`Album/CD1/Bonus` now gets its own row instead of a refused `Album` one). The
+  RAR_EXTENSIONS help and `settings.conf.sample` say so.
+- **Rows for the library root and artist folders are no longer written.** A loose track in the scan folder or directly
+  in an artist folder published a row that dcc.py refuses as a root or artist root. Folders with fewer than three
+  segments (`<label>/<artist>/<album>`) get no row, and a list whose only packable folders are those ships no album
+  list. Their tracks are still listed by name.
+- **The file-count cache keeps one entry per list.** It held a single entry and cleared it before storing the next,
+  so with two lists every advert cycle and every Stats poll read every list end to end again. Each list now keeps its
+  own entry, replaced only when its own files change, with at most 16 kept.
+- **`-que` and `-stats` report the channel's own list.** Both asked for the primary list's count, date and size, so a
+  channel bound to another list heard two library sizes from one bot. They now go through
+  `library.list_name_for_request(target)`, as the advert does. A private message is still the primary.
+- **@find matches a name in either Unicode form.** A library copied from a Mac has decomposed accents (NFD); an IRC
+  client sends composed ones (NFC). The search words and the searched part of each row are NFC-normalised for the
+  comparison only (`list.search_form()`). The list keeps the filesystem's bytes, and a pure-ASCII row costs nothing
+  extra.
+- **The scan does not enter a Windows directory junction.** A junction is not a symlink to Python, so the walk entered
+  it. One pointing at an ancestor was walked 63 levels deep until Windows raised OSError 22, and every rebuild after
+  that kept the previous index. `update_list.is_link_dir()` treats a junction like a symlink: `DirEntry.is_junction()`
+  on Python 3.12+, the reparse tag before it.
+- **Folders that differ only in case stay contiguous.** On Linux `Band/Live` and `band/Live` are two folders. Their
+  rows interleaved by filename, so the list repeated both headings once per row, each with the whole folder's summary.
+  The sort now breaks the case-insensitive tie on the exact folder, then the exact name (`_row_order()`).
+- **Tests:** `tests/test_a_failed_publish_keeps_the_live_list.py` (4), `tests/test_every_album_row_is_one_the_bot_packs.py`
+  (11, every published row fed to the real `dcc.handle_download_request()`), `tests/test_each_list_keeps_its_own_count.py`
+  (7), `tests/test_a_search_matches_either_unicode_form.py` (5), `tests/test_the_scan_does_not_follow_a_junction.py`
+  (6: fakes that run everywhere, plus a real junction on Windows), `tests/test_folders_differing_in_case_stay_apart.py`
+  (3: a stand-in walk everywhere, real folders where the filesystem tells case apart). Five existing tests updated for
+  the new rules.
+
+### 🧭 Fetching from bots: each answer, file and list stays with what it belongs to (#1269)
+
+Four findings from an audit of fetching from other bots, each confirmed by running the real functions.
+
+- **A late file answer reaches its pending row - the #1244 claim actually runs now.** #1244 checks a "file" row
+  back in "pending" (a busy reply, silence, a full disk, a restart, a passive offer with every slot in use) by its
+  exact name before a bot-alone folder or list row can take the offer. It tested `offered_at`, and every one of
+  those ways back to pending sets `offered_at=None`, so it never matched: a folder row offered to the same bot
+  still took the file, and without one the answer was refused as unsolicited. Its tests built a state no real path
+  produces. A row now carries `asked_before` (`dcc_fetch._note_it_was_asked()`, set on each of those paths while the
+  request had really gone out), and the claim tests that. A line dropped from the send queue before it went out
+  (`requests_not_sent()`) does not count as asked. The #1244 tests now reach "pending" through the real busy reply.
+- **Deleting an old finished fetch no longer deletes a newer fetch's file.** Once the operator moved a finished
+  `cover.jpg` out of the Downloads folder, a later fetch of the same name from another bot was promoted to the same
+  plain name, and both rows named one file - deleting the old row removed the new one's file. The promotion now
+  leaves a plain name another row still names alone (`_promote_clean_filename(..., queue=)`, under the fetch lock),
+  and the single and batch deletes leave a file another row still names (`another_row_holds_file_locked()`), for
+  histories written before this.
+- **A list request stays in its own channel.** The dispatcher's fallback to another channel the bot is in is right
+  for a file, not for a list whose channel means something. A second channel's request (`secondary_channel_tick()`)
+  that fell back to the bot's main channel came back with the main list, was merged as that channel's own, and
+  dropped the main and RAR lists and their index rows. A main-list refresh that fell back to a channel held as a
+  second channel's list replaced Main with it and dropped that channel's marker. Now a second channel's request goes
+  out in that channel or fails, and a main refresh is not sent to a channel held as a second channel's
+  (`dcc_fetch._list_channel_refusal()`). `list_fetch._install_fetched_list()` refuses both answers too, before
+  anything is extracted (`held_channel_role()`), so what is held stays as it was. A main refresh still falls back to
+  a channel nothing held came from, as #1232 does.
+- **Purging a bot removes its second channels' lists.** `forget_bot()` removed only the bot's own folder;
+  `lists/_channels/<bot>/` (up to `MAX_LIST_TEXT_SIZE` per channel) stayed on disk for good, from a single purge and
+  the bulk purges alike. It is removed now, with its folder tables, and the purge reports it if it could not be.
+- **Tests:** `tests/test_fetching_keeps_each_answer_its_own.py` (17 tests) and the rewritten #1244 tests in
+  `tests/test_dcc_fetch.py`. 13/13 mutations caught.
+
+### 🔌 IRC connection audit: late channel sync, the DCC address on reconnect, given-up channels, casemapping (#1271)
+
+Four findings from the 2026-10-10 audit of the IRC connection, each confirmed by running the real `irc_loop()`.
+
+- **Channel sync is claimed when the member list arrives late.** When every configured channel refused the first
+  JOIN (a +r channel and an X login slower than the JOIN, or bans at connect), the watchdog activated with
+  `channel_users` empty and rightly did not set `config.bot_joined_channel`. The activation runs once per
+  connection, so when the rejoin on the advert timer got the bot in and NAMES arrived, nothing set the flag until
+  the next reconnect. Until then cross-bot fetches waited as "joining", debug-channel lines piled up unsent, users
+  who left were never frozen, and auto-refetch stayed off. The claim is now `irc.claim_channel_sync()`, shared by
+  the activation and the 366 handler. An activation that finds nobody records that its connection is waiting
+  (`runtime.channel_sync_waiting`), and the first End of NAMES on that connection claims sync and starts what the
+  activation would have started. The ordinary path is unchanged: a 366 before the activation's settle is the
+  activation's to claim, and `runtime.channel_sync_lock` makes the claim once per connection.
+- **The DCC address is looked up again on reconnect.** It was looked up once, before the reconnect loop, and
+  written into `MY_IP_OR_DOCK`, the name that means "pinned", so it could never be looked up again. A bot that
+  started before the network was up refused every send until a restart, and one whose ISP reconnect brought a new
+  public address kept offering the old one. The detected address is now kept in `runtime.dcc_address_detected`, and
+  `MY_IP_OR_DOCK` is only ever the operator's pin. `dcc.dcc_address()` returns the pin or the detection, and
+  `get_public_ip_long()`, `is_offerable_to_strangers()` and the console's DCC CHAT offer read it.
+  `irc.refresh_dcc_address()` runs at startup and again (off the read thread) at every registration when nothing
+  is pinned. It looks again when the last lookup failed or found something more than 300 s ago
+  (`DCC_ADDRESS_RECHECK_SECONDS`), so a flapping link does not hammer the lookup service. A failed lookup keeps the
+  address found before it.
+- **A channel given up on forgets its members.** After a kick from a configured channel, the member list is kept
+  for the rejoin. When the rejoin was refused `REJOIN_ATTEMPTS` times, the list stayed for the rest of the
+  connection, so everyone in it stayed "present" to `dcc.py`: offered to, never frozen, never reaped. The refusal
+  that uses up the last attempt now drops it (`note_join_refused()`, every numeric). A kick with `REJOIN_ATTEMPTS`
+  at 0, where no rejoin is coming, drops it at once (`note_kicked_from()`).
+- **Channel names are compared under the server's casemapping.** On ircu, and on any server whose 005 says
+  `CASEMAPPING=rfc1459`, `#music[1]` and `#music{1}` are one channel. `str.lower()` does not fold those, so a
+  configured `#music[1]` that the server spells `#music{1}` was never confirmed. The advert skipped it, the rejoin
+  went out every advert cycle, and its members were filed under a key no per-channel lookup used. `irc.irc_lower()`
+  folds by the 005 `CASEMAPPING` (`rfc1459` by default and reset at each connection, plus `strict-rfc1459` and
+  `ascii`; an unknown mapping folds like `ascii`). `irc.channel_key()` maps any spelling of a configured channel to
+  the configured one, lower-cased, which is the key every other module already looks up. It is used for
+  `channel_users`, `kicked_channels`, the 353/366/JOIN/PART/KICK/refusal handlers, the per-channel advert
+  signature, `!debugnames`, the debug channel's de-duplication, `dcc.frozen_users_channel_is_synced()`,
+  `dcc_fetch.bot_in_our_channel()` and DCCore Chat's WHO rounds. A channel PRIVMSG's target is carried on in the
+  configured spelling. Nick comparisons still use `str.lower()`.
+- **Tests:** `tests/test_audit_irc_connection.py` (29 tests). These drive `irc_loop()` against scripted sockets for
+  each finding, and test `claim_channel_sync()`, `refresh_dcc_address()`, `dcc_address()`, `irc_lower()`,
+  `isupport_casemapping()`, `channel_key()` and the WHO round directly. 13/13 mutations caught.
+  `tests/test_list_freshness.py` and `tests/test_the_sweep_could_not_see_a_pm_requester.py` now read the claim's
+  order in `claim_channel_sync()`. `tests/support.py` resets the new runtime values between tests.
+
 ### 🧪 The pack-cancel test waits for its own rar
 
 `test_a_cancel_terminates_that_process_and_removes_the_partial_archive` failed now and then in CI with
