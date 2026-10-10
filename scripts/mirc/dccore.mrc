@@ -4266,7 +4266,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.RAR_EXTENSIONS 2213 list 1 2212
   hadd dccore.swm pg.RAR_EXTENSIONS 9
   hadd dccore.swm n.RAR_EXTENSIONS File types a folder needs to be !rar-packable
-  hadd dccore.swm h.RAR_EXTENSIONS A folder can be requested as a .rar only if it contains one of these file types. The default is music formats~2C so albums can be packed but a folder with one big film cannot.
+  hadd dccore.swm h.RAR_EXTENSIONS A folder can be requested as a .rar only if it contains one of these file types~2C directly or in its disc folders (CD1~2C Disc 2). The default is music formats~2C so albums can be packed but a folder with one big film cannot.
   hadd dccore.swm k.RAR_BINARY 2217 str 1 2216
   hadd dccore.swm pg.RAR_BINARY 9
   hadd dccore.swm n.RAR_BINARY RAR binary path

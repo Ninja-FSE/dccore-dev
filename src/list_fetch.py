@@ -326,6 +326,66 @@ def secondary_channel_extract_dir(bot, channel):
     return candidate
 
 
+def secondary_channels_dir(bot):
+    """The folder holding every secondary channel's list for `bot`
+    (lists/_channels/<bot>/), or None when the nick does not give a folder
+    of its own there (#1269). forget_bot() removes it: a purge removed only
+    list_extract_dir(bot), and a second channel's list - up to
+    MAX_LIST_TEXT_SIZE each - stayed on disk with nothing pointing at it."""
+    base = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+    channels_root = os.path.join(base, "lists", "_channels")
+    candidate = os.path.join(channels_root, _sanitize_bot_dir_name(bot).lower())
+    if not dcc.is_safe_path(channels_root, candidate):
+        return None
+    if os.path.normcase(os.path.abspath(candidate)) == os.path.normcase(os.path.abspath(channels_root)):
+        return None
+    return candidate
+
+
+def held_channel_role(bot, channel):
+    """What `channel` is to the list held for `bot` (#1269): "primary" when
+    the bot's main list came from it, "secondary" when a second channel's
+    list from it is held beside that, None when nothing held came from it
+    (or nothing is held at all).
+
+    Read without _lock(): the dispatcher asks it, and an extraction holds
+    that lock for seconds. An entry is replaced whole, never edited in
+    place, so one read sees one entry."""
+    wanted = str(channel or "").strip().lower()
+    if not wanted:
+        return None
+    entry = (getattr(config, "fetched_bot_lists", None) or {}).get(str(bot).strip().lower())
+    if not isinstance(entry, dict):
+        return None
+    if str(entry.get("channel") or "").strip().lower() == wanted:
+        return "primary"
+    for info in (entry.get("lists") or {}).values():
+        if isinstance(info, dict) and str(info.get("channel") or "").strip().lower() == wanted:
+            return "secondary"
+    return None
+
+
+def _wrong_channel_for_this_list(bot, channel, secondary):
+    """Why a fetched list must not be installed as the kind of list it was
+    asked for as, or None (#1269). A list is bound to the channel it came
+    from. A second channel's request that went out in the bot's MAIN
+    channel brings back the main list: merged as that channel's own, it
+    took the main and RAR markers for its own and dropped them. A main-list
+    refresh that went out in a channel already held as a second channel's
+    brings back that channel's list: installed as the main list, it
+    replaced Main and dropped the second channel's marker. Either way the
+    answer is refused before anything is extracted, and what is held stays
+    as it was."""
+    role = held_channel_role(bot, channel)
+    if secondary and role == "primary":
+        return (f"{channel} is where {bot}'s main list comes from, so its answer there is not "
+                f"a second channel's list - kept what is held")
+    if not secondary and role == "secondary":
+        return (f"{bot}'s list from {channel} is held as a second channel's list, so its answer "
+                f"there is not the main list - kept what is held (purge the bot to start over)")
+    return None
+
+
 def _extract_dir_for(bot, channel, secondary=False):
     """Which directory THIS fetch extracts into - list_extract_dir(bot) for
     an ordinary/primary fetch, secondary_channel_extract_dir() for a
@@ -2052,6 +2112,13 @@ def _install_fetched_list(bot, zip_path, extract_dir, channel=None, secondary=Fa
     # Normalised once, used everywhere below it matters.
     channel = (str(channel).strip() or None) if channel else None
 
+    # Before anything is extracted (#1269): the extraction would already
+    # have replaced the files the held list points at.
+    reason = _wrong_channel_for_this_list(bot, channel, secondary)
+    if reason:
+        print(f"[LIST-FETCH] Did not install {bot}'s list from {channel}: {reason}.")
+        return False, reason
+
     list_path, reason = _extract_and_locate_list_file(zip_path, extract_dir)
     if reason:
         print(f"[LIST-FETCH] Rejected list zip from {bot}: {reason}")
@@ -2425,6 +2492,10 @@ def forget_bot(bot):
         # Its folder tables go with it (#1128): nothing can page this list
         # again, and they would only hold a place among the few kept.
         list_mod.forget_folder_tables(under=list_extract_dir(bot))
+        # Its second channels' lists too (#1269), which live outside it.
+        channels_dir = secondary_channels_dir(bot)
+        if channels_dir:
+            list_mod.forget_folder_tables(under=channels_dir)
 
     # Off the lock: a slow rmtree on a network-mounted FETCHED_FILES_DIR must
     # not hold up an unrelated fetch that only needs the dict, and the entry
@@ -2443,6 +2514,14 @@ def forget_bot(bot):
     if os.path.exists(platform_compat.long_path(extract)):
         print(f"[LIST-FETCH] Forgot {bot}'s list, but {extract!r} could not "
               f"be removed - delete it by hand to reclaim the space.")
+    # Its second channels' lists (#1269): lists/_channels/<bot>/, a sibling
+    # of the bot's own folder (secondary_channel_extract_dir()), so the
+    # rmtree above never reached it.
+    if channels_dir:
+        shutil.rmtree(platform_compat.long_path(channels_dir), ignore_errors=True)
+        if os.path.exists(platform_compat.long_path(channels_dir)):
+            print(f"[LIST-FETCH] Forgot {bot}'s list, but {channels_dir!r} could not "
+                  f"be removed - delete it by hand to reclaim the space.")
 
     # EVERY LIST THE ARCHIVE HELD, not just the main one. _measure_extra_list()
     # indexes each further list under index_key(bot, marker) - "<nick>/<marker>"
@@ -2534,7 +2613,9 @@ def purge_fetched_list(source):
     # bulk purge that calls it in a loop. A per-list purge has one status line
     # to fill and an operator watching it, so it asks the question again here
     # rather than reporting a success the disk does not agree with.
-    if os.path.exists(platform_compat.long_path(list_extract_dir(nick))):
+    channels_dir = secondary_channels_dir(nick)
+    if (os.path.exists(platform_compat.long_path(list_extract_dir(nick)))
+            or (channels_dir and os.path.exists(platform_compat.long_path(channels_dir)))):
         return True, (f"Removed {nick} from the list browser, but some files "
                       f"could not be deleted - see the log.")
     return True, f"Purged everything held from {nick}."
