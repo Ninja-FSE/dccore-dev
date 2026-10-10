@@ -4,6 +4,34 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🛡️ A request gets the file it names, and only that
+
+Reported privately and fixed before the release, because each of these is one line any peer can send.
+
+- **What was wrong (Windows).** A requested name with a `:` in it opened an NTFS alternate data stream of a library
+  file. `names_a_remote_or_absolute_path()` refuses drive and UNC prefixes only, and a stream sits inside the library
+  as far as `is_safe_path()` can tell, so it was offered and sent. Windows writes such a stream on every downloaded
+  file, recording where it came from. A name ending in a dot or a space opened the file under a second spelling,
+  past the "already queued" check (#1077) and under a different download-counter key.
+- **Fix.** A new `dcc.names_a_hidden_part_of_a_file()` refuses, on the request's text, a component holding a `:` or
+  ending in a dot or a space - on Windows only, since no Windows file can be named that way while on Linux and macOS
+  both are ordinary characters (`Live: 1999.flac`, `R.E.M.`). A `..namedfork` component (a macOS resource fork) is
+  refused everywhere. A second gate, `dcc.resolves_to_a_stream()`, checks the path the lookup settled on, whichever
+  of the memories, the list scan or the walk produced it. Device names needed nothing: every request goes through
+  `long_path()`, whose `\\?\` prefix opens a file by the literal name.
+- **What was wrong (lists).** A list archive is matched on its last path component, and a non-primary list's
+  directory sits inside the primary's. A name with that list's folder in front of it passed the containment check,
+  so a channel bound to the primary list could be sent another list's archive (#26). Now only a file directly in the
+  requesting channel's own list directory is served.
+- **What was wrong (resume).** A DCC RESUME at or past the end of the file is clamped to the size, on purpose, so the
+  receiver's transfer finishes. That send moves no bytes, yet it was counted in the files-sent total, credited to the
+  download counter and the transfer record, offered to the speed record and announced as `Sent:` - the same
+  no-bandwidth inflation #656 closed for a forged acknowledgement. It is still answered and its queue row still
+  settled as delivered, but nothing is counted or announced.
+- **Tests:** `tests/test_a_request_gets_the_file_it_names_and_nothing_else.py` (20 tests). The stream cases go
+  through `handle_download_request()` with a real stream on Windows and a stand-in file elsewhere, so they run on
+  every runner; the resume cases run the real `start_dcc_send()` against fake sockets. 13/13 mutations caught.
+
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 
 ### 🧹 Purge every held list, to clear a channel stuck wrong from before v1.16 (#1260)

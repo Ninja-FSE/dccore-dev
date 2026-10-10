@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (security): a download request could reach more than the file it names.** On Windows, a specially written name could read hidden data stored alongside a shared file, including where the file was downloaded from. With several lists, a channel could be sent another channel's list. Such requests are now refused. A resumed download that sent nothing is no longer counted or announced as sent.
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.

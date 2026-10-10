@@ -67,6 +67,64 @@ def names_a_remote_or_absolute_path(name, windows=None):
     return False
 
 
+def names_a_hidden_part_of_a_file(name, windows=None):
+    """True for a requested name that would open something other than the file
+    the list names: a hidden stream or fork of it, or the file under a second
+    spelling.
+
+    The containment check cannot see these. They resolve INSIDE the library,
+    to a path that exists, because they are a file of the library read a
+    different way:
+
+    - On Windows, a ':' in a name component addresses an NTFS alternate data
+      stream ("track.flac:Zone.Identifier", or "track.flac::$DATA" for the
+      main stream under another name). A stream is never in any list, and the
+      one Windows writes on every downloaded file records where the file was
+      downloaded from - the operator's own browsing, URL and all.
+    - On Windows, a component that ends in a dot or a space is trimmed by the
+      file system before it is opened, so "track.flac." opens "track.flac"
+      under a name no list ever wrote, and the queue's "already asked for"
+      check (#1077) and the download counter both see a different file.
+    - On macOS, a "..namedfork" component opens a file's resource fork.
+
+    No Windows file can have ':' in its name or end in a dot or a space, so
+    no legitimate request on Windows ever contains them, and refusing them
+    there takes nothing away. On Linux and macOS both are ordinary, legal
+    characters ("Live: 1999.flac", "R.E.M."), so those two are refused only
+    on Windows (`windows` overrides, for tests, as it does above).
+    "..namedfork" is refused everywhere: no library holds a folder by that
+    name. Device names ("NUL", "CON") need nothing here - every file system
+    call on a request goes through platform_compat.long_path(), whose \\\\?\\
+    prefix makes Windows look for a file by that literal name instead.
+    """
+    if windows is None:
+        windows = platform_compat.IS_WINDOWS
+    for part in re.split(r"[\\/]", str(name)):
+        if part in ("", ".", ".."):
+            continue
+        if part.lower() == "..namedfork":
+            return True
+        if windows and (":" in part or part[-1] in ". "):
+            return True
+    return False
+
+
+def resolves_to_a_stream(path, windows=None):
+    """True for a resolved path whose part after the drive holds a ':'.
+
+    The second gate behind names_a_hidden_part_of_a_file(): that one reads
+    the request, this reads the path the lookup settled on, whichever of the
+    memories, the list scan or the walk produced it. On Windows a ':' after
+    the drive can only be an alternate data stream.
+    """
+    if windows is None:
+        windows = platform_compat.IS_WINDOWS
+    if not windows:
+        return False
+    import ntpath
+    return ":" in ntpath.splitdrive(str(path))[1]
+
+
 # A LIBRARY-WIDE LOOKUP IS THE EXPENSIVE THING A REQUEST CAN ASK FOR (#580).
 # A name that is not in the first folder's root makes handle_download_request()
 # read every published list and then walk every configured folder; each request
@@ -1212,6 +1270,12 @@ class _ShortSend(Exception):
     reported as "[DB ERROR] Could not increment the sharing statistics" would
     send the next reader looking for a database fault that never happened.
     """
+
+
+class _AlreadyHeld(Exception):
+    """Raised, like _ShortSend, to skip the completion bookkeeping - for a send
+    that completed with nothing on the wire because the receiver resumed at
+    the end of the file. See `already_held` in start_dcc_send()."""
 
 
 def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, shown_name=None):
@@ -3457,6 +3521,13 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             print(f"[SECURITY] Refused {user}'s request: {requested_file!r} names a location, not a file in the library.")
             announce.send_dcc_error(user, "invalid_path", target_chan)
             return
+        # A stream, a fork or a trimmed second spelling of a library file:
+        # inside the library, so the containment check below would let it
+        # through. Refused on the text too, before any file system call.
+        if names_a_hidden_part_of_a_file(requested_file):
+            print(f"[SECURITY] Refused {user}'s request: {requested_file!r} names a hidden part of a file, not a file in the library.")
+            announce.send_dcc_error(user, "invalid_path", target_chan)
+            return
         requested_file = requested_file.lstrip("/")
 
         # The master list lives in LOCAL_LIST_DIR, everything else in the
@@ -3488,6 +3559,20 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # whole of what send_file_list() just offered them.
             base_directory = os.path.abspath(list_mod.list_dir(wanted_list))
             full_path = os.path.join(base_directory, requested_file)
+            # THIS list's archive and no other. A list archive is asked for by
+            # its file name alone - that is all send_file_list() offers - but
+            # the name is matched on its last component, and a non-primary
+            # list's directory sits INSIDE the primary's. So a name with a
+            # folder in front of it passed the containment check below and
+            # reached another list's archive - one bound to channels this
+            # request did not come from (#26). Only a file directly in this
+            # list's own directory is served.
+            if (os.path.normcase(os.path.dirname(os.path.abspath(full_path)))
+                    != os.path.normcase(base_directory)):
+                print(f"[SECURITY] Refused {user}'s request: {requested_file!r} "
+                      f"is not an archive of the list this channel is bound to.")
+                announce.send_dcc_error(user, "invalid_path", target_chan)
+                return
             # One root per list, and deliberately so: a list's files live in
             # exactly one place regardless of how many folders it spans.
             search_roots = [base_directory]
@@ -3780,6 +3865,12 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # not how any one of them is tested. A path outside all of them is
         # still refused exactly as before.
         if not any(is_safe_path(root, full_path) for root in search_roots):
+            announce.send_dcc_error(user, "invalid_path", target_chan)
+            return
+        # Inside the library is not enough: a stream of a library file is
+        # inside it too. Whatever produced full_path, it must name a file.
+        if resolves_to_a_stream(full_path):
+            print(f"[SECURITY] Refused {user}'s request: {full_path!r} is a stream of a file, not a file.")
             announce.send_dcc_error(user, "invalid_path", target_chan)
             return
 
@@ -4140,6 +4231,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
     # Only a send loop that ran to completion counts as delivered. A socket timeout, a
     # refused connection or a half-finished stream must not consume the queue row.
     transfer_completed = False
+    # A completed send that moved nothing: see where it is set below.
+    already_held = False
 
     # #430: `irc_sock` is whatever socket was live when the caller captured
     # it - which can be several minutes stale by the time this actually
@@ -4557,6 +4650,18 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         else:
             final_ack_at = _wait_for_final_ack(conn, acks, file_size)
         transfer_completed = final_ack_at is not None
+        # A RESUME AT THE END OF THE FILE COMPLETES WITH NOTHING SENT.
+        # handle_resume_request() clamps a position past the end to the size,
+        # on purpose: the receiver already holds all of it, and the ACCEPT
+        # lets its transfer finish instead of hanging. That is still the
+        # outcome here - the queue row is settled as delivered - but nothing
+        # moved, so nothing is credited: not the files-sent total, not the
+        # download counter, not the transfer record, not the speed record,
+        # and no "Sent:" line in the channel. Otherwise a peer could raise
+        # any file's count, and the bot's totals, without a byte of traffic -
+        # what #656 closed for a forged final acknowledgement.
+        already_held = bool(transfer_completed and resume_offset
+                            and resume_offset >= file_size)
         if not transfer_completed and not short_read:
             if not acks.received_any:
                 report_failure(user, file_name,
@@ -4594,7 +4699,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         # was. It also fed the speed RECORD and the advert, so the figure the
         # channel saw was wrong in the same direction.
         transfer_finished_at = final_ack_at if transfer_completed else time.time()
-        if transfer_completed:
+        if already_held:
+            print(f"[DCC-RESUME] {user} resumed {file_name} at its end and "
+                  f"already held all {file_size} bytes; nothing was sent.")
+        elif transfer_completed:
             print(f"[DCC-SUCCESS] Sent the whole file to {user}; the receiver "
                   f"acknowledged all {file_size} bytes.")
         # The 1.5-second "let mIRC close its file calmly" pause is gone: the
@@ -4630,6 +4738,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             # the elapsed time covers a transfer that stopped early.
             if not transfer_completed:
                 raise _ShortSend()
+            if already_held:
+                raise _AlreadyHeld()
             stats = db.update_stats_on_complete(file_size - resume_offset)
             print(f"[DB COUNTER] Statistics updated on disk. (Files sent: {stats[0]})")
 
@@ -4670,6 +4780,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
                   f"short at {bytes_sent} of {file_size} bytes. A partial send "
                   f"is not a completed transfer, so it is left out of the "
                   f"totals, the download counter and the speed record.")
+        except _AlreadyHeld:
+            print(f"[DB COUNTER] Not counted: {user} already held all "
+                  f"{file_size} bytes of {file_name} and resumed at the end, "
+                  f"so nothing was sent.")
         except Exception as db_err:
             print(f"[DB ERROR] Could not increment the sharing statistics through the db module: {db_err}")
         # ---------------------------------------------------------------------
@@ -4780,11 +4894,13 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         # part-way has moved real bytes in real time, so its rate looks like a
         # legitimate sample and is not one.
         if transfer_completed:
-            try:
-                import stats_mgr as stats_mgr_mod
-                stats_mgr_mod.update_speed_record(final_calc_speed, acute_duration)
-            except Exception as record_err:
-                print(f"[STATS ERROR] Could not update the speed record: {record_err}")
+            # Not a sample at all when nothing moved (a resume at the end).
+            if not already_held:
+                try:
+                    import stats_mgr as stats_mgr_mod
+                    stats_mgr_mod.update_speed_record(final_calc_speed, acute_duration)
+                except Exception as record_err:
+                    print(f"[STATS ERROR] Could not update the speed record: {record_err}")
         else:
             # How it ended, in the record (#1203), while the row is still in
             # active_transfers: a stop cutting it off now finds it claimed.
@@ -4812,7 +4928,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             # re-offer the same file on every attempt.
             # A private request is not announced (#1242): the operator's
             # decision, though the channel it belongs to is known by now.
-            if transfer_completed:
+            # Nor is a resume at the end: nothing was sent.
+            if transfer_completed and not already_held:
                 announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, reported_speed,
                                                     duration=acute_duration,
                                                     private=is_private_row(next_file))
