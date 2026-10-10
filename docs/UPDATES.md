@@ -4,6 +4,33 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔧 Three follow-ups from the audit fixes (#1281)
+
+Each was left as a note in the PR that fixed the audit finding next to it (#1273, #1271, #1270).
+
+- **The settings window's Unlock keeps the spaces in a password.** #1273 made the console login take a password with
+  a run of spaces or a space at either end (`DCCORE PASSWORD <encoded>`), but the window's unlock prompt (#1264) put
+  `$input`'s answer in a `/var` and sent `unlock %pw`, and mIRC closes those spaces up in a `/var` as in a command's
+  parameters: such a password could log in but never unlock. `dccore.sw.unlockask` now hands the answer straight to
+  `$dccore.sw.unlockarg` in one nested expression, which returns it encoded with `$dccore.sw.enc` when it has such
+  spaces and as typed otherwise, and `dccore.sw.unlocksend` sends it. On the bot,
+  `console_settings.unlock_password_matches()` tries the argument as it is, then decoded - one attempt either way,
+  counted once against the address. A bot from before this still unlocks every password without such spaces, which
+  the window sends exactly as before. `dccore.mrc` is 1.19.3.
+- **The kick notice no longer promises a rejoin that won't come.** With `REJOIN_ATTEMPTS = 0` the bot never rejoins
+  (#1271 drops the member list at once for that reason), but the notice said "Will try to rejoin on the next
+  advert". `irc.kicked_notice()` now says "Not rejoining: REJOIN_ATTEMPTS is 0." in that case; with rejoining on, the
+  text is unchanged.
+- **The List Browser's filter matches a name in either Unicode form.** #1270 made `@find` match a name whether it is
+  written composed (NFC) or decomposed (NFD), as a library copied from a Mac writes it. The cross-list index
+  (`list_index.py`, FTS5) did not: unicode61 folds a single Latin accent either way, but a Vietnamese letter with two
+  marks, a Cyrillic short i, a kana with its voicing mark or a Hangul syllable split into other tokens, so a filter
+  typed in one form missed a list holding the other. The indexed name and the query now go through
+  `list_index.match_form()` (NFC, the rule `list.search_form()` uses); a name the two forms write differently also
+  keeps the list's own form in a new `original` column, and that is what a row shows and a request names. The index
+  schema is 3: an older index - or one an older version wrote to after a downgrade, since every version writes its
+  number on every open - is rebuilt once from the held lists, `folders` included.
+
 ### 🛡️ Names and text from other people are kept in their place
 
 Found by the multi-agent audit of 2026-10-10 (#1268-#1273): each of these takes a nick, a channel name, a file name
