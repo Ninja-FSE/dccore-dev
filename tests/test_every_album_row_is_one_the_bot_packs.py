@@ -160,8 +160,12 @@ class FoldersTheBotRefuses(RowCase):
 
     def test_the_loose_tracks_are_still_listed_by_name(self):
         self.build()
+        # The master list by its name - "alfa-<date>.txt" - not the first
+        # .txt the folder happens to list: the size side file is a .txt too,
+        # and macOS lists it first (a CI failure read "300" as the list).
         names = [n for n in os.listdir(self.tree.lists)
-                 if n.endswith(".txt") and "-RAR-" not in n]
+                 if n.startswith("alfa-") and n.endswith(".txt") and "-RAR-" not in n]
+        self.assertEqual(len(names), 1, names)
         with io.open(os.path.join(self.tree.lists, names[0]), encoding="utf-8") as handle:
             text = handle.read()
         self.assertIn("!alfa Loose Root Track.mp3", text)
