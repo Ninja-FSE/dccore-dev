@@ -6,8 +6,8 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ### 🛡️ Names and text from other people are kept in their place
 
-Reported privately and fixed before it was made public: each of these takes a nick, a channel name, a file name or a
-message that another IRC user chooses.
+Found by the multi-agent audit of 2026-10-10 (#1268-#1273): each of these takes a nick, a channel name, a file name
+or a message that another IRC user chooses.
 
 - **A bot's list folder can no longer be another one's.** `list_fetch._sanitize_bot_dir_name()` reserved nothing
   except Windows device names, so a nick could name a folder DCCore uses itself (`lists/_channels`, where every bot's
