@@ -47,6 +47,41 @@ work is `src/console_settings.py`, reached only from `adminchat.COMMANDS`; the l
   rows; that nothing but the console reaches these commands; the outbox bound; help and the guide),
   `tests/test_the_mirc_menu_has_every_command.py` (the new commands are the window's plumbing, not menu items).
 
+### 🎨 dccore.mrc: nicks, channels and the search term in colours of their own (#1259)
+
+A `@DCCore` line had a coloured tag and a coloured file name and nothing else: the nick and the channel were plain,
+and a searched term used the File names colour because both went through `dccore.name`. On a busy window, with dozens
+of searches an hour, one person or one channel was hard to follow down the list.
+
+- **Three more colours in `/dccore options`**, in a new row under the Show checkboxes: **Search text**, **Nicks** and
+  **Channels**. Nicks and Channels start at *same as the line*, which adds no control codes at all, so the line
+  is byte-for-byte what it was. Search text starts at *same as File names*, the colour the term already had. A saved
+  `dccore.ini` from before gets those defaults through `dccore.default`, so nobody sees a change until they choose one.
+- **Nicks can be *per nick*:** each nick a colour of its own, the same every time and in any case. `dccore.pernick`
+  takes the first six hex digits of the MD5 of the lower-cased nick, modulo the length of the list for the window's
+  background (Options' Background, or mIRC's own `$color(background)` when that is "none"). The sixteen lists in
+  `dccore.nickpal` leave out white and black (one of them is the line's own text colour), the background itself, and
+  every colour under 3:1 WCAG contrast against it. They are worked out once from `dccore.rgb` and the test recomputes
+  them. A mid-tone background leaves only two or three colours (pink: navy and maroon).
+- **One path for every line.** REQUEST, QUEUED, SENDING, RESUMED, SENT, FAIL and SEARCH draw the nick with
+  `$dccore.nick($2)`, and `dccore.in` draws the channel with `$dccore.chan($1)`, keeping its non-breaking spaces. The
+  SEARCH line's term goes through `$dccore.term($5-)`; file names keep `dccore.name`. All three go through
+  `dccore.paint`. It writes nothing for "same as the line", and a colour as two digits: `^C3` followed by a nick like
+  `3bot` would read as colour 33. The span ends with `^O`, as the tag and the file name already do.
+- **The Options dialog is 24 dbu taller.** The Show box grew a row of three labelled combos and everything below it
+  moved down. `dccore.fillspan` and `dccore.spanval` fill and read the three combos: their own lines first, then the
+  sixteen colours.
+- New keys: `col.term` (`name`, `-1` or 0-15), `col.nick` (`-1`, `per` or 0-15), `col.chan` (`-1` or 0-15). They
+  colour new lines only; lines already in the window stay as they were drawn. `dccore.ver` is 1.18.0.
+- **Tests:** `tests/test_the_mirc_window_colours_nicks_channels_and_terms.py` (30 tests, reading the script with its
+  comment lines removed). 14/14 mutations caught: a handler back to a raw `$2`, the term back through `dccore.name`,
+  the channel back to a raw `$1`, the "same as the line" guard removed or emitting a reset, either default changed, the
+  `col.chan` save removed, a single-digit colour, per-nick without `$lower`, a palette holding its background, the
+  fill off by one, a combo over the checks, and the version not bumped. The existing mIRC tests follow the new
+  expressions and the taller dialog.
+
+**Not run in mIRC.** As with every change to this script, the first real window is the real test.
+
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 
 ### 🧹 Purge every held list, to clear a channel stuck wrong from before v1.16 (#1260)

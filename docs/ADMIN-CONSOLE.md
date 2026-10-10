@@ -813,7 +813,7 @@ Chat request** to auto-accept so it never asks again.
 
 | where | what |
 |---|---|
-| the text | one line per event, mIRC's own timestamp, a bold coloured tag - `[REQUEST]`, `[SENDING]`, `[SENT]`, `[FAILED]`, `[QUEUED]`, `[SEARCH]`, `[JOIN]`, `[BAN]`... - then the event in plain words, the file name in its own colour |
+| the text | one line per event, mIRC's own timestamp, a bold coloured tag - `[REQUEST]`, `[SENDING]`, `[SENT]`, `[FAILED]`, `[QUEUED]`, `[SEARCH]`, `[JOIN]`, `[BAN]`... - then the event in plain words, the file name in its own colour, and the nick, the channel and a searched term in theirs if you choose them in the options |
 | the side panel | **Sending n/m**: each running transfer with its size, percentage and speed; **Queue n**: who is waiting, in order, with `frozen m:ss` on a queue that is counting down; **Today**: files and bytes sent, the speed record; and what this window has seen since it opened |
 | the title bar | `MusicBot on Undernet · slots 2/3 · queue 14 · today 38 files / 12.4GB · 1.5MB/s`, updated with every status burst |
 | the editbox | anything you type is a console command - `status`, `queue helen`, `clearqueue ivan`, `ban *!*@bad.host` - and the reply comes back as `[CONSOLE]` lines, or into a second `@DCCore-console` window if you prefer |
@@ -851,6 +851,13 @@ window can open the same way; both are off by default.
   lines - plus the colour of file names, of console replies and of the side
   panel's headings, and how
   often the `[STATUS]` line is written when the side panel is off (0 = never);
+- under those, the colours inside a line (dccore.mrc 1.18 or later): **Search
+  text** (the searched term; *same as File names* until you choose), **Nicks** and
+  **Channels** (both *same as the line*, no colour of their own, until you choose).
+  **Nicks** can also be *per nick*: each nick gets a colour of its own from its
+  name, the same every time whatever its case, out of the colours that can be
+  read on the window's background. A new choice colours new lines; what is
+  already in the window stays as it was drawn;
 - the side panel, the title bar figures, console replies in a separate
   window, the beep, the fixed-width font and its size (the Status window's
   size until you set one - on a high-resolution screen you may want a

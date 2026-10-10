@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **New: the dashboard's settings over the admin console**, for the settings window coming to `dccore.mrc`: `settings` lists every setting with its value, `set <KEY> <value>` changes one (or `setbegin` ... `setcommit` saves many with one rehash), and `served`, `folders`, `onconnect`, `setpreview` and `banlist` cover the lists and channels, the folders, the on-connect commands, the theme preview and the bans. They run the dashboard's own checks and save, so a value one refuses the other refuses too. See `docs/ADMIN-CONSOLE.md`, "Settings over the console".
+- **New (mIRC): nicks, channels and the search term can have colours of their own** in the `@DCCore` window. `/dccore options` has *Search text*, *Nicks* and *Channels* under the Show checkboxes, and *Nicks* can be *per nick*: each nick always gets the same colour, picked to be readable on the window's background, so one person's searches and requests stand out. Until you pick one, the window looks exactly as before. Update `dccore.mrc` to 1.18.0 and reload it with `/reload -rs dccore.mrc`.
 
 ## v1.16.1 — The Bot Forgets on Purpose
 
