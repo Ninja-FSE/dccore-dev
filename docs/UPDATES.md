@@ -4,6 +4,59 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🖥️ The settings window in `dccore.mrc` (#1264, phase B)
+
+`/dccore settings` (and **Bot Settings** / **Settings...** in the menus) opens `dialog dccore.set`: the bot's settings
+as the dashboard's Settings page has them, laid out as the settings-window mockup - six tabs (General, Sharing,
+Downloads, Security, Dashboard & Console, Advanced), each tab's pages in a list on the left, Apply / OK / Cancel and a
+status line at the bottom. Plain mIRC, no DLL. `dccore.mrc` is 1.19.0.
+
+- **Generated, not hand-kept.** `scripts/mirc/build_settings_window.py` writes one marked block of `dccore.mrc` - the
+  dialog table (420 controls, positions computed, labels measured with the options dialog's Tahoma table so a long
+  label wraps instead of being cut) and `alias dccore.sw.data`, the lookup data the hand-written mSL drives it with -
+  from `webserver.SETTINGS_LABELS`, `SETTINGS_UNITS`, `CHOICE_LABELS`, `settings_file.CHOICES` and `declared_types`,
+  the #528 help text (`settings_help`) and the dashboard's own words for the colours and channel modes
+  (`web/lang/en.json`). `scripts/mirc/settings_window_layout.py` is the mockup's grouping as pure data; every key of
+  `SETTINGS_CATEGORIES` is placed exactly once or in its `EXCLUDED` with a reason (only `ADMIN_PASSWORD_HASH`).
+  `--check` exits 1 when the block is stale. A page too tall for one column takes two (File locations).
+- **The tabs are only a strip.** No control is attached to a tab (mIRC would re-show all of them on a click); a page's
+  controls are shown and the previous page's hidden with `did -v` / `did -h`, from per-page id lists.
+- **Open:** `consolecaps` first - an older bot's "Unknown command" makes the window say "too old - update it" and edit
+  nothing of the bot - then `settings`; the structured pages ask for their snapshot (`onconnect`, `served`, then
+  `folders` for a bot with no `lists.json`, `banlist`) the first time they are shown. Every snapshot is counted against
+  its BEGIN/END before anything is shown, and one whose END never comes (phase A's stalled-client cut-off) times out
+  after 30 seconds as a failed load rather than leaving the window waiting.
+- **Apply** compares every control with what it showed when loaded and sends only what changed, as one transaction
+  (`setbegin`, a `set` each, `setcommit`): `SETDONE ok` says how many were saved and which need a restart, and reloads;
+  `SETERR` / `SETDONE error` put the dashboard's reasons in the status line, show the page of the first one and keep the
+  edits; `SETDONE confirm` (clearing the debug channel) is asked with `$input` from a timer, then `setcommit confirm` or
+  `setabort`. **OK** is Apply and closes once the bot has saved (at once when nothing changed); **Cancel** sends
+  nothing. A change on **File locations** asks first. Sizes show in KB/MB and go back in bytes.
+- **The structured pages:** IRC Server's on-connect box (multi-line edit, seconds between, Save, Resend now); Channels
+  (`CHANNEL` as a list, saved by Apply, and `DEBUG_CHANNEL`); Lists & channels (rows `List: Main [primary]`, its
+  folders, `#music -> Main - Normal`; edit the selected row, add, remove, Save lists - through `folders` when only the
+  implied list's folders changed, so the list is not made real); Bans & ignores (lift, ignore for minutes, add/remove
+  a pattern, re-asked two seconds after each, since `ban`/`unban` finish in the background); Appearance (theme and the
+  six colours as foreground/background menus; Preview runs `setbegin`, the theme's `set`s, `setpreview`, `setabort`
+  and draws the two raw lines in `@DCCore-preview`).
+- **General Settings** has this mIRC's own switches too (open @DCCore / Chat / Downloads at start, reconnect), saved to
+  `dccore.ini` by Apply or OK. **This mIRC window** opens the old Options dialog, unchanged; `/dccore options` is still
+  that dialog. The "..." browse buttons work only when the console connection is 127.0.0.1 / ::1.
+- **Values** are decoded with the doc's `$regsubex` and encoded by `dccore.sw.enc` / `dccore.sw.tok`, the mSL twins of
+  `console_settings.encode_value()` / `encode_token()`. The window needs mIRC 6.17 (`$regsubex`); an older mIRC is told.
+- **Tests:** `tests/test_the_settings_window_generator.py` (21: the block is up to date and `--check` catches a stale
+  one; every setting placed once or excluded; the mockup's tabs and pages; the generator refuses a key placed twice, a
+  key with no place, a check too wide and a page that cannot fit; labels, units, choices and help are the bot's) and
+  `tests/test_the_mirc_settings_window.py` (50: the decoder and encoder, re-run in Python from the script's own
+  patterns, agree with `console_settings` on a battery of values; every documented reply type is routed and has a
+  branch; every command sent is a console command with a real subcommand; Apply sends setbegin, sets, setcommit and no
+  `set` is ever sent outside a transaction; every snapshot is counted and times out; ids unique and clear of the other
+  dialogs; every control on exactly one page; labels fit; nothing overlaps; menus; version). Mutation-checked: a
+  removed handler, a broken decoder or encoder, a stale block, a key placed twice, a dropped count check, a `set`
+  outside setbegin and a dropped timeout each fail. `tests/test_the_mirc_menu_is_grouped_by_what_you_do.py` knows
+  **Bot Settings**; `tests/test_setup_check.py`'s one-copy guard skips `scripts/mirc`, whose layout names settings as
+  data.
+
 ### ⚙️ The dashboard's settings pages, over the admin console (#1264, phase A)
 
 The bot side of a settings window for `dccore.mrc`: console commands that run the dashboard's OWN Settings-page code,

@@ -829,7 +829,7 @@ Chat request** to auto-accept so it never asks again.
 | the side panel | **Sending n/m**: each running transfer with its size, percentage and speed; **Queue n**: who is waiting, in order, with `frozen m:ss` on a queue that is counting down; **Today**: files and bytes sent, the speed record; and what this window has seen since it opened |
 | the title bar | `MusicBot on Undernet · slots 2/3 · queue 14 · today 38 files / 12.4GB · 1.5MB/s`, updated with every status burst |
 | the editbox | anything you type is a console command - `status`, `queue helen`, `clearqueue ivan`, `ban *!*@bad.host` - and the reply comes back as `[CONSOLE]` lines, or into a second `@DCCore-console` window if you prefer |
-| right-click | **Cancel the running pack** at the very top while one runs, the common commands, **Script Settings** and **Console command** on top, then the groups **Info** (with **Download queues...**), **Lists**, **Library** (duplicate filenames, rebuild the list, **Read audio info**), **User control**, **Control** (update check, console feed, reload, **Stop the bot**), **Connection** and **Window** (DCCore Chat, Downloads window, panel, font); on a panel line, that user's queue, clearing it, ignoring them for a while, clearing and ignoring, or moving them earlier or later in line; in any channel's nick list, **DCCore → Queue of / Clear the queue of / Ignore for... / Clear the queue of and ignore for... / Stop ignoring** that nick |
+| right-click | **Cancel the running pack** at the very top while one runs, the common commands, **Script Settings**, **Bot Settings** and **Console command** on top, then the groups **Info** (with **Download queues...**), **Lists**, **Library** (duplicate filenames, rebuild the list, **Read audio info**), **User control**, **Control** (update check, console feed, reload, **Stop the bot**), **Connection** and **Window** (DCCore Chat, Downloads window, panel, font); on a panel line, that user's queue, clearing it, ignoring them for a while, clearing and ignoring, or moving them earlier or later in line; in any channel's nick list, **DCCore → Queue of / Clear the queue of / Ignore for... / Clear the queue of and ignore for... / Stop ignoring** that nick |
 | the window's button | on the switchbar or treebar, like any channel's: the **message** colour when there is new activity - a request, a queue position, a send, a search - and the **highlight** colour (the one mIRC uses when somebody says your nick) on a failed transfer or dropped lines, so a failure stands out. The `[STATUS]` line, joins, parts and bans do not light it, as they would not in a channel. mIRC 7 or later |
 | a beep | on a failed transfer, if you leave that on |
 
@@ -886,6 +886,57 @@ These are the script's own filters, kept by mIRC in `dccore.ini`. The
 bot's **Settings → Console feed** tickboxes remain the ceiling on what is
 sent at all: what is off there never reaches the script.
 
+### The bot's settings
+
+`/dccore settings` (or right-click -> **Bot Settings**, or **Settings...** next to
+**Options...** in the other menus) opens the settings window (dccore.mrc 1.19 or
+later, mIRC 6.17 or later): the bot's own settings, as the dashboard's Settings
+page has them, over the console commands above. Six tabs - **General**,
+**Sharing**, **Downloads**, **Security**, **Dashboard & Console**, **Advanced** -
+each with its pages in a list on the left, and **Apply**, **OK** and **Cancel**
+at the bottom.
+
+- **The labels, units, choices and help are the dashboard's.** Point at a
+  setting and its help shows under the page. Sizes show in KB or MB and go back
+  in bytes, as on the dashboard.
+- **General Settings** gathers the switches used most, including four of this
+  mIRC's own: open @DCCore, Chat and Downloads when mIRC starts, and reconnect
+  to the bot by itself. Those are saved here, in `dccore.ini`, by Apply or OK.
+- **Apply** sends what changed - only that - as one transaction (`setbegin`, a
+  `set` for each, `setcommit`), so the bot saves it in one go and rehashes once.
+  A value the bot refuses comes back with the dashboard's reason in the status
+  line, the window shows the page it is on, and nothing is saved; your edits
+  stay. Clearing the debug channel asks first, as the dashboard does. A change
+  on **File locations** asks before it is sent. **OK** is Apply, then closes once
+  the bot has saved; **Cancel** closes and sends nothing.
+- **Structured pages** save with buttons of their own: the on-connect commands
+  on **IRC Server** (and **Resend now**), the served lists, their folders and
+  each channel's list and mode on **Lists & channels** (rows such as
+  `#music -> Main - Normal`; select one to edit it, then **Save lists**), and
+  **Bans & ignores** (lift a timed ban, ignore a nick for some minutes, add or
+  remove a permanent pattern). **Channels** edits `CHANNEL` as a list and is
+  saved by Apply.
+- **Appearance**: the theme and the six custom colours as menus of mIRC's
+  sixteen. **Preview** draws the sample advert and notice, with the colours as
+  chosen and not saved, in `@DCCore-preview`.
+- **This mIRC window** opens the old **Options** dialog - `/dccore options` is
+  still that one.
+- **Paths** are the bot's. The **...** buttons that browse for one work only when
+  the console connection is local (the bot runs on this PC); otherwise type the
+  path as it is on the bot's machine.
+- **A bot without these commands** answers `consolecaps` with "Unknown command",
+  and the window says to update the bot; only this mIRC's own switches can be
+  changed then. A snapshot that arrives cut short (the counts on its BEGIN and
+  END lines disagree, or the END never comes) is never shown half: press
+  **Reload** or **Refresh**.
+
+The dialog is generated: `scripts/mirc/build_settings_window.py` writes it into
+a marked block of `dccore.mrc` from the bot's own settings metadata and
+`scripts/mirc/settings_window_layout.py` (which setting is on which page). A
+setting added to the bot fails a test until it has a place in the window, or a
+reason not to; run the script after changing either, and `--check` says
+whether the block is up to date.
+
 ### Commands
 
 ```
@@ -895,6 +946,7 @@ sent at all: what is off there never reaches the script.
 /dccore unpair               forget the token here and revoke it on the bot
 /dccore trust                accept the bot's current host as the one to send the token to
 /dccore options              what to show, colours, panel, title bar, beep, windows at start
+/dccore settings             the bot's own settings, as its dashboard's Settings page has them
 /dccore window               open or focus @DCCore
 /dccore chat [text]          open DCCore Chat, or say something in it (public)
 /dccore downloads            open @DCCore-Downloads: what the bot is fetching from other bots (needs 1.10)
