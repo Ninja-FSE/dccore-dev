@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed: a list rebuild that failed at the wrong moment could leave the bot with no list** until the next successful rebuild - @find said there was no list and the advert went quiet. The previous list is now always put back.
+- **Fixed: a multi-disc album (CD1, CD2 ...) can be packed with `!rar` again.** Its row in the album list was refused every time it was pasted. The row itself is unchanged, so requests already queued in AutoQ still match.
+- **Fixed: the album list no longer offers the library folder or an artist folder** just because a loose track sits in it. The bot always refused those. The tracks are still listed and requestable by name.
+- **Fixed: with more than one list, the file count is no longer re-read from disk on every advert and every Stats refresh.**
+- **Fixed: `-que` and `-stats` in a channel bound to a second list now report that list's file count, date and size**, the same as the advert there. They used to report the main list's.
+- **Fixed: @find finds accented names from a library copied off a Mac** (for example "é" stored as "e" plus an accent). The list itself is unchanged.
+- **Fixed (Windows): a directory junction inside the library is no longer walked into**, the same as a symlink. A junction pointing back up the library made every rebuild fail.
+- **Fixed (Linux): two folders whose names differ only in case** no longer have their files mixed together in the list under repeated headings.
 - **Fixed: a file a bot sent late could be taken by a folder request to the same bot.** A file request waiting to be asked again (the bot was busy, silent, or the disk was full) now gets its own answer, as the v1.16.0 fix meant it to.
 - **Fixed: deleting an old finished download could delete a newer download's file of the same name.** Once the old file had been moved out of the Downloads folder, a later download of the same name took its name; deleting the old row now leaves the newer file alone.
 - **Fixed: a bot's main and RAR lists could be wiped when it was briefly out of another channel.** A request for a bot's list in one channel is no longer sent to a different channel instead, and an answer from the wrong channel is never installed over what is held.

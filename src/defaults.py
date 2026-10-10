@@ -250,7 +250,10 @@ LIST_VIDEO_COMPANION_EXTENSIONS: list = [
 #
 # A folder earns a !rar row only if it holds one of these. Everything else is
 # still listed and still directly requestable by name - this decides packing,
-# nothing else.
+# nothing else. A multi-disc album counts as holding them when its disc
+# folders (CD1, Disc 2) do: its row names the album above them (#1270). The
+# library folder itself and an artist folder never get a row, whatever they
+# hold - the bot refuses to pack either.
 #
 # It is a set of its own, and not simply "whatever is in the list", because
 # for a while it WAS that: a folder became packable if it held any file the
