@@ -106,11 +106,11 @@ On Windows that command is **`py configure.py`**. A python.org install gives you
 
 1. **Nickname.**
 2. **IRC server** (`irc.undernet.org` unless you say otherwise).
-3. **Channel(s)**, comma-separated.
+3. **Channel(s)**, comma-separated, each starting with `#` - `mychannel` or `#one #two` (spaces) is asked again, as the browser setup page does.
 4. **Admin nick** - who may run `!ban`, `!rehash`, `!update`, `!clearqueue`.
 5. **Your services host**, optional - blank skips it. On a re-run the hosts already configured are shown; blank keeps them all, and typing one you already have changes nothing. Locks the admin console (and the in-channel admin commands, once this is set) to your account rather than just your nick, which anyone can take while you are offline; see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md#how-the-host-proves-your-login) for how to read it off `/whois`.
 6. **Admin console password**, typed twice and never shown; only its hash is written.
-7. **Music directory** - optional here (see below); if the folder does not exist it offers to create it.
+7. **Music directory** - optional here (see below). A pasted or dragged path in quotes (Explorer's *Copy as path*) is fine; a full path to a folder that does not exist yet offers to create it, and anything that is not a full path is asked again.
 8. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.
 
 Then two offers, either of which you can decline: **generate the file list now** (when a music directory was given; a first start does it anyway), and **import your OmenServe or KeepTrack totals** from mIRC's `vars.ini` (in mIRC's folder, or `scripts\vars.ini` on older installs) if you are coming from there. When both counted your sends you pick which totals to keep - they counted the same sends, so they are never added together. The answers are written to `settings.conf`, with the password hash (and nothing else) in `admin_config.py`.
@@ -129,6 +129,8 @@ Safe to run again later: every prompt shows what is already configured as its de
 
 Both are gitignored. `defaults.py` applies `admin_config.py` first and `settings.conf` second, so a value set in both takes the `settings.conf` one. The daemon says so at startup for every setting that `admin_config.py` sets to something `settings.conf` then overrides (`[CONFIG] settings.conf overrides WEBUI_HOST, which admin_config.py also sets ...`) — if an edit to `admin_config.py` seems to do nothing, that line is why.
 
+**One line `settings.conf` cannot read makes the whole file unreadable**, and every setting in it falls back to its default. The log names the file and the line (`[CONFIG] Could not read settings.conf, continuing with the built-in defaults: line 5 is not a setting: 'MAX_DCC_SLOTS 5' ...`), the setup check fails on it, and when the file held your nickname, channels or admin nick the bot refuses to start with that same line rather than offering the first-run setup again. `configure.py` says it too, before asking anything. Fix the line and start again.
+
 ### What must be set
 
 The daemon refuses to start until `NICKNAME`, `CHANNEL` and `ADMIN_NICK` have values, no matter how it is launched. Leaving them at their shipped blanks would mean joining somebody else's channels under a name that is not yours.
@@ -137,6 +139,19 @@ Three things are deliberately *not* required:
 
 - **`SERVER`** and **`DEBUG_CHANNEL`** — their shipped values are already right for almost every install, so requiring them would only make you retype something correct. `DEBUG_CHANNEL` ships blank, and blank means no debug channel is joined.
 - **`FILE_DIRECTORY`** — requiring it would block the daemon from reaching the dashboard, which is the easiest place to set it. A blank one warns, at the pre-flight check and again at boot, and the bot serves nothing until it has one.
+
+### Values that are refused
+
+The Settings page, the admin console, `configure.py` and the browser setup all refuse these when you **save** one:
+
+- **`ANNOUNCE_INTERVAL`** below 60 seconds. There is no "0 = off" here: a 0 used to make the bot advert as fast as the channel would take it.
+- **`FILE_DIRECTORY`** that is not an existing folder (blank is fine - see above). A path in quotes is refused with the path to use instead.
+- **`CHANNEL`** entries that do not start with `#` (or `&`), or that hold a space - several channels are separated by commas. `DEBUG_CHANNEL` and `BROADCAST_SEARCH_CHANNEL` take one channel each.
+- **`LIST_BASE_NAME`** with a character a file name cannot hold on every system, such as `|` or `\`. The refusal suggests the name to use (`DJ|Music` becomes `DJ_Music`), which is what the bot derives from a nickname like that anyway.
+
+A `settings.conf` written before these rules still **loads**, so a bot that ran before an update keeps running; the startup log names each value it had to change and its line. A `CHANNEL` list keeps its real channels and drops only the entries that are not (`#mychannel, jazz` joins `#mychannel`) - only a list with no channel in it at all is ignored. An `ANNOUNCE_INTERVAL` under 60 is used as 60. A `LIST_BASE_NAME` is kept as it is where this system can use it as a file name (a `|` on Linux or macOS), so the published list keeps its name, and sanitised where it cannot. A single `DEBUG_CHANNEL` or `BROADCAST_SEARCH_CHANNEL` that is not a channel is ignored, as before. Saving any of them again needs a value from the list above.
+
+With more than one list, the bot starts as long as any list has a folder it can read; a list whose folders are all missing (an unplugged drive) is named in a warning at startup and by the setup check, and its channels have nothing to serve until the drive is back.
 
 ### Disk the dashboard uses
 
