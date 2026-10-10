@@ -928,6 +928,16 @@ def restore_preserved_runtime(cfg, preserved_runtime):
 CORE_MODULES = ('admin_config', 'defaults', 'list', 'dcc', 'announce',
                 'security', 'db', 'stats_mgr')
 
+# Modules reloaded from scratch: their names are cleared before the reload,
+# so the file defines exactly what it says now. importlib.reload() re-runs a
+# file in the module's own namespace and never removes a name the new text
+# no longer defines, and defaults.py's `from admin_config import *` then
+# copied the old value back - a line deleted or commented out in
+# admin_config.py (ADMIN_PASSWORD_HASH, ADMIN_NICK, ADMIN_HOSTMASKS) stayed
+# live until a restart. admin_config.py holds settings only; nothing in it
+# is runtime state a reload must keep.
+RELOAD_FROM_SCRATCH = ('admin_config',)
+
 
 def _channels_to_sync(config):
     """Every channel the bot should be in: CHANNEL, plus the debug channel.
@@ -1164,6 +1174,24 @@ def _restore_advert_worker_token(live_worker_id):
     return True
 
 
+def _reload_from_scratch(module):
+    """importlib.reload() `module` with its own names cleared first, so a name
+    its file no longer defines is gone (see RELOAD_FROM_SCRATCH). A reload
+    that fails puts them back: the file's last good values stay, never none.
+    """
+    import importlib
+
+    names = {name: value for name, value in vars(module).items()
+             if not (name.startswith('__') and name.endswith('__'))}
+    for name in names:
+        delattr(module, name)
+    try:
+        return importlib.reload(module)
+    except BaseException:
+        vars(module).update(names)
+        raise
+
+
 def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
     """Reload the daemon's modules in place and return the names reloaded.
 
@@ -1196,6 +1224,9 @@ def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
     live = sys.modules.get('defaults')
     before = ({name: getattr(live, name, None) for name in settings_file.REQUIRED}
               if live is not None else {})
+    # ADMIN_NICK's other half: kept with it below, so a backstop that keeps the
+    # admin nick never leaves it without the hostmasks that narrowed it.
+    hostmasks_before = getattr(live, 'ADMIN_HOSTMASKS', None) if live is not None else None
 
     # Everything from here to the end of the reload is one window as far as any
     # other thread is concerned - see runtime.config_reload_lock's own comment
@@ -1204,7 +1235,10 @@ def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
         reloaded = []
         for mod_name in modules:
             if mod_name in sys.modules:
-                importlib.reload(sys.modules[mod_name])
+                if mod_name in RELOAD_FROM_SCRATCH:
+                    _reload_from_scratch(sys.modules[mod_name])
+                else:
+                    importlib.reload(sys.modules[mod_name])
                 reloaded.append(mod_name)
 
         # The lock hides the window; it cannot help if the window never closes.
@@ -1232,6 +1266,13 @@ def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
                 print(f"[REHASH CONFIG] {name} came back blank from the reload, so the "
                       f"value that was already running was kept. Check that settings.conf "
                       f"is readable - the next restart will use whatever it says.")
+                # Never the nick without its hostmasks: ADMIN_HOSTMASKS back to
+                # none makes the kept nick an admin from any host.
+                if (name == 'ADMIN_NICK' and hostmasks_before
+                        and not getattr(live, 'ADMIN_HOSTMASKS', None)):
+                    live.ADMIN_HOSTMASKS = hostmasks_before
+                    print("[REHASH CONFIG] ADMIN_HOSTMASKS came back empty with it and "
+                          "was kept as well, so the admin nick is still checked against them.")
 
         # Last, and separately: reloading this module rebinds the very names the
         # caller is executing out of. The running frame keeps its old code object,

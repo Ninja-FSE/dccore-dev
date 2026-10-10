@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (security): several holes in admin access are closed.** `dccore.mrc` could accept a new login token from someone other than your bot, so update it to 1.17.3 and reload it with `/reload -rs dccore.mrc`. The console's fallback connection now waits for you alone. Console logins made at the same time from one address no longer get more password tries than the limit. A `!rehash` that cannot read `settings.conf` keeps the settings it had, and a line you delete from `admin_config.py` is gone after a `!rehash`. `unpair` now says so when it could not revoke a token. **Update if you use the DCC console or `dccore.mrc`.**
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.

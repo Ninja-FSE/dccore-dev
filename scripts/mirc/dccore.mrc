@@ -90,7 +90,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.17.2 }
+alias dccore.ver { return 1.17.3 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -223,7 +223,7 @@ alias dccore {
     dccore.set wantopen 1
     hadd dccore.live pairing 1
     hadd dccore.live tries 0
-    if ($dccore.st(state) == in) { dccore.send pair $dccore.client $dccore.ver | return }
+    if ($dccore.st(state) == in) { dccore.send pair $dccore.client $dccore.ver | hadd dccore.live pairsent 1 | return }
     dccore.sys Pairing with $dccore.bot $+ : when the bot asks for the password, type it here once. The script keeps a token of its own from then on.
     dccore.connect byhand
     return
@@ -347,6 +347,8 @@ alias dccore.connect {
   hadd dccore.live byhand $iif($1 == byhand,1,0)
   hadd dccore.live tokentried 0
   hadd dccore.live typed 0
+  hadd dccore.live vetted 0
+  hdel dccore.live pairsent
   hadd dccore.live opened $ctime
   dccore.sys Opening the console of $dccore.bot $+ ...
   dccore.title
@@ -426,6 +428,9 @@ on *:CHATCLOSE: {
   var %was = $dccore.st(state)
   hadd dccore.live state closed
   hdel dccore.live mode
+  hdel dccore.live pairsent
+  hdel dccore.live vetted
+  hdel dccore.live typed
   .timerdccoreOpen off
   .timerdccoreHB off
   .timerdccoreHello off
@@ -479,7 +484,12 @@ alias dccore.send {
 alias dccore.line {
   var %state = $dccore.st(state)
   var %text = $strip($1-)
-  if ($1 == DCCORE) { dccore.structured $2- | return }
+  ; The structured feed comes only after the login: a DCCORE line before
+  ; it is not the bot's, whoever sent it.
+  if ($1 == DCCORE) {
+    if (%state == in) { dccore.structured $2- }
+    return
+  }
 
   if (%text == Enter Your Password:) {
     if ($dccore.opt(token) != $null) && (!$dccore.st(tokentried)) && (!$dccore.st(tokenbad)) && (!$dccore.st(pairing)) {
@@ -488,6 +498,7 @@ alias dccore.line {
       ; the script dials that nick by itself - so who answers is checked
       ; first, not assumed.
       if (!$dccore.peerok) { return }
+      hadd dccore.live vetted 1
       hadd dccore.live tokentried 1
       hadd dccore.live state auth
       dccore.send $dccore.opt(token)
@@ -501,6 +512,7 @@ alias dccore.line {
     ; if-line, and peerok closes the chat when it says no.)
     if (!$dccore.st(byhand)) {
       if (!$dccore.peerok password) { return }
+      hadd dccore.live vetted 1
     }
     hadd dccore.live state password
     dccore.sys Type the admin password here and press Enter. $iif($dccore.st(pairing),The script will then ask the bot for a token of its own.,$iif($dccore.st(tokenbad),(The stored token was refused and is not sent again; /dccore pair replaces it.),(No token stored; /dccore pair keeps one.)))
@@ -514,7 +526,7 @@ alias dccore.line {
     hdel dccore.live tokenbad
     dccore.send hello dccore.mrc $dccore.ver
     .timerdccoreHello 1 6 dccore.plain
-    if ($dccore.st(pairing)) { dccore.send pair $dccore.client $dccore.ver }
+    if ($dccore.st(pairing)) { dccore.send pair $dccore.client $dccore.ver | hadd dccore.live pairsent 1 }
     dccore.title
     dccore.chat.title
     return
@@ -720,6 +732,15 @@ alias dccore.structured {
     return
   }
   if (%type == TOKEN) {
+    ; Only the answer to a pair request this script sent in this chat, to a
+    ; peer it had reason to trust: one at the host the bot was paired from
+    ; (peerok said yes), or one the operator typed the password to. Anyone
+    ; can take the bot's nick while it is away and answer the script's own
+    ; dial; a token taken from them would replace the real one and re-point
+    ; bothost at their host, and the next login would go to them.
+    if (!$dccore.st(pairsent)) { dccore.sys Ignored a pairing token this script did not ask for. To pair this script, /dccore pair. | return }
+    if (!$dccore.st(vetted)) && (!$dccore.st(typed)) { dccore.sys Ignored a pairing token from a chat that was never checked to be the bot. | return }
+    hdel dccore.live pairsent
     dccore.set token $3
     dccore.set paired $date
     hdel dccore.live tokenbad

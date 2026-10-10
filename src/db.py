@@ -1298,14 +1298,21 @@ def load_admin_tokens():
 
 
 def save_admin_tokens(tokens):
+    """Write the token store; True when it was written, False when it was not.
+
+    `pair` and `unpair` report what this returns: an `unpair` whose write
+    failed has revoked nothing, and must not say "Revoked".
+    """
     try:
         with _disk_lock:
             # Secrets: owner-only from the first write (#692).
             _atomic_write(ADMIN_TOKENS_FILE,
                           json.dumps(tokens, indent=1, sort_keys=True, ensure_ascii=False),
                           mode=0o600)
+        return True
     except Exception as err:
         print(f"[DB ERROR] Could not save the console token store: {err}")
+        return False
 
 
 def load_list_grabs():
