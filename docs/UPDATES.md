@@ -52,6 +52,13 @@ Tests: `tests/test_the_stores_write_their_newest_copy_last.py`, `test_a_failed_f
 `_serve()` superseding mid-check) and `test_a_typed_password_keeps_its_spaces.py` (the alias read statement by
 statement and run through the settings window's `mirc_enc` emulation, then decoded by the bot), each mutation-checked.
 `tests/test_the_mirc_settings_window.py` and the public changelog name 1.19.1.
+### 🧪 The pack-cancel test waits for its own rar
+
+`test_a_cancel_terminates_that_process_and_removes_the_partial_archive` failed now and then in CI with
+`IndexError` on `self.rars[0]`. Its "a pack has started" check was "some pack is writing": on a slow runner the
+previous test's packer can outlive its cleanup's join, its job is the one `pack_status()` reports, and the request
+made here is still queued behind it. The wait now requires this test's own rar and an archive in this test's
+`TMP_ZIP_DIR`, and `setUp` lets a leftover packer finish first. Test-only; no behaviour changes.
 
 ### 🖥️ The settings window in `dccore.mrc` (#1264, phase B)
 
