@@ -4815,7 +4815,7 @@ def apply_folder_changes(payload):
 
 
 
-def _save_settings_and_rehash(changes, confirmed_debug_removal=False, source=None):
+def _save_settings_and_rehash(changes, confirmed_debug_removal=False, source=None, on_applied=None):
     """Write `changes` to settings.conf and dispatch a rehash on its own
     daemon thread. The shared tail of apply_settings_changes() (POST
     /api/settings) and build_password_change_result() (POST
@@ -4859,18 +4859,26 @@ def _save_settings_and_rehash(changes, confirmed_debug_removal=False, source=Non
     # saves through this same function (#1264) and names itself, so a change
     # made from mIRC is not logged as the dashboard's.
     who, where = source or (WEB_DASHBOARD_SOURCE, WEB_DASHBOARD_SOURCE)
-    threading.Thread(
-        target=commands.handle_rehash_request,
-        args=(who, where),
-        kwargs={"authorised": True, "confirmed_debug_removal": confirmed_debug_removal},
-        daemon=True,
-    ).start()
+    rehash_kwargs = {"authorised": True, "confirmed_debug_removal": confirmed_debug_removal}
+
+    def rehash():
+        # `on_applied` is told once the rehash has finished - the console's
+        # settings window reloads its page then (#1264), not at the save,
+        # when config still holds the old values: the rehash first waits up
+        # to REHASH_TRANSFER_WAIT for transfers to finish.
+        try:
+            commands.handle_rehash_request(who, where, **rehash_kwargs)
+        finally:
+            if on_applied is not None:
+                on_applied()
+
+    threading.Thread(target=rehash, daemon=True).start()
 
     restart_required = sorted(set(result["written"]) & SETTINGS_RESTART_ONLY)
     return 200, dict(result, rehash="started", restart_required=restart_required)
 
 
-def apply_settings_changes(changes, source=None):
+def apply_settings_changes(changes, source=None, on_applied=None):
     """POST /api/settings's pure logic: validate `changes` (a flat
     {SETTING: "string value"} object - settings_file.save() coerces each
     value the same way settings.conf itself would be read), then hand off to
@@ -4904,7 +4912,7 @@ def apply_settings_changes(changes, source=None):
                                "admin password."}
 
     return _save_settings_and_rehash(changes, confirmed_debug_removal=confirmed_debug_removal,
-                                     source=source)
+                                     source=source, on_applied=on_applied)
 
 
 def build_password_change_result(new_password, confirm_password):
@@ -5301,6 +5309,9 @@ class _WebConsoleSession:
     structured = False
     draws_dlqueue = False
     client = "web"
+    # Behind the dashboard login, which is the admin password itself - so
+    # unlocked, like a console that logged in with the password (#1264).
+    unlocked = True
 
     def __init__(self, nick):
         self.nick = nick

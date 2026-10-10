@@ -80,10 +80,11 @@ class TheWindowMenu(unittest.TestCase):
         # The settings window's commands (#1264) are driven by that window,
         # not clicked one by one: settings, set and the transactions behind
         # Apply, the served lists, folders and on-connect pages, the preview,
-        # the bans page's rows and the capability check it opens with.
+        # the bans page's rows, the capability check it opens with, and the
+        # unlock it asks for when a token login has to give the password.
         plumbing = {"hello", "help", "quit", "pair", "unpair", "dlcancel", "dlagain", "dlqueue", "clearandignore",
                     "settings", "set", "setbegin", "setcommit", "setabort", "setpreview", "served", "folders",
-                    "onconnect", "banlist", "consolecaps"}
+                    "onconnect", "banlist", "consolecaps", "unlock"}
         for command in adminchat.COMMANDS:
             if command in plumbing:
                 continue

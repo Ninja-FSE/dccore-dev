@@ -44,6 +44,7 @@ def make_session(case, structured=True):
     case.addCleanup(far.close)
     session = adminchat.Session(near, "192.0.2.1", "alfa", "alfa.example")
     session.authenticated = True
+    session.unlocked = True          # logged in with the password
     session.structured = structured
     session.sent = []
     session.send = session.sent.append
@@ -107,7 +108,7 @@ class Recorder:
         self.calls = []
         self.sources = []
 
-    def __call__(self, changes, source=None):
+    def __call__(self, changes, source=None, on_applied=None):
         self.calls.append(dict(changes))
         self.sources.append(source)
         return 200, {"written": sorted(k for k in changes if k != "confirm_debug_channel_removed"),
@@ -268,6 +269,7 @@ class EverySettingRoundTrips(SettingsCase):
         path = settings_file.settings_path()
         with io.open(path, "w", encoding="utf-8") as handle:
             handle.write("NICKNAME = alfa\n")
+        self.set_config(NICKNAME="alfa")            # what the daemon read from that file
         before_file = read_bytes(path)
         found = setf(self.snapshot())
         before = {name: getattr(config, name) for name in found}
@@ -402,7 +404,7 @@ class ATransaction(SettingsCase):
         self.assertTrue(reply[-1].startswith("DCCORE SETDONE ok 1 0 - "), reply)
 
     def test_restart_only_settings_are_named(self):
-        webserver.apply_settings_changes = lambda changes, source=None: (
+        webserver.apply_settings_changes = lambda changes, source=None, on_applied=None: (
             200, {"written": sorted(changes), "restart_required": ["WEBUI_PORT"]})
         reply = run(self.session, "set WEBUI_PORT 8421")
         self.assertTrue(reply[-1].startswith("DCCORE SETDONE ok 1 0 WEBUI_PORT Saved 1 setting(s)"), reply)
@@ -716,7 +718,7 @@ class TheCapabilities(DCCoreTestCase):
 
     def test_consolecaps_names_every_part_with_its_version(self):
         reply = run(make_session(self), "consolecaps")
-        self.assertEqual(reply, ["DCCORE CAPS settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1"
+        self.assertEqual(reply, ["DCCORE CAPS settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1 unlock:1"
                                  " machine:" + console_settings.machine_name()])
 
     def test_the_machine_name_is_one_token_naming_this_computer(self):

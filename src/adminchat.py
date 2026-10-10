@@ -1100,6 +1100,15 @@ class Session:
         self.served_txn = None
         self.folders_txn = None
         self.onconnect_txn = None
+        # HOW this session logged in (#1264 audit). The password unlocks it
+        # from the start; a paired token - kept in clear text in the script's
+        # dccore.ini - does not: changing settings, reading the on-connect
+        # commands (an X login holds a password) and minting tokens need
+        # `unlock <password>` once in the session. Locked until
+        # _check_password() says otherwise.
+        self.unlocked = False
+        self.paired_as = None
+        self.unlock_failures = 0
 
     # A DCC CHAT session keeps state between its lines, so it can hold a
     # transaction; the dashboard Console's per-request stand-in cannot.
@@ -2373,6 +2382,9 @@ def _cmd_pair(session, args):
     import datetime
     import secrets
     import db
+    import console_settings
+    if console_settings.refused_while_locked(session, "pair"):
+        return
     name = (args.split() or ["client"])[0]
     token = secrets.token_urlsafe(32)
     tokens = db.load_admin_tokens()
@@ -2400,8 +2412,12 @@ def _cmd_pair(session, args):
 def _cmd_unpair(session, args):
     """`unpair [name]`: list the paired clients, or revoke one."""
     import db
-    tokens = db.load_admin_tokens()
     name = (args.split() or [""])[0]
+    import console_settings
+    if (not name or name != getattr(session, "paired_as", None)) \
+            and console_settings.refused_while_locked(session, "unpair"):
+        return
+    tokens = db.load_admin_tokens()
     if not name:
         if not tokens:
             session.send("No paired clients.")
@@ -2478,6 +2494,7 @@ _cmd_folders = _settings_command("folders")
 _cmd_onconnect = _settings_command("onconnect")
 _cmd_banlist = _settings_command("banlist")
 _cmd_consolecaps = _settings_command("consolecaps")
+_cmd_unlock = _settings_command("unlock")
 
 
 def _cmd_help(session, args):
@@ -2541,6 +2558,7 @@ COMMANDS = {
     "onconnect":  (_cmd_onconnect,  "the commands sent on connect; resend them", "onconnect [begin|delay|line|commit|abort|resend]"),
     "banlist":    (_cmd_banlist,    "the bans, as rows for the settings window", "banlist"),
     "consolecaps": (_cmd_consolecaps, "which settings-window commands this bot has", "consolecaps"),
+    "unlock":     (_cmd_unlock,     "let a token login change settings (once per session)", "unlock <password>"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),
@@ -2566,7 +2584,7 @@ CONSOLE_SOURCE = "DCC-CONSOLE"
 # bury the log; the commits log what they saved, by name.
 _SETTINGS_FAMILY = {
     "settings": (), "set": (), "setbegin": (), "setcommit": ("confirm",), "setabort": (),
-    "setpreview": (), "banlist": (), "consolecaps": (),
+    "setpreview": (), "banlist": (), "consolecaps": (), "unlock": (),
     "served": ("begin", "list", "chan", "folder", "commit", "abort"),
     "folders": ("begin", "row", "commit", "abort"),
     "onconnect": ("begin", "delay", "line", "commit", "abort", "resend"),
@@ -2596,6 +2614,10 @@ def handle_command(session, text):
     if not stripped:
         return
     command, _, args = stripped.partition(" ")
+    if command.lower() == "unlock":
+        # The password verbatim, as the login takes it (#622): a trailing
+        # space is part of it, and the strip above took it off.
+        args = text.lstrip(" \t").partition(" ")[2]
     entry = COMMANDS.get(command.lower())
     if entry is None:
         session.send(f"Unknown command: {command}. Type 'help'.")
@@ -2747,6 +2769,8 @@ def _check_password(session, line):
         print(f"[ADMINCHAT] {session.nick} logged in with the token paired as {paired!r}.")
     if paired or verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied):
         session.authenticated = True
+        session.paired_as = paired
+        session.unlocked = not paired
         session.last_activity = time.time()
         clear_bad_ip(session.peer_ip)
         replaced = _promote(session)

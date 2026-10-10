@@ -48,6 +48,7 @@ dashboard shows it, and is never logged (on_connect.py's own rule).
 
 import math
 import re
+import time
 
 import defaults as config
 import runtime
@@ -56,7 +57,11 @@ import runtime
 # tell a bot that has these commands from one that answers "Unknown command",
 # and a later change that moves a field bumps the number of the part it moves.
 CAPS = (("settings", 1), ("preview", 1), ("served", 1), ("folders", 1),
-        ("onconnect", 1), ("banlist", 1))
+        ("onconnect", 1), ("banlist", 1), ("unlock", 1))
+
+# Wrong `unlock` passwords a session gets before it is closed - the login's
+# own allowance (adminchat.MAX_PASSWORD_ATTEMPTS), for the same guessing.
+UNLOCK_ATTEMPTS = 3
 
 # How many rows of each kind `banlist` sends at most. The session's outbox
 # holds 500 lines and drops the OLDEST once full - BANBEGIN first - so a
@@ -196,6 +201,64 @@ def _log(session, text):
 
 
 # --------------------------------------------------------------------------
+# The lock: a token login reads, the password changes (#1264 audit)
+# --------------------------------------------------------------------------
+
+def is_locked(session):
+    """Whether this session may not change settings yet: it logged in with a
+    paired token and has not given the password. A token sits in clear text
+    in the script's dccore.ini, and the dashboard asks for the password for
+    everything these commands change - served folders (which can publish
+    any directory on the machine), the on-connect commands (which hold an X
+    login and go to the server as the bot), ADMIN_HOSTMASKS, the token store.
+    A stand-in without the attribute (the dashboard's Console, behind its
+    password login) is not locked."""
+    return not getattr(session, "unlocked", True)
+
+
+def refused_while_locked(session, what):
+    """Refuse `what` on a locked session, saying how to unlock. True if
+    refused. A transaction the session has open is left open, so the window
+    can unlock and send its commit again."""
+    if not is_locked(session):
+        return False
+    sentence = "Type unlock <password> first - a paired token alone cannot change settings."
+    _say(session, f"LOCKED {what} {sentence}", sentence)
+    return True
+
+
+def cmd_unlock(session, args):
+    """`unlock <password>`: the admin password, checked the way the login
+    checks it, unlocks a token session for the rest of its life. Wrong three
+    times, the session is closed, as at the login."""
+    import adminchat
+    if not is_locked(session):
+        _say(session, "UNLOCKED", "This session can change settings.")
+        return
+    supplied = str(args or "")
+    if adminchat.verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied):
+        session.unlocked = True
+        session.unlock_failures = 0
+        adminchat.clear_bad_ip(getattr(session, "peer_ip", ""))
+        _log(session, "unlocked a token session with the password.")
+        _say(session, "UNLOCKED", "Unlocked: this session can change settings now.")
+        return
+    session.unlock_failures = getattr(session, "unlock_failures", 0) + 1
+    adminchat.note_bad_ip(getattr(session, "peer_ip", ""))
+    _log(session, f"gave a wrong unlock password, attempt {session.unlock_failures}/{UNLOCK_ATTEMPTS}.")
+    if session.unlock_failures >= UNLOCK_ATTEMPTS:
+        session.close(announce_text="Incorrect Password.")
+        adminchat._forget(session)
+        return
+    time.sleep(adminchat.WRONG_PASSWORD_DELAY)
+    if not str(getattr(config, "ADMIN_PASSWORD_HASH", "") or ""):
+        message = "No admin password is set on this bot; set one on the dashboard first."
+    else:
+        message = f"Wrong password ({session.unlock_failures} of {UNLOCK_ATTEMPTS})."
+    _say(session, f"UNLOCK error {message}", message)
+
+
+# --------------------------------------------------------------------------
 # consolecaps
 # --------------------------------------------------------------------------
 
@@ -305,10 +368,30 @@ class SettingsTransaction:
         self.implicit = False
 
 
-def _same_as_now(name, text):
-    """Whether `text` reads back as the value `name` has right now - the
+def file_values():
+    """{NAME: raw text} of what settings.conf sets now, or {} when it cannot
+    be read - read with settings_file's own parser."""
+    import io as _io
+    import settings_file
+    try:
+        with _io.open(settings_file.settings_path(), "rb") as handle:
+            return settings_file.parse(handle.read().decode("utf-8-sig").replace("\r\n", "\n"))
+    except (OSError, UnicodeDecodeError, settings_file.SettingsError):
+        return {}
+
+
+def _same_as_now(name, text, in_file=None):
+    """Whether `text` reads back as the value `name` will have - the
     unchanged value the window sends back for a field nobody touched. Read
-    with settings_file.coerce(), the reader settings.conf goes through."""
+    with settings_file.coerce(), the reader settings.conf goes through.
+
+    Judged against what settings.conf holds for `name` when it sets it, and
+    against config only when it does not (#1264 audit). A save rehashes on
+    a thread that first waits up to REHASH_TRANSFER_WAIT for transfers, and
+    until it reloads, config still holds the OLD value: putting a setting
+    back in that window was judged "Nothing changed", and the file kept the
+    new value, which the rehash then applied. `in_file` is file_values(),
+    read once by a caller that judges many."""
     import settings_file
     current = getattr(config, name, None)
     declared = settings_file.declared_types(vars(config)).get(name)
@@ -316,6 +399,12 @@ def _same_as_now(name, text):
         value = settings_file.coerce(name, text, current, declared)
     except ValueError:
         return False
+    stored = (file_values() if in_file is None else in_file).get(name)
+    if stored is not None:
+        try:
+            current = settings_file.coerce(name, stored, current, declared)
+        except ValueError:
+            pass        # unreadable in the file: the daemon kept config's value
     # bool is an int: True == 1, so a flag and a number never count as one.
     if isinstance(value, bool) != isinstance(current, bool):
         return False
@@ -388,6 +477,8 @@ def cmd_set(session, args):
         if _buffer(session, txn, name, text) and not _structured(session):
             session.send(f"{name} will be saved at setcommit ({len(txn.changes)} buffered).")
         return
+    if refused_while_locked(session, "set"):
+        return
     txn = SettingsTransaction(_settings_fields())
     _buffer(session, txn, name, text)
     _commit(session, txn, confirmed=False, single=True)
@@ -412,6 +503,8 @@ def cmd_setcommit(session, args):
         _say(session, "SETDONE error No transaction is open - send setbegin first.",
               "No transaction is open - start one with setbegin.")
         return
+    if refused_while_locked(session, "setcommit"):
+        return
     confirmed = str(args or "").strip(" ").lower() == "confirm"
     _commit(session, txn, confirmed=confirmed, single=False)
 
@@ -432,9 +525,10 @@ def _commit(session, txn, confirmed, single):
     unchanged = 0
     # The reads under the reload lock (see _refusal()); the save itself is
     # not, since its rehash takes the lock on a thread of its own.
+    in_file = file_values()
     with runtime.config_reload_lock:
         for name, text in txn.changes.items():
-            if _same_as_now(name, text):
+            if _same_as_now(name, text, in_file):
                 unchanged += 1
             else:
                 changes[name] = text
@@ -469,12 +563,30 @@ def _commit(session, txn, confirmed, single):
     if clearing:
         body["confirm_debug_channel_removed"] = True
     import adminchat
-    status, result = webserver.apply_settings_changes(
-        body, source=(session.nick, adminchat.CONSOLE_SOURCE))
-    if status != 200:
-        message = str((result or {}).get("error") or "The settings could not be saved.")
-        _say(session, f"SETDONE error {message}", f"Nothing was saved: {message}")
-        return
+    import threading
+    reported = threading.Event()
+
+    def applied():
+        # On the rehash's thread, once it has run: the window reloads its
+        # page now, not at SETDONE, when config still held the old values.
+        # After SETDONE, always - the rehash can finish first.
+        reported.wait(10)
+        _say(session, "SETAPPLIED", "The rehash has finished: the new settings are in effect.")
+
+    try:
+        status, result = webserver.apply_settings_changes(
+            body, source=(session.nick, adminchat.CONSOLE_SOURCE), on_applied=applied)
+        if status != 200:
+            message = str((result or {}).get("error") or "The settings could not be saved.")
+            _say(session, f"SETDONE error {message}", f"Nothing was saved: {message}")
+            return
+        _report_saved(session, changes, unchanged, result)
+    finally:
+        reported.set()
+
+
+def _report_saved(session, changes, unchanged, result):
+    """SETDONE ok, and the log line, for a save that went through."""
     _log(session, f"saved {len(changes)} setting(s) from the console: {', '.join(sorted(changes))}")
     restart = list(result.get("restart_required") or [])
     message = f"Saved {len(changes)} setting(s); the bot is rehashing to apply them."
@@ -731,6 +843,8 @@ def cmd_served(session, args):
         _say(session, f"SRVDONE aborted {len(txn.lists)}", "Dropped; nothing was saved.")
         return
     if sub == "commit":
+        if refused_while_locked(session, "served commit"):
+            return
         _served_commit(session, txn)
         return
     _served_row(session, txn, sub, rest)
@@ -812,6 +926,8 @@ def cmd_folders(session, args):
                             "path": decode_value(parts[2] if len(parts) > 2 else "")})
         return
     # commit
+    if refused_while_locked(session, "folders commit"):
+        return
     session.folders_txn = None
     if txn.problems:
         _say(session, f"FLDDONE error {len(txn.problems)} line(s) refused; nothing was saved.",
@@ -878,6 +994,9 @@ def cmd_onconnect(session, args):
     sub, _, rest = str(args or "").strip(" ").partition(" ")
     sub = sub.lower()
     if not sub:
+        # Locked too: an X login among them holds a password.
+        if refused_while_locked(session, "onconnect"):
+            return
         payload = webserver.build_on_connect_payload()
         if _structured(session):
             _send_lines(session, onconnect_lines(payload))
@@ -890,6 +1009,8 @@ def cmd_onconnect(session, args):
         _send_lines(session, out)
         return
     if sub == "resend":
+        if refused_while_locked(session, "onconnect resend"):
+            return
         status, result = webserver.build_on_connect_resend_result()
         if status == 200:
             _say(session, f"OCRESEND ok {result.get('sent', 0)} {result.get('message', '')}".rstrip(),
@@ -939,6 +1060,8 @@ def cmd_onconnect(session, args):
         txn.commands.append(decode_value(command))
         return
     # commit
+    if refused_while_locked(session, "onconnect commit"):
+        return
     session.onconnect_txn = None
     if txn.problems:
         _say(session, f"OCDONE error {len(txn.problems)} line(s) refused; nothing was saved.",
