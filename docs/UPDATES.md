@@ -58,6 +58,220 @@ or a message that another IRC user chooses.
   private messages at teardown and parks the file on a sink, as it does the fetch history. Four existing tests follow
   a changed statement. 32/32 mutations caught.
 
+### 🧪 The pack-cancel test waits for its own rar
+
+`test_a_cancel_terminates_that_process_and_removes_the_partial_archive` failed now and then in CI with
+`IndexError` on `self.rars[0]`. Its "a pack has started" check was "some pack is writing": on a slow runner the
+previous test's packer can outlive its cleanup's join, its job is the one `pack_status()` reports, and the request
+made here is still queued behind it. The wait now requires this test's own rar and an archive in this test's
+`TMP_ZIP_DIR`, and `setUp` lets a leftover packer finish first. Test-only; no behaviour changes.
+
+### 🖥️ The settings window in `dccore.mrc` (#1264, phase B)
+
+`/dccore settings` (and **Bot Settings** / **Settings...** in the menus) opens `dialog dccore.set`: the bot's settings
+as the dashboard's Settings page has them, laid out as the settings-window mockup - six tabs (General, Sharing,
+Downloads, Security, Dashboard & Console, Advanced), each tab's pages as a column of buttons on the left, Apply / OK /
+Cancel and a status line at the bottom. Plain mIRC, no DLL. `dccore.mrc` is 1.19.0. The pages are push-style radio
+buttons, not a listbox: a script cannot set a listbox's row height, and at a display scale above 100% its highlight
+was shorter than the text (found in the first real-mIRC test).
+
+- **Generated, not hand-kept.** `scripts/mirc/build_settings_window.py` writes one marked block of `dccore.mrc` - the
+  dialog table (420 controls, positions computed, labels measured with the options dialog's Tahoma table so a long
+  label wraps instead of being cut) and `alias dccore.sw.data`, the lookup data the hand-written mSL drives it with -
+  from `webserver.SETTINGS_LABELS`, `SETTINGS_UNITS`, `CHOICE_LABELS`, `settings_file.CHOICES` and `declared_types`,
+  the #528 help text (`settings_help`) and the dashboard's own words for the colours and channel modes
+  (`web/lang/en.json`). `scripts/mirc/settings_window_layout.py` is the mockup's grouping as pure data; every key of
+  `SETTINGS_CATEGORIES` is placed exactly once or in its `EXCLUDED` with a reason (only `ADMIN_PASSWORD_HASH`).
+  `--check` exits 1 when the block is stale. A page too tall for one column takes two (File locations).
+- **The tabs are only a strip.** No control is attached to a tab (mIRC would re-show all of them on a click); a page's
+  controls are shown and the previous page's hidden with `did -v` / `did -h`, from per-page id lists.
+- **Open:** `consolecaps` first - an older bot's "Unknown command" makes the window say "too old - update it" and edit
+  nothing of the bot - then `settings`; the structured pages ask for their snapshot (`onconnect`, `served`, then
+  `folders` for a bot with no `lists.json`, `banlist`) the first time they are shown. Every snapshot is counted against
+  its BEGIN/END before anything is shown, and one whose END never comes (phase A's stalled-client cut-off) times out
+  after 30 seconds as a failed load rather than leaving the window waiting.
+- **Apply** compares every control with what it showed when loaded and sends only what changed, as one transaction
+  (`setbegin`, a `set` each, `setcommit`): `SETDONE ok` says how many were saved and which need a restart, and reloads;
+  `SETERR` / `SETDONE error` put the dashboard's reasons in the status line, show the page of the first one and keep the
+  edits; `SETDONE confirm` (clearing the debug channel) is asked with `$input` from a timer, then `setcommit confirm` or
+  `setabort`. **OK** is Apply and closes once the bot has saved (at once when nothing changed); **Cancel** sends
+  nothing. A change on **File locations** asks first. Sizes show in KB/MB and go back in bytes.
+- **The structured pages:** IRC Server's on-connect box (multi-line edit, seconds between, Save, Resend now); Channels
+  (`CHANNEL` as a list, saved by Apply, and `DEBUG_CHANNEL`); Lists & channels (rows `List: Main [primary]`, its
+  folders, `#music -> Main - Normal`; edit the selected row, add, remove, Save lists - through `folders` when only the
+  implied list's folders changed, so the list is not made real); Bans & ignores (lift, ignore for minutes, add/remove
+  a pattern, re-asked two seconds after each, since `ban`/`unban` finish in the background); Appearance (theme and the
+  six colours as foreground/background menus; Preview runs `setbegin`, the theme's `set`s, `setpreview`, `setabort`
+  and draws the two lines in `@DCCore-preview`: decoded (the bot now encodes them, colour codes as `%03` and runs of
+  spaces as `%20`) and with every space made a non-breaking one, since `echo` collapses runs of spaces and a theme's
+  frame is made of them - a coloured `$chr(160)` draws the same block).
+- **General Settings** has this mIRC's own switches too (open @DCCore / Chat / Downloads at start, reconnect), saved
+  to `dccore.ini` by Apply or OK. **This mIRC window** opens the old Options dialog, unchanged; `/dccore options` is
+  still that dialog. The "..." browse buttons work only when the bot runs on this PC: the console connection is
+  127.0.0.1 / ::1, or the bot's `CAPS` line ends with `machine:<name>` and that is this computer's `$host` (spaces and
+  colons as `-`, compared ignoring case). A DCC chat to a bot on the same PC arrives from the public address, so the
+  address alone left the buttons greyed out in the first real-mIRC test.
+- **Values** are decoded with the doc's `$regsubex` and encoded by `dccore.sw.enc` / `dccore.sw.tok`, the mSL twins of
+  `console_settings.encode_value()` / `encode_token()`. The window needs mIRC 6.17 (`$regsubex`); an older mIRC is told.
+- **What a review of it found, fixed before it shipped:** a refused Save lists cleared the "not saved" mark, so OK
+  closed and dropped the edits (the mark now clears only on ok or unchanged); the implied-list shortcut compared with
+  `==`, which ignores case, so a case-only rename went through `folders` and was lost (`===`, as every comparison of
+  the operator's data now is); the debug-channel question's 30-second wait started before `$input`, so a question left
+  open timed out under itself (it starts once answered). And, since mIRC closes up runs of spaces in a command's
+  parameters: every value is now kept ENCODED as the bot sent it (settings, list names, folder paths, on-connect
+  lines) and decoded only for display; what the operator types is encoded straight from the control (`dccore.sw.wire`,
+  and `dccore.sw.enc` is one expression now, no `/var` in between); the dirty baseline is what the control shows after
+  filling, read back, so an untouched field is never sent and an untouched list row or on-connect line goes back byte
+  for byte. The File locations question is asked from a timer like the other one. A Channels refusal is named
+  "Channels" (each key's label is in the generated data as `n.<KEY>`), an "As set" colour shows all of itself, a new
+  start forgets the old waits, and no `did -c` selects line 0 when `$findtok` finds nothing.
+- **What an audit of both halves found, fixed:** a paired-token console may now read but not change settings (phase
+  A's `LOCKED`): the window asks for the admin password once, masked, from a timer, sends `unlock` straight from the
+  prompt (a local variable, in no table, never echoed - and `unlock` typed in @DCCore is echoed as `********`), and on
+  `UNLOCKED` sends the refused command again (`setcommit`, or `setcommit confirm`, a commit, a resend); no password or
+  a wrong one aborts the open transaction and keeps the edits; the on-connect box says "Locked" with an **Unlock**
+  button instead of failing; the unlock lasts one connection. The page reloads at `SETAPPLIED` ("Saved - Applying...",
+  then "Saved and applied"), with what was sent as the baseline until then; a save that wrote nothing reloads at once.
+  A reply reaches the window only when it is waiting for it (`dccore.sw.wants`: its phase, or the wait or flag of its
+  request), so `settings` or `served` typed in @DCCore is shown there and leaves the window alone. A console reconnect
+  keeps edits not saved (only untouched controls are refreshed, pages with edits of their own are not asked again;
+  Reload discards them). The public changelog's colours bullet says 1.19.0, like the window's.
+- **Tests:** `tests/test_the_settings_window_generator.py` (21: the block is up to date and `--check` catches a stale
+  one; every setting placed once or excluded; the mockup's tabs and pages; the generator refuses a key placed twice, a
+  key with no place, a check too wide and a page that cannot fit; labels, units, choices and help are the bot's) and
+  `tests/test_the_mirc_settings_window.py` (101: the decoder and encoder, re-run in Python from the script's own
+  patterns, agree with `console_settings` on a battery of values, and a preview line comes out as the bot's line with
+  no plain space for `echo` to collapse; every documented reply type is routed and has a branch; every command sent is
+  a console command with a real subcommand; Apply sends setbegin, sets, setcommit and no `set` is ever sent outside a
+  transaction; every snapshot is counted and times out; ids unique and clear of the other dialogs; every control on
+  exactly one page; labels fit; nothing overlaps; menus; version). Mutation-checked: a removed handler, a broken
+  decoder or encoder, a preview line echoed raw or without its non-breaking spaces, a stale block, a key placed twice,
+  a dropped count check, a `set` outside setbegin, a dropped timeout and each review finding put back each fail.
+  `tests/test_the_mirc_menu_is_grouped_by_what_you_do.py` knows **Bot Settings**; `tests/test_setup_check.py`'s
+  one-copy guard skips `scripts/mirc`, whose layout names settings as data.
+
+### ⚙️ The dashboard's settings pages, over the admin console (#1264, phase A)
+
+The bot side of a settings window for `dccore.mrc`: console commands that run the dashboard's OWN Settings-page code,
+so the window (phase B) can change the bot's settings from mIRC with nothing validated or saved a second way. The
+work is `src/console_settings.py`, reached only from `adminchat.COMMANDS`; the line protocol is defined in
+`docs/ADMIN-CONSOLE.md`, "Settings over the console".
+
+- **`settings`** lists every setting `build_settings_payload()` offers, read under the same reload lock, as
+  `SETBEGIN <n>` / `SETF <KEY> <type> <value>` / `SETEND <n>`. `ADMIN_PASSWORD_HASH` never appears. A value crosses
+  in its `settings.conf` form (a colour as its `\x03` escape text, as the page shows it), with a small `%HH` encoding
+  for the rare value a space-collapsing client would damage - an empty value, a leading, trailing or doubled space, a
+  control character. An ordinary value, `%admin%` and `%nick%` included, crosses unchanged.
+- **`setbegin` / `set` / `setcommit` / `setabort`**: `setcommit` saves every buffered change in ONE
+  `apply_settings_changes()` call, so Apply is one rehash. Each `set` is checked as it arrives by the save's own
+  per-value check (the new `settings_file.check_change()`), so an error comes back per setting, in the page's words;
+  one refused value saves nothing. A value equal to the current one is not written at all - the window can send a
+  whole page back and only what changed is saved, and a full round trip of every setting writes nothing. `set`
+  outside a transaction saves at once. Clearing `DEBUG_CHANNEL` asks first, as the page's confirm() does:
+  `SETDONE confirm ...`, then `setcommit confirm`. A second `setbegin` replaces the first and says how many changes it
+  dropped; the transaction lives on the session, so a disconnect drops it.
+- **`setpreview`**: the dashboard's theme preview with the unsaved `THEME` / `CUSTOM_THEME_*` / `SEARCH_ENABLED`, as
+  raw IRC lines to echo in colour.
+- **`served`**, **`folders`** and **`onconnect`**: the served lists (names, primary, channel bindings and each
+  channel's Normal / Quiet / Request only mode, folders), the one-list bot's folders, and the on-connect commands with
+  their delay - each a snapshot plus a begin / rows / commit transaction over `apply_list_changes()`,
+  `apply_folder_changes()` and `apply_on_connect_changes()`, whose whole-set checks come back one problem per line.
+  A set sent back unchanged writes nothing (an implied list does not become a `lists.json`). `onconnect resend` is
+  the dashboard's Resend button.
+- **`banlist`**: the permanent patterns and the running timed bans/ignores with seconds left, framed for a window
+  (`bans` stays the prose); `ban`, `unban`, `ignore` and `unignore` already cover changing both kinds.
+- **`consolecaps`** answers `DCCORE CAPS settings:1 preview:1 ...`, so the window can tell an older bot (which
+  answers "Unknown command") and say to update it.
+- **Never a value in the log.** `handle_command()` logs the settings commands by their command word, and the
+  subcommand when it is a real one, never the rest of the line - an on-connect command is often an X login with its
+  password, `set ADMIN_PASSWORD_HASH ...` was printed before it was refused, and a typo like `onconnect lines 1 ...`
+  must not print what follows it. A transaction's rows are not logged at all; a commit logs the names it saved.
+- **The dashboard's Console refuses the transactions** (each request is a new session, so a `setbegin` there would be
+  gone before the next `set`, which would then save at once).
+- **What a review of it found, fixed before it shipped:**
+  - *A big snapshot lost its head.* `served` within the dashboard's own limits (16 lists of 40 folders) is ~700 lines,
+    queued by the reader far faster than the writer sends, so the 500-line outbox dropped SRVBEGIN every time. A
+    snapshot now goes through `Session.send_lines()`, which waits for room (keeping 100 lines for the live feed) and,
+    if the client takes nothing for 15 seconds, stops with a `DCCORE OUT` line and no END. Every dump uses it.
+  - *A character split across two reads was garbled.* The reader decoded each 1024-byte `recv()` on its own, so a
+    character whose UTF-8 bytes straddled two of them became two U+FFFD - in a folder path, saved that way. Older than
+    this feature, but a page of rows sent at once made it likely. One incremental decoder per session now.
+  - *`nan` and `inf` were numbers.* `onconnect delay nan` was saved and read back as the 60-second maximum. Refused
+    there, in `on_connect.problems()` (the dashboard's save too), and in `settings_file.coerce()` for every float
+    setting - a settings.conf line saying `inf` now keeps the default, with the reason.
+  - *A no-break space split a field.* Python's `split()`/`strip()` take it (and U+3000) as whitespace, the encoding
+    does not escape it, so a label holding one came back cut short and the commit was refused. The protocol now splits
+    on the ASCII space only, and `handle_command()` (and the dashboard Console) strips only ASCII whitespace.
+  - *A commit read config outside the reload lock*, so inside a rehash's reload window a `set` back to the shipped
+    value was judged unchanged and dropped. The reads now take `runtime.config_reload_lock`; the save does not.
+  - *A legal row was "too long".* The reader closed the session at 4096 characters, and a folder path may be 4096 on
+    its own. 32768 once logged in; 4096 before the password, as before.
+  - *A lone `set` waiting for its confirmation swallowed the next one.* Anything but `setcommit confirm` or `setabort`
+    now ends that implicit transaction first, with `SETDONE aborted <n>`.
+- **Found testing the window in a real mIRC.** A save from the console was logged "Rehash triggered by WEB-DASHBOARD
+  from WEB-DASHBOARD": `apply_settings_changes()` started its rehash as the dashboard whoever called it. It takes a
+  `source` now, and the console passes its own (the nick and `DCC-CONSOLE`); the dashboard's default is unchanged.
+  And the window's "..." browse buttons were greyed out on a bot running on the same PC: a DCC chat arrives from the
+  public address the client advertises, never 127.0.0.1, so the address cannot say "same machine". The `CAPS` line
+  ends with `machine:<this computer's name>` for the window to compare with its own.
+- **Settings changes need the admin password, not only a paired token.** A paired token is kept in clear text in
+  `dccore.ini`, and these commands do what the dashboard asks the password for - serve any directory, read and resend
+  the on-connect commands (an X login holds a password), point `ADMIN_TOKENS_FILE` or `ADMIN_HOSTMASKS` anywhere. The
+  Session now records how it logged in (`unlocked`, `paired_as`, set by `_check_password()`; locked until then). A
+  token session reads (`settings`, `served`, `folders`, `banlist`, `setpreview`, `consolecaps`) and may buffer `set`
+  lines, but `setcommit`, a lone `set`, `served`/`folders`/`onconnect commit`, `onconnect resend`, the `onconnect`
+  listing, `pair` and `unpair` of another token answer `DCCORE LOCKED <command> ...` - the transaction stays open -
+  until `unlock <password>` (the login's own check, three tries, never logged) answers `DCCORE UNLOCKED`. The
+  dashboard's Console counts as the password. `CAPS` adds `unlock:1`.
+- **A revert before the rehash is saved; `SETAPPLIED` says when the rehash has run.** "Unchanged" was judged against
+  the running config, but a save's rehash first waits up to `REHASH_TRANSFER_WAIT` for transfers, and putting a
+  setting back in that window was "Nothing changed" while the file kept the new value. It is judged against what
+  `settings.conf` holds for the setting now (config only when the file does not set it). And
+  `apply_settings_changes()` takes an `on_applied` callback, run when its rehash has finished: the console sends
+  `DCCORE SETAPPLIED` then, always after its `SETDONE ok`, so the window reloads its page when the values are live.
+- **Tests:** `tests/test_console_settings_commands.py` (the encoding; framing and counts; every setting round-tripped
+  with no save; one save per commit, through the real `settings_file.save()`; per-key errors; abort; the
+  debug-channel confirmation; the preview's unsaved values; served lists, folders and on-connect round trips; the ban
+  rows; that nothing but the console reaches these commands; the outbox bound; help and the guide),
+  `tests/test_console_settings_edge_cases.py` (each review finding, through the real Session, writer and reader
+  loop), `tests/test_console_settings_need_the_password.py` (the lock, unlock, the revert during a held rehash,
+  `SETAPPLIED`), `tests/test_the_mirc_menu_has_every_command.py` (the new commands are the window's plumbing, not menu items).
+
+### 🎨 dccore.mrc: nicks, channels and the search term in colours of their own (#1259)
+
+A `@DCCore` line had a coloured tag and a coloured file name and nothing else: the nick and the channel were plain,
+and a searched term used the File names colour because both went through `dccore.name`. On a busy window, with dozens
+of searches an hour, one person or one channel was hard to follow down the list.
+
+- **Three more colours in `/dccore options`**, in a new row under the Show checkboxes: **Search text**, **Nicks** and
+  **Channels**. Nicks and Channels start at *same as the line*, which adds no control codes at all, so the line
+  is byte-for-byte what it was. Search text starts at *same as File names*, the colour the term already had. A saved
+  `dccore.ini` from before gets those defaults through `dccore.default`, so nobody sees a change until they choose one.
+- **Nicks can be *per nick*:** each nick a colour of its own, the same every time and in any case. `dccore.pernick`
+  takes the first six hex digits of the MD5 of the lower-cased nick, modulo the length of the list for the window's
+  background (Options' Background, or mIRC's own `$color(background)` when that is "none"). The sixteen lists in
+  `dccore.nickpal` leave out white and black (one of them is the line's own text colour), the background itself, and
+  every colour under 3:1 WCAG contrast against it. They are worked out once from `dccore.rgb` and the test recomputes
+  them. A mid-tone background leaves only two or three colours (pink: navy and maroon).
+- **One path for every line.** REQUEST, QUEUED, SENDING, RESUMED, SENT, FAIL and SEARCH draw the nick with
+  `$dccore.nick($2)`, and `dccore.in` draws the channel with `$dccore.chan($1)`, keeping its non-breaking spaces. The
+  SEARCH line's term goes through `$dccore.term($5-)`; file names keep `dccore.name`. All three go through
+  `dccore.paint`. It writes nothing for "same as the line", and a colour as two digits: `^C3` followed by a nick like
+  `3bot` would read as colour 33. The span ends with `^O`, as the tag and the file name already do.
+- **The Options dialog is 24 dbu taller.** The Show box grew a row of three labelled combos and everything below it
+  moved down. `dccore.fillspan` and `dccore.spanval` fill and read the three combos: their own lines first, then the
+  sixteen colours.
+- New keys: `col.term` (`name`, `-1` or 0-15), `col.nick` (`-1`, `per` or 0-15), `col.chan` (`-1` or 0-15). They
+  colour new lines only; lines already in the window stay as they were drawn. `dccore.ver` is 1.18.0.
+- **Tests:** `tests/test_the_mirc_window_colours_nicks_channels_and_terms.py` (30 tests, reading the script with its
+  comment lines removed). 14/14 mutations caught: a handler back to a raw `$2`, the term back through `dccore.name`,
+  the channel back to a raw `$1`, the "same as the line" guard removed or emitting a reset, either default changed, the
+  `col.chan` save removed, a single-digit colour, per-nick without `$lower`, a palette holding its background, the
+  fill off by one, a combo over the checks, and the version not bumped. The existing mIRC tests follow the new
+  expressions and the taller dialog.
+
+**Not run in mIRC.** As with every change to this script, the first real window is the real test.
+
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 
 ### 🧹 Purge every held list, to clear a channel stuck wrong from before v1.16 (#1260)
