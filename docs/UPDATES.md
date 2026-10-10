@@ -4,6 +4,55 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧰 Stores and console: newest copy written last, failed saves retried, a damaged audio cache moved aside, two login edge cases (#1273)
+
+Six findings of the 2026-10-10 audit of the stores and the admin console, each confirmed by running the real
+functions. `dccore.mrc` is 1.19.1 (reload it with `/reload -rs dccore.mrc`).
+
+- **The queue file could hold an older queue than the newest save wrote.** `db.save_dcc_queue()` copied
+  `config.dcc_queue` before taking `_disk_lock`, and several callers save after releasing `queue_lock`. A save that
+  copied first and then waited for the lock wrote last: an erased queue came back in the file, a new one was missing,
+  and a restart before the next save kept that. The copy is now taken inside `_disk_lock` - still one `dict()` under
+  the GIL, still without `queue_lock` - so copies reach the file in the order they were taken.
+- **The fetched-lists registry could name a list file that no longer exists.** `list_fetch._note_auto_attempt()` (the
+  auto-refetch sweep) and `mark_seen()` (the operator opening a list) copied the registry under `_lock()` and wrote it
+  after letting go; an install that finished in between was overwritten by the older copy, pointing at the dated file
+  the install had just removed. Both now write under `_lock()`, as the install and purge paths already did (same lock
+  order: `_lock()`, then `_disk_lock`).
+- **A failed fetch-history write was never tried again.** `_persist_fetch_history_locked()` remembered the snapshot
+  as written before `db.save_fetch_history()` ran, and the save swallowed its error, so every later tick saw
+  "unchanged". The save now returns True/False (as `save_known_bots()` does) and the snapshot is remembered only on
+  True - the #691 fix for the bot registry, applied to this store.
+- **A damaged `audio_info.db` is moved aside.** `audio_info.Cache.open()` returned None on any sqlite3 error, so a
+  damaged cache made every rebuild write its list with sizes only, for ever. A bare `DatabaseError` or a `DataError`
+  (`_is_damage()`, the download counts' test) now renames it to `<file>.corrupt-<timestamp>` with any `-wal`/`-shm`
+  and opens a fresh cache; the audio is read once more. A locked file or a full disk is not damage and leaves the file
+  alone; a damaged file that cannot be renamed says to delete it.
+- **A login replaced while its password was being checked no longer takes the console.** `_serve()` closes the
+  pending session when a newer connection arrives, but the replaced session's reader thread could still be inside
+  `_check_password()` (PBKDF2, once more per paired token). It then promoted the closed session: the operator's live
+  console was closed as taken over, the closed session became current until its thread forgot it - leaving no console -
+  and its debug and event sinks were never removed. `_promote()` now refuses, under `_state_lock`, a session that is
+  closed or is no longer `_pending` (the window between `_serve()` swapping `_pending` and closing the old one), and
+  removes the sinks again if the session closes while they are added. The refused session is not counted as a failed
+  attempt.
+- **dccore.mrc: a typed password with leading, trailing or doubled spaces can log in.** The script sent it as `$1-`,
+  which closes runs of spaces up and drops them at either end, so such a password (valid since #622) got "Incorrect
+  Password." three times and an IP block, and could not pair. The password prompt now calls `dccore.sendpass`: when
+  `$editbox(@DCCore)` is the typed line (its `$gettok(...,1-,32)` equals `$1-`) and is longer than `$1-`, it sends
+  `DCCORE PASSWORD $dccore.sw.enc(<the editbox>)` - the settings window's value encoding, nested so no `/var` closes
+  the spaces up - and otherwise `$1-` as before. `adminchat._check_password()` tries the line verbatim first, then the
+  decoded `DCCORE PASSWORD` value (`console_settings.decode_value`), so a password that reads like that form still
+  works and an older bot still gets every ordinary password as before. Not run in a real mIRC: if the editbox no
+  longer holds the line during `on INPUT`, the condition fails and the old `$1-` path runs unchanged. The settings
+  window's `unlock <password>` still sends its password as typed through `$1-`; not part of this finding.
+
+Tests: `tests/test_the_stores_write_their_newest_copy_last.py`, `test_a_failed_fetch_history_write_is_tried_again.py`,
+`test_a_damaged_audio_cache_is_moved_aside.py`, `test_a_superseded_login_does_not_take_the_console.py` (the real
+`_serve()` superseding mid-check) and `test_a_typed_password_keeps_its_spaces.py` (the alias read statement by
+statement and run through the settings window's `mirc_enc` emulation, then decoded by the bot), each mutation-checked.
+`tests/test_the_mirc_settings_window.py` and the public changelog name 1.19.1.
+
 ### 🖥️ The settings window in `dccore.mrc` (#1264, phase B)
 
 `/dccore settings` (and **Bot Settings** / **Settings...** in the menus) opens `dialog dccore.set`: the bot's settings

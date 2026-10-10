@@ -2650,6 +2650,10 @@ def _forget(session):
             _pending = None
 
 
+# What _promote() answers for a session that is no longer the pending one.
+_SUPERSEDED = object()
+
+
 def _promote(session):
     """A newly authenticated session replaces any live one.
 
@@ -2664,6 +2668,14 @@ def _promote(session):
     """
     global _session, _pending
     with _state_lock:
+        # SUPERSEDED WHILE ITS PASSWORD WAS CHECKED (#1273). A newer
+        # connection replaces the pending one under this lock, and checking a
+        # password takes a moment (PBKDF2, once more per paired token). The
+        # session it replaced must not log in afterwards: it is closed, or
+        # about to be, and promoting it closed the operator's live console
+        # and left no console at all.
+        if session.closed or (_pending is not None and _pending is not session):
+            return _SUPERSEDED
         previous = _session
         _session = session
         if _pending is session:
@@ -2674,6 +2686,11 @@ def _promote(session):
         import announce
         announce.add_debug_sink(session.debug_sink)
         announce.add_event_sink(session.event_sink)
+        if session.closed:
+            # Closed in between: its close() has already run and would never
+            # remove them (#1273).
+            announce.remove_debug_sink(session.debug_sink)
+            announce.remove_event_sink(session.event_sink)
     except Exception as sink_err:
         print(f"[ADMINCHAT] Could not attach the debug sink: {sink_err}")
 
@@ -2752,6 +2769,24 @@ def _token_matches(supplied):
     return None
 
 
+# A password sent as `DCCORE PASSWORD <value>` (#1273): the value encoded as
+# the settings commands encode one (console_settings.encode_value), so its
+# leading, trailing and doubled spaces survive. dccore.mrc sends a typed
+# password this way only when it has such spaces, which mIRC's $1- would
+# collapse; every other password still goes as it is typed.
+_SPACED_PASSWORD_PREFIX = "DCCORE PASSWORD "
+
+
+def _spaced_password(line):
+    """The password in a `DCCORE PASSWORD <value>` line, or None. Tried only
+    after the line itself, so a password that really is such a line still
+    opens the console."""
+    if not line.startswith(_SPACED_PASSWORD_PREFIX):
+        return None
+    import console_settings
+    return console_settings.decode_value(line[len(_SPACED_PASSWORD_PREFIX):]) or None
+
+
 def _check_password(session, line):
     # Verbatim, bar the newline the reader already split on: the setup page,
     # POST /api/settings/password and the dashboard's login all hash and
@@ -2767,13 +2802,20 @@ def _check_password(session, line):
     paired = _token_matches(supplied)
     if paired:
         print(f"[ADMINCHAT] {session.nick} logged in with the token paired as {paired!r}.")
-    if paired or verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied):
+    spaced = _spaced_password(supplied)
+    if paired or verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied) or (
+            spaced is not None and verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), spaced)):
         session.authenticated = True
         session.paired_as = paired
         session.unlocked = not paired
         session.last_activity = time.time()
         clear_bad_ip(session.peer_ip)
         replaced = _promote(session)
+        if replaced is _SUPERSEDED:
+            session.authenticated = False
+            print(f"[ADMINCHAT] {session.nick} ({session.peer_ip}) gave the password after a newer "
+                  f"connection had replaced it; not logged in.")
+            return
         session.send("")
         session.send("Entering DCC Chat Admin Interface")
         session.send('For help type "help"')

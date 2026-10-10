@@ -629,6 +629,15 @@ again. From then on the script answers `Enter Your Password:` with the token
 and is logged in exactly as with the password: the same hostmask check
 first, the same three attempts, the same IP block.
 
+**A typed password whose spaces must survive** (#1273). At the
+`Enter Your Password:` prompt the bot also takes `DCCORE PASSWORD <value>`:
+the password in the value encoding of "Settings over the console" below, so a
+space at either end and every space after another arrive as `%20`. A client
+whose input closes up runs of spaces - mIRC's does - sends a password that has
+such spaces this way; any other password goes as it is typed. The line as it
+arrives is tried first, so a password that really reads like this still opens
+the console, and a wrong one is one of the three attempts like any other.
+
 **The script only sends the token to the bot it paired with.** It dials the
 bot's nick by itself, and on Undernet anyone can take a nick while the bot is
 away, so before answering `Enter Your Password:` it compares the host the nick
@@ -832,7 +841,8 @@ Save the file anywhere (your mIRC folder is fine) and, in mIRC:
 with your bot's nick in place of `MusicBot`. The `@DCCore` window opens,
 the chat is offered exactly as `/dcc chat` would (path 1 or 2 above, as
 the bot decides), and when the bot asks for the password you **type it in
-the window, once**. The script then sends `pair dccore.mrc-<id> 1.1` - the
+the window, once**. A password with a space at either end, or two spaces in a
+row, works too: the script sends it encoded so its spaces survive (#1273). The script then sends `pair dccore.mrc-<id> 1.1` - the
 id is this mIRC install's own, see "What a token does not do" above - keeps the
 token the bot answers with in `dccore.ini` beside the script (in clear
 text - see "What a token does not do" above), and from then on connects

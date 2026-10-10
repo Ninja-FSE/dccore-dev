@@ -1187,8 +1187,12 @@ def _persist_fetch_history_locked(queue):
     snapshot = {rid: _restart_form(row) for rid, row in queue.items()}
     if snapshot == _last_persisted_terminal_snapshot:
         return
-    _last_persisted_terminal_snapshot = snapshot
-    db.save_fetch_history(snapshot)
+    # Remembered only once it is on disk (#1273), as irc._flush_known_bots()
+    # does (#691). Remembered before the write, one failed write - a sharing
+    # violation, a full disk - made every later tick see "unchanged", and
+    # nothing reached the file until the rows changed again.
+    if db.save_fetch_history(snapshot):
+        _last_persisted_terminal_snapshot = snapshot
 
 
 # QUEUED TOO (#978). A restart QUITs, and a file server drops the queue of a
