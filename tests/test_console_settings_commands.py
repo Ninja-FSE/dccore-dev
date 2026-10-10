@@ -221,11 +221,28 @@ class TheSettingsSnapshot(SettingsCase):
 
     def test_it_reads_the_payload_under_the_reload_lock(self):
         import runtime
+        import threading
         seen = []
         real = webserver._settings_payload_unlocked
 
+        def held_by_someone():
+            # RLock.locked() is new in Python 3.14, and an RLock is free to
+            # the thread that owns it. Another thread that cannot take it
+            # proves it is held; one that can gives it straight back.
+            took = []
+
+            def probe():
+                got = runtime.config_reload_lock.acquire(blocking=False)
+                took.append(got)
+                if got:
+                    runtime.config_reload_lock.release()
+            prober = threading.Thread(target=probe)
+            prober.start()
+            prober.join()
+            return not took[0]
+
         def spy(settings_module):
-            seen.append(runtime.config_reload_lock.locked())
+            seen.append(held_by_someone())
             return real(settings_module)
         webserver._settings_payload_unlocked = spy
         self.addCleanup(setattr, webserver, "_settings_payload_unlocked", real)
