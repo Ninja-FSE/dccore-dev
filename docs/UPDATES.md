@@ -62,6 +62,12 @@ work is `src/console_settings.py`, reached only from `adminchat.COMMANDS`; the l
     its own. 32768 once logged in; 4096 before the password, as before.
   - *A lone `set` waiting for its confirmation swallowed the next one.* Anything but `setcommit confirm` or `setabort`
     now ends that implicit transaction first, with `SETDONE aborted <n>`.
+- **Found testing the window in a real mIRC.** A save from the console was logged "Rehash triggered by WEB-DASHBOARD
+  from WEB-DASHBOARD": `apply_settings_changes()` started its rehash as the dashboard whoever called it. It takes a
+  `source` now, and the console passes its own (the nick and `DCC-CONSOLE`); the dashboard's default is unchanged.
+  And the window's "..." browse buttons were greyed out on a bot running on the same PC: a DCC chat arrives from the
+  public address the client advertises, never 127.0.0.1, so the address cannot say "same machine". The `CAPS` line
+  ends with `machine:<this computer's name>` for the window to compare with its own.
 - **Tests:** `tests/test_console_settings_commands.py` (the encoding; framing and counts; every setting round-tripped
   with no save; one save per commit, through the real `settings_file.save()`; per-key errors; abort; the
   debug-channel confirmation; the preview's unsaved values; served lists, folders and on-connect round trips; the ban

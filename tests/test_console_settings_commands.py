@@ -105,9 +105,11 @@ class Recorder:
 
     def __init__(self):
         self.calls = []
+        self.sources = []
 
-    def __call__(self, changes):
+    def __call__(self, changes, source=None):
         self.calls.append(dict(changes))
+        self.sources.append(source)
         return 200, {"written": sorted(k for k in changes if k != "confirm_debug_channel_removed"),
                      "rehash": "started", "restart_required": []}
 
@@ -400,7 +402,7 @@ class ATransaction(SettingsCase):
         self.assertTrue(reply[-1].startswith("DCCORE SETDONE ok 1 0 - "), reply)
 
     def test_restart_only_settings_are_named(self):
-        webserver.apply_settings_changes = lambda changes: (
+        webserver.apply_settings_changes = lambda changes, source=None: (
             200, {"written": sorted(changes), "restart_required": ["WEBUI_PORT"]})
         reply = run(self.session, "set WEBUI_PORT 8421")
         self.assertTrue(reply[-1].startswith("DCCORE SETDONE ok 1 0 WEBUI_PORT Saved 1 setting(s)"), reply)
@@ -714,7 +716,22 @@ class TheCapabilities(DCCoreTestCase):
 
     def test_consolecaps_names_every_part_with_its_version(self):
         reply = run(make_session(self), "consolecaps")
-        self.assertEqual(reply, ["DCCORE CAPS settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1"])
+        self.assertEqual(reply, ["DCCORE CAPS settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1"
+                                 " machine:" + console_settings.machine_name()])
+
+    def test_the_machine_name_is_one_token_naming_this_computer(self):
+        import socket
+        name = console_settings.machine_name()
+        self.assertEqual(name.lower(), socket.gethostname().lower().replace(" ", "-").replace(":", "-") or "-")
+        self.assertNotIn(" ", name)
+        self.assertNotIn(":", name)
+
+    def test_an_awkward_machine_name_still_makes_one_token(self):
+        import socket
+        real = socket.gethostname
+        socket.gethostname = lambda: "Living Room:PC\x01"
+        self.addCleanup(setattr, socket, "gethostname", real)
+        self.assertEqual(console_settings.machine_name(), "Living-Room-PC-")
 
 
 # --------------------------------------------------------------------------
