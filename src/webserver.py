@@ -3168,6 +3168,12 @@ def build_fetch_delete_result(request_id, only_states=None):
         bot = row.get("bot")
         asked_for = row.get("requested_filename") or row.get("filename")
         del config.fetch_queue[request_id]
+        directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+        if stored_filename and dcc_fetch.another_row_holds_file_locked(
+                config.fetch_queue, directory, stored_filename):
+            # Another row's file now (#1269): a newer fetch of the same name
+            # took the plain name after this row's file was moved away.
+            stored_filename = None
         never_sent = dcc_fetch.take_back_unsent_request(row)
         if at_the_bot and dcc_fetch.another_row_wants_locked(config.fetch_queue, bot, asked_for):
             # Another row still waits on the same file there (#1083).
@@ -3178,7 +3184,6 @@ def build_fetch_delete_result(request_id, only_states=None):
         removed_at_bot = dcc_fetch.drop_our_request_at(bot, asked_for, channel=row.get("channel"))
 
     if stored_filename:
-        directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
         target = os.path.join(directory, stored_filename)
         if not dcc.is_safe_path(directory, target):
             print(f"[WEBUI] Refused to delete {stored_filename!r}: outside FETCHED_FILES_DIR.")
@@ -3266,6 +3271,12 @@ def build_fetch_delete_many_result(request_ids, only_states=None):
             if stored_filename:
                 removed_files.append(stored_filename)
             cancelled.append(request_id)
+        # Never a file a row left in the queue still names as its own
+        # (#1269) - checked once the whole batch is popped, so two rows of
+        # this batch sharing one file still remove it.
+        directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+        still_named = dcc_fetch.files_other_rows_hold_locked(queue, directory, removed_files)
+        removed_files = [name for name in dict.fromkeys(removed_files) if name not in still_named]
         # Never for a file a newer row (one of THIS batch's own survivors,
         # or one outside it) still waits on there (#1083) - checked once
         # the whole batch has already been popped, under the SAME lock
@@ -3288,7 +3299,6 @@ def build_fetch_delete_many_result(request_ids, only_states=None):
             deduped.append((bot, asked_for, channel))
         still_held = deduped
 
-    directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
     for stored_filename in removed_files:
         target = os.path.join(directory, stored_filename)
         if not dcc.is_safe_path(directory, target):

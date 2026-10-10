@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed: a file a bot sent late could be taken by a folder request to the same bot.** A file request waiting to be asked again (the bot was busy, silent, or the disk was full) now gets its own answer, as the v1.16.0 fix meant it to.
+- **Fixed: deleting an old finished download could delete a newer download's file of the same name.** Once the old file had been moved out of the Downloads folder, a later download of the same name took its name; deleting the old row now leaves the newer file alone.
+- **Fixed: a bot's main and RAR lists could be wiped when it was briefly out of another channel.** A request for a bot's list in one channel is no longer sent to a different channel instead, and an answer from the wrong channel is never installed over what is held.
+- **Fixed: purging a bot left its other channels' lists on disk.** They are removed with the rest now.
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.
