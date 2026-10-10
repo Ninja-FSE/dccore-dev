@@ -94,7 +94,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.19.0 }
+alias dccore.ver { return 1.19.1 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -487,6 +487,22 @@ alias dccore.dead {
 alias dccore.send {
   if (!$chat($dccore.bot)) { dccore.sys Not connected. /dccore connect | return }
   .msg $+(=,$dccore.bot) $1-
+}
+
+; A password typed at the prompt (#1273). $1- has its runs of spaces closed
+; up and its leading and trailing ones dropped, so a password that has them
+; never arrived as typed. Such a password is read from the editbox as it
+; was typed and sent as DCCORE PASSWORD <value>, its spaces escaped as the
+; settings window escapes a value; the bot decodes it. Nested, never put in
+; a /var, which would close the spaces up again. Every other password goes
+; as it always did, which a bot from before this still accepts - and so
+; does one whose editbox does not hold the line $1- came from.
+alias dccore.sendpass {
+  if ($gettok($editbox(@DCCore),1-,32) === $1-) && ($len($editbox(@DCCore)) > $len($1-)) {
+    dccore.send DCCORE PASSWORD $dccore.sw.enc($editbox(@DCCore))
+    return
+  }
+  dccore.send $1-
 }
 
 ; ---------------------------------------------------------------------
@@ -1549,7 +1565,7 @@ on *:INPUT:@DCCore: {
     ; the password, typed by hand: never shown, never stored
     hadd dccore.live state auth
     hadd dccore.live typed 1
-    dccore.send $1-
+    dccore.sendpass $1-
     dccore.echo $dccore.prompt ********
     halt
   }

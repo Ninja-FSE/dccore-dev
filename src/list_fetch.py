@@ -1467,8 +1467,10 @@ def mark_seen(bot):
         if float(entry.get("seen_at") or 0) >= float(entry.get("fetched_at") or 0):
             return False
         entry["seen_at"] = time.time()
-        snapshot = dict(store)
-    db.save_fetched_bot_lists(snapshot)
+        # Written under the lock (#1273), as an install writes: written after
+        # it, this copy could land after an install that finished in between
+        # and put the list it replaced back in the file.
+        db.save_fetched_bot_lists(dict(store))
     return True
 
 
@@ -1498,8 +1500,8 @@ def _note_auto_attempt(bot, when):
         if not isinstance(entry, dict):
             return
         entry["last_attempt"] = when
-        snapshot = dict(store)
-    db.save_fetched_bot_lists(snapshot)
+        # Under the lock (#1273): see mark_seen().
+        db.save_fetched_bot_lists(dict(store))
 
 
 def _freshness_of(bot):
