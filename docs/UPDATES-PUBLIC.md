@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed: a bot that could not join any of its channels at connect never fully settled after it got in.** This happened with a channel that needs a services login slower than the join, or bans at connect. Once a later rejoin got the bot in, fetches from other bots, debug-channel messages and the freeze of departed users' queues stayed off until the next reconnect. They now start as soon as the channel's member list arrives.
+- **Fixed: the address DCCore offers for transfers was looked up only once, at startup.** If that lookup failed (the network was not up yet), every transfer was refused until a restart. If the ISP gave the connection a new address, the old one was offered and every transfer timed out. It is now looked up again whenever the bot reconnects, at most every five minutes. An address set in `MY_IP_OR_DOCK` is still used as it is.
+- **Fixed: a channel the bot gave up rejoining kept its users "present".** Their queues kept being offered to and were never frozen. They are now treated as gone, as for any other channel the bot has left.
+- **Fixed: a channel name with `[`, `]`, `\` or `~` that the server spells with `{`, `}`, `|` or `^` was never recognised.** Most servers treat these as the same channel. The bot joined it but never advertised there and kept asking to rejoin. Channel names are now compared the way the server says it compares them.
+
 ## v1.16.1 — The Bot Forgets on Purpose
 
 - **New: purge every held list at once**, in the console (`purgealllists confirm`) or the List Browser ("Purge every held list"). Recommended once after upgrading from before v1.16, since a bot's list held from back then can have its channel stuck wrong - each list rebuilds on its own with its channel resolved fresh. Update `dccore.mrc` to 1.17.2 and reload it with `/reload -rs dccore.mrc`.

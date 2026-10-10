@@ -3047,7 +3047,7 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None)
         # Guarded by tests/test_no_socket_write_is_a_partial_write.py.
         irc_sock.sendall(offer.encode("utf-8", errors="ignore"))
         print(f"[ADMINCHAT] Offered DCC CHAT to {nick} on "
-              f"{getattr(config, 'MY_IP_OR_DOCK', '?')}:{port}; waiting for the connection.")
+              f"{dcc.dcc_address() or '?'}:{port}; waiting for the connection.")
         deadline = time.monotonic() + LISTEN_TIMEOUT
         while True:
             listener.settimeout(max(0.001, deadline - time.monotonic()))
