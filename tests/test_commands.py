@@ -360,7 +360,10 @@ class QueueRemoveCleansTempArchives(DCCoreTestCase):
         path = self.archive()
         row = self.packed_row(path)
         config.dcc_queue = {"dave": [row]}
-        config.active_transfers = [{"user": "erin", "file": row["file"], "bytes_sent": 512}]
+        # A send's claim names its file by the row it carries (#1268), the way
+        # the dispatcher and the packer's handoff build it.
+        config.active_transfers = [{"user": "erin", "file": row["file"], "bytes_sent": 512,
+                                    "queue_row": self.packed_row(path, user="erin")}]
 
         commands.handle_queue_remove(self.sock, "dave", "#c")
 

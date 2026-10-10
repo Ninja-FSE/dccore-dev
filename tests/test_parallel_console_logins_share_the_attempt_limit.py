@@ -221,6 +221,21 @@ class TheReservationIsSettled(LoginCase):
         self.attempt(self.session(), "")
         self.assertNotIn(ADDRESS, adminchat._bad_ips)
 
+    def test_a_spaced_password_line_is_one_attempt(self):
+        """`DCCORE PASSWORD <value>` (#1273) is verified twice - as sent, and
+        decoded - and still costs the address one attempt, not two."""
+        s = self.session()
+        self.attempt(s, "DCCORE PASSWORD %20guess")
+        self.assertEqual(adminchat._bad_ips[ADDRESS][0], 1)
+        self.assertEqual(s.attempts, 1)
+
+    def test_a_spaced_password_line_logs_in_and_clears_the_address(self):
+        s = self.session()
+        self.attempt(s, "guess")
+        self.attempt(s, "DCCORE PASSWORD right")
+        self.assertTrue(s.authenticated)
+        self.assertNotIn(ADDRESS, adminchat._bad_ips)
+
 
 if __name__ == "__main__":
     import unittest
