@@ -94,6 +94,31 @@ stop_watcher_thread = None
 # !rehash during the outage cannot lose it; None while the bot is up.
 freeze_clock_paused_at = None
 
+# CHANNEL SYNC THAT ARRIVES LATE (#1271). irc.claim_channel_sync() sets
+# config.bot_joined_channel once per connection, and two threads can get
+# there: the activation (after its five-second settle) and the read loop,
+# when a rejoin's NAMES fills channel_users on a connection whose activation
+# found it empty. `channel_sync_waiting` is the epoch of the connection whose
+# activation found nobody and is still waiting for a member list; None
+# otherwise. The lock keeps the two from claiming twice.
+channel_sync_lock = threading.Lock()
+channel_sync_waiting = None
+
+# HOW THIS SERVER FOLDS CASE (#1271): the CASEMAPPING token of its 005 line,
+# reset to the RFC 1459 default at every connection. irc.irc_lower() reads it.
+server_casemapping = "rfc1459"
+
+# THE DCC ADDRESS THE BOT DETECTED (#1271), kept apart from MY_IP_OR_DOCK,
+# which is the operator's pin and nothing else. Writing the detection into
+# MY_IP_OR_DOCK made the first answer look like a pin to every later lookup,
+# so the address was found once per process: a lookup that failed at boot,
+# or a public address the ISP changed, stayed wrong until a restart.
+# `dcc_address_found_at` is the time.monotonic() of the last lookup that
+# found one; the lock keeps two lookups from running at once.
+dcc_address_lock = threading.Lock()
+dcc_address_detected = ""
+dcc_address_found_at = None
+
 # Per-user bookkeeping -------------------------------------------------------
 failed_transfers = {}    # Failed-transfer counter, per user
 channel_users    = {}    # Users currently seen in the channels

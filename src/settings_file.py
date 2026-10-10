@@ -318,7 +318,7 @@ NOT_SETTINGS = frozenset({"SCRIPT_VERSION"})
 # comment: MY_IP_OR_DOCK is the address DETECTED at startup, and a value in
 # the file would freeze one session's answer into every session after it.
 RUNTIME_ASSIGNED = {
-    "MY_IP_OR_DOCK": ("the daemon detects this address at startup rather than "
+    "MY_IP_OR_DOCK": ("the daemon detects this address when it connects rather than "
                       "reading it from a file. Set it in admin_config.py if "
                       "you need to pin it"),
     "ORIGINAL_NICK": ("the daemon remembers this for itself, from NICKNAME, so "

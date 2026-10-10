@@ -184,7 +184,12 @@ def handle_queue_check(s, user, target):
     formatted_total_files = ""
     list_date = ""
     if file_count <= 0:
-        file_count_total, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes()
+        # THE LIST THIS CHANNEL IS BOUND TO (#1270), as the advert in the
+        # same channel reports it - not the primary's figures. A private
+        # message is the primary.
+        import library
+        file_count_total, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes(
+            library.list_name_for_request(target))
         formatted_total_files = f"{file_count_total:,}"
     
     active_dl = oserve.active_downloads if oserve else 0
@@ -3124,8 +3129,13 @@ def handle_stats_request(s, user, target):
     def figure(text, colour=green):
         return f"{bold}{colour}{text}{reset}"
 
+    # This channel's list (#1270), as the advert here reports it; a private
+    # message is the primary. It used to be the primary everywhere, so a
+    # channel bound to another list heard two library sizes from one bot.
+    import library
     shared_count, list_date, shared_size, _raw = \
-        list_mod.get_file_count_date_size_and_raw_bytes()
+        list_mod.get_file_count_date_size_and_raw_bytes(
+            library.list_name_for_request(target))
 
     total_sent = stats_mgr.get_total_sent()
     total_bytes = stats_mgr.get_total_sent_bytes()
