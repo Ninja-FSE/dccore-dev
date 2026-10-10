@@ -4,6 +4,39 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧭 Fetching from bots: each answer, file and list stays with what it belongs to (#1269)
+
+Four findings from an audit of fetching from other bots, each confirmed by running the real functions.
+
+- **A late file answer reaches its pending row - the #1244 claim actually runs now.** #1244 checks a "file" row
+  back in "pending" (a busy reply, silence, a full disk, a restart, a passive offer with every slot in use) by its
+  exact name before a bot-alone folder or list row can take the offer. It tested `offered_at`, and every one of
+  those ways back to pending sets `offered_at=None`, so it never matched: a folder row offered to the same bot
+  still took the file, and without one the answer was refused as unsolicited. Its tests built a state no real path
+  produces. A row now carries `asked_before` (`dcc_fetch._note_it_was_asked()`, set on each of those paths while the
+  request had really gone out), and the claim tests that. A line dropped from the send queue before it went out
+  (`requests_not_sent()`) does not count as asked. The #1244 tests now reach "pending" through the real busy reply.
+- **Deleting an old finished fetch no longer deletes a newer fetch's file.** Once the operator moved a finished
+  `cover.jpg` out of the Downloads folder, a later fetch of the same name from another bot was promoted to the same
+  plain name, and both rows named one file - deleting the old row removed the new one's file. The promotion now
+  leaves a plain name another row still names alone (`_promote_clean_filename(..., queue=)`, under the fetch lock),
+  and the single and batch deletes leave a file another row still names (`another_row_holds_file_locked()`), for
+  histories written before this.
+- **A list request stays in its own channel.** The dispatcher's fallback to another channel the bot is in is right
+  for a file, not for a list whose channel means something. A second channel's request (`secondary_channel_tick()`)
+  that fell back to the bot's main channel came back with the main list, was merged as that channel's own, and
+  dropped the main and RAR lists and their index rows. A main-list refresh that fell back to a channel held as a
+  second channel's list replaced Main with it and dropped that channel's marker. Now a second channel's request goes
+  out in that channel or fails, and a main refresh is not sent to a channel held as a second channel's
+  (`dcc_fetch._list_channel_refusal()`). `list_fetch._install_fetched_list()` refuses both answers too, before
+  anything is extracted (`held_channel_role()`), so what is held stays as it was. A main refresh still falls back to
+  a channel nothing held came from, as #1232 does.
+- **Purging a bot removes its second channels' lists.** `forget_bot()` removed only the bot's own folder;
+  `lists/_channels/<bot>/` (up to `MAX_LIST_TEXT_SIZE` per channel) stayed on disk for good, from a single purge and
+  the bulk purges alike. It is removed now, with its folder tables, and the purge reports it if it could not be.
+- **Tests:** `tests/test_fetching_keeps_each_answer_its_own.py` (17 tests) and the rewritten #1244 tests in
+  `tests/test_dcc_fetch.py`. 13/13 mutations caught.
+
 ### 🔌 IRC connection audit: late channel sync, the DCC address on reconnect, given-up channels, casemapping (#1271)
 
 Four findings from the 2026-10-10 audit of the IRC connection, each confirmed by running the real `irc_loop()`.

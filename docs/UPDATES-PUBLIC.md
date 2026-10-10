@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fixed: a file a bot sent late could be taken by a folder request to the same bot.** A file request waiting to be asked again (the bot was busy, silent, or the disk was full) now gets its own answer, as the v1.16.0 fix meant it to.
+- **Fixed: deleting an old finished download could delete a newer download's file of the same name.** Once the old file had been moved out of the Downloads folder, a later download of the same name took its name; deleting the old row now leaves the newer file alone.
+- **Fixed: a bot's main and RAR lists could be wiped when it was briefly out of another channel.** A request for a bot's list in one channel is no longer sent to a different channel instead, and an answer from the wrong channel is never installed over what is held.
+- **Fixed: purging a bot left its other channels' lists on disk.** They are removed with the rest now.
 - **Fixed: a bot that could not join any of its channels at connect never fully settled after it got in.** This happened with a channel that needs a services login slower than the join, or bans at connect. Once a later rejoin got the bot in, fetches from other bots, debug-channel messages and the freeze of departed users' queues stayed off until the next reconnect. They now start as soon as the channel's member list arrives.
 - **Fixed: the address DCCore offers for transfers was looked up only once, at startup.** If that lookup failed (the network was not up yet), every transfer was refused until a restart. If the ISP gave the connection a new address, the old one was offered and every transfer timed out. It is now looked up again whenever the bot reconnects, at most every five minutes. An address set in `MY_IP_OR_DOCK` is still used as it is.
 - **Fixed: a channel the bot gave up rejoining kept its users "present".** Their queues kept being offered to and were never frozen. They are now treated as gone, as for any other channel the bot has left.
