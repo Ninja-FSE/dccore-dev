@@ -79,10 +79,13 @@ class TheAdvertIntervalHasAMinimum(SettingsCase):
         self.assertIn("ANNOUNCE_INTERVAL", payload["error"])
         self.assertFalse(os.path.exists(settings_file.settings_path()))
 
-    def test_a_hand_edited_zero_keeps_the_default(self):
+    def test_a_hand_edited_zero_is_raised_to_the_minimum(self):
+        """Read, not written: the file is older than the rule, so the value is
+        clamped and said, not thrown away (tests/test_an_older_settings_file_
+        still_loads.py has the rest of that rule)."""
         report = self.applied_from_file("ANNOUNCE_INTERVAL = 0\n")
-        self.assertNotIn("ANNOUNCE_INTERVAL", report["applied"])
-        self.assertEqual([name for name, _why in report["bad"]], ["ANNOUNCE_INTERVAL"])
+        self.assertEqual(report["applied"]["ANNOUNCE_INTERVAL"], 60)
+        self.assertEqual(report["bad"], [])
 
     def test_other_numbers_are_untouched(self):
         """0 means "off" for plenty of neighbours; only the named one has a floor."""
@@ -190,9 +193,11 @@ class AListNameIsAFileName(SettingsCase):
             with self.subTest(good=good):
                 self.assertEqual(self.coerce("LIST_BASE_NAME", good), good)
 
-    def test_a_hand_edited_bad_name_is_not_applied(self):
+    def test_a_hand_edited_bad_name_is_kept_or_sanitised_never_dropped(self):
+        """Dropping it would fall back to the nickname and rename the published
+        list; see tests/test_an_older_settings_file_still_loads.py."""
         report = self.applied_from_file("LIST_BASE_NAME = DJ|Music\n")
-        self.assertNotIn("LIST_BASE_NAME", report["applied"])
+        self.assertIn(report["applied"]["LIST_BASE_NAME"], ("DJ|Music", "DJ_Music"))
 
     def test_the_derived_name_follows_the_same_rule(self):
         """One charset for the derived name and the typed one."""

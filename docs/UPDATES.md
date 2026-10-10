@@ -39,6 +39,13 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
   format kept on a refused one.
 - **Parse errors named the wrong line** (one too high) **and the internal `[__dccore__]` section.**
   `_describe_parse_error()` gives the file's own line and text, and says "the top of the file".
+- **Writes are strict, a file that loaded before still loads.** The refusals above are for a save (Settings page,
+  console, configure.py, browser setup). Reading `settings.conf` goes through `settings_file.load_value()`: a
+  `CHANNEL` list keeps its valid channels and drops the rest (refused only when none is valid - otherwise
+  `#music, jazz`, which joined #music yesterday, would leave the REQUIRED `CHANNEL` blank and stop the bot); an
+  `ANNOUNCE_INTERVAL` under the minimum is raised to it rather than reset to 300; a `LIST_BASE_NAME` is kept where
+  this platform takes it as a file name (`_file_name_works_here()`) - renaming it would rename the published list -
+  and sanitised where it does not. Each is logged once with its line (`report["repaired"]`).
 - Help texts for `ANNOUNCE_INTERVAL`, `CHANNEL` and `LIST_BASE_NAME` (en/fr/es) and `settings.conf.sample` say the
   new limits; INSTALL.md has a "Values that are refused" section.
 - **Tests:** `tests/test_the_settings_refuse_what_cannot_work.py`, `tests/test_settings_parse_errors_name_the_real_line.py`,
@@ -46,8 +53,9 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
   `tests/test_startup_serves_every_list.py`, `tests/test_a_case_only_list_rename.py` (each real case-insensitive
   test probes the filesystem and skips, paired with a fake that runs everywhere - a hard link, or a stubbed probe),
   `tests/test_configure_takes_a_pasted_folder_and_checks_channels.py`,
-  `tests/test_the_console_stamp_follows_the_setting.py`. Three advert-worker tests now stub `advert_interval()`
-  instead of relying on a 0.01 s setting. 26/26 mutations caught.
+  `tests/test_the_console_stamp_follows_the_setting.py`, `tests/test_an_older_settings_file_still_loads.py` (the
+  load-versus-write rule, including a boot from a mixed channel list). Three advert-worker tests now stub
+  `advert_interval()` instead of relying on a 0.01 s setting. 32/32 mutations caught.
 
 ## 🟩 v1.16.1 (2026-10-09) - "The Bot Forgets on Purpose"
 

@@ -1001,6 +1001,96 @@ def coerce(name, raw, default, declared=None):
     return raw.strip("\n")
 
 
+# WHAT A FILE THAT WORKED YESTERDAY STILL DOES TODAY (#1272 review). The rules
+# above are for WRITING: the Settings page, the admin console, configure.py and
+# the browser setup refuse a value that cannot work, and the operator retypes
+# it there and then. Read from a settings.conf written before those rules,
+# the same refusal would put the setting back to its default at the next
+# start - and for CHANNEL, a REQUIRED setting, that is a bot that ran
+# yesterday and now refuses to start. So a value READ from the file keeps
+# whatever part of it works, and the log says what was dropped and on which
+# line:
+#
+#   CHANNEL           the entries that are channels are joined; the others
+#                     are dropped. Refused only when none is a channel.
+#   LIST_BASE_NAME    kept where it is a usable file name on THIS system (a
+#                     "|" is fine on Linux, and renaming it would rename the
+#                     published list); otherwise sanitised, as the name
+#                     derived from a nickname is.
+#   ANNOUNCE_INTERVAL and anything else in MINIMUMS: raised to the minimum,
+#                     not reset to the shipped default.
+#
+# Everything else reads exactly as coerce() says.
+_WINDOWS_FILE_NAME_FORBIDDEN = set('<>:"/\\|?*')
+
+
+def _file_name_works_here(name, windows=None):
+    """Whether `name` can start a file name on this system (or on Windows
+    when `windows` says so) - the platform's own rule, not the portable
+    charset list_base_name_problem() asks a NEW value to keep to."""
+    if windows is None:
+        windows = os.name == "nt"
+    text = str(name)
+    if not text.strip() or text in (".", "..") or "/" in text or "\x00" in text:
+        return False
+    if windows and any(ch in _WINDOWS_FILE_NAME_FORBIDDEN or ord(ch) < 32 for ch in text):
+        return False
+    return True
+
+
+def load_value(name, raw, default, declared=None, windows=None):
+    """coerce() for a value READ from settings.conf: (value, note).
+
+    `note` is None when the value read cleanly, or what was done to keep the
+    working part of it - see the comment above. Raises ValueError exactly
+    where coerce() would for anything with no working part.
+    """
+    text = raw.strip()
+
+    if name in CHANNEL_LIST_SETTINGS and text and channels_problem(text):
+        parts = [part.strip() for part in text.split(",") if part.strip()]
+        kept = [part for part in parts if channel_problem(part) is None]
+        dropped = [part for part in parts if channel_problem(part) is not None]
+        if kept and dropped:
+            value = coerce(name, ",".join(kept), default, declared)
+            return value, (
+                f"ignoring {', '.join(repr(part) for part in dropped)} "
+                f"({channel_problem(dropped[0])}) and joining {', '.join(kept)}. "
+                f"Correct the line; the Settings page and configure.py only "
+                f"save a list where every entry is a channel")
+
+    if name == "LIST_BASE_NAME" and text:
+        problem = list_base_name_problem(text)
+        if problem:
+            if _file_name_works_here(text, windows):
+                return text, (
+                    f"kept as it is, since it works on this system - but {problem}, "
+                    f"and it cannot be saved like this from the Settings page")
+            cleaned = sanitize_list_base_name(text)
+            return cleaned, f"using {cleaned!r}: {problem}"
+
+    if name in MINIMUMS and (declared or type(default)) is int:
+        try:
+            number = int(text)
+        except ValueError:
+            number = None
+        floor = MINIMUMS[name]
+        if number is not None and number < floor:
+            return floor, f"{number} is below the minimum of {floor}; using {floor}"
+
+    return coerce(name, raw, default, declared), None
+
+
+def _active_line_numbers(text):
+    """{NAME: line number} of each active (uncommented) setting in `text`."""
+    numbers = {}
+    for number, line in enumerate(text.split("\n"), start=1):
+        found = _ASSIGNMENT_RE.match(line)
+        if found and found.group("comment") is None and not found.group("indent"):
+            numbers.setdefault(found.group("key").upper(), number)
+    return numbers
+
+
 def apply_to(namespace, path=None, log=print):
     """Read the settings file and write recognised values into `namespace`.
 
@@ -1010,7 +1100,7 @@ def apply_to(namespace, path=None, log=print):
     """
     path = path or settings_path()
     report = {"path": path, "applied": {}, "unknown": [], "bad": [], "shadowed": [],
-              "read_error": None}
+              "read_error": None, "repaired": []}
 
     if not os.path.exists(path):
         return report
@@ -1024,7 +1114,8 @@ def apply_to(namespace, path=None, log=print):
         # the operator looks at a file that plainly sets it. utf-8-sig
         # consumes a BOM when present and is identical to utf-8 when not.
         with io.open(path, encoding="utf-8-sig") as handle:
-            entries = parse(handle.read())
+            text = handle.read()
+        entries = parse(text)
     except (OSError, UnicodeDecodeError, SettingsError) as err:
         report["read_error"] = str(err)
         log(f"[CONFIG] Could not read {os.path.basename(path)}, "
@@ -1037,10 +1128,12 @@ def apply_to(namespace, path=None, log=print):
             report["unknown"].append(key)
             continue
         try:
-            value = coerce(key, raw, namespace[key], types.get(key))
+            value, note = load_value(key, raw, namespace[key], types.get(key))
         except ValueError as err:
             report["bad"].append((key, str(err)))
             continue
+        if note:
+            report["repaired"].append((key, _active_line_numbers(text).get(key), note))
         namespace[key] = value
         report["applied"][key] = value
 
@@ -1095,6 +1188,9 @@ def _log_summary(report, path, log):
             continue
         log(f"[CONFIG] {name}: ignoring {key!r} - not a setting this version "
             f"recognises. Check the spelling against settings.conf.sample.")
+    for key, line, note in report.get("repaired", ()):
+        where = f" line {line}" if line else ""
+        log(f"[CONFIG] {name}{where}: {key} - {note}.")
     for key, why in report["bad"]:
         log(f"[CONFIG] {name}: ignoring {key} - {why}. Keeping the default.")
 

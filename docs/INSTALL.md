@@ -142,12 +142,14 @@ Three things are deliberately *not* required:
 
 ### Values that are refused
 
-The Settings page, the admin console, `configure.py` and the browser setup all refuse these, and a hand-edited `settings.conf` line with one is ignored (the log says so and the default stays):
+The Settings page, the admin console, `configure.py` and the browser setup all refuse these when you **save** one:
 
 - **`ANNOUNCE_INTERVAL`** below 60 seconds. There is no "0 = off" here: a 0 used to make the bot advert as fast as the channel would take it.
 - **`FILE_DIRECTORY`** that is not an existing folder (blank is fine - see above). A path in quotes is refused with the path to use instead.
 - **`CHANNEL`** entries that do not start with `#` (or `&`), or that hold a space - several channels are separated by commas. `DEBUG_CHANNEL` and `BROADCAST_SEARCH_CHANNEL` take one channel each.
 - **`LIST_BASE_NAME`** with a character a file name cannot hold on every system, such as `|` or `\`. The refusal suggests the name to use (`DJ|Music` becomes `DJ_Music`), which is what the bot derives from a nickname like that anyway.
+
+A `settings.conf` written before these rules still **loads**, so a bot that ran before an update keeps running; the startup log names each value it had to change and its line. A `CHANNEL` list keeps its real channels and drops only the entries that are not (`#mychannel, jazz` joins `#mychannel`) - only a list with no channel in it at all is ignored. An `ANNOUNCE_INTERVAL` under 60 is used as 60. A `LIST_BASE_NAME` is kept as it is where this system can use it as a file name (a `|` on Linux or macOS), so the published list keeps its name, and sanitised where it cannot. A single `DEBUG_CHANNEL` or `BROADCAST_SEARCH_CHANNEL` that is not a channel is ignored, as before. Saving any of them again needs a value from the list above.
 
 With more than one list, the bot starts as long as any list has a folder it can read; a list whose folders are all missing (an unplugged drive) is named in a warning at startup and by the setup check, and its channels have nothing to serve until the drive is back.
 
