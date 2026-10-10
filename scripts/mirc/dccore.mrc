@@ -94,7 +94,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.19.1 }
+alias dccore.ver { return 1.19.3 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -2711,13 +2711,31 @@ alias dccore.sw.locked {
 }
 ; Asked from a timer ($input waits for an answer, which a script event may
 ; not do). Masked (p). No comma in the prompt: it would end the argument.
+; The answer goes straight into $dccore.sw.unlockarg, in one nested
+; expression, and never into a /var (#1281): a /var - like a command's
+; parameters - closes up a run of spaces and drops the ones at either end,
+; and a password that has them could log in but never unlock.
 alias dccore.sw.unlockask {
   if (!$dialog(dccore.set)) { return }
-  var %pw = $input(The bot needs its admin password to change settings from this console. It unlocks this connection once and is not kept.,po,DCCore - Unlock)
-  if (%pw == $null) { dccore.sw.unlockdrop Not saved: no password was given. | return }
+  dccore.sw.unlocksend $dccore.sw.unlockarg($input(The bot needs its admin password to change settings from this console. It unlocks this connection once and is not kept.,po,DCCore - Unlock))
+}
+; The password as unlock sends it (#1281). One with a run of spaces, or a
+; space at either end, is encoded as the window encodes a value, so it
+; survives being a command's parameters; the bot tries what it gets as it
+; is, then decoded. Any other password goes as typed, which a bot from
+; before this still accepts. $1 is an identifier's argument and keeps its
+; spaces; what is returned has no run of them and none at either end.
+alias dccore.sw.unlockarg {
+  if ($regex($1,/^\x20|\x20$|\x20\x20/)) { return $dccore.sw.enc($1) }
+  return $1
+}
+; $1- is $dccore.sw.unlockarg's answer: nothing when the box was cancelled
+; or left empty. Sent, never echoed or kept.
+alias dccore.sw.unlocksend {
+  if ($1- == $null) { dccore.sw.unlockdrop Not saved: no password was given. | return }
   hadd dccore.sws unlocking 1
   dccore.sw.wait unlock
-  dccore.send unlock %pw
+  dccore.send unlock $1-
 }
 ; The Unlock button beside the on-connect box.
 alias dccore.sw.unlockbutton {
