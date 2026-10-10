@@ -126,13 +126,14 @@ ADMIN_HOSTMASKS = ["operator.users.undernet.org"]        # bare host
 ADMIN_HOSTMASKS = ["*!*@operator.users.undernet.org"]    # familiar IRC form
 ```
 
-Wildcards work, and more than one entry is allowed:
+Wildcards work as they do everywhere on IRC - `*` is any run of characters and
+`?` exactly one - and more than one entry is allowed:
 
 ```python
 ADMIN_HOSTMASKS = ["operator.users.undernet.org", "operator2.users.undernet.org"]
 ```
 
-A pattern that reduces to bare `*` is refused and logged — it would admit the
+A pattern made of nothing but wildcards and dots is refused and logged — it would admit the
 whole network and make the gate decorative. A pattern that is accepted but
 names far more than one operator is warned about at start-up, on `!rehash` and
 by `setup_check.py`, and still works as written: `*.users.undernet.org` puts
@@ -242,7 +243,7 @@ prefix.
 
 | Command | Effect |
 |---|---|
-| `ban <pattern>` | add a permanent wildcard ban |
+| `ban <pattern>` | add a permanent wildcard ban: `*` is any run of characters, `?` exactly one (`ban *!*@10.0.0.?`) |
 | `unban <pattern>` | remove one |
 | `queuemove <nick> up\|down` | move a nick one place up or down the line for a free slot (#1206); `queue` lists the nicks in that order. Only the two nicks swap places; nobody else's moves. A nick with a list waiting is served first, so nobody is moved past it - that is refused, with the place the nick keeps. The order is kept in memory only: a restart puts it back to first-come |
 | `queuemove <nick> <number> up\|down` | move one of a nick's queued files up or down in its own queue — the one at the top is sent first. A file being sent or packed stays put and nothing is moved past it. The number is the one `queue <nick>` shows |
@@ -629,6 +630,15 @@ again. From then on the script answers `Enter Your Password:` with the token
 and is logged in exactly as with the password: the same hostmask check
 first, the same three attempts, the same IP block.
 
+**A typed password whose spaces must survive** (#1273). At the
+`Enter Your Password:` prompt the bot also takes `DCCORE PASSWORD <value>`:
+the password in the value encoding of "Settings over the console" below, so a
+space at either end and every space after another arrive as `%20`. A client
+whose input closes up runs of spaces - mIRC's does - sends a password that has
+such spaces this way; any other password goes as it is typed. The line as it
+arrives is tried first, so a password that really reads like this still opens
+the console, and a wrong one is one of the three attempts like any other.
+
 **The script only sends the token to the bot it paired with.** It dials the
 bot's nick by itself, and on Undernet anyone can take a nick while the bot is
 away, so before answering `Enter Your Password:` it compares the host the nick
@@ -832,7 +842,8 @@ Save the file anywhere (your mIRC folder is fine) and, in mIRC:
 with your bot's nick in place of `MusicBot`. The `@DCCore` window opens,
 the chat is offered exactly as `/dcc chat` would (path 1 or 2 above, as
 the bot decides), and when the bot asks for the password you **type it in
-the window, once**. The script then sends `pair dccore.mrc-<id> 1.1` - the
+the window, once**. A password with a space at either end, or two spaces in a
+row, works too: the script sends it encoded so its spaces survive (#1273). The script then sends `pair dccore.mrc-<id> 1.1` - the
 id is this mIRC install's own, see "What a token does not do" above - keeps the
 token the bot answers with in `dccore.ini` beside the script (in clear
 text - see "What a token does not do" above), and from then on connects

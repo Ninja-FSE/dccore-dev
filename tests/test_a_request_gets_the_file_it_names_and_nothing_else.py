@@ -190,6 +190,18 @@ class AStreamIsNotServed(PathSecurityBase):
         self.request("Artist/Album/track.flac")
         self.assertEqual(self.sent_paths(), [os.path.normcase(self.track)])
 
+    def test_a_queued_stream_is_not_sent(self):
+        """A row that names a stream - restored from dcc_queue.txt, never
+        through the request guards - is refused by the dispatch-time check
+        every queued row passes before its send."""
+        row = {"file": "track.flac:Zone.Identifier", "path": self.stream}
+        self.assertFalse(dcc.may_still_be_sent(self.stream, row))
+
+    def test_a_queued_file_is_still_sent(self):
+        """The control for the one above."""
+        row = {"file": "track.flac", "path": self.track}
+        self.assertTrue(dcc.may_still_be_sent(self.track, row))
+
 
 class AListArchiveStaysWithItsChannel(PathSecurityBase):
     """Two lists: Alfa, the primary, bound to #music; Bravo bound to #vip."""
