@@ -192,6 +192,12 @@ GROUPS = (
         )),
         ("This mIRC window", (
             ("", ({"widget": "mircwin"},)),
+            ("Settings window", (
+                {"note": "Drawn with DCX (scripts\\mirc\\dcx) when this mIRC can load it, with mIRC's own "
+                         "controls when not - /dccore dcx says which and why. Takes effect the next time "
+                         "the window opens."},
+                {"local": "nodcx", "label": "Use the built-in settings window, not DCX"},
+            )),
         )),
     )),
     ("Advanced", (

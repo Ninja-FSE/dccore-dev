@@ -501,7 +501,8 @@ start scripts and `configure.py` work as before. Three things that do change:
   longer reads them, but the old `adminchat.py` there would still run old code - delete them. (Or unpack the release into
   a new folder and copy `data/` and your two config files across.)
 
-**Update `dccore.mrc`.** Save this release's `scripts/mirc/dccore.mrc` over yours and type `/reload -rs dccore.mrc`
+**Update `dccore.mrc`.** Save this release's `scripts/mirc/dccore.mrc` over yours - with the `dcx` folder beside it, which
+the settings window uses when it can - and type `/reload -rs dccore.mrc`
 in mIRC. An older script keeps working, without the new Downloads window, the rebuild progress and the fixes.
 
 **The download counts move into a database.** The first start copies `data/download_counts.json` into

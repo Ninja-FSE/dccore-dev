@@ -650,7 +650,7 @@ class TheWindowsBehaviour(unittest.TestCase):
 
     def test_the_local_switches_are_this_mircs(self):
         data = generated_data()
-        self.assertEqual(data["locals"].split(), ["start.main", "start.chat", "start.downloads", "auto"])
+        self.assertEqual(data["locals"].split(), ["start.main", "start.chat", "start.downloads", "auto", "nodcx"])
         save = alias("dccore.sw.savelocal")
         self.assertIn("if (%state != $dccore.opt(%o)) { hadd dccore %o %state | inc %n }", save)
         self.assertIn("if (%n) { dccore.save }", save)
@@ -756,8 +756,8 @@ class TheExamplesAreInvented(unittest.TestCase):
 
 class TheVersion(unittest.TestCase):
 
-    def test_the_script_is_1_19_4(self):
-        self.assertIn("\nalias dccore.ver { return 1.19.4 }\n", code())
+    def test_the_script_is_1_20_0(self):
+        self.assertIn("\nalias dccore.ver { return 1.20.0 }\n", code())
 
 
 class TheReviewOfTheFirstVersion(unittest.TestCase):
@@ -1014,7 +1014,8 @@ class ThePageButtons(unittest.TestCase):
         self.assertIn("if (%i <= $numtok(%pages,32)) {", body)
         self.assertIn("did -ra dccore.set $calc(1019 + %i) $replace($dccore.sw.untext($dccore.sw.m(p. $+ "
                       "$gettok(%pages,%i,32))),&,&&)", body)
-        self.assertIn("did -v dccore.set $calc(1019 + %i)", body)
+        # shown again only in the built-in window - with DCX the tree replaces them (#1288)
+        self.assertIn("if (!$dccore.sw.s(dcx)) { did -v dccore.set $calc(1019 + %i) }", body)
         self.assertIn("else { did -h dccore.set $calc(1019 + %i) }", body)
 
     def test_the_page_shown_has_its_button_pressed_and_only_it(self):

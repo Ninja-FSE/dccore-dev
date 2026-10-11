@@ -42,6 +42,7 @@
 *.png   binary
 *.jpg   binary
 *.ico   binary
+*.dll   binary
 
 # =====================================================================
 # WHAT DOES NOT LEAVE THIS REPOSITORY
