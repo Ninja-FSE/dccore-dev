@@ -44,6 +44,13 @@ class WhyNot(unittest.TestCase):
                                             "!$isfile(", "$sha256(", "$dccore.dcx.version == $null")]
         self.assertEqual(order, sorted(order))
 
+    def test_a_loader_that_is_not_the_shipped_one_stops_it_but_a_missing_one_does_not(self):
+        self.assertIn("if ($isfile($dccore.dcx.wv2file)) && ($sha256($dccore.dcx.wv2file,2) != "
+                      "$dccore.dcx.wv2sha256)", self.body)
+        self.assertIn("$scriptdir $+ dcx\\WebView2Loader.dll", alias("dccore.dcx.wv2file"))
+        self.assertLess(self.position("$sha256($dccore.dcx.file,2)"), self.position("$sha256($dccore.dcx.wv2file,2)"))
+        self.assertLess(self.position("$sha256($dccore.dcx.wv2file,2)"), self.position("$dccore.dcx.version == $null"))
+
     def test_a_dll_another_script_loaded_is_not_hash_checked(self):
         guard = block("if (!$dccore.dcx.loaded) {", "\n".join(self.why))
         self.assertIn("$isfile(", guard)
@@ -148,6 +155,65 @@ class TheCheckWindow(unittest.TestCase):
     def test_both_events_reach_atdccore(self):
         self.assertIn("on *:dialog:dccore.dcxcheck:sclick:1:", code())
         self.assertIn("if ($2 == sclick) && ($3 == 10)", alias("dccore.dcx.checkcb"))
+
+
+class TheTree(unittest.TestCase):
+    """Phase 2: the built-in window, marked, with a DCX tree for the pages."""
+
+    def test_it_is_built_before_the_first_page_is_shown(self):
+        lines = statements(alias("dccore.sw.init"))
+        self.assertLess(lines.index("dccore.sw.dcx"), lines.index("dccore.sw.tab 1"))
+
+    def test_nothing_happens_when_dcx_cannot_be_used(self):
+        lines = statements(alias("dccore.sw.dcx"))
+        self.assertEqual(lines[0], "if ($dccore.dcx.why != $null) { return }")
+        self.assertEqual(lines[1], "dccore.dcx Mark dccore.set dccore.sw.dcxcb")
+        self.assertEqual(lines[2], "hadd dccore.sws dcx 1")
+
+    def test_the_strip_and_the_buttons_are_hidden_for_it(self):
+        body = alias("dccore.sw.dcx")
+        self.assertIn("did -h dccore.set $calc(1000 + %g)", body)
+        self.assertIn("did -h dccore.set $calc(1019 + %i)", body)
+        # and dccore.sw.tab does not show the buttons again
+        self.assertIn("if (!$dccore.sw.s(dcx)) { did -v dccore.set $calc(1019 + %i) }", alias("dccore.sw.tab"))
+        self.assertIn("if (!$dccore.sw.s(dcx)) { did -f dccore.set $calc(1000 + %g) }", alias("dccore.sw.goto"))
+
+    def test_it_is_placed_by_the_generated_geometry_and_the_reported_scale(self):
+        body = alias("dccore.sw.dcx")
+        self.assertIn("$dialog(dccore.set).cw / $gettok($dccore.sw.m(size),1,32)", body)
+        self.assertIn("$dialog(dccore.set).ch / $gettok($dccore.sw.m(size),2,32)", body)
+        self.assertIn("-c %id treeview %x %y %w %h", body)
+        found = re.search(r"(?m)^  hadd dccore\.swm dcxtree (\d+) (\d+) (\d+) (\d+) (\d+)$", raw())
+        size = re.search(r"(?m)^  hadd dccore\.swm size (\d+) (\d+)$", raw())
+        self.assertTrue(found and size)
+        tree_id, x, y, w, h = (int(n) for n in found.groups())
+        import build_settings_window as builder
+        self.assertEqual((int(size.group(1)), int(size.group(2))), (builder.DIALOG_W, builder.DIALOG_H))
+        self.assertLessEqual(x + w, builder.CONTENT_X - 2)
+        self.assertLessEqual(y + h, builder.CONNECTED[1] - 2)
+        table = block("dialog dccore.set {", raw())
+        self.assertNotIn(", %d, " % tree_id, table)
+
+    def test_groups_and_pages_come_from_the_window_data(self):
+        body = alias("dccore.sw.dcx")
+        self.assertIn("$+(-1,$chr(9),+beE 0 0 0 0 0 0 0 0 $dccore.sw.m(g. $+ %g))", body)
+        self.assertIn("$+(%g -1,$chr(9),+E 0 0 0 0 0 0 0 0 $dccore.sw.untext($dccore.sw.m(p. $+ "
+                      "$gettok(%pages,%i,32))))", body)
+
+    def test_the_page_shown_is_selected_quietly(self):
+        self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.dcxshow $1 }", alias("dccore.sw.page"))
+        lines = statements(alias("dccore.sw.dcxshow"))
+        quiet = lines.index("hadd dccore.sws dcxquiet 1")
+        select = [i for i, line in enumerate(lines) if " -c %g %at" in line][0]
+        self.assertLess(quiet, select)
+        self.assertLess(select, lines.index("hdel dccore.sws dcxquiet"))
+
+    def test_a_click_drives_the_same_switch_as_the_buttons(self):
+        body = alias("dccore.sw.dcxcb")
+        self.assertIn("(!$istok(sclick selchange,$2,32)) || ($dccore.sw.s(dcxquiet)) { return }", body)
+        self.assertIn("var %p = $gettok($dccore.sw.m(g. $+ %g $+ .pages),%at,32)", body)
+        self.assertIn("hadd dccore.sws last. $+ %g %p", body)
+        self.assertTrue(statements(body)[-1] == "dccore.sw.tab %g")
 
 
 if __name__ == "__main__":

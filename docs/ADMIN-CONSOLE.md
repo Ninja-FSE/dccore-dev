@@ -948,8 +948,10 @@ at the bottom.
 The settings window is being moved onto **DCX** (Dialog Control eXtensions,
 https://github.com/twig/dcxdll, BSD-3-Clause), which gives it a real tree for the
 pages and tables with columns for the bans, channels and lists. `dcx.dll` ships
-unmodified in `scripts/mirc/dcx/`, beside its licence and a README naming the
-release and its SHA-256; the script checks that hash before it loads the file.
+unmodified in `scripts/mirc/dcx/`, with Microsoft's `WebView2Loader.dll` (which
+DCX loads every time it starts, and warns about in the status window when it is
+missing), their licences, and a README naming both files and their SHA-256s; the
+script checks those hashes before it loads DCX.
 Whenever DCX cannot be used, the window drawn with mIRC's own controls opens,
 exactly as before:
 
@@ -959,10 +961,14 @@ exactly as before:
   is 32-bit;
 - `dcx\dcx.dll` is not beside the script, is not that release, or will not load.
 
+With DCX, the six tabs and the column of page buttons give way to a **tree**
+on the left: each group in bold with its pages under it, the page shown
+selected. Everything to its right - the pages, their settings, Apply, OK and
+Cancel - is the same window either way. Tables with columns for the bans,
+channels and lists come next.
+
 `/dccore dcx` says which applies. `/dccore dcx check` opens a small window that
-tests DCX in this mIRC and writes what it found in `@DCCore`. In this first
-step the settings window itself is still the built-in one; the DCX window comes
-next, built on what that check shows.
+tests DCX in this mIRC and writes what it found in `@DCCore`.
 
 - **The labels, units, choices and help are the dashboard's.** Point at a
   setting and its help shows under the page. Sizes show in KB or MB and go back

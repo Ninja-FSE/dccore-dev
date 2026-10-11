@@ -2042,7 +2042,13 @@ alias dccore.settings {
 ;  copy of dcx.dll beside it is what DCX itself warns against.
 
 alias dccore.dcx.sha256 { return 321e9ac2168734edd6ff6e48f4bd9540e9297f5e1360773edda9d554e620db12 }
+; Microsoft's WebView2 loader, shipped beside it: DCX loads it every time it
+; starts (from mIRC's folder, then from beside dcx.dll) and writes a warning
+; to the status window when it is not there. Missing is harmless; a file
+; that is not the shipped one is not let near the dll.
+alias dccore.dcx.wv2sha256 { return 5659cbae9f3d412662515671a6c85aefe08eee17118c3de1330a2fed74dc415f }
 alias dccore.dcx.file { return $scriptdir $+ dcx\dcx.dll }
+alias dccore.dcx.wv2file { return $scriptdir $+ dcx\WebView2Loader.dll }
 alias dccore.dcx.loaded { return $dll(dcx.dll) }
 alias dccore.dcx.path { return $iif($dccore.dcx.loaded,$v1,$dccore.dcx.file) }
 alias dccore.dcx.why {
@@ -2052,6 +2058,7 @@ alias dccore.dcx.why {
   if (!$dccore.dcx.loaded) {
     if (!$isfile($dccore.dcx.file)) { return $dccore.dcx.file is missing }
     if ($sha256($dccore.dcx.file,2) != $dccore.dcx.sha256) { return $dccore.dcx.file is not the release this script was shipped with }
+    if ($isfile($dccore.dcx.wv2file)) && ($sha256($dccore.dcx.wv2file,2) != $dccore.dcx.wv2sha256) { return $dccore.dcx.wv2file is not the one this script was shipped with }
   }
   if ($dccore.dcx.version == $null) { return dcx.dll would not load }
 }
@@ -2248,6 +2255,7 @@ alias dccore.sw.init {
   %i = 1
   while (%i <= $dccore.sw.m(pages)) { dccore.sw.showpage %i -h | inc %i }
   dccore.sw.enable 0
+  dccore.sw.dcx
   dccore.sw.tab 1
   .timerdccoreSwTick 0 5 dccore.sw.tick
   dccore.sw.start
@@ -2314,7 +2322,7 @@ alias dccore.sw.tab {
   while (%i <= $dccore.sw.m(slots)) {
     if (%i <= $numtok(%pages,32)) {
       did -ra dccore.set $calc(1019 + %i) $replace($dccore.sw.untext($dccore.sw.m(p. $+ $gettok(%pages,%i,32))),&,&&)
-      did -v dccore.set $calc(1019 + %i)
+      if (!$dccore.sw.s(dcx)) { did -v dccore.set $calc(1019 + %i) }
     }
     else { did -h dccore.set $calc(1019 + %i) }
     inc %i
@@ -2337,6 +2345,7 @@ alias dccore.sw.page {
     else { did -u dccore.set $calc(1019 + %i) }
     inc %i
   }
+  if ($dccore.sw.s(dcx)) { dccore.sw.dcxshow $1 }
   did -r dccore.set 1012
   var %asks = $dccore.sw.m(p. $+ $1 $+ .ask), %i = 1
   while (%i <= $numtok(%asks,32)) {
@@ -2350,13 +2359,71 @@ alias dccore.sw.goto {
   if (%page == $null) { return }
   while (%g <= $dccore.sw.m(groups)) {
     if ($istok($dccore.sw.m(g. $+ %g $+ .pages),%page,32)) {
-      did -f dccore.set $calc(1000 + %g)
+      if (!$dccore.sw.s(dcx)) { did -f dccore.set $calc(1000 + %g) }
       hadd dccore.sws last. $+ %g %page
       dccore.sw.tab %g
       return
     }
     inc %g
   }
+}
+
+; ---- the DCX tree (#1288) ----------------------------------------------
+;  When DCX can be used the window is marked, its tab strip and page buttons
+;  are hidden, and a DCX tree of the groups and their pages takes the left
+;  column. Every page, control and line of logic stays the built-in
+;  window's: the tree only drives dccore.sw.tab and dccore.sw.page, as the
+;  strip and the buttons do. /dccore dcx check showed what this rests on in
+;  a real mIRC - its own controls keep raising their events in a marked
+;  dialog, and $dialog().cw over the width in dialog units is the pixel
+;  scale. When DCX cannot be used none of this runs and the window is
+;  exactly the built-in one.
+alias dccore.sw.dcx {
+  if ($dccore.dcx.why != $null) { return }
+  dccore.dcx Mark dccore.set dccore.sw.dcxcb
+  hadd dccore.sws dcx 1
+  var %g = 1, %i = 1
+  while (%g <= $dccore.sw.m(groups)) { did -h dccore.set $calc(1000 + %g) | inc %g }
+  while (%i <= $dccore.sw.m(slots)) { did -h dccore.set $calc(1019 + %i) | inc %i }
+  var %t = $dccore.sw.m(dcxtree), %id = $gettok(%t,1,32)
+  var %sx = $calc($dialog(dccore.set).cw / $gettok($dccore.sw.m(size),1,32)), %sy = $calc($dialog(dccore.set).ch / $gettok($dccore.sw.m(size),2,32))
+  var %x = $round($calc($gettok(%t,2,32) * %sx),0), %y = $round($calc($gettok(%t,3,32) * %sy),0)
+  var %w = $round($calc($gettok(%t,4,32) * %sx),0), %h = $round($calc($gettok(%t,5,32) * %sy),0)
+  dccore.dcx xdialog dccore.set -c %id treeview %x %y %w %h hasbuttons haslines linesatroot showsel
+  %g = 1
+  while (%g <= $dccore.sw.m(groups)) {
+    dccore.dcx xdid dccore.set %id -a $+(-1,$chr(9),+beE 0 0 0 0 0 0 0 0 $dccore.sw.m(g. $+ %g))
+    var %pages = $dccore.sw.m(g. $+ %g $+ .pages)
+    %i = 1
+    while (%i <= $numtok(%pages,32)) {
+      dccore.dcx xdid dccore.set %id -a $+(%g -1,$chr(9),+E 0 0 0 0 0 0 0 0 $dccore.sw.untext($dccore.sw.m(p. $+ $gettok(%pages,%i,32))))
+      inc %i
+    }
+    inc %g
+  }
+}
+; $1 the page now shown: its item selected in the tree, without that
+; selection being taken as a click
+alias dccore.sw.dcxshow {
+  var %g = $dccore.sw.s(tab), %at = $findtok($dccore.sw.m(g. $+ %g $+ .pages),$1,1,32)
+  if (!%at) { return }
+  hadd dccore.sws dcxquiet 1
+  dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxtree),1,32) -c %g %at
+  hdel dccore.sws dcxquiet
+}
+; DCX's events: $1 the dialog, $2 the event, $3 the control, $4- the item's
+; path - "G" for a group, "G N" for its Nth page
+alias dccore.sw.dcxcb {
+  if ($3 != $gettok($dccore.sw.m(dcxtree),1,32)) || (!$istok(sclick selchange,$2,32)) || ($dccore.sw.s(dcxquiet)) { return }
+  var %g = $gettok($4-,1,32), %at = $gettok($4-,2,32)
+  if (%g !isnum $+(1-,$dccore.sw.m(groups))) { return }
+  if (%at isnum) {
+    var %p = $gettok($dccore.sw.m(g. $+ %g $+ .pages),%at,32)
+    if (%p == $null) || (%p == $dccore.sw.s(page)) { return }
+    hadd dccore.sws last. $+ %g %p
+  }
+  elseif (%g == $dccore.sw.s(tab)) { return }
+  dccore.sw.tab %g
 }
 
 ; ---- talking to the bot ----------------------------------------------
@@ -4099,6 +4166,8 @@ alias dccore.sw.data {
   hmake dccore.swm 100
   hadd dccore.swm groups 6
   hadd dccore.swm slots 6
+  hadd dccore.swm size 420 298
+  hadd dccore.swm dcxtree 900 4 4 86 264
   hadd dccore.swm g.1 General
   hadd dccore.swm g.1.pages 1 2 3 4 5 6
   hadd dccore.swm g.2 Sharing

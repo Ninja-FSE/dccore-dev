@@ -6,8 +6,9 @@ it, and the script, which refuses to load a file whose SHA-256 differs. Change
 one without the others and this fails.
 
 It also holds the dll to what the README promises: 32-bit (the reason a 64-bit
-mIRC falls back), importing nothing but Windows' own libraries (the reason
-WebView2Loader.dll is not shipped), with DCX's BSD-3-Clause notice beside it.
+mIRC falls back), importing nothing but Windows' own libraries, with DCX's
+BSD-3-Clause notice beside it - and the same for Microsoft's WebView2Loader.dll,
+which DCX loads every time it starts and warns about when it is missing.
 """
 
 import hashlib
@@ -22,6 +23,8 @@ DCX_DIR = os.path.join(REPO_ROOT, "scripts", "mirc", "dcx")
 DLL = os.path.join(DCX_DIR, "dcx.dll")
 README = os.path.join(DCX_DIR, "README.md")
 LICENSE = os.path.join(DCX_DIR, "LICENSE-DCX.txt")
+LOADER = os.path.join(DCX_DIR, "WebView2Loader.dll")
+LOADER_LICENSE = os.path.join(DCX_DIR, "LICENSE-WebView2.txt")
 SCRIPT = os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc")
 
 # What a stock Windows install has. A dll outside this list would have to be
@@ -98,17 +101,18 @@ class PE(object):
 
 class TheFileIsTheOneItSaysItIs(unittest.TestCase):
 
-    def test_the_readme_names_the_files_hash(self):
-        actual = hashlib.sha256(read(DLL, "rb")).hexdigest()
+    def test_the_readme_names_the_files_hashes(self):
+        actual = [hashlib.sha256(read(path, "rb")).hexdigest() for path in (DLL, LOADER)]
         named = re.findall(r"`([0-9a-f]{64})`", read(README))
-        self.assertEqual(named, [actual],
-                         "scripts/mirc/dcx/README.md must name exactly the SHA-256 of the dcx.dll beside it")
+        self.assertEqual(named, actual,
+                         "scripts/mirc/dcx/README.md must name the SHA-256 of dcx.dll, then of WebView2Loader.dll")
 
     def test_the_script_refuses_anything_else(self):
-        actual = hashlib.sha256(read(DLL, "rb")).hexdigest()
-        pinned = re.search(r"^alias dccore\.dcx\.sha256 \{ return ([0-9a-f]{64}) \}$", read(SCRIPT), re.M)
-        self.assertIsNotNone(pinned, "dccore.mrc has no dccore.dcx.sha256")
-        self.assertEqual(pinned.group(1), actual, "dccore.dcx.sha256 is not the shipped dcx.dll's SHA-256")
+        for name, path in (("dccore.dcx.sha256", DLL), ("dccore.dcx.wv2sha256", LOADER)):
+            actual = hashlib.sha256(read(path, "rb")).hexdigest()
+            pinned = re.search(r"^alias %s \{ return ([0-9a-f]{64}) \}$" % re.escape(name), read(SCRIPT), re.M)
+            self.assertIsNotNone(pinned, "dccore.mrc has no " + name)
+            self.assertEqual(pinned.group(1), actual, "%s is not the shipped file's SHA-256" % name)
 
     def test_the_readme_names_the_project_and_the_release(self):
         text = read(README)
@@ -134,9 +138,16 @@ class TheFileIsWhatTheFallbackAssumes(unittest.TestCase):
         self.assertEqual(wanted - WINDOWS_DLLS, set(),
                          "dcx.dll imports a dll that is not Windows' own; ship it too or pick another build")
 
-    def test_webview2loader_is_not_shipped(self):
-        # Only DCX's web control loads it, at run time, and the window has none.
-        self.assertNotIn("webview2loader.dll", {n.lower() for n in os.listdir(DCX_DIR)})
+    def test_the_loader_is_shipped_beside_it(self):
+        # DCX loads it from mIRC's folder or from beside dcx.dll every time it
+        # starts, and writes a warning to the status window when it is not
+        # found - so it sits beside dcx.dll, 32-bit like it.
+        loader = PE(read(LOADER, "rb"))
+        self.assertEqual(loader.machine, 0x14C)
+        version = "1.0.2151.40".encode("utf-16-le")
+        self.assertIn(version, read(LOADER, "rb"))
+        self.assertEqual({n.lower() for n in os.listdir(DCX_DIR) if n.lower().endswith(".dll")},
+                         {"dcx.dll", "webview2loader.dll"})
 
 
 class TheLicenceTravelsWithIt(unittest.TestCase):
@@ -146,6 +157,13 @@ class TheLicenceTravelsWithIt(unittest.TestCase):
         self.assertIn("Copyright (c) 2013, twig", text)
         self.assertIn("Redistributions in binary form must reproduce the above copyright notice", text)
         self.assertIn("THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"", text)
+
+    def test_microsofts_notice_is_beside_the_loader(self):
+        text = read(LOADER_LICENSE)
+        self.assertIn("Copyright (C) Microsoft Corporation. All rights reserved.", text)
+        self.assertIn("Redistributions in binary form must reproduce the above", text)
+        self.assertIn("https://aka.ms/webview", read(README))
+        self.assertIn("Microsoft.Web.WebView2", read(README))
 
     def test_the_dll_is_kept_byte_for_byte(self):
         attributes = read(os.path.join(REPO_ROOT, ".gitattributes"))

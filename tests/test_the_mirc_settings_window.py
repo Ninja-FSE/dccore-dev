@@ -1014,7 +1014,8 @@ class ThePageButtons(unittest.TestCase):
         self.assertIn("if (%i <= $numtok(%pages,32)) {", body)
         self.assertIn("did -ra dccore.set $calc(1019 + %i) $replace($dccore.sw.untext($dccore.sw.m(p. $+ "
                       "$gettok(%pages,%i,32))),&,&&)", body)
-        self.assertIn("did -v dccore.set $calc(1019 + %i)", body)
+        # shown again only in the built-in window - with DCX the tree replaces them (#1288)
+        self.assertIn("if (!$dccore.sw.s(dcx)) { did -v dccore.set $calc(1019 + %i) }", body)
         self.assertIn("else { did -h dccore.set $calc(1019 + %i) }", body)
 
     def test_the_page_shown_has_its_button_pressed_and_only_it(self):
