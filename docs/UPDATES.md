@@ -4,6 +4,44 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧱 Splitting `dcc.py`, step 3: choosing the next user is its own function (#1304)
+
+Step 3 of splitting `dcc.py` (`docs/FUTURE.md`; steps 1 and 2 are #1298 and #1300). Section B of
+`check_queue_and_send()`, the sweep under `queue_lock` that gives a free slot to the next in line, moved unchanged to
+a top-level `claim_next_in_line()`. It returns `(promoted, promoted_key, pack_to_wake, absent_users)`. The sweep:
+
+- re-checks the slot count inside the lock;
+- orders the queues with a list allowed to go first (#1205), then the longest wait;
+- skips held, frozen, already-sending and absent users, returning the absent ones for a freeze;
+- keeps a slot for a pack whose turn has come (#1034);
+- claims the user and their transfer row.
+
+What follows the lock stays in `check_queue_and_send()`: the unshared-row drop (#1268), the notice and
+`start_dcc_send()`, the pack wake and the freezes. The notice `stat()`s the library and must not run under the lock
+(#605). The early `return` when the slots filled while waiting for the lock is now "claimed nothing", after which the
+rest does nothing, as before. An AST check shows the sweep uses no names but module globals.
+`check_queue_and_send()` goes from 539 to 401 lines. No behaviour changes.
+
+- **Tests:**
+  - `tests/test_choosing_the_next_user_on_its_own.py` (9 tests):
+    - the longest wait wins and is claimed;
+    - a list at a queue's head goes first and is counted, but not while another list that went first is sending;
+    - held, frozen and already-sending users are passed over;
+    - an absent user is returned for a freeze;
+    - a pack whose turn has come is woken with a slot kept, and with one slot it keeps it;
+    - while another pack is made, the sweep looks further;
+    - full slots claim nothing.
+  - Two source-reading tests (`test_audit_rar_pack_and_slots.py`, `test_announce_target_is_one_channel.py`) read the
+    sweep where it now is.
+- **Mutation checks, 10/10 caught:**
+  - the caller drops the absent users, or the pack to wake;
+  - full slots are claimed past;
+  - a held, frozen or already-sending user is claimed;
+  - an absent user is not frozen;
+  - no slot is kept for the pack;
+  - the user is not claimed;
+  - a list that went first is not counted.
+
 ### 🧱 Splitting `dcc.py`, step 2: the inline RAR packer is its own function (#1300)
 
 Step 2 of splitting `dcc.py` (`docs/FUTURE.md`; step 1 is #1298). The packer was `_inline_rar_packer_body()`, a
