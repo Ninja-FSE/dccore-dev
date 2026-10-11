@@ -176,9 +176,10 @@ class TheLabelsFitInGdi(unittest.TestCase):
             px_per_dbu = base_unit / 4.0
             clipped = []
             for cid, text, _table_available in rows:
-                kind_is_check = any(k == "check" and i == cid for k, _l, i, *_ in controls())
-                width = next(w for _k, _l, i, _x, _y, w, _h in controls() if i == cid)
-                available = width * px_per_dbu - (CHECK_BOX_PX if kind_is_check else 0)
+                kind, width, height = next((k, w, h) for k, _l, i, _x, _y, w, h in controls() if i == cid)
+                # a text wraps over the lines its height holds, as labelled() counts them
+                lines = max(1, height // 8) if kind == "text" else 1
+                available = width * px_per_dbu * lines - (CHECK_BOX_PX if kind == "check" else 0)
                 if widths[text] > available:
                     clipped.append("%s: %d %r needs %dpx, has %.1f"
                                    % (font_name, cid, text, widths[text], available))
