@@ -123,6 +123,10 @@ DIALOG_W, DIALOG_H = 488, 364
 # only had Windows draw that border cut off under the first tab (#1288).
 TABS = (4, 2, 480, 338)
 TAB_HEADER_H = 14                           # the tabs themselves; the body starts under them
+# Windows draws the frame's left edge in the highlight colour, which is the
+# dialog's own on a grey window: an etched line of its own there - a box a
+# unit wide - closes the frame.
+FRAME_LEFT_ID = 1019
 # The pages of the chosen tab: a column of push-style radio buttons, one per
 # slot, as many slots as the tab with the most pages has. Not a listbox: a
 # listbox's row height cannot be set from a script, and at a display scale
@@ -778,6 +782,7 @@ def render(builder):
             out.append('  tab "%s", %d, %d %d %d %d' % ((static(group), cid) + TABS))
         else:
             out.append('  tab "%s", %d' % (static(group), cid))
+    out.append('  box "", %d, %d %d 1 %d' % (FRAME_LEFT_ID, TABS[0], TABS[1] + TAB_HEADER_H, TABS[3] - TAB_HEADER_H))
     slots = max(len(pages) for _group, pages in layout.GROUPS)
     for number in range(slots):
         y = PAGE_SLOT_Y + number * (PAGE_SLOT_H + PAGE_SLOT_GAP)

@@ -19,6 +19,7 @@ from test_the_mirc_settings_window import (alias, block, code, dialog, generated
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "scripts", "mirc"))
 
+import build_settings_window as generator  # noqa: E402
 import settings_window_layout as layout  # noqa: E402
 
 
@@ -266,7 +267,8 @@ class TheMockupLayout(unittest.TestCase):
             cls.pages[page] = ids
 
     def test_every_titled_section_is_a_frame_listed_before_what_it_holds(self):
-        frames = [c for c in self.controls if c[0] == "box"]
+        # every box but the untitled one down the tab frame's left edge
+        frames = [c for c in self.controls if c[0] == "box" and c[2] != generator.FRAME_LEFT_ID]
         self.assertGreater(len(frames), 40)
         for _kind, title, fid, x, y, w, h, _style in frames:
             self.assertTrue(title, fid)

@@ -4016,6 +4016,7 @@ dialog dccore.set {
   tab "Dashboard && Console", 1005
   tab "Advanced", 1006
   tab "Script", 1007
+  box "", 1019, 4 16 1 324
   radio "", 1020, 10 24 88 15, push group
   radio "", 1021, 10 41 88 15, push
   radio "", 1022, 10 58 88 15, push
