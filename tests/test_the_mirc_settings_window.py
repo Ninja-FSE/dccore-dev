@@ -129,7 +129,7 @@ def slot_ids():
     return set(range(1020, 1020 + int(generated_data()["slots"])))
 
 
-GLOBAL_IDS = set(range(1001, 1008)) | {1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019} | slot_ids()
+GLOBAL_IDS = set(range(1001, 1008)) | {1012, 1013, 1014, 1015, 1016, 1017, 1018} | slot_ids()
 
 
 # ---------------------------------------------------------------------------
@@ -628,8 +628,7 @@ class TheDialog(unittest.TestCase):
         self.assertEqual([t[1] for t in tabs], ["General", "Sharing", "Downloads", "Security",
                                                 "Dashboard & Console", "Advanced", "Script"])
         _kind, _label, _cid, tx, ty, tw, th, _style = tabs[0]
-        body = [c for c in self.controls if c[0] not in ("tab", "button")
-                and c[2] not in (1013, 1018, generator.FRAME_LEFT_ID)]
+        body = [c for c in self.controls if c[0] not in ("tab", "button") and c[2] not in (1013, 1018)]
         self.assertGreaterEqual(min(c[4] for c in body), ty + generator.TAB_HEADER_H)
         self.assertLessEqual(max(c[4] + (12 if c[0] == "combo" else c[6]) for c in body), ty + th)
         self.assertGreater(min(c[3] for c in body), tx)
@@ -637,12 +636,14 @@ class TheDialog(unittest.TestCase):
         # the connection and status lines and the buttons sit under it
         self.assertGreater(min(c[4] for c in self.controls if c[0] == "button" and c[2] in (1014, 1015, 1016, 1017)),
                            ty + th)
-        # its left edge, which Windows draws in the highlight colour, gets an
-        # etched line of its own: a box a unit wide, down the frame's side
-        left = next(c for c in self.controls if c[2] == generator.FRAME_LEFT_ID)
-        self.assertEqual(left[0], "box")
-        self.assertEqual((left[3], left[4], left[5], left[4] + left[6]),
-                         (tx, ty + generator.TAB_HEADER_H, 1, ty + th))
+        # Windows 10 draws no left edge on the first tab: with DCX a line of
+        # its own runs down it, from an unselected tab's top into the frame
+        ex, ey, eh = generator.DCX_TABEDGE
+        self.assertEqual(ex, tx)
+        self.assertLess(ty, ey)
+        self.assertLess(ey, ty + generator.TAB_HEADER_H)
+        self.assertLess(ty + generator.TAB_HEADER_H, ey + eh)
+        self.assertLess(ey + eh, generator.DCX_PAGES[1])
 
     def test_the_footer_has_apply_ok_and_cancel(self):
         buttons = {c[2]: c[1] for c in self.controls if c[0] == "button"}

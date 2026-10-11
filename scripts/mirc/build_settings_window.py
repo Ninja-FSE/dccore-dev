@@ -123,10 +123,6 @@ DIALOG_W, DIALOG_H = 488, 364
 # only had Windows draw that border cut off under the first tab (#1288).
 TABS = (4, 2, 480, 338)
 TAB_HEADER_H = 14                           # the tabs themselves; the body starts under them
-# Windows draws the frame's left edge in the highlight colour, which is the
-# dialog's own on a grey window: an etched line of its own there - a box a
-# unit wide - closes the frame.
-FRAME_LEFT_ID = 1019
 # The pages of the chosen tab: a column of push-style radio buttons, one per
 # slot, as many slots as the tab with the most pages has. Not a listbox: a
 # listbox's row height cannot be set from a script, and at a display scale
@@ -150,6 +146,19 @@ DCX_PAGES = (10, 24, 88, 286)
 DCX_PAGES_ID = 900
 DCX_TITLE = (110, 26, 370, 10)
 DCX_TITLE_ID = 901
+# Windows 10 draws an unselected tab with its top and right edges only - the
+# tab before it supplies the left one - so the first tab has no left edge
+# at all, and the frame's left line looked cut off under it (the operator's
+# screenshot). With DCX that edge is drawn as a line of its own: a panel a
+# pixel wide in the tab border's colour, from where an unselected tab's top
+# edge is (TAB_INSET under the control's top; measured at 125 %, within a
+# pixel or two elsewhere) down into the frame's left edge, which the tab
+# control draws from under the tabs. x, y, h in dialog units; the colour as
+# the number $rgb gives.
+DCX_TABEDGE_ID = 902
+TAB_INSET = 3
+DCX_TABEDGE = (TABS[0], TABS[1] + TAB_INSET, TAB_HEADER_H - 1)
+DCX_TABEDGE_RGB = (217, 217, 217)
 
 # A page is its sections, each in a titled frame (a section with no title is
 # bare), down one column - or two side by side when one is too tall. Inside a
@@ -782,7 +791,6 @@ def render(builder):
             out.append('  tab "%s", %d, %d %d %d %d' % ((static(group), cid) + TABS))
         else:
             out.append('  tab "%s", %d' % (static(group), cid))
-    out.append('  box "", %d, %d %d 1 %d' % (FRAME_LEFT_ID, TABS[0], TABS[1] + TAB_HEADER_H, TABS[3] - TAB_HEADER_H))
     slots = max(len(pages) for _group, pages in layout.GROUPS)
     for number in range(slots):
         y = PAGE_SLOT_Y + number * (PAGE_SLOT_H + PAGE_SLOT_GAP)
@@ -803,8 +811,12 @@ def render(builder):
     if (title_x < CONTENT_X or title_x + title_w > CONTENT_X + CONTENT_W or title_y < body_top
             or title_y + title_h > CONTENT_Y):
         raise LayoutError("the DCX title %r is not between the tabs and the page" % (DCX_TITLE,))
-    if not DCX_PAGES_ID < DCX_TITLE_ID < min(LISTVIEWS[n][0] for n in LISTVIEWS):
-        raise LayoutError("the DCX ids collide: page list %d, title %d" % (DCX_PAGES_ID, DCX_TITLE_ID))
+    if not DCX_PAGES_ID < DCX_TITLE_ID < DCX_TABEDGE_ID < min(LISTVIEWS[n][0] for n in LISTVIEWS):
+        raise LayoutError("the DCX ids collide: page list %d, title %d, tab edge %d"
+                          % (DCX_PAGES_ID, DCX_TITLE_ID, DCX_TABEDGE_ID))
+    edge_x, edge_y, edge_h = DCX_TABEDGE
+    if not (edge_x == TABS[0] and TABS[1] < edge_y < body_top < edge_y + edge_h < pages_y):
+        raise LayoutError("the tab edge %r is not down the first tab into the frame" % (DCX_TABEDGE,))
     # every table has its columns, and every set of columns its table
     lists = [c for c in builder.controls if c["kind"] == "list"]
     if sorted(c["id"] for c in lists) != sorted(LISTVIEWS):
@@ -841,9 +853,12 @@ def render(builder):
     data.insert(2, ("size", "%d %d" % (DIALOG_W, DIALOG_H)))
     data.insert(3, ("dcxpages", "%d %d %d %d %d" % ((DCX_PAGES_ID,) + DCX_PAGES)))
     data.insert(4, ("dcxtitle", "%d %d %d %d %d" % ((DCX_TITLE_ID,) + DCX_TITLE)))
+    red, green, blue = DCX_TABEDGE_RGB
+    data.insert(5, ("dcxtabedge", "%d %d %d %d %d" % ((DCX_TABEDGE_ID,) + DCX_TABEDGE
+                                                      + (red + green * 256 + blue * 65536,))))
     # the tables: each native list, the DCX listview over its rectangle, and
     # that listview's columns and extra styles
-    data.insert(5, ("lvs", " ".join(str(c["id"]) for c in lists)))
+    data.insert(6, ("lvs", " ".join(str(c["id"]) for c in lists)))
     for control in lists:
         dcx_id, columns, extra = LISTVIEWS[control["id"]]
         data.append(("lv.%d" % control["id"], "%d %d %d %d %d"

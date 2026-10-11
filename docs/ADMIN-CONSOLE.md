@@ -954,8 +954,9 @@ bottom.
 #### DCX (#1288)
 
 The settings window is being moved onto **DCX** (Dialog Control eXtensions,
-https://github.com/twig/dcxdll, BSD-3-Clause), which gives it a real tree for the
-pages and tables with columns for the bans, channels and lists. `dcx.dll` ships
+https://github.com/twig/dcxdll, BSD-3-Clause), which gives it a list of the chosen
+tab's pages, tables with columns for the bans, channels and lists, and the first
+tab's left edge, which Windows 10 draws for no unselected tab. `dcx.dll` ships
 unmodified in `scripts/mirc/dcx/`, with Microsoft's `WebView2Loader.dll` (which
 DCX loads every time it starts, and warns about in the status window when it is
 missing), their licences, and a README naming both files and their SHA-256s; the
@@ -963,13 +964,13 @@ script checks those hashes before it loads DCX.
 Whenever DCX cannot be used, the window drawn with mIRC's own controls opens,
 exactly as before:
 
-- the option *Use the built-in settings window, not DCX* is on (the window's
-  **This mIRC window** page);
+- the option *Use the built-in settings window, not DCX* is on (the **Script**
+  tab's **Window** page);
 - the mIRC version is below 7.45 (DCX 3.1 needs 7.45 or later), or it is the 64-bit build - the dll
   is 32-bit;
 - `dcx\dcx.dll` is not beside the script, is not that release, or will not load.
 
-With DCX the window has the mockup's navigation: the six tabs stay, and the
+With DCX the window has the mockup's navigation: the seven tabs stay, and the
 column of page buttons gives way to a **list of the chosen tab's pages** on
 the left, the page shown highlighted, with the page's name in bold between
 the tabs and the page. Every table is a **listview with columns**: the

@@ -2365,6 +2365,12 @@ alias dccore.sw.dcx {
   %t = $dccore.sw.m(dcxtitle)
   dccore.dcx xdialog dccore.set -c $gettok(%t,1,32) text $dccore.sw.dcxrect($gettok(%t,2-5,32)) nowrap noprefix noformat
   dccore.dcx xdid dccore.set $gettok(%t,1,32) -f +b default 9 Tahoma
+  ; the first tab's left edge, which Windows draws for no unselected tab: a
+  ; line a pixel wide in the tab border's colour, down into the frame's edge
+  %t = $dccore.sw.m(dcxtabedge)
+  var %e = $dccore.sw.dcxrect($gettok(%t,2,32) $gettok(%t,3,32) 1 $gettok(%t,4,32))
+  dccore.dcx xdialog dccore.set -c $gettok(%t,1,32) panel $gettok(%e,1,32) $gettok(%e,2,32) 1 $gettok(%e,4,32)
+  dccore.dcx xdid dccore.set $gettok(%t,1,32) -C +b $gettok(%t,5,32)
   ; the tables
   var %lvs = $dccore.sw.m(lvs)
   %i = 1
@@ -4016,7 +4022,6 @@ dialog dccore.set {
   tab "Dashboard && Console", 1005
   tab "Advanced", 1006
   tab "Script", 1007
-  box "", 1019, 4 16 1 324
   radio "", 1020, 10 24 88 15, push group
   radio "", 1021, 10 41 88 15, push
   radio "", 1022, 10 58 88 15, push
@@ -4561,6 +4566,7 @@ alias dccore.sw.data {
   hadd dccore.swm size 488 364
   hadd dccore.swm dcxpages 900 10 24 88 286
   hadd dccore.swm dcxtitle 901 110 26 370 10
+  hadd dccore.swm dcxtabedge 902 4 5 13 14277081
   hadd dccore.swm lvs 1520 1540 1580 1595
   hadd dccore.swm g.1 General
   hadd dccore.swm g.1.pages 1 2 3 4 5 6

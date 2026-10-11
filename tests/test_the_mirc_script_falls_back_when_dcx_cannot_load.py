@@ -19,7 +19,6 @@ from test_the_mirc_settings_window import (alias, block, code, dialog, generated
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "scripts", "mirc"))
 
-import build_settings_window as generator  # noqa: E402
 import settings_window_layout as layout  # noqa: E402
 
 
@@ -267,8 +266,7 @@ class TheMockupLayout(unittest.TestCase):
             cls.pages[page] = ids
 
     def test_every_titled_section_is_a_frame_listed_before_what_it_holds(self):
-        # every box but the untitled one down the tab frame's left edge
-        frames = [c for c in self.controls if c[0] == "box" and c[2] != generator.FRAME_LEFT_ID]
+        frames = [c for c in self.controls if c[0] == "box"]
         self.assertGreater(len(frames), 40)
         for _kind, title, fid, x, y, w, h, _style in frames:
             self.assertTrue(title, fid)
@@ -331,6 +329,29 @@ class TheMockupLayout(unittest.TestCase):
         show = alias("dccore.sw.showpage")
         self.assertIn("if ($2 == -v) { dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxtitle),1,32) -t "
                       "$dccore.sw.untext($dccore.sw.m(p. $+ $1)) }", show)
+
+    def test_the_first_tabs_left_edge_is_drawn_as_a_line_of_its_own(self):
+        """Windows 10 draws an unselected tab with its top and right edges
+        only, so the first tab has no left edge: a DCX panel a pixel wide,
+        in the tab border's colour, runs down it into the frame's edge."""
+        eid, x, y, h, colour = (int(n) for n in self.data["dcxtabedge"].split())
+        self.assertEqual(eid, self.builder.DCX_TABEDGE_ID)
+        self.assertTrue(self.builder.DCX_TITLE_ID < eid < 910)
+        self.assertEqual((x, y, h), self.builder.DCX_TABEDGE)
+        self.assertEqual(x, self.builder.TABS[0])
+        self.assertLess(self.builder.TABS[1], y)
+        self.assertLess(y, self.builder.TABS[1] + self.builder.TAB_HEADER_H)
+        self.assertLess(self.builder.TABS[1] + self.builder.TAB_HEADER_H, y + h)
+        red, green, blue = self.builder.DCX_TABEDGE_RGB
+        self.assertEqual(colour, red + green * 256 + blue * 65536)
+        body = alias("dccore.sw.dcx")
+        self.assertIn("%t = $dccore.sw.m(dcxtabedge)", body)
+        # the height scaled with the window, the width a pixel whatever the scale
+        self.assertIn("var %e = $dccore.sw.dcxrect($gettok(%t,2,32) $gettok(%t,3,32) 1 $gettok(%t,4,32))", body)
+        self.assertIn("-c $gettok(%t,1,32) panel $gettok(%e,1,32) $gettok(%e,2,32) 1 $gettok(%e,4,32)", body)
+        self.assertIn("xdid dccore.set $gettok(%t,1,32) -C +b $gettok(%t,5,32)", body)
+        # nothing of it in the native form: that keeps Windows' own look
+        self.assertNotIn("dcxtabedge", block("dialog dccore.set {", raw()))
 
     def test_every_table_has_its_columns_and_a_listview_over_its_place(self):
         lists = [c for c in self.controls if c[0] == "list"]
