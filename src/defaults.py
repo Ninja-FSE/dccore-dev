@@ -1511,7 +1511,27 @@ try:
 except ImportError:
     pass
 
-settings_file.apply_to(globals())
+# The report is kept (_SETTINGS_REPORT) so a reload can tell an unreadable
+# settings.conf from one that says less. A !rehash re-executes this file in
+# the same namespace, so the report of the previous read is still here. When
+# the file cannot be read now - saved in the wrong encoding, held by
+# antivirus, on a share that dropped out - what it said at the last read is
+# applied again rather than the shipped defaults: those would quietly widen
+# who is admin (ADMIN_HOSTMASKS back to none, so the nick alone) on a bot that
+# is already running. At startup there is no previous read, and
+# oserve.startup()'s REQUIRED gate says what is wrong, as before.
+_PREVIOUS_SETTINGS_REPORT = globals().get("_SETTINGS_REPORT")
+_SETTINGS_REPORT = settings_file.apply_to(globals())
+if (_SETTINGS_REPORT.get("read_error") and _PREVIOUS_SETTINGS_REPORT
+        and _PREVIOUS_SETTINGS_REPORT.get("path") == _SETTINGS_REPORT.get("path")
+        and _PREVIOUS_SETTINGS_REPORT.get("applied")):
+    globals().update(_PREVIOUS_SETTINGS_REPORT["applied"])
+    _SETTINGS_REPORT["applied"] = dict(_PREVIOUS_SETTINGS_REPORT["applied"])
+    _SETTINGS_REPORT["kept_last_read"] = True
+    print(f"[CONFIG] Kept the {len(_SETTINGS_REPORT['applied'])} setting(s) settings.conf "
+          f"held at its last good read, since it cannot be read now. Fix the file and "
+          f"rehash again; a restart would refuse to start with it like this.")
+del _PREVIOUS_SETTINGS_REPORT
 
 # ---------------------------------------------------------------------
 # 10. DERIVED VALUES (computed AFTER local overrides, never before)

@@ -4,6 +4,56 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🛡️ Admin access: the script's pairing token, the console's listener and logins, and what a rehash keeps
+
+Reported privately (an audit of the admin console and admin access) and fixed before the release.
+
+- **`dccore.mrc` took a `DCCORE TOKEN` line from whoever held the bot's nick.** Every `DCCORE` line went to
+  `dccore.structured` in any state, before any login, and the TOKEN branch stored the token and re-learned `bothost`
+  from the nick's current host - the host #585's check compares against. The script now reads `DCCORE` lines only in
+  state `in`, and takes TOKEN only when it sent `pair` in this chat (`pairsent`, set beside both `dccore.send pair`)
+  and the peer was checked: peerok said yes (`vetted`, set at both peerok call sites) or the operator typed the
+  password (`typed`). `dccore.connect` and `on CHATCLOSE` forget all three. A token the script did not ask for is
+  ignored, and the window says so. `dccore.ver` is 1.19.4.
+- **Auto mode's fallback listener took the first peer from anywhere.** When the dial to the operator failed,
+  `_connect_and_serve()` called `_listen_and_serve()` without an address, so #680's check covered listen mode only.
+  It now passes `_fallback_expected_ip()`: the advertised address, or - when that is a LAN, link-local or CGNAT
+  address, which a client behind NAT reports when it does not know its public one - the IRC host when that is an
+  IPv4 address. A host name is not resolved (a cloak or a wildcard would name somebody else); then the first peer is
+  taken, as for a passive offer, and the log says so.
+- **A rehash that could not read `settings.conf` made admin nick-only.** `apply_to()` kept the shipped defaults, the
+  backstop put back only the REQUIRED three (ADMIN_NICK among them), and `ADMIN_HOSTMASKS` came back empty, which
+  `is_admin()` reads as "the nick alone". `defaults.py` now keeps the report as `_SETTINGS_REPORT`; on a reload whose
+  read fails, what the same file said at its last good read is applied again (and carried forward), before the
+  derived values. The backstop never keeps ADMIN_NICK without the hostmasks that narrowed it. A file that is read and
+  says less is applied as it says, so neither is a ratchet.
+- **A line deleted from `admin_config.py` stayed live after `!rehash`.** `importlib.reload()` never removes a name the
+  file no longer defines, and `from admin_config import *` copied it back - deleting `ADMIN_PASSWORD_HASH` did not
+  revoke the password. `commands.RELOAD_FROM_SCRATCH` (`admin_config` only) clears the module's names before its
+  reload and puts them back if the reload fails, so a typo keeps the last good values.
+- **`unpair` said "Revoked" when the write failed, and `pair` could write a revoked token back.**
+  `db.save_admin_tokens()` now returns whether it wrote; `pair` and `unpair` (`_revoke_token()`) report a failed
+  write and change nothing, and their load-change-save runs under `runtime.admin_tokens_lock`.
+- **Parallel console logins from one address got more guesses than the limit.** The block was checked when the chat
+  opened and an attempt counted after its PBKDF2 verify. `reserve_password_attempt()` now checks the block and counts
+  the attempt in one step under `runtime.admin_bad_ip_lock` (adminchat's `_bad_lock` is bound to it) before the
+  verify; a right password clears the address. A chat whose address was blocked meanwhile is closed at its next
+  attempt. `unlock <password>` on a token session (#1264, `console_settings.cmd_unlock()`) reserves the same way,
+  so unlocks sent side by side share the limit too. A `DCCORE PASSWORD <value>` line (#1273) is verified as sent and
+  then decoded under the one reservation, so it is one attempt too, and so is an encoded `unlock` from the settings
+  window (#1281: `cmd_unlock()` reserves, then calls `unlock_password_matches()`).
+  `tests/test_the_settings_window_unlock_keeps_its_spaces.py` counts the address through the reservation as well as
+  `note_bad_ip()`, which this branch no longer calls on a wrong unlock.
+- **Docs:** `docs/ADMIN-CONSOLE.md` (the token rule, auto mode's fallback, the shared attempt limit, what `pair` and
+  `unpair` say on a failed write, a deleted `admin_config.py` line).
+- **Tests:** `tests/test_the_mirc_script_takes_a_token_only_when_it_asked.py` (15, runs the TOKEN guards as written
+  in the script through a small condition evaluator), `tests/test_the_fallback_listener_takes_only_the_operator.py`
+  (9), `tests/test_a_rehash_that_cannot_read_settings_keeps_the_admin_gates.py` (7),
+  `tests/test_a_line_removed_from_admin_config_is_gone_after_a_rehash.py` (5),
+  `tests/test_pair_and_unpair_say_what_was_stored.py` (7),
+  `tests/test_parallel_console_logins_share_the_attempt_limit.py` (13, logins, unlocks, the spaced-password line
+  and the encoded unlock). 30/30 mutations caught.
+
 ### 🛡️ The dashboard's login and sessions hold: parallel guesses, DNS rebinding, revocation, framing
 
 Reported privately and fixed before the release. Four findings against `webserver.py`, all in the login and session

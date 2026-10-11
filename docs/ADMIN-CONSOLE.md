@@ -144,7 +144,8 @@ documented shape is your own services host in full.
 ### 4. Restart the daemon
 
 `admin_config.py` is read at import. `!rehash` reloads `config`, so it picks up
-changes too, but a restart is the sure thing while you are setting this up.
+changes too - a line you delete or comment out included: the setting goes back to
+its default - but a restart is the sure thing while you are setting this up.
 
 ---
 
@@ -647,7 +648,11 @@ bot's nick by itself, and on Undernet anyone can take a nick while the bot is
 away, so before answering `Enter Your Password:` it compares the host the nick
 has now with the one the bot had when the token was stored (`bothost` in
 `dccore.ini`, learned when the token arrives). A different host is not sent the
-token: the window says so and the script stops reconnecting by itself. If the bot
+token: the window says so and the script stops reconnecting by itself. The token
+itself is only taken as the answer to the script's own `pair`, sent after the
+login in a chat whose peer passed that check or that you typed the password in;
+a `DCCORE TOKEN` line any other time is ignored and said so in the window, and
+no `DCCORE` line is read at all before the login. If the bot
 really has moved, `/dccore trust` accepts its current host. A script paired
 before this check learns the host the first time the bot's is known; if it is
 not known yet (you share no channel with it) the token waits for `/dccore trust`.
@@ -698,7 +703,9 @@ unpair dccore.mrc-3f9a12c0   revoke one; its next login is a wrong password
 ```
 
 `pair` and `unpair` are console commands: you have to be logged in - with
-the password or with a token - to mint or revoke one. The file lives where
+the password or with a token - to mint or revoke one. When the token file cannot
+be written, both say so (`NOT revoked: ...`, `Could not pair ...`) and nothing
+changes: an `unpair` that answers "Revoked" has really revoked the token. The file lives where
 **Settings → Advanced → Paired console scripts file** points.
 
 ## Settings over the console
@@ -1224,6 +1231,13 @@ port during the window is dropped without a banner, logged as
 you. (A passive request advertises no address, so there the first connection is
 taken.)
 
+The default mode, `auto`, does the same when its dial to you fails and it falls
+back to listening. If your client advertised a LAN address (192.168.x.x, 10.x.x.x
+and the like - what a client behind a router reports when it does not know its
+public one), the listener takes the connection from the address in your IRC host
+instead, when the host is an address. When it is a name, nothing says where you
+will connect from, and the log says the listener takes the first connection.
+
 **The log says it could not connect to you at `0.0.0.0`.**
 
 ```
@@ -1254,7 +1268,11 @@ Every port in the range is busy with transfers. Wait for one to finish, or widen
 
 **"address is temporarily blocked."**
 Three wrong passwords from that IP. Wait 15 minutes, or restart the daemon — the
-block lives in memory only.
+block lives in memory only. The limit is per address, not per chat: a password is
+counted before it is checked, so chats opened side by side share the three, and a
+chat that was already open when the address was blocked is closed at its next
+attempt with "Too many failed password attempts from this address." An
+`unlock <password>` counts the same way, against the same three.
 
 **Locked out entirely.**
 Edit `admin_config.py` and restart. While `ADMIN_CHANNEL_COMMANDS` is on (it

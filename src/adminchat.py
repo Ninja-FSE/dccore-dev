@@ -45,7 +45,10 @@ gets no banner, no connection, no reply of any kind, and no way to learn whether
 the mask was wrong. The cost of an unauthorised attempt is one regex. When the
 bot listens instead of dialling, the listener takes a connection only from the
 address the operator's CTCP advertised (#680) - a scanner that reaches the port
-first is dropped without a word and the window stays open for the operator.
+first is dropped without a word and the window stays open for the operator. That
+holds for auto mode's fallback after a failed dial too; an offer naming a LAN
+address is matched against the operator's IRC host instead, when that is an
+address (_fallback_expected_ip()).
 
 CONNECTION DIRECTION, AND THE INBOUND SURFACE
 ---------------------------------------------
@@ -81,6 +84,7 @@ import time
 
 import defaults as config
 import platform_compat
+import runtime
 
 # --------------------------------------------------------------------------
 # Tunables. Deliberately module constants rather than config entries: these are
@@ -127,7 +131,7 @@ _listening = False            # at most one passive listener WAITING to be diall
 _state_lock = threading.Lock()
 
 _bad_ips = {}                 # ip -> [failure_count, blocked_until, last_failure]
-_bad_lock = threading.Lock()
+_bad_lock = runtime.admin_bad_ip_lock  # see runtime.py: check-and-count is one step
 
 
 def forget_stale_failures(pool, now, window=None):
@@ -367,6 +371,39 @@ def note_bad_ip(ip):
             print(f"[ADMINCHAT] {ip} blocked for {int(BAD_IP_BLOCK_SECONDS)}s "
                   f"after {entry[0]} failed password attempt(s).")
         _bad_ips[ip] = entry
+
+
+def reserve_password_attempt(ip):
+    """Count one password attempt from `ip` BEFORE it is verified; False,
+    and nothing counted, when the address is blocked.
+
+    The check and the count are one step under the lock. When the attempt
+    was checked against the block first and counted only after the verify
+    (PBKDF2, deliberately slow), parallel logins from one address each passed
+    the check before any of them had been counted, and got more guesses than
+    MAX_PASSWORD_ATTEMPTS between them. The attempt that reaches the limit
+    sets the block here, so nothing from that address is verified after it
+    until it is settled: a right password clears the address (clear_bad_ip),
+    a wrong one leaves the count and the block as they are.
+    """
+    if not ip:
+        return True
+    with _bad_lock:
+        now = time.time()
+        forget_stale_failures(_bad_ips, now)
+        entry = _bad_ips.get(ip)
+        if entry and entry[1]:
+            if now < entry[1]:
+                return False
+            del _bad_ips[ip]      # block expired, as in is_bad_ip()
+            entry = None
+        entry = entry or [0, 0.0, now]
+        entry[0] += 1
+        entry[2] = now
+        if entry[0] >= MAX_PASSWORD_ATTEMPTS:
+            entry[1] = now + BAD_IP_BLOCK_SECONDS
+        _bad_ips[ip] = entry
+        return True
 
 
 def is_bad_ip(ip):
@@ -2389,12 +2426,21 @@ def _cmd_pair(session, args):
         return
     name = (args.split() or ["client"])[0]
     token = secrets.token_urlsafe(32)
-    tokens = db.load_admin_tokens()
-    replaced = name in tokens
-    tokens[name] = {"hash": make_password_hash(token),
-                    "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "by": session.nick}
-    db.save_admin_tokens(tokens)
+    entry = {"hash": make_password_hash(token),
+             "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+             "by": session.nick}
+    # Load, change and save as one step (runtime.admin_tokens_lock): a `pair`
+    # in another session must not write back a token this one just revoked.
+    with runtime.admin_tokens_lock:
+        tokens = db.load_admin_tokens()
+        replaced = name in tokens
+        tokens[name] = entry
+        saved = db.save_admin_tokens(tokens)
+    if not saved:
+        # A token that was never stored would be refused at the next login.
+        session.send(f"Could not pair {name}: the token store could not be written "
+                     f"(see the bot's log). Nothing was changed.")
+        return
     print(f"[ADMINCHAT] {session.nick} paired a console client as {name!r}.")
     if session.structured:
         session.send(f"DCCORE TOKEN {name} {token}")
@@ -2430,11 +2476,26 @@ def _cmd_unpair(session, args):
             session.send(f"  {key:<20} paired {entry.get('created', '?')} by {entry.get('by', '?')}")
         session.send("Revoke one with: unpair <name>")
         return
-    if name not in tokens:
-        session.send(f"No paired client called {name}.")
+    _revoke_token(session, name)
+
+
+def _revoke_token(session, name):
+    """`unpair <name>`: load, remove and save as one step, and say what
+    really happened - a failed write has revoked nothing."""
+    import db
+    with runtime.admin_tokens_lock:
+        tokens = db.load_admin_tokens()
+        if name not in tokens:
+            session.send(f"No paired client called {name}.")
+            return
+        del tokens[name]
+        saved = db.save_admin_tokens(tokens)
+    if not saved:
+        print(f"[ADMINCHAT] {session.nick} could not revoke the console token {name!r}: "
+              f"the token store could not be written.")
+        session.send(f"NOT revoked: the token store could not be written (see the bot's log), "
+                     f"so {name}'s token still logs in. Try again once the bot can write its data folder.")
         return
-    del tokens[name]
-    db.save_admin_tokens(tokens)
     print(f"[ADMINCHAT] {session.nick} revoked the console token {name!r}.")
     session.send(f"Revoked {name}. A client still logged in with it stays until it disconnects.")
 
@@ -2798,6 +2859,15 @@ def _check_password(session, line):
     supplied = line
     if not supplied:
         return
+    # Counted before it is verified (see reserve_password_attempt()): a second
+    # login from the same address cannot slip past the block while this one
+    # is still being checked.
+    if not reserve_password_attempt(session.peer_ip):
+        print(f"[ADMINCHAT] Password attempt from {session.nick} ({session.peer_ip}) refused: "
+              f"the address is blocked after {MAX_PASSWORD_ATTEMPTS} failed attempts.")
+        session.close(announce_text="Too many failed password attempts from this address. Try again later.")
+        _forget(session)
+        return
     # The password, or a paired client's token (#550, step 3). A token opens
     # a chat and nothing else: the dashboard's login checks
     # ADMIN_PASSWORD_HASH alone and never sees the token store.
@@ -2828,9 +2898,12 @@ def _check_password(session, line):
         return
 
     session.attempts += 1
-    note_bad_ip(session.peer_ip)
+    # Already counted against the address by reserve_password_attempt().
     print(f"[ADMINCHAT] Failed password from {session.nick} ({session.host}), "
           f"attempt {session.attempts}/{MAX_PASSWORD_ATTEMPTS}.")
+    if is_bad_ip(session.peer_ip):
+        print(f"[ADMINCHAT] {session.peer_ip} blocked for {int(BAD_IP_BLOCK_SECONDS)}s "
+              f"after {MAX_PASSWORD_ATTEMPTS} failed password attempt(s).")
     if session.attempts >= MAX_PASSWORD_ATTEMPTS:
         session.close(announce_text="Incorrect Password.")
         _forget(session)
@@ -3082,9 +3155,49 @@ def _connect_and_serve(irc_sock, nick, host, ip, port, token=None):
         print(f"[ADMINCHAT] Could not connect to {nick} at {ip}:{port} ({err}); "
               f"falling back to listening. Set ADMIN_CHAT_MODE = \"listen\" in "
               f"admin_config.py to go straight here and skip the wait.")
-        _listen_and_serve(irc_sock, nick, host, token)
+        # Only the operator, as in listen mode (#680): without an address the
+        # listener took the first peer from anywhere.
+        expected_ip = _fallback_expected_ip(ip, host)
+        if expected_ip is None:
+            print(f"[ADMINCHAT] {nick}'s offer named a LAN address and the IRC host "
+                  f"is not an address, so the listener cannot tell the operator from "
+                  f"anyone else and takes the first connection.")
+        _listen_and_serve(irc_sock, nick, host, token, expected_ip)
         return
     _serve(sock, ip, nick, host, f"opened to {ip}:{port}")
+
+
+# What a client behind NAT reports as its own address when it does not know
+# the public one: the LAN, link-local and carrier-grade NAT ranges. An offer
+# naming one of these says nothing about where the client's connection to
+# the bot's listener will come from.
+_SELF_REPORTED_LAN = tuple(ipaddress.ip_network(net) for net in
+                           ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                            "169.254.0.0/16", "100.64.0.0/10"))
+
+
+def _fallback_expected_ip(advertised_ip, host):
+    """The address auto mode's fallback listener takes a connection from,
+    or None when nothing says.
+
+    The address the offer advertised, as listen mode uses it (#680) - unless
+    it is a LAN address: such a client cannot be dialled, which is why the
+    fallback exists, and its connection to the listener comes from its
+    router's public address instead. Then the address its IRC host is, when
+    the host is an address and not a name (a name is not resolved: a cloak
+    or a wildcard would resolve to somebody else's). Neither: None, and the
+    listener takes the first peer, as for a passive offer.
+    """
+    try:
+        address = ipaddress.IPv4Address(advertised_ip)
+    except (ipaddress.AddressValueError, ValueError):
+        address = None
+    if address is not None and not any(address in net for net in _SELF_REPORTED_LAN):
+        return str(address)
+    try:
+        return str(ipaddress.IPv4Address(str(host or "")))
+    except (ipaddress.AddressValueError, ValueError):
+        return None
 
 
 def _listen_and_serve(irc_sock, nick, host, token=None, expected_ip=None):

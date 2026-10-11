@@ -656,6 +656,25 @@ web_login_lock = threading.Lock()
 web_password_checks = threading.BoundedSemaphore(WEB_PASSWORD_CHECKS_AT_ONCE)
 web_sessions_lock = threading.Lock()
 
+# The DCC console's login and token store. adminchat.py is not reloaded by
+# !rehash, but db.py is, and both locks are taken around db.py's own calls;
+# here for the same reason as every other lock in this file.
+#
+# admin_bad_ip_lock: adminchat._bad_ips, the per-address count of failed
+# console passwords. A login attempt is checked against the block AND counted
+# under one hold of it, before the password is verified - checked first and
+# counted only after the (slow, PBKDF2) verify, parallel logins from one
+# address each passed the check before any of them was counted, and got more
+# guesses than MAX_PASSWORD_ATTEMPTS between them.
+#
+# admin_tokens_lock: the paired-client token store's load-modify-save in the
+# console's `pair` and `unpair`. Without it a `pair` in one session could
+# write back the store it loaded before an `unpair` in another removed a
+# token, and the revoked token worked again. Lock order: this one first, then
+# disk_lock (db.save_admin_tokens() takes it inside).
+admin_bad_ip_lock = threading.Lock()
+admin_tokens_lock = threading.Lock()
+
 # Live transfer rate ---------------------------------------------------------
 # Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
 # !rehash cannot reset it, and so readers that must not import the daemon can

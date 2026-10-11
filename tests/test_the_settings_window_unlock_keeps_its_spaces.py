@@ -97,14 +97,23 @@ class TheBot(DCCoreTestCase):
         self.addCleanup(adminchat.reset_state_for_tests)
         adminchat.WRONG_PASSWORD_DELAY, real = 0.0, adminchat.WRONG_PASSWORD_DELAY
         self.addCleanup(setattr, adminchat, "WRONG_PASSWORD_DELAY", real)
+        # Every count against the address, however it is made: a failure
+        # noted after the verify, or an attempt reserved before it.
         self.counted = []
         real_note = adminchat.note_bad_ip
         self.addCleanup(setattr, adminchat, "note_bad_ip", real_note)
+        real_reserve = adminchat.reserve_password_attempt
+        self.addCleanup(setattr, adminchat, "reserve_password_attempt", real_reserve)
 
         def note_bad_ip(ip):
             self.counted.append(ip)
             return real_note(ip)
+
+        def reserve_password_attempt(ip):
+            self.counted.append(ip)
+            return real_reserve(ip)
         adminchat.note_bad_ip = note_bad_ip
+        adminchat.reserve_password_attempt = reserve_password_attempt
 
     def use(self, password):
         self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash(password, iterations=1000))
