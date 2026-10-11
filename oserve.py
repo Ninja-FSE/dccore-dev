@@ -479,9 +479,12 @@ def startup(setup_page=None):
         # one start that pays in full is the first after an upgrade that
         # rebuilt the index for its prefix index and folder ids (#1130,
         # #1135): every held list is indexed again here, once.
+        #
+        # On a thread of its own since #1296: that one start kept the bot off
+        # IRC for about ten minutes. The dashboard's filter waits for it.
         try:
             import list_index
-            list_index.backfill_missing(config.fetched_bot_lists)
+            list_index.backfill_in_background(config.fetched_bot_lists)
         except Exception as err:
             print(f"[STARTUP] Could not check the search index ({err}); the "
                   f"dashboard's cross-list filter may be incomplete until the "
