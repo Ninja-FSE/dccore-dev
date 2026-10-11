@@ -5,7 +5,8 @@ Step 0 (#1311) moved the shared limits and helpers to web_common.py; each
 later step moves one section (#1313: web_search.py, the search broadcast;
 #1315: web_lists.py, other bots' lists; #1317: web_fetch.py and
 web_list_update.py; #1318: web_library.py, web_stats.py and web_queue.py; #1320: web_settings.py,
-web_served.py, web_on_connect.py and web_messages.py).
+web_served.py, web_on_connect.py and web_messages.py; #1322: web_login.py,
+web_console.py and web_setup_page.py).
 webserver imports every moved name back. Two promises keep that safe, for
 every module in SPLIT_MODULES:
 
@@ -35,7 +36,8 @@ import webserver  # noqa: E402
 # One entry per step of the split, in order.
 SPLIT_MODULES = ("web_common", "web_search", "web_lists", "web_fetch", "web_list_update",
                  "web_library", "web_stats", "web_queue",
-                 "web_settings", "web_served", "web_on_connect", "web_messages")
+                 "web_settings", "web_served", "web_on_connect", "web_messages",
+                 "web_login", "web_console", "web_setup_page")
 
 
 def module_tree(name):
