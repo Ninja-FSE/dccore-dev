@@ -2,7 +2,8 @@
 keeps to.
 
 Step 0 (#1311) moved the shared limits and helpers to web_common.py; each
-later step moves one section (#1313: web_search.py, the search broadcast).
+later step moves one section (#1313: web_search.py, the search broadcast;
+#1315: web_lists.py, other bots' lists).
 webserver imports every moved name back. Two promises keep that safe, for
 every module in SPLIT_MODULES:
 
@@ -30,12 +31,23 @@ import web_common  # noqa: E402
 import webserver  # noqa: E402
 
 # One entry per step of the split, in order.
-SPLIT_MODULES = ("web_common", "web_search")
+SPLIT_MODULES = ("web_common", "web_search", "web_lists")
 
 
 def module_tree(name):
     with io.open(os.path.join(REPO_ROOT, "src", name + ".py"), encoding="utf-8") as handle:
         return parse_source(handle.read())
+
+
+def rebound_names(name):
+    """Names the module reassigns through `global` - a lazily built cache,
+    say. An import-back would copy the value at import time and go stale the
+    first time the module reassigns it (#1315: web_lists._NICK_RE)."""
+    found = set()
+    for node in ast.walk(module_tree(name)):
+        if isinstance(node, ast.Global):
+            found.update(node.names)
+    return found
 
 
 def defined_names(name):
@@ -58,9 +70,17 @@ class WebserverStillAnswersForEveryName(unittest.TestCase):
     def test_each_is_the_same_object_there(self):
         for module in SPLIT_MODULES:
             loaded = importlib.import_module(module)
-            for name in defined_names(module):
+            for name in set(defined_names(module)) - rebound_names(module):
                 with self.subTest(module=module, name=name):
                     self.assertIs(getattr(webserver, name, None), getattr(loaded, name))
+
+    def test_a_name_the_module_reassigns_is_not_copied(self):
+        """A copy would hold the value from import time - None, for a cache
+        built on first use - while the module moves on."""
+        for module in SPLIT_MODULES:
+            for name in rebound_names(module):
+                with self.subTest(module=module, name=name):
+                    self.assertFalse(hasattr(webserver, name), "webserver holds a copy that goes stale")
 
 
 class ItStandsOnItsOwn(unittest.TestCase):
