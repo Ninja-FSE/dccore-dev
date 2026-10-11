@@ -185,6 +185,13 @@ class TheTree(unittest.TestCase):
         self.assertIn("$dialog(dccore.set).cw / $gettok($dccore.sw.m(size),1,32)", rect)
         self.assertIn("$dialog(dccore.set).ch / $gettok($dccore.sw.m(size),2,32)", rect)
         self.assertIn("-c %id treeview $dccore.sw.dcxrect($gettok(%t,2-5,32))", body)
+        # the four numbers reach the identifier as ONE parameter (mIRC splits
+        # an identifier's parameters on commas): read as $1 to $4 they made
+        # every DCX control zero-sized, so they are taken apart from $1-
+        self.assertIn("var %r = $1-,", rect)
+        for n in (1, 2, 3, 4):
+            self.assertIn("$gettok(%%r,%d,32)" % n, rect)
+        self.assertNotRegex(rect, r"\$[1-4] \*")
         found = re.search(r"(?m)^  hadd dccore\.swm dcxtree (\d+) (\d+) (\d+) (\d+) (\d+)$", raw())
         size = re.search(r"(?m)^  hadd dccore\.swm size (\d+) (\d+)$", raw())
         self.assertTrue(found and size)

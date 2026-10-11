@@ -2427,10 +2427,13 @@ alias dccore.sw.dcx {
   %i = 1
   while (%i <= $numtok(%lvs,32)) { dccore.sw.lv.make $gettok(%lvs,%i,32) | inc %i }
 }
-; $1-4 a rectangle in dialog units: the same in DCX's pixels
+; $1- a rectangle in dialog units, "x y w h": the same in DCX's pixels. An
+; identifier's parameters are split on commas, not spaces, so the four
+; numbers arrive as one and are taken apart here - as $1 to $4 they were
+; one number and three blanks, and every DCX control was made zero-sized.
 alias dccore.sw.dcxrect {
-  var %sx = $calc($dialog(dccore.set).cw / $gettok($dccore.sw.m(size),1,32)), %sy = $calc($dialog(dccore.set).ch / $gettok($dccore.sw.m(size),2,32))
-  return $round($calc($1 * %sx),0) $round($calc($2 * %sy),0) $round($calc($3 * %sx),0) $round($calc($4 * %sy),0)
+  var %r = $1-, %sx = $calc($dialog(dccore.set).cw / $gettok($dccore.sw.m(size),1,32)), %sy = $calc($dialog(dccore.set).ch / $gettok($dccore.sw.m(size),2,32))
+  return $round($calc($gettok(%r,1,32) * %sx),0) $round($calc($gettok(%r,2,32) * %sy),0) $round($calc($gettok(%r,3,32) * %sx),0) $round($calc($gettok(%r,4,32) * %sy),0)
 }
 ; $1 a native list: hidden, and the DCX listview with its columns made over
 ; its place - hidden too, until its page is shown
