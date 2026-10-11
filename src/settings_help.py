@@ -235,6 +235,7 @@ PLAIN_HELP = {
     'MAX_FETCH_LIST_FILE_SIZE': 'The biggest list archive you will accept from another bot, in bytes. A real list is a few megabytes; this stops a bad offer sending you something huge. 0 means no limit.',
     'MAX_LIST_TEXT_SIZE': 'The biggest unpacked list you will read from another bot, in bytes. Every line of it is kept in memory, so this is a memory limit. 0 uses the default.',
     'FETCH_HISTORY_DAYS': 'How many days a finished download from another bot stays in the Downloads table. The downloaded file itself is kept regardless.',
+    'LIST_REQUEST_TAG': 'A short tag added after your list requests, the way AutoQ adds ::AutoQ::, so a channel can see what is fetching. It is sent only to other DCCore bots, which always accept it; other bots get the plain request, because many answer only that exact line. Plain text, up to 32 characters. Leave it empty to send no tag.',
     'FETCH_HISTORY_MAX_ROWS': 'The most finished downloads kept in that table, whatever their age.',
     'ANNOUNCE_INTERVAL': 'How often the bot posts its advert in the channel, in seconds. 300 is every five minutes. 60 is the least it accepts - channels do not like a bot that advertises constantly.',
     'ANNOUNCE_TRANSFERS': 'Post a line in the channel each time a file has been sent. Everything else about a transfer is private to the person who asked; this is the only public part. A file asked for by private message is never announced.',

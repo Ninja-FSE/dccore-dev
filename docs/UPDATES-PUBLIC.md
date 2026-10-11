@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **New: each list can leave out file types of its own**, like OmenServe's per-list *Exclude*. On the Settings page's lists editor, every list has *File types to leave out of this list* (for example `.cue, .nfo`). These are on top of the file types every list leaves out (`LIST_IGNORED_EXTENSIONS`). Rebuild the lists to apply it. Saving the lists from the mIRC settings window keeps them as they are.
+- **New: your list requests can carry a short tag**, the way AutoQ's carry `::AutoQ::`, so a channel can see what is fetching. Set *Tag on your list requests* (`LIST_REQUEST_TAG`) on the Settings page under *Fetching from bots*, or in the mIRC settings window. It is sent only to other DCCore bots, which always accept it. Other bots get the plain request, because many only answer that exact line. Plain text, up to 32 characters. It is empty out of the box, so nothing changes until you set it.
 
 ## v1.16.2 — The Hardened Release
 

@@ -4919,6 +4919,7 @@
     MAX_FETCH_SLOTS: "settings.field.MAX_FETCH_SLOTS",
     FETCH_HISTORY_DAYS: "settings.field.FETCH_HISTORY_DAYS",
     FETCH_HISTORY_MAX_ROWS: "settings.field.FETCH_HISTORY_MAX_ROWS",
+    LIST_REQUEST_TAG: "settings.field.LIST_REQUEST_TAG",
     MAX_FETCH_FILE_SIZE: "settings.field.MAX_FETCH_FILE_SIZE",
     MAX_LIST_TEXT_SIZE: "settings.field.MAX_LIST_TEXT_SIZE",
     DCC_BLOCK_SIZE: "settings.field.DCC_BLOCK_SIZE",

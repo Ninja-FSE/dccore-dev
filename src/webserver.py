@@ -3725,7 +3725,8 @@ SETTINGS_CATEGORIES = (
                                                 "MAX_FETCH_LIST_FILE_SIZE",
                                                 "MAX_LIST_TEXT_SIZE",
                                                 "FETCH_HISTORY_DAYS",
-                                                "FETCH_HISTORY_MAX_ROWS"]),
+                                                "FETCH_HISTORY_MAX_ROWS",
+                                                "LIST_REQUEST_TAG"]),
     # #926: how the fetch queue paces itself with another bot.
     # #1210: a bot that keeps failing is paused for a while.
     ("fetch-queue",   "Fetch queue",           ["FETCH_MAX_PER_BOT", "FETCH_QUEUED_TIMEOUT",
@@ -3815,6 +3816,7 @@ SETTINGS_LABELS = {
     "MAX_FETCH_SLOTS": "Max fetch slots",
     "FETCH_HISTORY_DAYS": "Keep finished downloads for (days)",
     "FETCH_HISTORY_MAX_ROWS": "Maximum finished downloads kept",
+    "LIST_REQUEST_TAG": "Tag on your list requests",
     "MAX_FETCH_FILE_SIZE": "Max fetch file size",
     "MAX_LIST_TEXT_SIZE": "Largest list text accepted from a peer",
     "DCC_BLOCK_SIZE": "Packet size",
