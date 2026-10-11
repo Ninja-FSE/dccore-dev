@@ -4,6 +4,31 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧱 Splitting `irc_loop`, step 1: the nick-refusal handler is its own function (#1287)
+
+The first step of "Splitting the largest functions" in `docs/FUTURE.md` (was #1150). The body of the 432/433/437
+handler, which steps down the nick ladder while registering and keeps the current name once registered, moved out of
+`irc_loop()` unchanged into `answer_nick_refusal(line, sock, registered, refusals)` in `irc.py`. It returns the
+refusal count, which the loop keeps per connection as before. The guard (`is_server_numeric(line, "433") or ...`)
+stays in the read loop where it was, so the order of the loop's checks is untouched. No behaviour changes.
+
+- **Tests:** `OnceRegisteredTheOldRuleStands` in `tests/test_a_third_nick_when_both_are_taken.py` read the loop's text.
+  It now calls the handler for four cases: the ladder while registering, a refusal once registered (no NICK sent, the
+  name and the count kept), the end of the ladder, and a 437 that names a channel. The guard tests in
+  `tests/test_membership_events.py` find the guard from the call line. `test_the_bots_own_nick_follows_the_server.py`
+  looks for `config.NICKNAME` assignments in the loop and the handler. The tests that drive `irc_loop()` against a
+  scripted server are unchanged and still cover the wiring.
+- **Mutation checks, 10/10 caught:**
+  - the loop drops the returned count;
+  - the loop always says registering, or always says registered;
+  - the guard drops 437;
+  - the branches are swapped;
+  - the ladder does not record the name it asked for;
+  - a channel 437 is not stepped aside;
+  - the count is not advanced;
+  - a registered bot answers with another NICK;
+  - a registered refusal resets the count.
+
 ### 🧪 The script-version changelog test survives the next section (#1285)
 
 `test_the_public_changelog_names_one_script_version` (from the #1264 settings window) demanded that the topmost
