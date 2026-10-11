@@ -634,7 +634,7 @@ class TheDialog(unittest.TestCase):
         table = {c[2] for c in self.controls}
         used = set(int(i) for i in re.findall(r"\bdccore\.set (1[0-9]{3})\b", handwritten()))
         used |= set(int(i) for i in re.findall(r"%id == (1[0-9]{3})\b", handwritten()))
-        self.assertGreater(len(used), 30)
+        self.assertGreater(len(used), 20)
         self.assertEqual(used - table, set())
 
 
@@ -791,7 +791,7 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
         self.assertIn("hdel dccore.sws srv.dirty", lines["unchanged"])
         self.assertNotIn("srv.dirty", lines["error"])
         self.assertIn("Your changes are still here", lines["error"])
-        self.assertIn("if ($dccore.sw.s(srv.dirty)) { return Lists & channels }", alias("dccore.sw.unsaved"))
+        self.assertIn("if ($dccore.sw.s(srv.dirty)) { return Lists and Channel bindings }", alias("dccore.sw.unsaved"))
 
     # 2. The operator's data is compared case-sensitively.
     def test_a_case_only_rename_is_a_change(self):
@@ -856,18 +856,19 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
         self.assertNotIn("$dccore.sw.enc(", save)
 
     def test_what_the_operator_types_is_encoded_straight_from_the_control(self):
-        """Every name or path typed into Lists & channels is stored as
-        enc() or tok() of $did(...).text - never via a /var or a command's
-        parameters first."""
+        """Every name, label or path typed into the list window is stored
+        as enc() or tok() of $did(...).text - never via a /var or a
+        command's parameters first."""
         stored = 0
-        for name in ("dccore.sw.srv.addlist", "dccore.sw.srv.newfolder", "dccore.sw.srv.changel"):
+        for name in ("dccore.sw.srv.lok", "dccore.sw.srv.lclick"):
             for line in statements(alias(name)):
-                if ("hadd dccore.sws srv." in line or "dccore.sw.srv.addfolder " in line) and "$did(" in line:
+                if (("hadd dccore.sws srv." in line or "hadd dccore.swl f." in line or "dccore.sw.srv.lfolder " in line)
+                        and "$did(" in line):
                     stored += 1
-                    for use in re.findall(r"(\$\w[\w.]*)\(\$did\(dccore\.set,15(?:42|49)\)\.text\)", line):
+                    for use in re.findall(r"(\$\w[\w.]*)\(\$did\(dccore\.setl,(?:2|7|9)\)\.text\)", line):
                         self.assertIn(use, ("$dccore.sw.enc", "$dccore.sw.tok"), line)
-                    self.assertNotRegex(line, r"(?<!\()\$did\(dccore\.set,15(?:42|49)\)\.text(?!\))", line)
-        self.assertGreaterEqual(stored, 4)
+                    self.assertNotRegex(line, r"(?<!\()\$did\(dccore\.setl,(?:2|7|9)\)\.text(?!\))", line)
+        self.assertGreaterEqual(stored, 3)
 
     def test_an_untouched_on_connect_line_goes_back_byte_for_byte(self):
         fill = alias("dccore.sw.oc.fill")

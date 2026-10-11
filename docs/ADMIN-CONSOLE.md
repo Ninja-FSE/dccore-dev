@@ -966,12 +966,12 @@ With DCX the window has the mockup's navigation: the six tabs stay, and the
 column of page buttons gives way to a **list of the chosen tab's pages** on
 the left, the page shown highlighted, with the page's name in bold between
 the tabs and the page. Every table is a **listview with columns**: the
-channels; the lists (Name | Primary | Folder path) and the channel bindings
-(Channel | List | Mode) on **Lists & channels**; the timed bans (Nick | Time
-left) and the permanent patterns on **Bans & ignores**. Select a row and use
-the buttons under its table. Without DCX the tabs, the page buttons and plain
-lists draw the same pages: the settings, Apply, OK and Cancel are the same
-window either way.
+channels; the lists (Name | Primary | Folders) on **Lists**; the timed bans
+(Nick | Time left) and the permanent patterns on **Bans & ignores**. Select a
+row and use the buttons under its table. (**Channel bindings** is a row per
+channel with its own menus, the same with or without DCX.) Without DCX the
+tabs, the page buttons and plain lists draw the same pages: the settings,
+Apply, OK and Cancel are the same window either way.
 
 `/dccore dcx` says which applies. `/dccore dcx check` opens a small window that
 tests DCX in this mIRC and writes what it found in `@DCCore`.
@@ -1001,13 +1001,15 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
   applied*, and the page shows the bot's values. If the console reconnects
   while you have changes not saved, they are kept: **Reload** discards them.
 - **Structured pages** save with buttons of their own: the on-connect commands
-  on **IRC Server** (and **Resend now**); **Lists & channels**, two tables -
-  the lists, each with its folders under it, and the channel bindings - where
-  you select a row, change the fields under its table and press **Change**
-  (**Add folder** adds to the list selected; **Remove** takes a list's
-  channels and folders with it), then **Save lists**; and **Bans & ignores**
-  (lift a timed ban, ignore a nick for some minutes, add or remove a
-  permanent pattern). **Channels** edits `CHANNEL` as a list and is
+  on **IRC Server** (and **Resend now**); **Lists**, a table with a row per
+  list, where **Add list** and **Edit** open a window for one list's name,
+  primary flag and folders (a label and a path each) and **Delete** takes a
+  list with its channels and folders; **Channel bindings**, a row per
+  channel with its own List and Mode menus - a change in a menu is kept at
+  once - and a **Remove**, with a row to add one under them, fifteen rows a
+  page; **Save lists**, on both pages, sends the whole set; and **Bans &
+  ignores** (lift a timed ban, ignore a nick for some minutes, add or remove
+  a permanent pattern). **Channels** edits `CHANNEL` as a list and is
   saved by Apply. A save the bot refuses keeps your edits there. A row or a
   command you did not touch goes back exactly as the bot sent it.
 - **Appearance**: the theme and the six custom colours as menus of mIRC's

@@ -165,7 +165,7 @@ class EverySettingHasAPlace(unittest.TestCase):
         pages = {group: [page for page, _sections in pages] for group, pages in layout.GROUPS}
         self.assertEqual(pages["General"], ["IRC Server", "General Settings", "Channels", "Operator",
                                             "Appearance", "Advertising"])
-        self.assertEqual(pages["Sharing"], ["Search", "Transfers", "Your list", "Lists & channels", "Rebuild"])
+        self.assertEqual(pages["Sharing"], ["Search", "Transfers", "Your list", "Lists", "Channel bindings", "Rebuild"])
         self.assertEqual(pages["Downloads"], ["List discovery", "Fetch tuning", "Queue"])
         self.assertEqual(pages["Security"], ["Anti-flood", "Bans & ignores", "Private messages",
                                              "Admin console"])

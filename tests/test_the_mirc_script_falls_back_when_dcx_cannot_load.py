@@ -238,7 +238,7 @@ class ThePageList(unittest.TestCase):
         self.assertEqual(lines[-1], "dccore.sw.page %p")
 
 
-TABLES = (1520, 1540, 1560, 1580, 1595)
+TABLES = (1520, 1540, 1580, 1595)
 
 
 class TheMockupLayout(unittest.TestCase):
@@ -306,7 +306,8 @@ class TheMockupLayout(unittest.TestCase):
     def test_a_check_that_fits_no_column_sends_the_page_to_the_next_form_not_an_error(self):
         # Fetch tuning is two roomy columns only because its re-fetch check
         # was shortened to fit one; the long one made the page compact
-        self.assertEqual(self.data["p.13.layout"], "roomy 2")
+        page = next(p for p in self.pages if untext(self.data["p.%d" % p]) == "Fetch tuning")
+        self.assertEqual(self.data["p.%d.layout" % page], "roomy 2")
         import settings_window_layout as layout
         fetch = dict(dict(layout.GROUPS)["Downloads"])["Fetch tuning"]
         labels = [item["label"] for _h, items in fetch for item in items if isinstance(item, dict) and "label" in item]
@@ -342,8 +343,7 @@ class TheMockupLayout(unittest.TestCase):
             self.assertIn(str(cid), self.data["p.%d.lv" % self.page_of(cid)].split())
         self.assertEqual(len(set(dcx_ids)), len(dcx_ids))
         self.assertEqual(self.data["lvx.1520"], "noheader")
-        self.assertEqual(self.data["lvc.1540"], "150 Name,44 Primary,0 Folder path")
-        self.assertEqual(self.data["lvc.1560"], "110 Channel,110 List,0 Mode")
+        self.assertEqual(self.data["lvc.1540"], "120 Name,44 Primary,0 Folders")
 
     def test_a_listview_is_made_hidden_over_its_native_list_with_its_columns(self):
         lines = statements(alias("dccore.sw.lv.make"))
@@ -389,37 +389,91 @@ class TheMockupLayout(unittest.TestCase):
         init = statements(alias("dccore.sw.init"))
         self.assertLess(init.index("dccore.sw.enable 0"), init.index("dccore.sw.dcx"))
 
-    def test_a_row_picked_in_a_listview_drives_the_same_pick_as_the_native_list(self):
-        cb = statements(alias("dccore.sw.dcxcb"))
-        self.assertEqual(cb[1], "if ($istok(sclick selected,$2,32)) && ($3 == $dccore.sw.lv.id(1540)) { dccore.sw.srv.pickl | return }")
-        self.assertEqual(cb[2], "if ($istok(sclick selected,$2,32)) && ($3 == $dccore.sw.lv.id(1560)) { dccore.sw.srv.pickc | return }")
+    def test_the_lists_tables_selection_is_read_when_a_button_needs_it(self):
+        # no pick on a click: Edit and Delete read the selected row then
+        self.assertEqual(statements(alias("dccore.sw.srv.selected")),
+                         ["return $dccore.sw.s(srv.rowl. $+ $dccore.sw.lv.sel(1540))"])
+        self.assertNotIn("pick", alias("dccore.sw.dcxcb"))
         click = alias("dccore.sw.click")
-        self.assertIn("if (%id == 1540) { dccore.sw.srv.pickl | return }", click)
-        self.assertIn("if (%id == 1560) { dccore.sw.srv.pickc | return }", click)
+        self.assertIn("if (%id == 1554) { if ($dccore.sw.srv.selected != $null) { dccore.sw.srv.open $v1 }", click)
+        self.assertIn("var %n = $dccore.sw.srv.selected", alias("dccore.sw.srv.delete"))
 
-    def test_lists_and_channels_are_two_tables_with_their_own_buttons(self):
+    def test_lists_and_bindings_are_the_mockups_two_pages(self):
         import settings_window_layout as layout
-        page = dict(dict(layout.GROUPS)["Sharing"])["Lists & channels"]
-        self.assertEqual([(h, [i["widget"] for i in items if isinstance(i, dict) and "widget" in i]) for h, items in page],
-                         [("", []), ("Lists", ["srvlists"]), ("Channel bindings", ["srvchans"]), ("", ["srvsave"])])
-        draw = alias("dccore.sw.srv.draw")
-        self.assertIn("dccore.sw.lv.clear 1540", draw)
-        self.assertIn("dccore.sw.lv.clear 1560", draw)
-        self.assertIn("hadd dccore.sws srv.rowl. $+ %line L %id", draw)
-        self.assertIn("hadd dccore.sws srv.rowc. $+ %i $gettok(%c,%i,32)", draw)
+        sharing = dict(dict(layout.GROUPS)["Sharing"])
+        widgets_of = lambda page: [(h, [i["widget"] for i in items if isinstance(i, dict) and "widget" in i])
+                                   for h, items in page]
+        self.assertEqual(widgets_of(sharing["Lists"]), [("", []), ("Lists", ["srvlists"]), ("", ["srvsave"])])
+        self.assertEqual(widgets_of(sharing["Channel bindings"]),
+                         [("", []), ("Channel bindings", ["srvchans"]), ("", ["srvsaveb"])])
+        # the lists table: a row per list, Edit and Add list opening the list window
+        draw = statements(alias("dccore.sw.srv.draw"))
+        self.assertEqual(draw[0], "dccore.sw.lv.clear 1540")
+        self.assertIn("hadd dccore.sws srv.rowl. $+ %i %id", draw)
+        self.assertEqual(draw[-1], "dccore.sw.srv.drawrows")
+        buttons = {c[2]: c[1] for c in self.controls if c[0] == "button"}
+        self.assertEqual([buttons[i] for i in (1551, 1554, 1555, 1557)], ["Add list", "Edit", "Delete", "Refresh"])
         click = alias("dccore.sw.click")
-        for cid, action in ((1554, "changel"), (1555, "removel"), (1562, "changec"), (1563, "removec"),
-                            (1551, "addlist"), (1553, "newfolder"), (1552, "newchan")):
-            self.assertIn("if (%%id == %d) { dccore.sw.srv.%s | return }" % (cid, action), click)
-        # a folder goes to the list selected in the lists table, not a menu
-        self.assertIn("dccore.sw.srv.addfolder $dccore.sw.srv.sellist", alias("dccore.sw.srv.newfolder"))
-        self.assertNotIn("dccore.sw.srv.change {", code())
-        self.assertNotIn("dccore.sw.srv.remove {", code())
+        self.assertIn("if (%id == 1551) { dccore.sw.srv.open new | return }", click)
+        self.assertIn("if (%id == 1555) { dccore.sw.srv.delete | return }", click)
+        self.assertIn("if (%id == 1556) || (%id == 1566) { dccore.sw.srv.save | return }", click)
+        self.assertIn("if (%id == 1557) || (%id == 1567) { dccore.sw.reask served | return }", click)
+        for name in ("pickl", "pickc", "sellist", "newfolder", "changel", "changec", "removel", "removec", "addlist"):
+            self.assertNotIn("alias dccore.sw.srv.%s " % name, code(), name)
+        # the list window: its own dialog, its folders typed there
+        table = block("dialog dccore.setl {")
+        for cid, text in ((2, "edit"), (3, "check"), (5, "list"), (7, "edit"), (9, "edit"), (15, "OK"), (16, "Cancel")):
+            self.assertRegex(table, r"(?m)^  \w+ (?:\"[^\"]*\", )?%d, " % cid, text)
+        self.assertIn("on *:dialog:dccore.setl:sclick:*: { dccore.sw.srv.lclick $did }", code())
+        lok = alias("dccore.sw.srv.lok")
+        self.assertIn("hadd dccore.sws srv.l. $+ %id $did(dccore.setl,3).state $dccore.sw.enc($did(dccore.setl,2).text)", lok)
+        self.assertIn("dccore.sw.srv.addfolder %id $hget(dccore.swl,f. $+ $gettok(%w,%i,32))", lok)
+        self.assertEqual(statements(lok)[-1], "dccore.sw.srv.edited")
+        # and nothing reaches the bot but through Save lists
+        self.assertNotIn("dccore.send", alias("dccore.sw.srv.lok"))
+        self.assertNotIn("dccore.send", alias("dccore.sw.srv.rowclick"))
+
+    def test_the_bindings_rows_are_the_mockups(self):
+        import build_settings_window as builder
+        page = next(p for p in self.pages if untext(self.data["p.%d" % p]) == "Channel bindings")
+        ids = set(self.pages[page])
+        for r in range(builder.BIND_ROWS):
+            base = builder.BIND_FIRST_ID + 4 * r
+            kinds = [self.where[base + k][0] for k in range(4)]
+            self.assertEqual(kinds, ["text", "combo", "combo", "button"], r)
+            self.assertEqual(self.where[base + 3][1], "Remove")
+            self.assertTrue({base, base + 1, base + 2, base + 3} <= ids, r)
+            if r:
+                self.assertEqual(self.where[base][4] - self.where[base - 4][4], builder.BIND_PITCH)
+        add = builder.BIND_ADD_ID
+        self.assertEqual([self.where[add + k][0] for k in range(4)], ["edit", "combo", "combo", "button"])
+        self.assertEqual(self.where[add + 3][1], "Add")
+        self.assertEqual([self.where[i][1] for i in (1566, 1567, 1569, 1570)], ["Save lists", "Refresh", "Previous", "Next"])
+        self.assertEqual(statements(alias("dccore.sw.srv.rowbase")), ["return $calc(1700 + 4 * ($1 - 1))"])
+        self.assertEqual(builder.BIND_FIRST_ID, 1700)
+        # a click in a row: its menus change the binding at once, its Remove takes it
+        click = alias("dccore.sw.click")
+        self.assertIn("if (%id isnum 1700-1759) { dccore.sw.srv.rowclick %id | return }", click)
+        self.assertIn("if (%id == 1773) { dccore.sw.srv.newchan | return }", click)
+        rowclick = alias("dccore.sw.srv.rowclick")
+        self.assertIn("if (%what == 3) {", rowclick)
+        self.assertIn("hadd dccore.sws srv.c. $+ %n $dccore.sw.srv.chosen($calc(%base + 1)) $gettok(%row,2,32) "
+                      "$dccore.sw.srv.mode($calc(%base + 2))", rowclick)
+        self.assertIn("hadd dccore.sws srv.dirty 1", rowclick)
+        # the spare rows are hidden, and hidden again each time the page is shown
+        self.assertIn("did $iif($calc(%off + %r) <= %n,-v,-h) dccore.set", alias("dccore.sw.srv.rowsvis"))
+        self.assertIn("if ($istok($dccore.sw.m(p. $+ $1 $+ .w),srvchans,32)) { dccore.sw.srv.rowsvis }",
+                      alias("dccore.sw.page"))
+        self.assertIn("srvchans", self.data["p.%d.w" % page].split())
+        # every Mode menu gets the modes once, at init
+        combos = alias("dccore.sw.combos")
+        self.assertIn("while (%r <= 15) { dccore.sw.fillfrom $calc($dccore.sw.srv.rowbase(%r) + 2)", combos)
+        self.assertIn("dccore.sw.fillfrom 1772", combos)
 
     def test_the_names_and_paths_shown_are_the_stored_ones_made_tokens(self):
         draw = alias("dccore.sw.srv.draw")
         self.assertIn("$dccore.sw.retok($gettok(%l,2-,32))", draw)
-        self.assertIn("$dccore.sw.retok($gettok(%row,3-,32))", draw)
+        self.assertIn("$dccore.sw.tok(%folders)", draw)
         self.assertEqual(statements(alias("dccore.sw.retok")), ["return $replace($1-,$chr(32),$chr(37) $+ 20)"])
 
 

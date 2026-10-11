@@ -64,8 +64,8 @@ GROUPS = (
             )),
             ("Serving channels", (
                 {"note": "Which channels the bot joins and sits in. What each one serves - which list, "
-                         "which folders, Normal, Silent or Request only - is set per list under "
-                         "Sharing > Lists & channels."},
+                         "which folders, Normal, Silent or Request only - is set under Sharing > Lists "
+                         "and Channel bindings."},
                 {"widget": "channels", "keys": ["CHANNEL"]},
             )),
         )),
@@ -118,16 +118,22 @@ GROUPS = (
             ("!rar packing", ("RAR_EXTENSIONS", "RAR_BINARY", "MAX_RAR_FOLDER_SIZE", "RAR_TIMEOUT")),
             ("List banner", ("LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES", "LIST_SHOW_AUDIO_INFO")),
         )),
-        ("Lists & channels", (
+        ("Lists", (
             ("", (
                 {"note": "What each list shares: a name, its folders, and whether it is primary (it "
-                         "answers a private message, and any channel bound to none). Then which list "
-                         "answers in each channel, and that channel's mode. Select a row to edit it; "
-                         "Save lists sends the whole set to the bot."},
+                         "answers a private message, and any channel bound to none). Add list and Edit "
+                         "open a window for one list; Save lists sends the whole set to the bot."},
             )),
             ("Lists", ({"widget": "srvlists"},)),
-            ("Channel bindings", ({"widget": "srvchans"},)),
             ("", ({"widget": "srvsave"},)),
+        )),
+        ("Channel bindings", (
+            ("", (
+                {"note": "Which list answers in each channel, and that channel's mode. A change in a "
+                         "menu is kept at once; Save lists sends the set to the bot."},
+            )),
+            ("Channel bindings", ({"widget": "srvchans"},)),
+            ("", ({"widget": "srvsaveb"},)),
         )),
         ("Rebuild", (
             ("Automatic rebuild", ("LIST_REBUILD_SCHEDULE", "LIST_UPDATE_TIMEOUT",

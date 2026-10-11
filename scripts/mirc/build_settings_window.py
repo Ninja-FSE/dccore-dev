@@ -184,37 +184,27 @@ WIDGETS = {
         (1522, "button", "Add channel", 256, 14, 56, 13, ""),
         (1523, "button", "Remove", 256, 30, 56, 13, ""),
     ),
-    # Lists & channels: the lists with their folders, then the channel
-    # bindings, each a table with the controls that edit its selected row
-    # under it, then the buttons that save the whole set.
+    # Lists: a table with a row per list, as the mockup draws it. Add list
+    # and Edit open the list window (dccore.setl) for one list's name,
+    # primary flag and folders; Delete takes the selected list.
     "srvlists": (
-        (1540, "list", "", 0, 0, 358, 48, "hsbar vsbar"),
-        (1541, "text", "Name", 0, 54, 24, 8, ""),
-        (1542, "edit", "", 26, 52, 150, 11, "autohs"),
-        (1543, "check", "Primary", 184, 52, 60, 10, ""),
-        (1548, "text", "Folder path", 0, 67, 40, 8, ""),
-        (1549, "edit", "", 44, 65, 296, 11, "autohs"),
-        (1550, "button", "...", 342, 64, 16, 13, ""),
-        (1551, "button", "Add list", 0, 80, 50, 13, ""),
-        (1553, "button", "Add folder", 53, 80, 56, 13, ""),
-        (1554, "button", "Change", 112, 80, 46, 13, ""),
-        (1555, "button", "Remove", 161, 80, 46, 13, ""),
-    ),
-    "srvchans": (
-        (1560, "list", "", 0, 0, 358, 48, "hsbar vsbar"),
-        (1544, "text", "Channel", 0, 54, 32, 8, ""),
-        (1561, "edit", "", 34, 52, 96, 11, "autohs"),
-        (1546, "text", "List", 136, 54, 16, 8, ""),
-        (1545, "combo", "", 154, 52, 92, 80, "drop"),
-        (1558, "text", "Mode", 250, 54, 20, 8, ""),
-        (1547, "combo", "", 272, 52, 86, 60, "drop"),
-        (1552, "button", "Add channel", 0, 67, 56, 13, ""),
-        (1562, "button", "Change", 59, 67, 46, 13, ""),
-        (1563, "button", "Remove", 108, 67, 46, 13, ""),
+        (1540, "list", "", 0, 0, 358, 64, "hsbar vsbar"),
+        (1551, "button", "Add list", 0, 68, 50, 13, ""),
+        (1554, "button", "Edit", 53, 68, 46, 13, ""),
+        (1555, "button", "Delete", 102, 68, 46, 13, ""),
+        (1557, "button", "Refresh", 151, 68, 46, 13, ""),
     ),
     "srvsave": (
         (1556, "button", "Save lists", 0, 0, 56, 13, ""),
-        (1557, "button", "Refresh", 59, 0, 46, 13, ""),
+    ),
+    # Channel bindings: the mockup's rows, below.
+    "srvchans": None,
+    "srvsaveb": (
+        (1566, "button", "Save lists", 0, 0, 56, 13, ""),
+        (1567, "button", "Refresh", 59, 0, 46, 13, ""),
+        (1568, "text", "", 120, 2, 120, 8, ""),
+        (1569, "button", "Previous", 244, 0, 50, 13, ""),
+        (1570, "button", "Next", 297, 0, 46, 13, ""),
     ),
     "bantimed": (
         (1580, "list", "", 0, 0, 358, 60, "vsbar"),
@@ -244,6 +234,33 @@ WIDGETS = {
         (1616, "button", "@DCCore window options...", 0, 28, 100, 13, ""),
     ),
 }
+# The Channel bindings page: the mockup's rows. A row per channel, each with
+# its own List and Mode menus and a Remove button, then the row that adds
+# one. Row R's controls are BIND_FIRST_ID + 4(R-1): its channel, +1 its
+# List menu, +2 its Mode menu, +3 its Remove. The script fills BIND_ROWS of
+# them a page and hides the spare ones (dccore.sw.srv.drawrows).
+BIND_ROWS, BIND_FIRST_ID, BIND_PITCH = 15, 1700, 13
+BIND_ADD_ID = 1770                          # the row that adds one: edit, List, Mode, Add
+
+
+def binding_rows():
+    parts = []
+    for r in range(BIND_ROWS):
+        base, y = BIND_FIRST_ID + 4 * r, BIND_PITCH * r
+        parts += [(base, "text", "", 0, y + 2, 106, 8, ""),
+                  (base + 1, "combo", "", 110, y, 90, 80, "drop"),
+                  (base + 2, "combo", "", 204, y, 90, 60, "drop"),
+                  (base + 3, "button", "Remove", 306, y - 1, 52, 13, "")]
+    y = BIND_PITCH * BIND_ROWS + 4
+    parts += [(BIND_ADD_ID, "edit", "", 0, y, 106, 11, "autohs"),
+              (BIND_ADD_ID + 1, "combo", "", 110, y, 90, 80, "drop"),
+              (BIND_ADD_ID + 2, "combo", "", 204, y, 90, 60, "drop"),
+              (BIND_ADD_ID + 3, "button", "Add", 306, y - 1, 52, 13, "")]
+    return tuple(parts)
+
+
+WIDGETS["srvchans"] = binding_rows()
+
 # The heights the layout reserves for each (the lowest control's bottom, plus a gap).
 WIDGET_H = {name: max(y + (12 if kind == "combo" else h) for _i, kind, _t, _x, y, _w, h, _s in parts) + 4
             for name, parts in WIDGETS.items()}
@@ -251,8 +268,8 @@ WIDGET_H = {name: max(y + (12 if kind == "combo" else h) for _i, kind, _t, _x, y
 # cannot be edited); "mircwin" is this mIRC's own.
 LOCAL_WIDGETS = ("mircwin",)
 # The command each structured page asks with, the first time it is shown.
-WIDGET_ASKS = {"onconnect": "onconnect", "srvlists": "served", "srvchans": "served", "srvsave": "served",
-               "bantimed": "banlist", "banperm": "banlist"}
+WIDGET_ASKS = {"onconnect": "onconnect", "srvlists": "served", "srvsave": "served", "srvchans": "served",
+               "srvsaveb": "served", "bantimed": "banlist", "banperm": "banlist"}
 
 # The tables' columns, for DCX (#1288): each native list above, by id, gets a
 # listview over its rectangle with these columns - (width in dialog units,
@@ -261,8 +278,7 @@ WIDGET_ASKS = {"onconnect": "onconnect", "srvlists": "served", "srvchans": "serv
 # the listview when there is one and the native list when there is not.
 LISTVIEWS = {
     1520: (910, ((0, "Channel"),), "noheader"),
-    1540: (911, ((150, "Name"), (44, "Primary"), (0, "Folder path")), ""),
-    1560: (912, ((110, "Channel"), (110, "List"), (0, "Mode")), ""),
+    1540: (911, ((120, "Name"), (44, "Primary"), (0, "Folders")), ""),
     1580: (913, ((160, "Nick"), (0, "Time left")), ""),
     1595: (914, ((0, "Pattern"),), ""),
 }
