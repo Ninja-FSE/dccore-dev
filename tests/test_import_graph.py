@@ -54,6 +54,9 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #   web_fetch,             - the fetch queue and this bot's own list rebuild,
 #   web_list_update          split out (#1317); stdlib, config, runtime,
 #                            platform_compat, web_common and web_lists
+#   web_library, web_stats - the own library, the Stats page and the Queue
+#   web_queue                page, split out (#1318); stdlib, config,
+#                            adminchat (already allowed) and each other
 ALLOWED = {
     "webserver",
     "web_common",
@@ -61,6 +64,9 @@ ALLOWED = {
     "web_lists",
     "web_fetch",
     "web_list_update",
+    "web_library",
+    "web_stats",
+    "web_queue",
     "defaults",
     "runtime",
     "settings_file",
