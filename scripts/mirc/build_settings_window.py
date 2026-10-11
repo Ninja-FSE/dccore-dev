@@ -108,36 +108,47 @@ def wrapped_lines(text, width_dbu):
 # Geometry, in dialog units (option dbu)
 # ---------------------------------------------------------------------------
 
-DIALOG_W, DIALOG_H = 420, 298
-TABS = (4, 2, 412, 14)
+DIALOG_W, DIALOG_H = 480, 340
+TABS = (4, 2, 472, 14)
 # The pages of the chosen tab: a column of push-style radio buttons, one per
 # slot, as many slots as the tab with the most pages has. Not a listbox: a
 # listbox's row height cannot be set from a script, and at a display scale
 # above 100% its highlight was shorter than the text, which looked cut.
-PAGE_SLOT_X, PAGE_SLOT_Y, PAGE_SLOT_W, PAGE_SLOT_H, PAGE_SLOT_GAP = 4, 20, 84, 15, 2
-CONTENT_X, CONTENT_Y, CONTENT_W, CONTENT_H = 94, 18, 322, 226
-HELP = (94, 246, 322, 24)                   # three lines of the hovered setting's help
-CONNECTED = (4, 272, 254, 8)
-STATUS = (4, 281, 254, 16)
-BUTTONS = (("Reload", 1017, 262), ("Apply", 1014, 302), ("OK", 1015, 341), ("Cancel", 1016, 380))
-BUTTON_Y, BUTTON_W, BUTTON_H = 279, 36, 13
-# The DCX tree that takes the left column when DCX can be used (#1288): over
-# where the tab strip and the page buttons were, clear of the content and of
-# the connection line below it. The script turns it into pixels with the
-# scale $dialog().cw / DIALOG_W gives.
-DCX_TREE = (4, 4, 86, 264)
+PAGE_SLOT_X, PAGE_SLOT_Y, PAGE_SLOT_W, PAGE_SLOT_H, PAGE_SLOT_GAP = 4, 18, 96, 15, 2
+CONTENT_X, CONTENT_Y, CONTENT_W, CONTENT_H = 106, 18, 370, 274
+HELP = (106, 294, 370, 24)                  # three lines of the hovered setting's help
+CONNECTED = (4, 320, 310, 8)
+STATUS = (4, 329, 310, 10)
+BUTTONS = (("Reload", 1017, 319), ("Apply", 1014, 358), ("OK", 1015, 397), ("Cancel", 1016, 436))
+BUTTON_Y, BUTTON_W, BUTTON_H = 324, 36, 13
+# With DCX (#1288) a tree takes the left column, over where the tab strip and
+# the page buttons are, clear of the page and of the connection line below;
+# and the page's name goes, in bold, into the strip the hidden tabs leave
+# above the page. The script turns both into pixels with the scale
+# $dialog().cw / DIALOG_W gives.
+DCX_TREE = (4, 4, 96, 266)
 DCX_TREE_ID = 900
+DCX_TITLE = (106, 4, 370, 12)
+DCX_TITLE_ID = 901
 
-# One column: label | control. Two columns (a page too tall for one): the same,
-# narrower, side by side.
+# A page is its sections, each in a titled frame (a section with no title is
+# bare), down one column - or two side by side when one is too tall. Inside a
+# frame the mockup's form, ROOMY: every label on a line of its own above a
+# control the width of the frame. A page too tall for that even in two
+# columns (File locations, with its twenty-odd paths) falls back to COMPACT,
+# the first version's form: label | control on one line.
+STYLES = (("roomy", 1), ("roomy", 2), ("compact", 1), ("compact", 2))
 COLUMN_GAP = 8
-CONTROL_W = {1: 132, 2: 66}
+BOX_PAD, BOX_TOP, BOX_BOTTOM = 6, 10, 4     # a frame: its sides, its title line, under its last item
+SECTION_GAP = 4
+CHOICE_W, COLOUR_W, COLOUR_GAP = 120, 80, 4 # roomy: a menu, and the two menus of a colour
+ROOMY_GAP, ROOMY_AFTER = 1, 3               # roomy: label to control, control to the next item
+CONTROL_W = {1: 132, 2: 84}                 # compact: the control, by columns
 LABEL_GAP = 4
 BROWSE_W = 14
 
 EDIT_H, COMBO_H, CHECK_H = 11, 11, 10
 ROW_PITCH, COMBO_PITCH, CHECK_PITCH = 12, 13, 11
-HEADER_PITCH, SECTION_GAP = 10, 2
 
 # Control ids. Every dialog's ids are its own, but these stay clear of the
 # options dialog's (1-703) and the download queues' (1-6) all the same, so a
@@ -145,76 +156,91 @@ HEADER_PITCH, SECTION_GAP = 10, 2
 TAB_IDS = range(1001, 1007)
 FIRST_SLOT_ID = 1020                        # the page buttons: 1020, 1021, ...
 HELP_ID, CONNECTED_ID, STATUS_ID = 1012, 1013, 1018
-FIRST_TEXT_ID = 1100                        # section headers and notes
+FIRST_TEXT_ID = 1100                        # frames and notes
 FIRST_ITEM_ID, ITEM_STRIDE = 2000, 4        # +0 label, +1 control, +2 browse button / background combo
 
 # The structured controls the hand-written mSL drives by id. Each is placed as
 # a block at the next free row of its page; offsets below are from its own
-# top-left corner. (id, kind, text, x, y, w, h, style)
+# top-left corner, and its width is a frame's inside, 358. (id, kind, text,
+# x, y, w, h, style)
 WIDGETS = {
     "onconnect": (
         (1500, "text", "Sent once the server has registered the bot, before it joins: one command per line, "
                        "exactly as typed into a client. %nick% is the nickname the server gave it.",
-         0, 0, 322, 16, ""),
-        (1501, "edit", "", 0, 18, 322, 40, "multi return autohs autovs hsbar vsbar"),
+         0, 0, 358, 16, ""),
+        (1501, "edit", "", 0, 18, 358, 40, "multi return autohs autovs hsbar vsbar"),
         (1502, "text", "Seconds between commands", 0, 63, 92, 8, ""),
         (1503, "edit", "", 94, 61, 24, 11, "autohs"),
-        (1504, "button", "Save on-connect commands", 170, 60, 100, 13, ""),
-        (1505, "button", "Resend now", 274, 60, 48, 13, ""),
         # the on-connect commands need the admin password on a token login (#1264)
         (1506, "button", "Unlock", 122, 60, 44, 13, ""),
+        (1504, "button", "Save on-connect commands", 170, 60, 100, 13, ""),
+        (1505, "button", "Resend now", 274, 60, 48, 13, ""),
     ),
+    # The tables (the "list" controls) are each a native list, and with DCX a
+    # listview with the columns LISTVIEWS gives it, over the same rectangle.
     "channels": (
-        (1520, "list", "", 0, 0, 200, 50, "vsbar"),
-        (1521, "edit", "", 206, 0, 116, 11, "autohs"),
-        (1522, "button", "Add channel", 206, 14, 56, 13, ""),
-        (1523, "button", "Remove", 206, 30, 56, 13, ""),
+        (1520, "list", "", 0, 0, 250, 168, "vsbar"),
+        (1521, "edit", "", 256, 0, 102, 11, "autohs"),
+        (1522, "button", "Add channel", 256, 14, 56, 13, ""),
+        (1523, "button", "Remove", 256, 30, 56, 13, ""),
     ),
-    "served": (
-        (1540, "list", "", 0, 0, 322, 84, "hsbar vsbar"),
-        (1541, "text", "Name", 0, 91, 44, 8, ""),
-        (1542, "edit", "", 46, 89, 150, 11, "autohs"),
-        (1543, "check", "Primary", 204, 89, 60, 10, ""),
-        (1544, "text", "List", 0, 104, 44, 8, ""),
-        (1545, "combo", "", 46, 102, 96, 80, "drop"),
-        (1546, "text", "Mode", 150, 104, 26, 8, ""),
-        (1547, "combo", "", 178, 102, 96, 60, "drop"),
-        (1548, "text", "Folder path", 0, 117, 44, 8, ""),
-        (1549, "edit", "", 46, 115, 260, 11, "autohs"),
-        (1550, "button", "...", 308, 114, 14, 13, ""),
-        (1551, "button", "Add list", 0, 131, 50, 13, ""),
-        (1552, "button", "Add channel", 53, 131, 56, 13, ""),
-        (1553, "button", "Add folder", 112, 131, 52, 13, ""),
-        (1554, "button", "Change", 167, 131, 46, 13, ""),
-        (1555, "button", "Remove", 216, 131, 46, 13, ""),
-        (1556, "button", "Save lists", 0, 147, 56, 13, ""),
-        (1557, "button", "Refresh", 59, 147, 46, 13, ""),
+    # Lists & channels: the lists with their folders, then the channel
+    # bindings, each a table with the controls that edit its selected row
+    # under it, then the buttons that save the whole set.
+    "srvlists": (
+        (1540, "list", "", 0, 0, 358, 48, "hsbar vsbar"),
+        (1541, "text", "Name", 0, 54, 24, 8, ""),
+        (1542, "edit", "", 26, 52, 150, 11, "autohs"),
+        (1543, "check", "Primary", 184, 52, 60, 10, ""),
+        (1548, "text", "Folder path", 0, 67, 40, 8, ""),
+        (1549, "edit", "", 44, 65, 296, 11, "autohs"),
+        (1550, "button", "...", 342, 64, 16, 13, ""),
+        (1551, "button", "Add list", 0, 80, 50, 13, ""),
+        (1553, "button", "Add folder", 53, 80, 56, 13, ""),
+        (1554, "button", "Change", 112, 80, 46, 13, ""),
+        (1555, "button", "Remove", 161, 80, 46, 13, ""),
+    ),
+    "srvchans": (
+        (1560, "list", "", 0, 0, 358, 48, "hsbar vsbar"),
+        (1544, "text", "Channel", 0, 54, 32, 8, ""),
+        (1561, "edit", "", 34, 52, 96, 11, "autohs"),
+        (1546, "text", "List", 136, 54, 16, 8, ""),
+        (1545, "combo", "", 154, 52, 92, 80, "drop"),
+        (1558, "text", "Mode", 250, 54, 20, 8, ""),
+        (1547, "combo", "", 272, 52, 86, 60, "drop"),
+        (1552, "button", "Add channel", 0, 67, 56, 13, ""),
+        (1562, "button", "Change", 59, 67, 46, 13, ""),
+        (1563, "button", "Remove", 108, 67, 46, 13, ""),
+    ),
+    "srvsave": (
+        (1556, "button", "Save lists", 0, 0, 56, 13, ""),
+        (1557, "button", "Refresh", 59, 0, 46, 13, ""),
     ),
     "bantimed": (
-        (1580, "list", "", 0, 0, 240, 44, "vsbar"),
-        (1581, "button", "Lift now", 246, 0, 50, 13, ""),
-        (1582, "button", "Refresh", 246, 16, 50, 13, ""),
-        (1583, "text", "Nick", 0, 50, 20, 8, ""),
-        (1584, "edit", "", 22, 48, 90, 11, "autohs"),
-        (1585, "text", "Minutes", 118, 50, 32, 8, ""),
-        (1586, "edit", "", 152, 48, 30, 11, "autohs"),
-        (1587, "button", "Ignore", 188, 47, 50, 13, ""),
+        (1580, "list", "", 0, 0, 358, 60, "vsbar"),
+        (1583, "text", "Nick", 0, 66, 20, 8, ""),
+        (1584, "edit", "", 22, 64, 90, 11, "autohs"),
+        (1585, "text", "Minutes", 118, 66, 32, 8, ""),
+        (1586, "edit", "", 152, 64, 30, 11, "autohs"),
+        (1587, "button", "Ignore", 188, 63, 50, 13, ""),
+        (1581, "button", "Lift now", 0, 79, 50, 13, ""),
+        (1582, "button", "Refresh", 53, 79, 46, 13, ""),
     ),
     "banperm": (
-        (1595, "list", "", 0, 0, 240, 44, "vsbar"),
-        (1596, "button", "Remove", 246, 0, 50, 13, ""),
-        (1597, "edit", "", 0, 48, 182, 11, "autohs"),
-        (1598, "button", "Add pattern", 188, 47, 50, 13, ""),
+        (1595, "list", "", 0, 0, 358, 60, "vsbar"),
+        (1597, "edit", "", 0, 64, 250, 11, "autohs"),
+        (1598, "button", "Add pattern", 254, 63, 56, 13, ""),
+        (1596, "button", "Remove", 0, 79, 50, 13, ""),
     ),
     "preview": (
         (1610, "button", "Preview", 0, 0, 50, 13, ""),
         (1611, "text", "Draws the sample advert and notice in @DCCore-preview with the colours chosen here, "
-                       "before they are saved.", 56, 0, 266, 16, ""),
+                       "before they are saved.", 56, 0, 302, 16, ""),
     ),
     "mircwin": (
         (1615, "text", "What @DCCore shows and in which colours, its side panel, font and background, and "
                        "the bot's nick and pairing are this mIRC's own options, kept in dccore.ini beside "
-                       "the script.", 0, 0, 322, 24, ""),
+                       "the script.", 0, 0, 358, 24, ""),
         (1616, "button", "@DCCore window options...", 0, 28, 100, 13, ""),
     ),
 }
@@ -225,7 +251,21 @@ WIDGET_H = {name: max(y + (12 if kind == "combo" else h) for _i, kind, _t, _x, y
 # cannot be edited); "mircwin" is this mIRC's own.
 LOCAL_WIDGETS = ("mircwin",)
 # The command each structured page asks with, the first time it is shown.
-WIDGET_ASKS = {"onconnect": "onconnect", "served": "served", "bantimed": "banlist", "banperm": "banlist"}
+WIDGET_ASKS = {"onconnect": "onconnect", "srvlists": "served", "srvchans": "served", "srvsave": "served",
+               "bantimed": "banlist", "banperm": "banlist"}
+
+# The tables' columns, for DCX (#1288): each native list above, by id, gets a
+# listview over its rectangle with these columns - (width in dialog units,
+# title), 0 for the rest of the width - and the extra listview styles named.
+# The script reads or writes a table through dccore.sw.lv.*, which addresses
+# the listview when there is one and the native list when there is not.
+LISTVIEWS = {
+    1520: (910, ((0, "Channel"),), "noheader"),
+    1540: (911, ((150, "Name"), (44, "Primary"), (0, "Folder path")), ""),
+    1560: (912, ((110, "Channel"), (110, "List"), (0, "Mode")), ""),
+    1580: (913, ((160, "Nick"), (0, "Time left")), ""),
+    1595: (914, ((0, "Pattern"),), ""),
+}
 
 # Help for this mIRC's own switches, which have no dashboard help text.
 LOCAL_HELP = "This mIRC's own setting, kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK."
@@ -364,6 +404,7 @@ class Builder:
         self.locals = []
         self.browse = []
         self.page_widgets = {}
+        self.page_layout = {}       # page -> "roomy 1", "compact 2", ...: the form it was given
         self.labels = {}            # KEY -> its label in the window, for the status line's errors
 
     # -- one control -------------------------------------------------------
@@ -415,18 +456,22 @@ class Builder:
             label = "%s (%s)" % (label, unit[0])
         return label
 
-    def item_height(self, item, columns):
-        width = self.column_width(columns)
+    def item_height(self, item, columns, style, boxed):
+        width = self.item_width(columns, boxed)
         if isinstance(item, dict) and "note" in item:
             return wrapped_lines(item["note"], width) * LINE_DBU + 3
         if isinstance(item, dict) and "widget" in item:
             return WIDGET_H[item["widget"]]
         if isinstance(item, dict) and "local" in item:
-            return CHECK_PITCH
+            # a check box does not wrap: one its column cuts is "too tall",
+            # so the page is tried in the next form before it is refused
+            return CHECK_PITCH if self.check_fits(item["label"], width) else CONTENT_H + 1
         key = item["key"] if isinstance(item, dict) else item
         kind = self.kind_of(key)
         if kind == "bool":
-            return CHECK_PITCH
+            return CHECK_PITCH if self.check_fits(self.label_of(item), width) else CONTENT_H + 1
+        if style == "roomy":
+            return wrapped_lines(self.label_of(item), width) * LINE_DBU + ROOMY_GAP + EDIT_H + ROOMY_AFTER
         label_w = width - CONTROL_W[columns] - LABEL_GAP
         lines = wrapped_lines(self.label_of(item), label_w)
         pitch = COMBO_PITCH if kind in ("choice", "tri", "colour") else ROW_PITCH
@@ -435,49 +480,76 @@ class Builder:
     def column_width(self, columns):
         return CONTENT_W if columns == 1 else (CONTENT_W - COLUMN_GAP) // 2
 
-    def section_height(self, section, columns, first):
+    def item_width(self, columns, boxed):
+        """What an item may take: the column, less a frame's sides."""
+        return self.column_width(columns) - (2 * BOX_PAD if boxed else 0)
+
+    def section_height(self, section, columns, style, first):
         header, items = section
-        height = 0
+        inner = sum(self.item_height(item, columns, style, bool(header)) for item in items)
         if header:
-            height += (0 if first else SECTION_GAP) + HEADER_PITCH
-        return height + sum(self.item_height(item, columns) for item in items)
+            inner += BOX_TOP + BOX_BOTTOM
+        return (0 if first else SECTION_GAP) + inner
 
     # -- a page ----------------------------------------------------------------
 
     def place_page(self, name, sections):
         has_widget = any(isinstance(i, dict) and "widget" in i for _h, items in sections for i in items)
-        one = sum(self.section_height(s, 1, n == 0) for n, s in enumerate(sections))
-        if one <= CONTENT_H:
-            self.place_column(sections, CONTENT_X, 1)
-            return
-        if has_widget:
-            raise LayoutError("page %s is %d dbu tall and has a widget, so cannot take two columns" % (name, one))
-        best = None
-        for split in range(1, len(sections)):
-            left = sum(self.section_height(s, 2, n == 0) for n, s in enumerate(sections[:split]))
-            right = sum(self.section_height(s, 2, n == 0) for n, s in enumerate(sections[split:]))
-            if best is None or max(left, right) < best[0]:
-                best = (max(left, right), split)
-        if best is None or best[0] > CONTENT_H:
-            raise LayoutError("page %s does not fit, even in two columns" % name)
-        split = best[1]
-        self.place_column(sections[:split], CONTENT_X, 2)
-        self.place_column(sections[split:], CONTENT_X + self.column_width(2) + COLUMN_GAP, 2)
+        for style, columns in STYLES:
+            if columns == 1:
+                if sum(self.section_height(s, 1, style, n == 0) for n, s in enumerate(sections)) <= CONTENT_H:
+                    self.place_column(sections, CONTENT_X, 1, style)
+                    self.page_layout[self.page] = "%s %d" % (style, columns)
+                    return
+                continue
+            if has_widget:
+                # a widget is one block, which a column split could cut
+                continue
+            best = None
+            for split in range(1, len(sections)):
+                left = sum(self.section_height(s, 2, style, n == 0) for n, s in enumerate(sections[:split]))
+                right = sum(self.section_height(s, 2, style, n == 0) for n, s in enumerate(sections[split:]))
+                if best is None or max(left, right) < best[0]:
+                    best = (max(left, right), split)
+            if best is not None and best[0] <= CONTENT_H:
+                split = best[1]
+                self.place_column(sections[:split], CONTENT_X, 2, style)
+                self.place_column(sections[split:], CONTENT_X + self.column_width(2) + COLUMN_GAP, 2, style)
+                self.page_layout[self.page] = "%s %d" % (style, columns)
+                return
+        for header, items in sections:
+            for item in items:
+                label = (item.get("label") if isinstance(item, dict) and "local" in item
+                         else self.label_of(item) if self.is_check(item) else None)
+                if label and not self.check_fits(label, self.item_width(1, bool(header))):
+                    raise LayoutError("the check %r does not fit in %d dbu" % (label, self.item_width(1, bool(header))))
+        raise LayoutError("page %s does not fit, even compact in two columns" % name)
 
-    def place_column(self, sections, x, columns):
+    def is_check(self, item):
+        if isinstance(item, dict) and ("note" in item or "widget" in item or "local" in item):
+            return False
+        return self.kind_of(item["key"] if isinstance(item, dict) else item) == "bool"
+
+    def place_column(self, sections, x, columns, style):
         width = self.column_width(columns)
         y = CONTENT_Y
         for number, (header, items) in enumerate(sections):
-            if header:
-                if number:
-                    y += SECTION_GAP
-                self.add("text", self.text_id(), x, y, width, LINE_DBU, header, role="header")
-                y += HEADER_PITCH
+            if number:
+                y += SECTION_GAP
+            boxed = bool(header)
+            if boxed:
+                # the frame first: a control listed after it is drawn over it
+                inner = sum(self.item_height(item, columns, style, True) for item in items)
+                self.add("box", self.text_id(), x, y, width, BOX_TOP + inner + BOX_BOTTOM, header, role="header")
+                ix, iy = x + BOX_PAD, y + BOX_TOP
+            else:
+                ix, iy = x, y
             for item in items:
-                self.place_item(item, x, y, width, columns)
-                y += self.item_height(item, columns)
+                self.place_item(item, ix, iy, self.item_width(columns, boxed), columns, style)
+                iy += self.item_height(item, columns, style, boxed)
+            y = iy + (BOX_BOTTOM if boxed else 0)
 
-    def place_item(self, item, x, y, width, columns):
+    def place_item(self, item, x, y, width, columns, style):
         if isinstance(item, dict) and "note" in item:
             lines = wrapped_lines(item["note"], width)
             self.add("text", self.text_id(), x, y, width, lines * LINE_DBU, item["note"], role="note")
@@ -488,8 +560,8 @@ class Builder:
             for key in item.get("keys", ()):
                 self.claim(key)
             keys = list(item.get("keys", ()))
-            for number, (cid, kind, text, dx, dy, w, h, style) in enumerate(WIDGETS[name]):
-                self.add(kind, cid, x + dx, y + dy, w, h, text, style,
+            for number, (cid, kind, text, dx, dy, w, h, wstyle) in enumerate(WIDGETS[name]):
+                self.add(kind, cid, x + dx, y + dy, w, h, text, wstyle,
                          role="local" if name in LOCAL_WIDGETS else "widget",
                          key=keys[0] if keys and number == 0 else "")
             for key in item.get("keys", ()):
@@ -498,7 +570,6 @@ class Builder:
             return
         if isinstance(item, dict) and "local" in item:
             base = self.item_ids()
-            self.check_fits(item["label"], width)
             self.add("check", base + 1, x, y, width, CHECK_H, item["label"], role="local",
                      key="@" + item["local"])
             self.locals.append((item["local"], base + 1))
@@ -511,37 +582,44 @@ class Builder:
         unit = self.meta["units"].get(key)
         factor = unit[1] if unit else 1
         if kind == "bool":
-            self.check_fits(label, width)
             self.add("check", base + 1, x, y, width, CHECK_H, label, role="value", key=key)
             self.keys.append((key, base + 1, kind, factor, base + 1))
             self.labels[key] = label
             return
-        control_w = CONTROL_W[columns]
-        label_w = width - control_w - LABEL_GAP
-        lines = wrapped_lines(label, label_w)
-        self.add("text", base, x, y + 2, label_w, lines * LINE_DBU, label, role="label", key=key)
-        cx = x + label_w + LABEL_GAP
+        if style == "roomy":
+            # the label on its own line, the control under it, as wide as the frame
+            lines = wrapped_lines(label, width)
+            self.add("text", base, x, y, width, lines * LINE_DBU, label, role="label", key=key)
+            cx, cy, control_w = x, y + lines * LINE_DBU + ROOMY_GAP, width
+            menu_w, colour_w = min(CHOICE_W, width), COLOUR_W
+        else:
+            control_w = CONTROL_W[columns]
+            label_w = width - control_w - LABEL_GAP
+            lines = wrapped_lines(label, label_w)
+            self.add("text", base, x, y + 2, label_w, lines * LINE_DBU, label, role="label", key=key)
+            cx, cy = x + label_w + LABEL_GAP, y
+            menu_w, colour_w = control_w, (control_w - COLOUR_GAP) // 2
         if kind in ("choice", "tri"):
-            self.add("combo", base + 1, cx, y, control_w, 80, style="drop", role="value", key=key)
+            self.add("combo", base + 1, cx, cy, menu_w, 80, style="drop", role="value", key=key)
         elif kind == "colour":
-            half = (control_w - 4) // 2
-            self.add("combo", base + 1, cx, y, half, 120, style="drop", role="value", key=key)
-            self.add("combo", base + 2, cx + half + 4, y, half, 120, style="drop", role="value", key=key)
+            self.add("combo", base + 1, cx, cy, colour_w, 120, style="drop", role="value", key=key)
+            self.add("combo", base + 2, cx + colour_w + COLOUR_GAP, cy, colour_w, 120, style="drop", role="value",
+                     key=key)
         else:
             browse = (key in self.layout.FOLDER_KEYS and "dir") or (key in self.layout.FILE_KEYS and "file")
             edit_w = control_w - (BROWSE_W + 2 if browse else 0)
-            self.add("edit", base + 1, cx, y, edit_w, EDIT_H, style="autohs", role="value", key=key)
+            self.add("edit", base + 1, cx, cy, edit_w, EDIT_H, style="autohs", role="value", key=key)
             if browse:
-                self.add("button", base + 2, cx + edit_w + 2, y - 1, BROWSE_W, EDIT_H + 1, "...",
+                self.add("button", base + 2, cx + edit_w + 2, cy - 1, BROWSE_W, EDIT_H + 1, "...",
                          role="browse", key=key)
                 self.browse.append((base + 2, browse, key))
         self.keys.append((key, base + 1, kind, factor, base))
         self.labels[key] = label
 
     def check_fits(self, label, width):
-        """A check box does not wrap: its label is cut off instead."""
-        if text_px(label) + CHECK_BOX_PX > width * PX_PER_DBU:
-            raise LayoutError("the check %r does not fit in %d dbu" % (label, width))
+        """Whether a check box's label fits: a check does not wrap, its label
+        is cut off instead."""
+        return text_px(label) + CHECK_BOX_PX <= width * PX_PER_DBU
 
     def claim(self, key):
         if key in self.placed:
@@ -627,6 +705,25 @@ def render(builder):
     tree_x, tree_y, tree_w, tree_h = DCX_TREE
     if tree_x + tree_w > CONTENT_X - 2 or tree_y + tree_h > CONNECTED[1] - 2 or DCX_TREE_ID >= min(TAB_IDS):
         raise LayoutError("the DCX tree %r (id %d) overlaps the page or another control" % (DCX_TREE, DCX_TREE_ID))
+    title_x, title_y, title_w, title_h = DCX_TITLE
+    if title_x < CONTENT_X or title_x + title_w > CONTENT_X + CONTENT_W or title_y + title_h > CONTENT_Y:
+        raise LayoutError("the DCX title %r is not in the strip above the page" % (DCX_TITLE,))
+    if not DCX_TREE_ID < DCX_TITLE_ID < min(LISTVIEWS[n][0] for n in LISTVIEWS):
+        raise LayoutError("the DCX ids collide: tree %d, title %d" % (DCX_TREE_ID, DCX_TITLE_ID))
+    # every table has its columns, and every set of columns its table
+    lists = [c for c in builder.controls if c["kind"] == "list"]
+    if sorted(c["id"] for c in lists) != sorted(LISTVIEWS):
+        raise LayoutError("the lists in the window are %s, LISTVIEWS names %s"
+                          % (sorted(c["id"] for c in lists), sorted(LISTVIEWS)))
+    dcx_ids = [LISTVIEWS[n][0] for n in LISTVIEWS]
+    if len(set(dcx_ids)) != len(dcx_ids) or max(dcx_ids) >= min(TAB_IDS):
+        raise LayoutError("the listviews' DCX ids are not unique, or not below the dialog's own: %s" % dcx_ids)
+    for native, (_dcx_id, columns, extra) in LISTVIEWS.items():
+        for _width, title in columns:
+            if "," in title or set(title) - _SAFE:
+                raise LayoutError("the column title %r of list %d cannot be written as it is" % (title, native))
+        if [w for w, _t in columns].count(0) != 1 or columns[-1][0] != 0:
+            raise LayoutError("list %d: exactly the last column takes the rest of the width (0)" % native)
     for _group, pages in layout.GROUPS:
         for name, _sections in pages:
             if text_px(name) + BUTTON_PAD_PX > PAGE_SLOT_W * PX_PER_DBU:
@@ -648,14 +745,29 @@ def render(builder):
     data.insert(1, ("slots", str(max(len(pages) for _group, pages in layout.GROUPS))))
     data.insert(2, ("size", "%d %d" % (DIALOG_W, DIALOG_H)))
     data.insert(3, ("dcxtree", "%d %d %d %d %d" % ((DCX_TREE_ID,) + DCX_TREE)))
+    data.insert(4, ("dcxtitle", "%d %d %d %d %d" % ((DCX_TITLE_ID,) + DCX_TITLE)))
+    # the tables: each native list, the DCX listview over its rectangle, and
+    # that listview's columns and extra styles
+    data.insert(5, ("lvs", " ".join(str(c["id"]) for c in lists)))
+    for control in lists:
+        dcx_id, columns, extra = LISTVIEWS[control["id"]]
+        data.append(("lv.%d" % control["id"], "%d %d %d %d %d"
+                     % (dcx_id, control["x"], control["y"], control["w"], control["h"])))
+        data.append(("lvc.%d" % control["id"], ",".join("%d %s" % (width, title) for width, title in columns)))
+        if extra:
+            data.append(("lvx.%d" % control["id"], extra))
     data.append(("pages", str(len(builder.pages))))
     for number, _group, name in builder.pages:
         data.append(("p.%d" % number, hash_text(name)))
+        data.append(("p.%d.layout" % number, builder.page_layout[number]))
         ids = [c["id"] for c in builder.controls if c["page"] == number]
         parts = chunks(ids, CHUNK_IDS)
         data.append(("p.%d.n" % number, str(len(parts))))
         for index, part in enumerate(parts, start=1):
             data.append(("p.%d.%d" % (number, index), ",".join(str(i) for i in part)))
+        page_lists = [c["id"] for c in lists if c["page"] == number]
+        if page_lists:
+            data.append(("p.%d.lv" % number, " ".join(str(i) for i in page_lists)))
         widgets = builder.page_widgets.get(number)
         if widgets:
             data.append(("p.%d.w" % number, " ".join(widgets)))

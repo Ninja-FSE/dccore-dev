@@ -938,10 +938,11 @@ sent at all: what is off there never reaches the script.
 `/dccore settings` (or right-click -> **Bot Settings**, or **Settings...** next to
 **Options...** in the other menus) opens the settings window (dccore.mrc 1.19 or
 later, mIRC 6.17 or later): the bot's own settings, as the dashboard's Settings
-page has them, over the console commands above. Six tabs - **General**,
+page has them, over the console commands above. Six groups - **General**,
 **Sharing**, **Downloads**, **Security**, **Dashboard & Console**, **Advanced** -
-each with its pages as a column of buttons on the left, and **Apply**, **OK** and **Cancel**
-at the bottom.
+each with its pages, chosen on the left; every page its sections in titled
+frames, each label above its field; and **Apply**, **OK** and **Cancel** at the
+bottom.
 
 #### DCX (#1288)
 
@@ -962,10 +963,14 @@ exactly as before:
 - `dcx\dcx.dll` is not beside the script, is not that release, or will not load.
 
 With DCX, the six tabs and the column of page buttons give way to a **tree**
-on the left: each group in bold with its pages under it, the page shown
-selected. Everything to its right - the pages, their settings, Apply, OK and
-Cancel - is the same window either way. Tables with columns for the bans,
-channels and lists come next.
+on the left - each group in bold with its pages under it, the page shown
+selected - with the page's name in bold above the page, and every table is a
+**listview with columns**: the channels; the lists (Name | Primary | Folder
+path) and the channel bindings (Channel | List | Mode) on **Lists & channels**;
+the timed bans (Nick | Time left) and the permanent patterns on **Bans &
+ignores**. Select a row and use the buttons under its table. Without DCX the
+tabs, the page buttons and plain lists draw the same pages: the settings,
+Apply, OK and Cancel are the same window either way.
 
 `/dccore dcx` says which applies. `/dccore dcx check` opens a small window that
 tests DCX in this mIRC and writes what it found in `@DCCore`.
@@ -995,11 +1000,13 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
   applied*, and the page shows the bot's values. If the console reconnects
   while you have changes not saved, they are kept: **Reload** discards them.
 - **Structured pages** save with buttons of their own: the on-connect commands
-  on **IRC Server** (and **Resend now**), the served lists, their folders and
-  each channel's list and mode on **Lists & channels** (rows such as
-  `#music -> Main - Normal`; select one to edit it, then **Save lists**), and
-  **Bans & ignores** (lift a timed ban, ignore a nick for some minutes, add or
-  remove a permanent pattern). **Channels** edits `CHANNEL` as a list and is
+  on **IRC Server** (and **Resend now**); **Lists & channels**, two tables -
+  the lists, each with its folders under it, and the channel bindings - where
+  you select a row, change the fields under its table and press **Change**
+  (**Add folder** adds to the list selected; **Remove** takes a list's
+  channels and folders with it), then **Save lists**; and **Bans & ignores**
+  (lift a timed ban, ignore a nick for some minutes, add or remove a
+  permanent pattern). **Channels** edits `CHANNEL` as a list and is
   saved by Apply. A save the bot refuses keeps your edits there. A row or a
   command you did not touch goes back exactly as the bot sent it.
 - **Appearance**: the theme and the six custom colours as menus of mIRC's

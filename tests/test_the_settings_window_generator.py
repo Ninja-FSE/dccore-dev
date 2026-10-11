@@ -200,10 +200,21 @@ class TheGeneratorRefusesABadLayout(unittest.TestCase):
             self.build(layout_copy(EXCLUDED={"SERVER": "a reason long enough to count as one"}))
 
     def test_a_check_too_long_for_its_column_is_refused(self):
+        # too long for the full width of a frame, so no form fits it: the
+        # error names the check, not the page
         def longer(groups):
-            groups[0][1][1][1][2][1].append({"local": "x", "label": "A check box label " * 6})
-        with self.assertRaisesRegex(generator.LayoutError, "does not fit"):
+            groups[0][1][1][1][2][1].append({"local": "x", "label": "A check box label " * 9})
+        with self.assertRaisesRegex(generator.LayoutError, "the check .* does not fit"):
             self.build(layout_copy(GROUPS=with_groups(longer)))
+
+    def test_a_check_too_long_for_one_column_sends_the_page_to_one_column(self):
+        # Your list is two roomy columns; a check that fits one column of the
+        # page's width but not half of it makes it one column instead
+        def wider(groups):
+            groups[1][1][2][1][1][1].append({"local": "x", "label": "A check box label " * 5})
+        builder = self.build(layout_copy(GROUPS=with_groups(wider)))
+        page = next(number for number, _group, name in builder.pages if name == "Your list")
+        self.assertEqual(builder.page_layout[page], "compact 1")
 
     def test_a_page_that_cannot_fit_is_refused(self):
         def crowd(groups):

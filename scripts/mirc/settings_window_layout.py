@@ -122,9 +122,12 @@ GROUPS = (
             ("", (
                 {"note": "What each list shares: a name, its folders, and whether it is primary (it "
                          "answers a private message, and any channel bound to none). Then which list "
-                         "answers in each channel, and that channel's mode."},
-                {"widget": "served"},
+                         "answers in each channel, and that channel's mode. Select a row to edit it; "
+                         "Save lists sends the whole set to the bot."},
             )),
+            ("Lists", ({"widget": "srvlists"},)),
+            ("Channel bindings", ({"widget": "srvchans"},)),
+            ("", ({"widget": "srvsave"},)),
         )),
         ("Rebuild", (
             ("Automatic rebuild", ("LIST_REBUILD_SCHEDULE", "LIST_UPDATE_TIMEOUT",
@@ -139,8 +142,9 @@ GROUPS = (
             ("Discover lists", ("AUTO_DISCOVER_CHANNEL_LISTS", "MULTI_CHANNEL_LIST_STABLE_SECONDS")),
         )),
         ("Fetch tuning", (
-            ("Slots & re-fetch", ("MAX_FETCH_SLOTS", "AUTO_REFETCH_LISTS", "AUTO_REFETCH_INTERVAL_HOURS",
-                                  "AUTO_REFETCH_MAX_PER_RUN")),
+            ("Slots & re-fetch", ("MAX_FETCH_SLOTS",
+                                  {"key": "AUTO_REFETCH_LISTS", "label": "Re-fetch a list when its bot has a new one"},
+                                  "AUTO_REFETCH_INTERVAL_HOURS", "AUTO_REFETCH_MAX_PER_RUN")),
             ("Timeouts", ("FETCH_OFFER_TIMEOUT", "FETCH_TRANSFER_TIMEOUT", "FETCH_FOLDER_OFFER_TIMEOUT",
                           "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED", "FETCH_FOLDER_TRANSFER_TIMEOUT")),
             ("Size limits", ("MAX_FETCH_FILE_SIZE", "MAX_FETCH_FOLDER_FILE_SIZE", "MAX_FETCH_LIST_FILE_SIZE",

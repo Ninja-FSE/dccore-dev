@@ -523,16 +523,18 @@ class TheDialog(unittest.TestCase):
         the init handler writes in (t.<id>) in place of their empty strings."""
         rows = []
         for kind, label, cid, _x, _y, w, h, _s in self.controls:
-            if kind not in ("check", "text", "button", "tab"):
+            if kind not in ("check", "text", "button", "tab", "box"):
                 continue
             if "t.%d" % cid in self.data:
                 label = untext(self.data["t.%d" % cid]).replace("&&", "&")
             rows.append((kind, label, cid, w, h))
         return rows
 
-    def test_the_size_is_about_the_mockups(self):
-        self.assertLessEqual(self.size[0], 420)
-        self.assertLessEqual(self.size[1], 300)
+    def test_the_size_is_the_mockups(self):
+        # 480 x 340 dialog units: the mockup's proportions at a size that
+        # fits a 1080p screen with room for the frames and the labels above
+        # their fields (#1288, phase 3)
+        self.assertEqual(self.size, (480, 340))
 
     def test_ids_are_unique_and_clear_of_the_other_dialogs(self):
         ids = [c[2] for c in self.controls]
@@ -565,9 +567,9 @@ class TheDialog(unittest.TestCase):
             if kind == "check":
                 if text_px(text) + CHECK_BOX_PX > available:
                     clipped.append("%d %r (check)" % (cid, text))
-            elif kind == "button":
+            elif kind in ("button", "box"):
                 if text_px(text) + 8 > available:
-                    clipped.append("%d %r (button)" % (cid, text))
+                    clipped.append("%d %r (%s)" % (cid, text, kind))
             elif wrapped_lines(text, w) * 8 > h:
                 clipped.append("%d %r needs %d lines in %d dbu" % (cid, text, wrapped_lines(text, w), h))
         self.assertEqual(clipped, [])
@@ -600,6 +602,15 @@ class TheDialog(unittest.TestCase):
                 for b in ids[n + 1:]:
                     A, B = box(a), box(b)
                     overlap = A[0] < B[2] and B[0] < A[2] and A[1] < B[3] and B[1] < A[3]
+                    frames = [c for c in (a, b) if where[c][0] == "box"]
+                    if len(frames) == 1:
+                        # a frame holds its section's controls: each is inside
+                        # it whole, or clear of it - never across its edge
+                        F, C = (A, B) if frames[0] == a else (B, A)
+                        inside = F[0] <= C[0] and C[2] <= F[2] and F[1] <= C[1] and C[3] <= F[3]
+                        self.assertTrue(inside or not overlap, "page %d: %d straddles the frame %d"
+                                        % (page, b if frames[0] == a else a, frames[0]))
+                        continue
                     self.assertFalse(overlap, "page %d: %d and %d overlap" % (page, a, b))
 
     def test_the_tabs_are_a_strip_above_the_pages(self):
@@ -849,7 +860,7 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
         enc() or tok() of $did(...).text - never via a /var or a command's
         parameters first."""
         stored = 0
-        for name in ("dccore.sw.srv.addlist", "dccore.sw.srv.newfolder", "dccore.sw.srv.change"):
+        for name in ("dccore.sw.srv.addlist", "dccore.sw.srv.newfolder", "dccore.sw.srv.changel"):
             for line in statements(alias(name)):
                 if ("hadd dccore.sws srv." in line or "dccore.sw.srv.addfolder " in line) and "$did(" in line:
                     stored += 1
@@ -973,7 +984,7 @@ class ThePageButtons(unittest.TestCase):
 
     def test_there_is_no_page_list_any_more(self):
         self.assertNotIn("1010", code())
-        self.assertFalse([c for c in self.controls if c[0] == "list" and c[3] < 94])
+        self.assertFalse([c for c in self.controls if c[0] == "list" and c[3] < 106])
 
     def test_one_button_per_slot_enough_for_the_busiest_tab(self):
         import settings_window_layout as layout
@@ -982,13 +993,13 @@ class ThePageButtons(unittest.TestCase):
         self.assertEqual([c[2] for c in buttons], sorted(slot_ids()))
         self.assertEqual([c[7] for c in buttons], ["push group"] + ["push"] * (self.slots - 1))
         for kind, _label, cid, x, y, w, h, _style in buttons:
-            self.assertEqual((x, w), (4, 84), cid)
+            self.assertEqual((x, w), (4, 96), cid)
             self.assertGreaterEqual(h, 14, cid)
         tops = [c[4] for c in buttons]
         self.assertTrue(all(b - a >= buttons[0][6] for a, b in zip(tops, tops[1:])), tops)
 
     def test_every_page_name_fits_its_button(self):
-        width = 84 * PX_PER_DBU
+        width = 96 * PX_PER_DBU
         for page in range(1, int(self.data["pages"]) + 1):
             name = untext(self.data["p.%d" % page])
             self.assertLessEqual(text_px(name) + 8, width, name)

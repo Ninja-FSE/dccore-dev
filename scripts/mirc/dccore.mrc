@@ -2200,6 +2200,8 @@ alias dccore.sw.untok {
   if ($1 == -) { return }
   return $dccore.sw.dec($1)
 }
+; An encoded value (enc's form, which may hold single spaces) as one token.
+alias dccore.sw.retok { return $replace($1-,$chr(32),$chr(37) $+ 20) }
 
 ; The bot runs on this PC, so a path picked with the "..." buttons is one it
 ; can read: the console connection is loopback, or the bot's CAPS line ends
@@ -2292,10 +2294,20 @@ alias dccore.sw.fillfrom {
   while (%i <= $numtok($2-,44)) { did -a dccore.set $1 $gettok($2-,%i,44) | inc %i }
 }
 
-; $1 a page, $2 -h or -v: every control of the page hidden or shown
+; $1 a page, $2 -h or -v: every control of the page hidden or shown - and
+; with DCX its tables' listviews with them, their native lists kept hidden,
+; and the page's name put in the title (#1288)
 alias dccore.sw.showpage {
   var %j = 1
   while (%j <= $dccore.sw.m(p. $+ $1 $+ .n)) { did $2 dccore.set $dccore.sw.m($+(p.,$1,.,%j)) | inc %j }
+  if (!$dccore.sw.s(dcx)) { return }
+  var %lvs = $dccore.sw.m(p. $+ $1 $+ .lv), %i = 1
+  while (%i <= $numtok(%lvs,32)) {
+    did -h dccore.set $gettok(%lvs,%i,32)
+    dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) $iif($2 == -v,-s,-h)
+    inc %i
+  }
+  if ($2 == -v) { dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxtitle),1,32) -t $dccore.sw.untext($dccore.sw.m(p. $+ $1)) }
 }
 ; $1 1 or 0: every control that edits the bot enabled or not. The "..."
 ; buttons only for a bot on this PC.
@@ -2310,6 +2322,10 @@ alias dccore.sw.enable {
     var %i = 1, %n = $hfind(dccore.swm,br.*,0,w)
     while (%i <= %n) { did -b dccore.set $gettok($hfind(dccore.swm,br.*,%i,w),2,46) | inc %i }
     did -b dccore.set 1550
+  }
+  if ($dccore.sw.s(dcx)) {
+    var %lvs = $dccore.sw.m(lvs), %i = 1
+    while (%i <= $numtok(%lvs,32)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) $iif($1,-e,-b) | inc %i }
   }
 }
 
@@ -2368,13 +2384,17 @@ alias dccore.sw.goto {
   }
 }
 
-; ---- the DCX tree (#1288) ----------------------------------------------
+; ---- the DCX tree, title and tables (#1288) ----------------------------
 ;  When DCX can be used the window is marked, its tab strip and page buttons
 ;  are hidden, and a DCX tree of the groups and their pages takes the left
-;  column. Every page, control and line of logic stays the built-in
-;  window's: the tree only drives dccore.sw.tab and dccore.sw.page, as the
-;  strip and the buttons do. /dccore dcx check showed what this rests on in
-;  a real mIRC - its own controls keep raising their events in a marked
+;  column; the page's name goes, in bold, into the strip the hidden tabs
+;  leave above the page; and each table - a native list control - is hidden
+;  under a DCX listview with columns over its place. Every page, control and
+;  line of logic stays the built-in window's: the tree only drives
+;  dccore.sw.tab and dccore.sw.page, as the strip and the buttons do, and a
+;  table is read and written through dccore.sw.lv.*, which address whichever
+;  of the two is there. /dccore dcx check showed what this rests on in a
+;  real mIRC - its own controls keep raising their events in a marked
 ;  dialog, and $dialog().cw over the width in dialog units is the pixel
 ;  scale. When DCX cannot be used none of this runs and the window is
 ;  exactly the built-in one.
@@ -2386,10 +2406,7 @@ alias dccore.sw.dcx {
   while (%g <= $dccore.sw.m(groups)) { did -h dccore.set $calc(1000 + %g) | inc %g }
   while (%i <= $dccore.sw.m(slots)) { did -h dccore.set $calc(1019 + %i) | inc %i }
   var %t = $dccore.sw.m(dcxtree), %id = $gettok(%t,1,32)
-  var %sx = $calc($dialog(dccore.set).cw / $gettok($dccore.sw.m(size),1,32)), %sy = $calc($dialog(dccore.set).ch / $gettok($dccore.sw.m(size),2,32))
-  var %x = $round($calc($gettok(%t,2,32) * %sx),0), %y = $round($calc($gettok(%t,3,32) * %sy),0)
-  var %w = $round($calc($gettok(%t,4,32) * %sx),0), %h = $round($calc($gettok(%t,5,32) * %sy),0)
-  dccore.dcx xdialog dccore.set -c %id treeview %x %y %w %h hasbuttons haslines linesatroot showsel
+  dccore.dcx xdialog dccore.set -c %id treeview $dccore.sw.dcxrect($gettok(%t,2-5,32)) hasbuttons haslines linesatroot showsel
   %g = 1
   while (%g <= $dccore.sw.m(groups)) {
     dccore.dcx xdid dccore.set %id -a $+(-1,$chr(9),+beE 0 0 0 0 0 0 0 0 $dccore.sw.m(g. $+ %g))
@@ -2401,6 +2418,37 @@ alias dccore.sw.dcx {
     }
     inc %g
   }
+  ; the page's name, bold, where the tab strip was
+  %t = $dccore.sw.m(dcxtitle)
+  dccore.dcx xdialog dccore.set -c $gettok(%t,1,32) text $dccore.sw.dcxrect($gettok(%t,2-5,32)) nowrap noprefix noformat
+  dccore.dcx xdid dccore.set $gettok(%t,1,32) -f +b default 9 Tahoma
+  ; the tables
+  var %lvs = $dccore.sw.m(lvs)
+  %i = 1
+  while (%i <= $numtok(%lvs,32)) { dccore.sw.lv.make $gettok(%lvs,%i,32) | inc %i }
+}
+; $1-4 a rectangle in dialog units: the same in DCX's pixels
+alias dccore.sw.dcxrect {
+  var %sx = $calc($dialog(dccore.set).cw / $gettok($dccore.sw.m(size),1,32)), %sy = $calc($dialog(dccore.set).ch / $gettok($dccore.sw.m(size),2,32))
+  return $round($calc($1 * %sx),0) $round($calc($2 * %sy),0) $round($calc($3 * %sx),0) $round($calc($4 * %sy),0)
+}
+; $1 a native list: hidden, and the DCX listview with its columns made over
+; its place - hidden too, until its page is shown
+alias dccore.sw.lv.make {
+  var %l = $dccore.sw.m(lv. $+ $1), %id = $gettok(%l,1,32), %rect = $dccore.sw.dcxrect($gettok(%l,2-5,32))
+  did -h dccore.set $1
+  dccore.dcx xdialog dccore.set -c %id listview %rect report singlesel fullrow showsel $dccore.sw.m(lvx. $+ $1)
+  ; the columns: widths in dialog units made pixels, the last one the rest
+  var %cols = $dccore.sw.m(lvc. $+ $1), %i = 1, %left = $calc($gettok(%rect,3,32) - 20), %sx = $calc($gettok(%rect,3,32) / $gettok(%l,4,32)), %out
+  while (%i <= $numtok(%cols,44)) {
+    var %c = $gettok(%cols,%i,44), %w = $round($calc($gettok(%c,1,32) * %sx),0)
+    if (%w == 0) { %w = %left }
+    %left = $calc(%left - %w)
+    %out = $+(%out,$iif(%i > 1,$chr(9)),+l 0 %w $gettok(%c,2-,32))
+    inc %i
+  }
+  dccore.dcx xdid dccore.set %id -t %out
+  dccore.dcx xdid dccore.set %id -h
 }
 ; $1 the page now shown: its item selected in the tree, without that
 ; selection being taken as a click
@@ -2412,8 +2460,11 @@ alias dccore.sw.dcxshow {
   hdel dccore.sws dcxquiet
 }
 ; DCX's events: $1 the dialog, $2 the event, $3 the control, $4- the item's
-; path - "G" for a group, "G N" for its Nth page
+; path - "G" for a group, "G N" for its Nth page - or a table's row
 alias dccore.sw.dcxcb {
+  ; a row of a table picked, by a click or the keyboard: as a click on its native list
+  if ($istok(sclick selected,$2,32)) && ($3 == $dccore.sw.lv.id(1540)) { dccore.sw.srv.pickl | return }
+  if ($istok(sclick selected,$2,32)) && ($3 == $dccore.sw.lv.id(1560)) { dccore.sw.srv.pickc | return }
   if ($3 != $gettok($dccore.sw.m(dcxtree),1,32)) || (!$istok(sclick selchange,$2,32)) || ($dccore.sw.s(dcxquiet)) { return }
   var %g = $gettok($4-,1,32), %at = $gettok($4-,2,32)
   if (%g !isnum $+(1-,$dccore.sw.m(groups))) { return }
@@ -2424,6 +2475,50 @@ alias dccore.sw.dcxcb {
   }
   elseif (%g == $dccore.sw.s(tab)) { return }
   dccore.sw.tab %g
+}
+
+; ---- the tables ------------------------------------------------------
+;  Each table is a native list control, with DCX hidden under a listview
+;  with columns (dccore.sw.lv.make). Everything that reads or writes one
+;  goes through these, which say the same thing to either.
+
+; $1 a native list: the control to address - the listview over it, or itself
+alias dccore.sw.lv.id { return $iif($dccore.sw.s(dcx),$gettok($dccore.sw.m(lv. $+ $1),1,32),$1) }
+alias dccore.sw.lv.clear {
+  if ($dccore.sw.s(dcx)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($1) -r }
+  else { did -r dccore.set $1 }
+}
+; $1 a native list, $2- a row's cells as tokens (encoded, "-" for an empty
+; one - dccore.sw.tok's form): one column each in a listview, joined with
+; " - " in a native list
+alias dccore.sw.lv.add {
+  var %i = 1, %row
+  while (%i <= $numtok($2-,32)) {
+    var %cell = $dccore.sw.untok($gettok($2-,%i,32))
+    if ($dccore.sw.s(dcx)) { %row = $+(%row,$iif(%i > 1,$+($chr(9),+ 0 0 0 0 $chr(32))),$iif(%cell != $null,%cell,$chr(160))) }
+    elseif (%cell != $null) { %row = $+(%row,$iif(%row != $null,$+($chr(32),-,$chr(32))),%cell) }
+    inc %i
+  }
+  if ($dccore.sw.s(dcx)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($1) -a 0 0 + 0 0 0 0 0 0 %row }
+  else { did -a dccore.set $1 %row }
+}
+; $1 a native list: its selected row's number, or nothing
+alias dccore.sw.lv.sel {
+  if ($dccore.sw.s(dcx)) { var %s = $dccore.dcx(_xdid,dccore.set $dccore.sw.lv.id($1) sel) | return $iif(%s isnum 1-,%s) }
+  return $did(dccore.set,$1).sel
+}
+alias dccore.sw.lv.count {
+  if ($dccore.sw.s(dcx)) { return $dccore.dcx(_xdid,dccore.set $dccore.sw.lv.id($1) num) }
+  return $did(dccore.set,$1).lines
+}
+; $1 a native list, $2 a row: its first cell
+alias dccore.sw.lv.text {
+  if ($dccore.sw.s(dcx)) { return $dccore.dcx(_xdid,dccore.set $dccore.sw.lv.id($1) text $2) }
+  return $did(dccore.set,$1,$2).text
+}
+alias dccore.sw.lv.del {
+  if ($dccore.sw.s(dcx)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($1) -d $2 }
+  else { did -d dccore.set $1 $2 }
 }
 
 ; ---- talking to the bot ----------------------------------------------
@@ -2990,10 +3085,10 @@ alias dccore.sw.fill {
   }
   elseif (%kind == colour) { dccore.sw.colourfill %id %v }
   elseif (%kind == chanlist) {
-    did -r dccore.set %id
+    dccore.sw.lv.clear %id
     var %i = 1
     while (%i <= $numtok(%v,44)) {
-      if ($remove($gettok(%v,%i,44),$chr(32)) != $null) { did -a dccore.set %id $remove($gettok(%v,%i,44),$chr(32)) }
+      if ($remove($gettok(%v,%i,44),$chr(32)) != $null) { dccore.sw.lv.add %id $dccore.sw.tok($remove($gettok(%v,%i,44),$chr(32))) }
       inc %i
     }
   }
@@ -3254,19 +3349,22 @@ alias dccore.sw.click {
   if ($dccore.sw.m(br. $+ %id) != $null) { dccore.sw.browse %id $calc(%id - 1) $gettok($dccore.sw.m(br. $+ %id),1,32) | return }
   ; Channels
   if (%id == 1522) { dccore.sw.chanadd | return }
-  if (%id == 1523) { if ($did(dccore.set,1520).sel) { did -d dccore.set 1520 $did(dccore.set,1520).sel } | return }
+  if (%id == 1523) { dccore.sw.chandel | return }
   ; IRC Server: the on-connect commands
   if (%id == 1504) { dccore.sw.oc.save | return }
   if (%id == 1505) { if ($dccore.sw.can(onconnect)) { hadd dccore.sws resending.oc 1 | dccore.sw.status Sending the on-connect commands again... | dccore.send onconnect resend } | return }
   if (%id == 1506) { dccore.sw.unlockbutton | return }
-  ; Lists & channels
-  if (%id == 1540) { dccore.sw.srv.pick | return }
+  ; Lists & channels: the lists table (1540), then the bindings table (1560)
+  if (%id == 1540) { dccore.sw.srv.pickl | return }
   if (%id == 1550) { dccore.sw.browse %id 1549 dir | return }
   if (%id == 1551) { dccore.sw.srv.addlist | return }
-  if (%id == 1552) { dccore.sw.srv.newchan | return }
   if (%id == 1553) { dccore.sw.srv.newfolder | return }
-  if (%id == 1554) { dccore.sw.srv.change | return }
-  if (%id == 1555) { dccore.sw.srv.remove | return }
+  if (%id == 1554) { dccore.sw.srv.changel | return }
+  if (%id == 1555) { dccore.sw.srv.removel | return }
+  if (%id == 1560) { dccore.sw.srv.pickc | return }
+  if (%id == 1552) { dccore.sw.srv.newchan | return }
+  if (%id == 1562) { dccore.sw.srv.changec | return }
+  if (%id == 1563) { dccore.sw.srv.removec | return }
   if (%id == 1556) { dccore.sw.srv.save | return }
   if (%id == 1557) { dccore.sw.reask served | return }
   ; Bans & ignores
@@ -3320,14 +3418,20 @@ alias dccore.sw.browse {
 
 alias dccore.sw.chans {
   var %id = $gettok($dccore.sw.m(k.CHANNEL),1,32), %i = 1, %out
-  while (%i <= $did(dccore.set,%id).lines) { %out = $addtok(%out,$did(dccore.set,%id,%i).text,44) | inc %i }
+  while (%i <= $dccore.sw.lv.count(%id)) { %out = $addtok(%out,$dccore.sw.lv.text(%id,%i),44) | inc %i }
   return %out
 }
 alias dccore.sw.chanadd {
   var %c = $remove($did(dccore.set,1521).text,$chr(32),$chr(44))
   if (%c == $null) { dccore.sw.status Type the channel to add first. | return }
-  did -a dccore.set 1520 %c
+  dccore.sw.lv.add 1520 $dccore.sw.tok(%c)
   did -r dccore.set 1521
+  dccore.sw.pending
+}
+alias dccore.sw.chandel {
+  var %sel = $dccore.sw.lv.sel(1520)
+  if (!%sel) { dccore.sw.status Select the channel to remove first. | return }
+  dccore.sw.lv.del 1520 %sel
   dccore.sw.pending
 }
 
@@ -3412,16 +3516,18 @@ alias dccore.sw.oc.wire {
 
 ; ---- Lists & channels -------------------------------------------------
 ;
-;  The lists as rows: a list, its folders under it, then every channel
-;  binding as "#chan -> List - Mode". Each list has an id of the window's
-;  own (srv.l.<id> = "<primary> <name>", in srv.order), so removing one
-;  renumbers nothing; channels and folders name the id of their list
-;  (srv.c.<n> = "<list> <channel token> <mode>", srv.f.<n> = "<list>
-;  <label token> <path>"). Names and paths are kept ENCODED - as the bot
-;  sent them, or enc() of what was typed, taken straight from the control -
-;  and decoded only to be shown, so a row nobody touched goes back byte for
-;  byte. Save sends the whole set back, in the order the bot sent it, so a
-;  set left as it was saves nothing.
+;  Two tables: the lists, each with its folders under it (Name | Primary |
+;  Folder path), and the channel bindings (Channel | List | Mode). Each
+;  list has an id of the window's own (srv.l.<id> = "<primary> <name>", in
+;  srv.order), so removing one renumbers nothing; channels and folders name
+;  the id of their list (srv.c.<n> = "<list> <channel token> <mode>",
+;  srv.f.<n> = "<list> <label token> <path>"). A table's row N is mapped
+;  back by srv.rowl.N ("L <id>" or "F <n>") and srv.rowc.N (<n>). Names and
+;  paths are kept ENCODED - as the bot sent them, or enc() of what was
+;  typed, taken straight from the control - and decoded only to be shown,
+;  so a row nobody touched goes back byte for byte. Save sends the whole
+;  set back, in the order the bot sent it, so a set left as it was saves
+;  nothing.
 
 ; Count a row of the snapshot: $1 is 1 for a list, 2 a channel, 3 a folder.
 alias dccore.sw.srv.count {
@@ -3474,24 +3580,24 @@ alias dccore.sw.srv.modelabel {
   return $gettok($dccore.sw.untext($dccore.sw.m(modelabels)),%at,44)
 }
 alias dccore.sw.srv.draw {
-  did -r dccore.set 1540
+  dccore.sw.lv.clear 1540
+  dccore.sw.lv.clear 1560
   did -r dccore.set 1545
-  hdel -w dccore.sws srv.row.*
+  hdel -w dccore.sws srv.row*
   var %order = $dccore.sw.s(srv.order), %f = $dccore.sw.s(srv.forder), %c = $dccore.sw.s(srv.corder), %i = 1, %line = 0
   while (%i <= $numtok(%order,32)) {
-    var %id = $gettok(%order,%i,32)
-    var %l = $dccore.sw.s(srv.l. $+ %id)
-    did -a dccore.set 1540 List: $dccore.sw.srv.listname(%id) $iif($gettok(%l,1,32) == 1,$+($chr(91),primary,$chr(93)))
+    var %id = $gettok(%order,%i,32), %l = $dccore.sw.s(srv.l. $+ %id)
+    dccore.sw.lv.add 1540 $iif($gettok(%l,2-,32) != $null,$dccore.sw.retok($gettok(%l,2-,32)),$dccore.sw.tok($chr(40) $+ unnamed $+ $chr(41))) $iif($gettok(%l,1,32) == 1,primary,-) -
     inc %line
-    hadd dccore.sws srv.row. $+ %line L %id
+    hadd dccore.sws srv.rowl. $+ %line L %id
     did -a dccore.set 1545 $iif($gettok(%l,2-,32) != $null,$dccore.sw.srv.listname(%id),$chr(40) $+ unnamed $+ $chr(41))
     var %j = 1
     while (%j <= $numtok(%f,32)) {
       var %row = $dccore.sw.s(srv.f. $+ $gettok(%f,%j,32))
       if ($gettok(%row,1,32) == %id) {
-        did -a dccore.set 1540 $str($chr(160),4) $+ folder $dccore.sw.untok($gettok(%row,2,32)) = $dccore.sw.dec($gettok(%row,3-,32))
+        dccore.sw.lv.add 1540 $dccore.sw.tok($str($chr(160),4) $+ folder: $dccore.sw.untok($gettok(%row,2,32))) - $dccore.sw.retok($gettok(%row,3-,32))
         inc %line
-        hadd dccore.sws srv.row. $+ %line F $gettok(%f,%j,32)
+        hadd dccore.sws srv.rowl. $+ %line F $gettok(%f,%j,32)
       }
       inc %j
     }
@@ -3500,36 +3606,46 @@ alias dccore.sw.srv.draw {
   %i = 1
   while (%i <= $numtok(%c,32)) {
     var %row = $dccore.sw.s(srv.c. $+ $gettok(%c,%i,32))
-    did -a dccore.set 1540 $dccore.sw.untok($gettok(%row,2,32)) -> $dccore.sw.srv.listname($gettok(%row,1,32)) - $dccore.sw.srv.modelabel($gettok(%row,3,32))
-    inc %line
-    hadd dccore.sws srv.row. $+ %line C $gettok(%c,%i,32)
+    dccore.sw.lv.add 1560 $gettok(%row,2,32) $dccore.sw.tok($dccore.sw.srv.listname($gettok(%row,1,32))) $dccore.sw.tok($dccore.sw.srv.modelabel($gettok(%row,3,32)))
+    hadd dccore.sws srv.rowc. $+ %i $gettok(%c,%i,32)
     inc %i
   }
 }
-; A row selected: its fields into the controls under the list.
-alias dccore.sw.srv.pick {
-  var %r = $dccore.sw.s(srv.row. $+ $did(dccore.set,1540).sel)
+; A row of the lists table picked: its fields into the controls under it.
+alias dccore.sw.srv.pickl {
+  var %r = $dccore.sw.s(srv.rowl. $+ $dccore.sw.lv.sel(1540))
   if (%r == $null) { return }
-  var %kind = $gettok(%r,1,32), %n = $gettok(%r,2,32), %order = $dccore.sw.s(srv.order)
+  var %kind = $gettok(%r,1,32), %n = $gettok(%r,2,32)
   if (%kind == L) {
     dccore.sw.put 1542 $dccore.sw.srv.listname(%n)
     if ($gettok($dccore.sw.s(srv.l. $+ %n),1,32) == 1) { did -c dccore.set 1543 }
     else { did -u dccore.set 1543 }
-    dccore.sw.pickline 1545 $findtok(%order,%n,1,32)
-    return
-  }
-  if (%kind == C) {
-    var %row = $dccore.sw.s(srv.c. $+ %n)
-    dccore.sw.put 1542 $dccore.sw.untok($gettok(%row,2,32))
-    dccore.sw.pickline 1545 $findtok(%order,$gettok(%row,1,32),1,32)
-    dccore.sw.pickline 1547 $findtok($dccore.sw.m(modes),$gettok(%row,3,32),1,32)
+    did -r dccore.set 1549
     return
   }
   var %row = $dccore.sw.s(srv.f. $+ %n)
   dccore.sw.put 1542 $dccore.sw.untok($gettok(%row,2,32))
   dccore.sw.put 1549 $dccore.sw.dec($gettok(%row,3-,32))
-  dccore.sw.pickline 1545 $findtok(%order,$gettok(%row,1,32),1,32)
+  did -u dccore.set 1543
 }
+; A binding picked: its channel, list and mode into the controls under it.
+alias dccore.sw.srv.pickc {
+  var %n = $dccore.sw.s(srv.rowc. $+ $dccore.sw.lv.sel(1560))
+  if (%n == $null) { return }
+  var %row = $dccore.sw.s(srv.c. $+ %n)
+  dccore.sw.put 1561 $dccore.sw.untok($gettok(%row,2,32))
+  dccore.sw.pickline 1545 $findtok($dccore.sw.s(srv.order),$gettok(%row,1,32),1,32)
+  dccore.sw.pickline 1547 $findtok($dccore.sw.m(modes),$gettok(%row,3,32),1,32)
+}
+; The list the lists table's selected row belongs to - a list row is its own.
+alias dccore.sw.srv.sellist {
+  var %r = $dccore.sw.s(srv.rowl. $+ $dccore.sw.lv.sel(1540))
+  if (%r == $null) { return }
+  if ($gettok(%r,1,32) == L) { return $gettok(%r,2,32) }
+  return $gettok($dccore.sw.s(srv.f. $+ $gettok(%r,2,32)),1,32)
+}
+; The mode chosen in the Mode menu: the first when none is.
+alias dccore.sw.srv.mode { return $gettok($dccore.sw.m(modes),$iif($did(dccore.set,1547).sel,$did(dccore.set,1547).sel,1),32) }
 ; Select line $2 of combo $1 - or none, when $findtok found nothing (0).
 alias dccore.sw.pickline {
   if ($2) { did -c dccore.set $1 $2 }
@@ -3567,47 +3683,60 @@ alias dccore.sw.srv.addlist {
 }
 alias dccore.sw.srv.newchan {
   if (!$dccore.sw.srv.ready) { return }
-  var %chan = $remove($did(dccore.set,1542).text,$chr(32))
-  if (%chan == $null) || ($dccore.sw.srv.chosen == $null) { dccore.sw.status Type the channel in Name and pick its List first. | return }
-  dccore.sw.srv.addchan $dccore.sw.srv.chosen $dccore.sw.tok(%chan) $gettok($dccore.sw.m(modes),$iif($did(dccore.set,1547).sel,$did(dccore.set,1547).sel,1),32)
+  var %chan = $remove($did(dccore.set,1561).text,$chr(32))
+  if (%chan == $null) || ($dccore.sw.srv.chosen == $null) { dccore.sw.status Type the channel and pick its List first. | return }
+  dccore.sw.srv.addchan $dccore.sw.srv.chosen $dccore.sw.tok(%chan) $dccore.sw.srv.mode
   dccore.sw.srv.edited
 }
 alias dccore.sw.srv.newfolder {
   if (!$dccore.sw.srv.ready) { return }
-  if ($did(dccore.set,1549).text == $null) || ($dccore.sw.srv.chosen == $null) { dccore.sw.status Type the folder path and pick its List first (Name is the folder's label). | return }
-  dccore.sw.srv.addfolder $dccore.sw.srv.chosen $dccore.sw.tok($did(dccore.set,1542).text) $dccore.sw.enc($did(dccore.set,1549).text)
+  if ($did(dccore.set,1549).text == $null) || ($dccore.sw.srv.sellist == $null) { dccore.sw.status Select the list in the table and type the folder path first (Name is the folder's label). | return }
+  dccore.sw.srv.addfolder $dccore.sw.srv.sellist $dccore.sw.tok($did(dccore.set,1542).text) $dccore.sw.enc($did(dccore.set,1549).text)
   dccore.sw.srv.edited
 }
-; The selected row takes what the controls say now.
-alias dccore.sw.srv.change {
+; The lists table's selected row takes what the controls under it say now.
+alias dccore.sw.srv.changel {
   if (!$dccore.sw.srv.ready) { return }
-  var %r = $dccore.sw.s(srv.row. $+ $did(dccore.set,1540).sel)
-  if (%r == $null) { dccore.sw.status Select the row to change first. | return }
+  var %r = $dccore.sw.s(srv.rowl. $+ $dccore.sw.lv.sel(1540))
+  if (%r == $null) { dccore.sw.status Select the list or folder to change first. | return }
   var %kind = $gettok(%r,1,32), %n = $gettok(%r,2,32)
   if (%kind == L) {
     if ($did(dccore.set,1542).text == $null) { dccore.sw.status A list needs a name. | return }
     hadd dccore.sws srv.l. $+ %n $did(dccore.set,1543).state $dccore.sw.enc($did(dccore.set,1542).text)
     if ($did(dccore.set,1543).state) { dccore.sw.srv.oneprimary %n }
   }
-  elseif (%kind == C) {
-    var %chan = $remove($did(dccore.set,1542).text,$chr(32))
-    if (%chan == $null) { dccore.sw.status A binding needs a channel. | return }
-    hadd dccore.sws srv.c. $+ %n $dccore.sw.srv.chosen $dccore.sw.tok(%chan) $gettok($dccore.sw.m(modes),$iif($did(dccore.set,1547).sel,$did(dccore.set,1547).sel,1),32)
-  }
   else {
     if ($did(dccore.set,1549).text == $null) { dccore.sw.status A folder needs a path. | return }
-    hadd dccore.sws srv.f. $+ %n $dccore.sw.srv.chosen $dccore.sw.tok($did(dccore.set,1542).text) $dccore.sw.enc($did(dccore.set,1549).text)
+    hadd dccore.sws srv.f. $+ %n $gettok($dccore.sw.s(srv.f. $+ %n),1,32) $dccore.sw.tok($did(dccore.set,1542).text) $dccore.sw.enc($did(dccore.set,1549).text)
   }
   dccore.sw.srv.edited
 }
-; The selected row goes; a list takes its channels and folders with it.
-alias dccore.sw.srv.remove {
+; The bindings table's selected row takes what the controls under it say now.
+alias dccore.sw.srv.changec {
   if (!$dccore.sw.srv.ready) { return }
-  var %r = $dccore.sw.s(srv.row. $+ $did(dccore.set,1540).sel)
-  if (%r == $null) { dccore.sw.status Select the row to remove first. | return }
+  var %n = $dccore.sw.s(srv.rowc. $+ $dccore.sw.lv.sel(1560))
+  if (%n == $null) { dccore.sw.status Select the binding to change first. | return }
+  var %chan = $remove($did(dccore.set,1561).text,$chr(32))
+  if (%chan == $null) { dccore.sw.status A binding needs a channel. | return }
+  hadd dccore.sws srv.c. $+ %n $dccore.sw.srv.chosen $dccore.sw.tok(%chan) $dccore.sw.srv.mode
+  dccore.sw.srv.edited
+}
+; The bindings table's selected row goes.
+alias dccore.sw.srv.removec {
+  if (!$dccore.sw.srv.ready) { return }
+  var %n = $dccore.sw.s(srv.rowc. $+ $dccore.sw.lv.sel(1560))
+  if (%n == $null) { dccore.sw.status Select the binding to remove first. | return }
+  hdel dccore.sws srv.c. $+ %n
+  dccore.sw.keep srv.corder $remtok($dccore.sw.s(srv.corder),%n,1,32)
+  dccore.sw.srv.edited
+}
+; The lists table's selected row goes; a list takes its channels and folders with it.
+alias dccore.sw.srv.removel {
+  if (!$dccore.sw.srv.ready) { return }
+  var %r = $dccore.sw.s(srv.rowl. $+ $dccore.sw.lv.sel(1540))
+  if (%r == $null) { dccore.sw.status Select the list or folder to remove first. | return }
   var %kind = $gettok(%r,1,32), %n = $gettok(%r,2,32)
-  if (%kind == C) { hdel dccore.sws srv.c. $+ %n | dccore.sw.keep srv.corder $remtok($dccore.sw.s(srv.corder),%n,1,32) }
-  elseif (%kind == F) { hdel dccore.sws srv.f. $+ %n | dccore.sw.keep srv.forder $remtok($dccore.sw.s(srv.forder),%n,1,32) }
+  if (%kind == F) { hdel dccore.sws srv.f. $+ %n | dccore.sw.keep srv.forder $remtok($dccore.sw.s(srv.forder),%n,1,32) }
   else {
     hdel dccore.sws srv.l. $+ %n
     dccore.sw.keep srv.order $remtok($dccore.sw.s(srv.order),%n,1,32)
@@ -3681,23 +3810,23 @@ alias dccore.sw.srv.save {
 
 ; $1 permanent, $2 timed: the true totals, of which at most 200 each came
 alias dccore.sw.ban.draw {
-  did -r dccore.set 1580
-  did -r dccore.set 1595
+  dccore.sw.lv.clear 1580
+  dccore.sw.lv.clear 1595
   var %i = 1
   while (%i <= $dccore.sw.s(ban.gt)) {
     var %row = $dccore.sw.s(ban.t. $+ %i)
-    did -a dccore.set 1580 $gettok(%row,2,32) - $duration($gettok(%row,1,32)) left
+    dccore.sw.lv.add 1580 $dccore.sw.tok($gettok(%row,2,32)) $dccore.sw.tok($duration($gettok(%row,1,32)) left)
     inc %i
   }
   %i = 1
-  while (%i <= $dccore.sw.s(ban.gp)) { did -a dccore.set 1595 $dccore.sw.s(ban.p. $+ %i) | inc %i }
+  while (%i <= $dccore.sw.s(ban.gp)) { dccore.sw.lv.add 1595 $dccore.sw.tok($dccore.sw.s(ban.p. $+ %i)) | inc %i }
   dccore.sw.status $1 permanent pattern(s) and $2 timed ban(s) or ignore(s) $+ $iif(($1 > 200) || ($2 > 200),$chr(32) $+ - the first 200 of each are shown) $+ .
 }
 ; ban, unban, ignore and unignore report in @DCCore and some finish in the
 ; background, so the list is asked for again a moment later.
 alias dccore.sw.ban.after { .timerdccoreSwBan 1 2 dccore.sw.reask banlist }
 alias dccore.sw.ban.lift {
-  var %sel = $did(dccore.set,1580).sel
+  var %sel = $dccore.sw.lv.sel(1580)
   if (!%sel) { dccore.sw.status Select the nick to lift first. | return }
   dccore.send unignore $gettok($dccore.sw.s(ban.t. $+ %sel),2,32)
   dccore.sw.ban.after
@@ -3709,7 +3838,7 @@ alias dccore.sw.ban.ignore {
   dccore.sw.ban.after
 }
 alias dccore.sw.ban.unban {
-  var %sel = $did(dccore.set,1595).sel
+  var %sel = $dccore.sw.lv.sel(1595)
   if (!%sel) { dccore.sw.status Select the pattern to remove first. | return }
   dccore.send unban $dccore.sw.s(ban.p. $+ %sel)
   dccore.sw.ban.after
@@ -3727,447 +3856,456 @@ alias dccore.sw.ban.add {
 ; bot's settings metadata) and run: python scripts/mirc/build_settings_window.py
 dialog dccore.set {
   title "DCCore - Settings"
-  size -1 -1 420 298
+  size -1 -1 480 340
   option dbu
-  tab "General", 1001, 4 2 412 14
+  tab "General", 1001, 4 2 472 14
   tab "Sharing", 1002
   tab "Downloads", 1003
   tab "Security", 1004
   tab "Dashboard && Console", 1005
   tab "Advanced", 1006
-  radio "", 1020, 4 20 84 15, push group
-  radio "", 1021, 4 37 84 15, push
-  radio "", 1022, 4 54 84 15, push
-  radio "", 1023, 4 71 84 15, push
-  radio "", 1024, 4 88 84 15, push
-  radio "", 1025, 4 105 84 15, push
-  text "", 1012, 94 246 322 24
-  text "", 1013, 4 272 254 8
-  text "", 1018, 4 281 254 16
-  button "Reload", 1017, 262 279 36 13
-  button "Apply", 1014, 302 279 36 13
-  button "OK", 1015, 341 279 36 13
-  button "Cancel", 1016, 380 279 36 13, cancel
-  text "Connection", 1100, 94 18 322 8
-  text "IRC server", 2000, 94 30 186 8
-  edit "", 2001, 284 28 132 11, autohs
-  text "Port", 2004, 94 42 186 8
-  edit "", 2005, 284 40 132 11, autohs
-  text "Nickname", 2008, 94 54 186 8
-  edit "", 2009, 284 52 132 11, autohs
-  text "Alt nickname", 2012, 94 66 186 8
-  edit "", 2013, 284 64 132 11, autohs
-  text "Reconnection", 1101, 94 78 322 8
-  text "Rejoin attempts after a kick (0 = never)", 2016, 94 90 186 8
-  edit "", 2017, 284 88 132 11, autohs
-  text "Check the on-connect commands worked every (minutes, 0 = never)", 2020, 94 102 186 16
-  edit "", 2021, 284 100 132 11, autohs
-  text "On connect", 1102, 94 122 322 8
-  text "", 1500, 94 132 322 16
-  edit "", 1501, 94 150 322 40, multi return autohs autovs hsbar vsbar
-  text "Seconds between commands", 1502, 94 195 92 8
-  edit "", 1503, 188 193 24 11, autohs
-  button "Save on-connect commands", 1504, 264 192 100 13
-  button "Resend now", 1505, 368 192 48 13
-  button "Unlock", 1506, 216 192 44 13
-  text "The on/off switches used most, here from their own pages so there is one place to check.", 1103, 94 18 322 8
-  text "Open when mIRC starts (minimised)", 1104, 94 31 322 8
-  check "DCCore window", 2025, 94 41 322 10
-  check "Chat", 2029, 94 52 322 10
-  check "Downloads", 2033, 94 63 322 10
-  text "Connection", 1105, 94 76 322 8
-  check "Reconnect and log in to the bot by itself when it comes back", 2037, 94 86 322 10
-  text "Sharing && search", 1106, 94 99 322 8
-  check "Answer @find searches", 2041, 94 109 322 10
-  check "Announce finished transfers in the channel", 2045, 94 120 322 10
-  check "Enable !rar folder packing", 2049, 94 131 322 10
-  text "Messaging && dashboard", 1107, 94 144 322 8
-  check "Keep private messages (off: keep none, reply once instead)", 2053, 94 154 322 10
-  check "Enable web dashboard", 2057, 94 165 322 10
-  check "Answer CTCP VERSION", 2061, 94 176 322 10
-  text "Updates", 1108, 94 189 322 8
-  check "Tell me when a new version is out", 2065, 94 199 322 10
-  text "Admin channels", 1109, 94 18 322 8
-  text "A separate channel the bot sends its own diagnostic lines to - never one it also serves files in.", 1110, 94 28 322 8
-  text "Debug channel", 2068, 94 41 186 8
-  edit "", 2069, 284 39 132 11, autohs
-  text "Serving channels", 1111, 94 53 322 8
-  text "Which channels the bot joins and sits in. What each one serves - which list, which folders, Normal, Silent or Request only - is set per list under Sharing > Lists && channels.", 1112, 94 63 322 16
-  list 1520, 94 82 200 50, vsbar
-  edit "", 1521, 300 82 116 11, autohs
-  button "Add channel", 1522, 300 96 56 13
-  button "Remove", 1523, 300 112 56 13
-  text "Admin", 1113, 94 18 322 8
-  text "Admin nick(s)", 2072, 94 30 186 8
-  edit "", 2073, 284 28 132 11, autohs
-  text "What the channel sees", 1114, 94 18 322 8
-  text "Colour theme", 2076, 94 30 186 8
-  combo 2077, 284 28 132 80, drop
-  button "Preview", 1610, 94 41 50 13
-  text "Draws the sample advert and notice in @DCCore-preview with the colours chosen here, before they are saved.", 1611, 150 41 266 16
-  text "Custom override - surface colours", 1115, 94 63 322 8
-  text "Set any of these and it replaces that one role in the theme above. Keep previous keeps whatever background the segment before left.", 1116, 94 73 322 16
-  text "Border colour", 2080, 94 94 186 8
-  combo 2081, 284 92 64 120, drop
-  combo 2082, 352 92 64 120, drop
-  text "Separator colour", 2084, 94 107 186 8
-  combo 2085, 284 105 64 120, drop
-  combo 2086, 352 105 64 120, drop
-  text "Text box colour", 2088, 94 120 186 8
-  combo 2089, 284 118 64 120, drop
-  combo 2090, 352 118 64 120, drop
-  text "Custom override - text colours", 1117, 94 133 322 8
-  text "Value colour", 2092, 94 145 186 8
-  combo 2093, 284 143 64 120, drop
-  combo 2094, 352 143 64 120, drop
-  text "Alert colour", 2096, 94 158 186 8
-  combo 2097, 284 156 64 120, drop
-  combo 2098, 352 156 64 120, drop
-  text "Accent colour", 2100, 94 171 186 8
-  combo 2101, 284 169 64 120, drop
-  combo 2102, 352 169 64 120, drop
-  text "Advert", 1118, 94 18 322 8
-  text "Advert interval (seconds)", 2104, 94 30 186 8
-  edit "", 2105, 284 28 132 11, autohs
-  text "Broadcast search", 1119, 94 42 322 8
-  text "Broadcast search channel", 2108, 94 54 186 8
-  edit "", 2109, 284 52 132 11, autohs
-  text "Broadcast search cooldown (seconds)", 2112, 94 66 186 8
-  edit "", 2113, 284 64 132 11, autohs
-  text "Timing", 1120, 94 78 322 8
-  text "Message delay (seconds)", 2116, 94 90 186 8
-  edit "", 2117, 284 88 132 11, autohs
-  text "Debug message delay (seconds)", 2120, 94 102 186 8
-  edit "", 2121, 284 100 132 11, autohs
-  text "Sending", 1121, 94 18 322 8
-  text "Max simultaneous sends", 2124, 94 30 186 8
-  edit "", 2125, 284 28 132 11, autohs
-  text "Max queue per user", 2128, 94 42 186 8
-  edit "", 2129, 284 40 132 11, autohs
-  text "Max global queue", 2132, 94 54 186 8
-  edit "", 2133, 284 52 132 11, autohs
-  text "Search (@find)", 1122, 94 66 322 8
-  text "How much the bot says back once it answers (the on/off switch is under General > General Settings).", 1123, 94 76 322 16
-  text "Max search results", 2136, 94 97 186 8
-  edit "", 2137, 284 95 132 11, autohs
-  check "Name the folder in search replies", 2141, 94 107 322 10
-  text "Longest folder shown (characters)", 2144, 94 120 186 8
-  edit "", 2145, 284 118 132 11, autohs
-  text "During a rebuild", 1124, 94 132 322 8
-  check "Pause sharing during !update", 2149, 94 142 322 10
-  check "Pause for the whole rebuild", 2153, 94 153 322 10
-  text "Seconds a rehash waits for transfers to finish", 2156, 94 166 186 8
-  edit "", 2157, 284 164 132 11, autohs
-  text "Buffers && packet size", 1125, 94 18 322 8
-  text "Packet size", 2160, 94 30 186 8
-  combo 2161, 284 28 132 80, drop
-  text "Socket send buffer (0 = the default for your platform) (KB)", 2164, 94 43 186 16
-  edit "", 2165, 284 41 132 11, autohs
-  text "Ports && reliability", 1126, 94 63 322 8
-  text "DCC port range start", 2168, 94 75 186 8
-  edit "", 2169, 284 73 132 11, autohs
-  text "DCC port range end", 2172, 94 87 186 8
-  edit "", 2173, 284 85 132 11, autohs
-  text "Wait for the receiver to connect (seconds)", 2176, 94 99 186 8
-  edit "", 2177, 284 97 132 11, autohs
-  text "Max send failures", 2180, 94 111 186 8
-  edit "", 2181, 284 109 132 11, autohs
-  text "Library", 1127, 94 18 322 8
-  text "Music directory (used only when no folders are set)", 2184, 94 30 186 8
-  edit "", 2185, 284 28 116 11, autohs
-  button "...", 2186, 402 27 14 12
-  text "List base name", 2188, 94 42 186 8
-  edit "", 2189, 284 40 132 11, autohs
-  text "List delivery format", 2192, 94 54 186 8
-  combo 2193, 284 52 132 80, drop
-  text "File types to leave out of the list", 2196, 94 67 186 8
-  edit "", 2197, 284 65 132 11, autohs
-  text "Film && series", 1128, 94 79 322 8
-  check "Publish film and series as a separate list", 2201, 94 89 322 10
-  text "File types that go in the film list", 2204, 94 102 186 8
-  edit "", 2205, 284 100 132 11, autohs
-  text "File types that follow a film into its list (subtitles, .nfo, .sfv)", 2208, 94 114 186 16
-  edit "", 2209, 284 112 132 11, autohs
-  text "!rar packing", 1129, 94 134 322 8
-  text "File types a folder needs to be !rar-packable", 2212, 94 146 186 8
-  edit "", 2213, 284 144 132 11, autohs
-  text "RAR binary path", 2216, 94 158 186 8
-  edit "", 2217, 284 156 116 11, autohs
-  button "...", 2218, 402 155 14 12
-  text "Largest folder !rar will pack (0 = no limit) (MB)", 2220, 94 170 186 8
-  edit "", 2221, 284 168 132 11, autohs
-  text "RAR pack timeout (seconds)", 2224, 94 182 186 8
-  edit "", 2225, 284 180 132 11, autohs
-  text "List banner", 1130, 94 194 322 8
-  text "List banner file", 2228, 94 206 186 8
-  edit "", 2229, 284 204 116 11, autohs
-  button "...", 2230, 402 203 14 12
-  text "List banner size limit (KB)", 2232, 94 218 186 8
-  edit "", 2233, 284 216 132 11, autohs
-  check "Length and quality in the list", 2237, 94 228 322 10
-  text "What each list shares: a name, its folders, and whether it is primary (it answers a private message, and any channel bound to none). Then which list answers in each channel, and that channel's mode.", 1131, 94 18 322 16
-  list 1540, 94 37 322 84, hsbar vsbar
-  text "Name", 1541, 94 128 44 8
-  edit "", 1542, 140 126 150 11, autohs
-  check "Primary", 1543, 298 126 60 10
-  text "List", 1544, 94 141 44 8
-  combo 1545, 140 139 96 80, drop
-  text "Mode", 1546, 244 141 26 8
-  combo 1547, 272 139 96 60, drop
-  text "Folder path", 1548, 94 154 44 8
-  edit "", 1549, 140 152 260 11, autohs
-  button "...", 1550, 402 151 14 13
-  button "Add list", 1551, 94 168 50 13
-  button "Add channel", 1552, 147 168 56 13
-  button "Add folder", 1553, 206 168 52 13
-  button "Change", 1554, 261 168 46 13
-  button "Remove", 1555, 310 168 46 13
-  button "Save lists", 1556, 94 184 56 13
-  button "Refresh", 1557, 153 184 46 13
-  text "Automatic rebuild", 1132, 94 18 322 8
-  text "Rebuild the list automatically", 2240, 94 30 186 8
-  edit "", 2241, 284 28 132 11, autohs
-  text "List rebuild hard cap (seconds, 0 = none)", 2244, 94 42 186 8
-  edit "", 2245, 284 40 132 11, autohs
-  text "Give up if a rebuild reports nothing for (seconds)", 2248, 94 54 186 8
-  edit "", 2249, 284 52 132 11, autohs
-  text "Performance", 1133, 94 66 322 8
-  text "Time limit for reading audio files (no longer used)", 2252, 94 78 186 8
-  edit "", 2253, 284 76 132 11, autohs
-  text "Audio files read at once", 2256, 94 90 186 8
-  edit "", 2257, 284 88 132 11, autohs
-  text "Folders scanned at once", 2260, 94 102 186 8
-  edit "", 2261, 284 100 132 11, autohs
-  text "Auto-grab", 1134, 94 18 322 8
-  check "Grab the lists of bots you have no list from", 2265, 94 28 322 10
-  text "Minutes between automatic grabs", 2268, 94 41 186 8
-  edit "", 2269, 284 39 132 11, autohs
-  text "Skip bots with fewer files than", 2272, 94 53 186 8
-  edit "", 2273, 284 51 132 11, autohs
-  text "Skip bots slower than (KB/s)", 2276, 94 65 186 8
-  edit "", 2277, 284 63 132 11, autohs
-  text "Discover lists", 1135, 94 77 322 8
-  check "Discover a bot's other channel-bound lists", 2281, 94 87 322 10
-  text "Hold stable this long first (seconds)", 2284, 94 100 186 8
-  edit "", 2285, 284 98 132 11, autohs
-  text "Slots && re-fetch", 1136, 94 18 322 8
-  text "Max fetch slots", 2288, 94 30 186 8
-  edit "", 2289, 284 28 132 11, autohs
-  check "Re-fetch a held list when its bot advertises a new one", 2293, 94 40 322 10
-  text "Least time between re-fetches of one bot (hours)", 2296, 94 53 186 8
-  edit "", 2297, 284 51 132 11, autohs
-  text "Most lists to re-fetch in one sweep", 2300, 94 65 186 8
-  edit "", 2301, 284 63 132 11, autohs
-  text "Timeouts", 1137, 94 77 322 8
-  text "Wait for a reply to a fetch request (seconds)", 2304, 94 89 186 8
-  edit "", 2305, 284 87 132 11, autohs
-  text "Fetch transfer timeout (seconds)", 2308, 94 101 186 8
-  edit "", 2309, 284 99 132 11, autohs
-  text "Wait for a reply to a folder (.rar) request (seconds)", 2312, 94 113 186 8
-  edit "", 2313, 284 111 132 11, autohs
-  text "...from a bot that publishes no .rar list (seconds)", 2316, 94 125 186 8
-  edit "", 2317, 284 123 132 11, autohs
-  text "Folder (.rar) fetch transfer timeout (seconds)", 2320, 94 137 186 8
-  edit "", 2321, 284 135 132 11, autohs
-  text "Size limits", 1138, 94 149 322 8
-  text "Max fetch file size (MB)", 2324, 94 161 186 8
-  edit "", 2325, 284 159 132 11, autohs
-  text "Max folder (.rar) fetch size (MB)", 2328, 94 173 186 8
-  edit "", 2329, 284 171 132 11, autohs
-  text "Max fetched master-list zip size (MB)", 2332, 94 185 186 8
-  edit "", 2333, 284 183 132 11, autohs
-  text "Largest list text accepted from a peer (MB)", 2336, 94 197 186 8
-  edit "", 2337, 284 195 132 11, autohs
-  text "History", 1139, 94 209 322 8
-  text "Keep finished downloads for (days)", 2340, 94 221 186 8
-  edit "", 2341, 284 219 132 11, autohs
-  text "Maximum finished downloads kept", 2344, 94 233 186 8
-  edit "", 2345, 284 231 132 11, autohs
-  text "Fetch queue", 1140, 94 18 322 8
-  text "Files asked of one bot at once", 2348, 94 30 186 8
-  edit "", 2349, 284 28 132 11, autohs
-  text "Wait for a queued request (s)", 2352, 94 42 186 8
-  edit "", 2353, 284 40 132 11, autohs
-  text "Failed requests in a row that pause a bot", 2356, 94 54 186 8
-  edit "", 2357, 284 52 132 11, autohs
-  text "Minutes a failing bot stays paused", 2360, 94 66 186 8
-  edit "", 2361, 284 64 132 11, autohs
-  text "List requests", 1141, 94 78 322 8
-  text "Tag on your list requests", 2364, 94 90 186 8
-  edit "", 2365, 284 88 132 11, autohs
-  text "Flood protection", 1142, 94 18 322 8
-  text "Max commands per window", 2368, 94 30 186 8
-  edit "", 2369, 284 28 132 11, autohs
-  text "Request window (seconds)", 2372, 94 42 186 8
-  edit "", 2373, 284 40 132 11, autohs
-  text "Mute duration (seconds)", 2376, 94 54 186 8
-  edit "", 2377, 284 52 132 11, autohs
-  text "Ban after flooding while muted (seconds)", 2380, 94 66 186 8
-  edit "", 2381, 284 64 132 11, autohs
-  text "Temporary (by nick)", 1143, 94 18 322 8
-  text "Flood protection bans a nick by itself; Ignore is the same timed block, started by hand.", 1144, 94 28 322 8
-  list 1580, 94 39 240 44, vsbar
-  button "Lift now", 1581, 340 39 50 13
-  button "Refresh", 1582, 340 55 50 13
-  text "Nick", 1583, 94 89 20 8
-  edit "", 1584, 116 87 90 11, autohs
-  text "Minutes", 1585, 212 89 32 8
-  edit "", 1586, 246 87 30 11, autohs
-  button "Ignore", 1587, 282 86 50 13
-  text "Permanent (by hostmask pattern)", 1145, 94 105 322 8
-  text "Wildcard patterns such as *!*@host.example - the same as ban and unban in the console.", 1146, 94 115 322 8
-  list 1595, 94 126 240 44, vsbar
-  button "Remove", 1596, 340 126 50 13
-  edit "", 1597, 94 174 182 11, autohs
-  button "Add pattern", 1598, 282 173 50 13
-  text "Auto-reply", 1147, 94 18 322 8
-  text "Record one private message per sender every (seconds)", 2384, 94 30 186 8
-  edit "", 2385, 284 28 132 11, autohs
-  text "", 2388, 94 42 186 8
-  edit "", 2389, 284 40 132 11, autohs
-  text "Reply to the same sender once every (seconds)", 2392, 94 54 186 8
-  edit "", 2393, 284 52 132 11, autohs
-  text "Rate limit", 1148, 94 66 322 8
-  text "Most replies to send in one burst window", 2396, 94 78 186 8
-  edit "", 2397, 284 76 132 11, autohs
-  text "How long that burst window is (seconds)", 2400, 94 90 186 8
-  edit "", 2401, 284 88 132 11, autohs
-  text "Access", 1149, 94 18 322 8
-  text "Admin hostmasks", 2404, 94 30 186 8
-  edit "", 2405, 284 28 132 11, autohs
-  text "DCC chat connection mode", 2408, 94 42 186 8
-  combo 2409, 284 40 132 80, drop
-  text "Behaviour", 1150, 94 55 322 8
-  check "Allow admin commands in channel", 2413, 94 65 322 10
-  check "Colour the tags in the admin DCC chat", 2417, 94 76 322 10
-  text "Server", 1151, 94 18 322 8
-  text "Host", 2420, 94 30 186 8
-  edit "", 2421, 284 28 132 11, autohs
-  text "Port", 2424, 94 42 186 8
-  edit "", 2425, 284 40 132 11, autohs
-  text "Other names the dashboard answers to", 2428, 94 54 186 8
-  edit "", 2429, 284 52 132 11, autohs
-  text "Console && browser", 1152, 94 66 322 8
-  text "Enable the Console page (remote admin)", 2432, 94 78 186 8
-  combo 2433, 284 76 132 80, drop
-  check "Open the dashboard in a browser at startup", 2437, 94 89 322 10
-  check "Folder picker on the Settings page", 2441, 94 100 322 10
-  text "What shows in @DCCore", 1153, 94 18 322 8
-  check "Show requests (who asked for what)", 2445, 94 28 322 10
-  check "Show queue positions", 2449, 94 39 322 10
-  check "Show transfers starting, resuming and completing", 2453, 94 50 322 10
-  check "Show failed transfers", 2457, 94 61 322 10
-  check "Show searches and their result counts", 2461, 94 72 322 10
-  text "Debug channel", 1154, 94 85 322 8
-  check "Also send requests, queue positions, starts and searches to the IRC debug channel", 2465, 94 95 322 10
-  text "What @DCCore shows and in which colours, its side panel, font and background, and the bot's nick and pairing are this mIRC's own options, kept in dccore.ini beside the script.", 1615, 94 18 322 24
-  button "@DCCore window options...", 1616, 94 46 100 13
-  text "Settings window", 1155, 94 65 322 8
-  text "Drawn with DCX (scripts\mirc\dcx) when this mIRC can load it, with mIRC's own controls when not - /dccore dcx says which and why. Takes effect the next time the window opens.", 1156, 94 75 322 16
-  check "Use the built-in settings window, not DCX", 2469, 94 94 322 10
-  text "Debug", 1157, 94 18 322 8
-  check "Debug mode", 2473, 94 28 322 10
-  check "Send debug lines to channel", 2477, 94 39 322 10
-  check "Send debug lines to admin console", 2481, 94 50 322 10
-  text "Logging", 1158, 94 63 322 8
-  text "Time prefix on every console line (strftime; blank = none)", 2484, 94 75 186 8
-  edit "", 2485, 284 73 132 11, autohs
-  text "Log file (blank = none)", 2488, 94 87 186 8
-  edit "", 2489, 284 85 116 11, autohs
-  button "...", 2490, 402 84 14 12
-  text "Start a new log file at (MB)", 2492, 94 99 186 8
-  edit "", 2493, 284 97 132 11, autohs
-  text "Old log files to keep", 2496, 94 111 186 8
-  edit "", 2497, 284 109 132 11, autohs
-  text "Window && project", 1159, 94 123 322 8
-  text "The bot's window on Windows (normal, minimised, hidden)", 2500, 94 135 186 8
-  combo 2501, 284 133 132 80, drop
-  text "Project URL", 2504, 94 148 186 8
-  edit "", 2505, 284 146 132 11, autohs
-  text "Library && lists", 1160, 94 18 157 8
-  text "Temp archive directory", 2508, 94 30 87 8
-  edit "", 2509, 185 28 50 11, autohs
-  button "...", 2510, 237 27 14 12
-  text "Master list directory", 2512, 94 42 87 8
-  edit "", 2513, 185 40 50 11, autohs
-  button "...", 2514, 237 39 14 12
-  text "Fetched files directory", 2516, 94 54 87 8
-  edit "", 2517, 185 52 50 11, autohs
-  button "...", 2518, 237 51 14 12
-  text "Served folders file", 2520, 94 66 87 8
-  edit "", 2521, 185 64 50 11, autohs
-  button "...", 2522, 237 63 14 12
-  text "Served lists file", 2524, 94 78 87 8
-  edit "", 2525, 185 76 50 11, autohs
-  button "...", 2526, 237 75 14 12
-  text "Security", 1161, 94 90 157 8
-  text "Bans file", 2528, 94 102 87 8
-  edit "", 2529, 185 100 50 11, autohs
-  button "...", 2530, 237 99 14 12
-  text "Hard bans file", 2532, 94 114 87 8
-  edit "", 2533, 185 112 50 11, autohs
-  button "...", 2534, 237 111 14 12
-  text "Stats && bots", 1162, 94 126 157 8
-  text "Stats file", 2536, 94 138 87 8
-  edit "", 2537, 185 136 50 11, autohs
-  button "...", 2538, 237 135 14 12
-  text "Known bots file", 2540, 94 150 87 8
-  edit "", 2541, 185 148 50 11, autohs
-  button "...", 2542, 237 147 14 12
-  text "Fetched bot lists file", 2544, 94 162 87 8
-  edit "", 2545, 185 160 50 11, autohs
-  button "...", 2546, 237 159 14 12
-  text "Search && audio", 1163, 94 174 157 8
-  text "Cross-list search index", 2548, 94 186 87 8
-  edit "", 2549, 185 184 50 11, autohs
-  button "...", 2550, 237 183 14 12
-  text "Audio info cache", 2552, 94 198 87 8
-  edit "", 2553, 185 196 50 11, autohs
-  button "...", 2554, 237 195 14 12
-  text "Fetch history", 1164, 259 18 157 8
-  text "Fetch history file", 2556, 259 30 87 8
-  edit "", 2557, 350 28 50 11, autohs
-  button "...", 2558, 402 27 14 12
-  text "Download counts file", 2560, 259 42 87 8
-  edit "", 2561, 350 40 50 11, autohs
-  button "...", 2562, 402 39 14 12
-  text "Transfer record file", 2564, 259 54 87 8
-  edit "", 2565, 350 52 50 11, autohs
-  button "...", 2566, 402 51 14 12
-  text "List build", 1165, 259 66 157 8
-  text "List size file", 2568, 259 78 87 8
-  edit "", 2569, 350 76 50 11, autohs
-  button "...", 2570, 402 75 14 12
-  text "List raw bytes file", 2572, 259 90 87 8
-  edit "", 2573, 350 88 50 11, autohs
-  button "...", 2574, 402 87 14 12
-  text "List rebuild progress file", 2576, 259 102 87 8
-  edit "", 2577, 350 100 50 11, autohs
-  button "...", 2578, 402 99 14 12
-  text "Console && messaging", 1166, 259 114 157 8
-  text "Paired console scripts file", 2580, 259 126 87 8
-  edit "", 2581, 350 124 50 11, autohs
-  button "...", 2582, 402 123 14 12
-  text "On-connect commands file", 2584, 259 138 87 8
-  edit "", 2585, 350 136 50 11, autohs
-  button "...", 2586, 402 135 14 12
-  text "Operator notices file", 2588, 259 150 87 8
-  edit "", 2589, 350 148 50 11, autohs
-  button "...", 2590, 402 147 14 12
-  text "Private messages file", 2592, 259 162 87 8
-  edit "", 2593, 350 160 50 11, autohs
-  button "...", 2594, 402 159 14 12
-  text "DCC queue file", 2596, 259 174 87 8
-  edit "", 2597, 350 172 50 11, autohs
-  button "...", 2598, 402 171 14 12
+  radio "", 1020, 4 18 96 15, push group
+  radio "", 1021, 4 35 96 15, push
+  radio "", 1022, 4 52 96 15, push
+  radio "", 1023, 4 69 96 15, push
+  radio "", 1024, 4 86 96 15, push
+  radio "", 1025, 4 103 96 15, push
+  text "", 1012, 106 294 370 24
+  text "", 1013, 4 320 310 8
+  text "", 1018, 4 329 310 10
+  button "Reload", 1017, 319 324 36 13
+  button "Apply", 1014, 358 324 36 13
+  button "OK", 1015, 397 324 36 13
+  button "Cancel", 1016, 436 324 36 13, cancel
+  box "Connection", 1100, 106 18 370 106
+  text "IRC server", 2000, 112 28 358 8
+  edit "", 2001, 112 37 358 11, autohs
+  text "Port", 2004, 112 51 358 8
+  edit "", 2005, 112 60 358 11, autohs
+  text "Nickname", 2008, 112 74 358 8
+  edit "", 2009, 112 83 358 11, autohs
+  text "Alt nickname", 2012, 112 97 358 8
+  edit "", 2013, 112 106 358 11, autohs
+  box "Reconnection", 1101, 106 128 370 60
+  text "Rejoin attempts after a kick (0 = never)", 2016, 112 138 358 8
+  edit "", 2017, 112 147 358 11, autohs
+  text "Check the on-connect commands worked every (minutes, 0 = never)", 2020, 112 161 358 8
+  edit "", 2021, 112 170 358 11, autohs
+  box "On connect", 1102, 106 192 370 91
+  text "", 1500, 112 202 358 16
+  edit "", 1501, 112 220 358 40, multi return autohs autovs hsbar vsbar
+  text "Seconds between commands", 1502, 112 265 92 8
+  edit "", 1503, 206 263 24 11, autohs
+  button "Unlock", 1506, 234 262 44 13
+  button "Save on-connect commands", 1504, 282 262 100 13
+  button "Resend now", 1505, 386 262 48 13
+  text "The on/off switches used most, here from their own pages so there is one place to check.", 1103, 106 18 370 8
+  box "Open when mIRC starts (minimised)", 1104, 106 33 370 47
+  check "DCCore window", 2025, 112 43 358 10
+  check "Chat", 2029, 112 54 358 10
+  check "Downloads", 2033, 112 65 358 10
+  box "Connection", 1105, 106 84 370 25
+  check "Reconnect and log in to the bot by itself when it comes back", 2037, 112 94 358 10
+  box "Sharing && search", 1106, 106 113 370 47
+  check "Answer @find searches", 2041, 112 123 358 10
+  check "Announce finished transfers in the channel", 2045, 112 134 358 10
+  check "Enable !rar folder packing", 2049, 112 145 358 10
+  box "Messaging && dashboard", 1107, 106 164 370 47
+  check "Keep private messages (off: keep none, reply once instead)", 2053, 112 174 358 10
+  check "Enable web dashboard", 2057, 112 185 358 10
+  check "Answer CTCP VERSION", 2061, 112 196 358 10
+  box "Updates", 1108, 106 215 370 25
+  check "Tell me when a new version is out", 2065, 112 225 358 10
+  box "Admin channels", 1109, 106 18 370 48
+  text "A separate channel the bot sends its own diagnostic lines to - never one it also serves files in.", 1110, 112 28 358 8
+  text "Debug channel", 2068, 112 39 358 8
+  edit "", 2069, 112 48 358 11, autohs
+  box "Serving channels", 1111, 106 70 370 205
+  text "Which channels the bot joins and sits in. What each one serves - which list, which folders, Normal, Silent or Request only - is set per list under Sharing > Lists && channels.", 1112, 112 80 358 16
+  list 1520, 112 99 250 168, vsbar
+  edit "", 1521, 368 99 102 11, autohs
+  button "Add channel", 1522, 368 113 56 13
+  button "Remove", 1523, 368 129 56 13
+  box "Admin", 1113, 106 18 370 37
+  text "Admin nick(s)", 2072, 112 28 358 8
+  edit "", 2073, 112 37 358 11, autohs
+  box "What the channel sees", 1114, 106 18 370 57
+  text "Colour theme", 2076, 112 28 358 8
+  combo 2077, 112 37 120 80, drop
+  button "Preview", 1610, 112 51 50 13
+  text "Draws the sample advert and notice in @DCCore-preview with the colours chosen here, before they are saved.", 1611, 168 51 302 16
+  box "Custom override - surface colours", 1115, 106 79 370 102
+  text "Set any of these and it replaces that one role in the theme above. Keep previous keeps whatever background the segment before left.", 1116, 112 89 358 16
+  text "Border colour", 2080, 112 108 358 8
+  combo 2081, 112 117 80 120, drop
+  combo 2082, 196 117 80 120, drop
+  text "Separator colour", 2084, 112 131 358 8
+  combo 2085, 112 140 80 120, drop
+  combo 2086, 196 140 80 120, drop
+  text "Text box colour", 2088, 112 154 358 8
+  combo 2089, 112 163 80 120, drop
+  combo 2090, 196 163 80 120, drop
+  box "Custom override - text colours", 1117, 106 185 370 83
+  text "Value colour", 2092, 112 195 358 8
+  combo 2093, 112 204 80 120, drop
+  combo 2094, 196 204 80 120, drop
+  text "Alert colour", 2096, 112 218 358 8
+  combo 2097, 112 227 80 120, drop
+  combo 2098, 196 227 80 120, drop
+  text "Accent colour", 2100, 112 241 358 8
+  combo 2101, 112 250 80 120, drop
+  combo 2102, 196 250 80 120, drop
+  box "Advert", 1118, 106 18 370 37
+  text "Advert interval (seconds)", 2104, 112 28 358 8
+  edit "", 2105, 112 37 358 11, autohs
+  box "Broadcast search", 1119, 106 59 370 60
+  text "Broadcast search channel", 2108, 112 69 358 8
+  edit "", 2109, 112 78 358 11, autohs
+  text "Broadcast search cooldown (seconds)", 2112, 112 92 358 8
+  edit "", 2113, 112 101 358 11, autohs
+  box "Timing", 1120, 106 123 370 60
+  text "Message delay (seconds)", 2116, 112 133 358 8
+  edit "", 2117, 112 142 358 11, autohs
+  text "Debug message delay (seconds)", 2120, 112 156 358 8
+  edit "", 2121, 112 165 358 11, autohs
+  box "Sending", 1121, 106 18 370 83
+  text "Max simultaneous sends", 2124, 112 28 358 8
+  edit "", 2125, 112 37 358 11, autohs
+  text "Max queue per user", 2128, 112 51 358 8
+  edit "", 2129, 112 60 358 11, autohs
+  text "Max global queue", 2132, 112 74 358 8
+  edit "", 2133, 112 83 358 11, autohs
+  box "Search (@find)", 1122, 106 105 370 82
+  text "How much the bot says back once it answers (the on/off switch is under General > General Settings).", 1123, 112 115 358 8
+  text "Max search results", 2136, 112 126 358 8
+  edit "", 2137, 112 135 358 11, autohs
+  check "Name the folder in search replies", 2141, 112 149 358 10
+  text "Longest folder shown (characters)", 2144, 112 160 358 8
+  edit "", 2145, 112 169 358 11, autohs
+  box "During a rebuild", 1124, 106 191 370 59
+  check "Pause sharing during !update", 2149, 112 201 358 10
+  check "Pause for the whole rebuild", 2153, 112 212 358 10
+  text "Seconds a rehash waits for transfers to finish", 2156, 112 223 358 8
+  edit "", 2157, 112 232 358 11, autohs
+  box "Buffers && packet size", 1125, 106 18 370 60
+  text "Packet size", 2160, 112 28 358 8
+  combo 2161, 112 37 120 80, drop
+  text "Socket send buffer (0 = the default for your platform) (KB)", 2164, 112 51 358 8
+  edit "", 2165, 112 60 358 11, autohs
+  box "Ports && reliability", 1126, 106 82 370 106
+  text "DCC port range start", 2168, 112 92 358 8
+  edit "", 2169, 112 101 358 11, autohs
+  text "DCC port range end", 2172, 112 115 358 8
+  edit "", 2173, 112 124 358 11, autohs
+  text "Wait for the receiver to connect (seconds)", 2176, 112 138 358 8
+  edit "", 2177, 112 147 358 11, autohs
+  text "Max send failures", 2180, 112 161 358 8
+  edit "", 2181, 112 170 358 11, autohs
+  box "Library", 1127, 106 18 181 106
+  text "Music directory (used only when no folders are set)", 2184, 112 28 169 8
+  edit "", 2185, 112 37 153 11, autohs
+  button "...", 2186, 267 36 14 12
+  text "List base name", 2188, 112 51 169 8
+  edit "", 2189, 112 60 169 11, autohs
+  text "List delivery format", 2192, 112 74 169 8
+  combo 2193, 112 83 120 80, drop
+  text "File types to leave out of the list", 2196, 112 97 169 8
+  edit "", 2197, 112 106 169 11, autohs
+  box "Film && series", 1128, 106 128 181 79
+  check "Publish film and series as a separate list", 2201, 112 138 169 10
+  text "File types that go in the film list", 2204, 112 149 169 8
+  edit "", 2205, 112 158 169 11, autohs
+  text "File types that follow a film into its list (subtitles, .nfo, .sfv)", 2208, 112 172 169 16
+  edit "", 2209, 112 189 169 11, autohs
+  box "!rar packing", 1129, 295 18 181 106
+  text "File types a folder needs to be !rar-packable", 2212, 301 28 169 8
+  edit "", 2213, 301 37 169 11, autohs
+  text "RAR binary path", 2216, 301 51 169 8
+  edit "", 2217, 301 60 153 11, autohs
+  button "...", 2218, 456 59 14 12
+  text "Largest folder !rar will pack (0 = no limit) (MB)", 2220, 301 74 169 8
+  edit "", 2221, 301 83 169 11, autohs
+  text "RAR pack timeout (seconds)", 2224, 301 97 169 8
+  edit "", 2225, 301 106 169 11, autohs
+  box "List banner", 1130, 295 128 181 71
+  text "List banner file", 2228, 301 138 169 8
+  edit "", 2229, 301 147 153 11, autohs
+  button "...", 2230, 456 146 14 12
+  text "List banner size limit (KB)", 2232, 301 161 169 8
+  edit "", 2233, 301 170 169 11, autohs
+  check "Length and quality in the list", 2237, 301 184 169 10
+  text "What each list shares: a name, its folders, and whether it is primary (it answers a private message, and any channel bound to none). Then which list answers in each channel, and that channel's mode. Select a row to edit it; Save lists sends the whole set to the bot.", 1131, 106 18 370 24
+  box "Lists", 1132, 106 49 370 111
+  list 1540, 112 59 358 48, hsbar vsbar
+  text "Name", 1541, 112 113 24 8
+  edit "", 1542, 138 111 150 11, autohs
+  check "Primary", 1543, 296 111 60 10
+  text "Folder path", 1548, 112 126 40 8
+  edit "", 1549, 156 124 296 11, autohs
+  button "...", 1550, 454 123 16 13
+  button "Add list", 1551, 112 139 50 13
+  button "Add folder", 1553, 165 139 56 13
+  button "Change", 1554, 224 139 46 13
+  button "Remove", 1555, 273 139 46 13
+  box "Channel bindings", 1133, 106 164 370 98
+  list 1560, 112 174 358 48, hsbar vsbar
+  text "Channel", 1544, 112 228 32 8
+  edit "", 1561, 146 226 96 11, autohs
+  text "List", 1546, 248 228 16 8
+  combo 1545, 266 226 92 80, drop
+  text "Mode", 1558, 362 228 20 8
+  combo 1547, 384 226 86 60, drop
+  button "Add channel", 1552, 112 241 56 13
+  button "Change", 1562, 171 241 46 13
+  button "Remove", 1563, 220 241 46 13
+  button "Save lists", 1556, 106 266 56 13
+  button "Refresh", 1557, 165 266 46 13
+  box "Automatic rebuild", 1134, 106 18 370 83
+  text "Rebuild the list automatically", 2240, 112 28 358 8
+  edit "", 2241, 112 37 358 11, autohs
+  text "List rebuild hard cap (seconds, 0 = none)", 2244, 112 51 358 8
+  edit "", 2245, 112 60 358 11, autohs
+  text "Give up if a rebuild reports nothing for (seconds)", 2248, 112 74 358 8
+  edit "", 2249, 112 83 358 11, autohs
+  box "Performance", 1135, 106 105 370 83
+  text "Time limit for reading audio files (no longer used)", 2252, 112 115 358 8
+  edit "", 2253, 112 124 358 11, autohs
+  text "Audio files read at once", 2256, 112 138 358 8
+  edit "", 2257, 112 147 358 11, autohs
+  text "Folders scanned at once", 2260, 112 161 358 8
+  edit "", 2261, 112 170 358 11, autohs
+  box "Auto-grab", 1136, 106 18 370 94
+  check "Grab the lists of bots you have no list from", 2265, 112 28 358 10
+  text "Minutes between automatic grabs", 2268, 112 39 358 8
+  edit "", 2269, 112 48 358 11, autohs
+  text "Skip bots with fewer files than", 2272, 112 62 358 8
+  edit "", 2273, 112 71 358 11, autohs
+  text "Skip bots slower than (KB/s)", 2276, 112 85 358 8
+  edit "", 2277, 112 94 358 11, autohs
+  box "Discover lists", 1137, 106 116 370 48
+  check "Discover a bot's other channel-bound lists", 2281, 112 126 358 10
+  text "Hold stable this long first (seconds)", 2284, 112 137 358 8
+  edit "", 2285, 112 146 358 11, autohs
+  box "Slots && re-fetch", 1138, 106 18 181 94
+  text "Max fetch slots", 2288, 112 28 169 8
+  edit "", 2289, 112 37 169 11, autohs
+  check "Re-fetch a list when its bot has a new one", 2293, 112 51 169 10
+  text "Least time between re-fetches of one bot (hours)", 2296, 112 62 169 8
+  edit "", 2297, 112 71 169 11, autohs
+  text "Most lists to re-fetch in one sweep", 2300, 112 85 169 8
+  edit "", 2301, 112 94 169 11, autohs
+  box "Timeouts", 1139, 106 116 181 129
+  text "Wait for a reply to a fetch request (seconds)", 2304, 112 126 169 8
+  edit "", 2305, 112 135 169 11, autohs
+  text "Fetch transfer timeout (seconds)", 2308, 112 149 169 8
+  edit "", 2309, 112 158 169 11, autohs
+  text "Wait for a reply to a folder (.rar) request (seconds)", 2312, 112 172 169 8
+  edit "", 2313, 112 181 169 11, autohs
+  text "...from a bot that publishes no .rar list (seconds)", 2316, 112 195 169 8
+  edit "", 2317, 112 204 169 11, autohs
+  text "Folder (.rar) fetch transfer timeout (seconds)", 2320, 112 218 169 8
+  edit "", 2321, 112 227 169 11, autohs
+  box "Size limits", 1140, 295 18 181 106
+  text "Max fetch file size (MB)", 2324, 301 28 169 8
+  edit "", 2325, 301 37 169 11, autohs
+  text "Max folder (.rar) fetch size (MB)", 2328, 301 51 169 8
+  edit "", 2329, 301 60 169 11, autohs
+  text "Max fetched master-list zip size (MB)", 2332, 301 74 169 8
+  edit "", 2333, 301 83 169 11, autohs
+  text "Largest list text accepted from a peer (MB)", 2336, 301 97 169 8
+  edit "", 2337, 301 106 169 11, autohs
+  box "History", 1141, 295 128 181 60
+  text "Keep finished downloads for (days)", 2340, 301 138 169 8
+  edit "", 2341, 301 147 169 11, autohs
+  text "Maximum finished downloads kept", 2344, 301 161 169 8
+  edit "", 2345, 301 170 169 11, autohs
+  box "Fetch queue", 1142, 106 18 370 106
+  text "Files asked of one bot at once", 2348, 112 28 358 8
+  edit "", 2349, 112 37 358 11, autohs
+  text "Wait for a queued request (s)", 2352, 112 51 358 8
+  edit "", 2353, 112 60 358 11, autohs
+  text "Failed requests in a row that pause a bot", 2356, 112 74 358 8
+  edit "", 2357, 112 83 358 11, autohs
+  text "Minutes a failing bot stays paused", 2360, 112 97 358 8
+  edit "", 2361, 112 106 358 11, autohs
+  box "List requests", 1143, 106 128 370 37
+  text "Tag on your list requests", 2364, 112 138 358 8
+  edit "", 2365, 112 147 358 11, autohs
+  box "Flood protection", 1144, 106 18 370 106
+  text "Max commands per window", 2368, 112 28 358 8
+  edit "", 2369, 112 37 358 11, autohs
+  text "Request window (seconds)", 2372, 112 51 358 8
+  edit "", 2373, 112 60 358 11, autohs
+  text "Mute duration (seconds)", 2376, 112 74 358 8
+  edit "", 2377, 112 83 358 11, autohs
+  text "Ban after flooding while muted (seconds)", 2380, 112 97 358 8
+  edit "", 2381, 112 106 358 11, autohs
+  box "Temporary (by nick)", 1145, 106 18 370 121
+  text "Flood protection bans a nick by itself; Ignore is the same timed block, started by hand.", 1146, 112 28 358 8
+  list 1580, 112 39 358 60, vsbar
+  text "Nick", 1583, 112 105 20 8
+  edit "", 1584, 134 103 90 11, autohs
+  text "Minutes", 1585, 230 105 32 8
+  edit "", 1586, 264 103 30 11, autohs
+  button "Ignore", 1587, 300 102 50 13
+  button "Lift now", 1581, 112 118 50 13
+  button "Refresh", 1582, 165 118 46 13
+  box "Permanent (by hostmask pattern)", 1147, 106 143 370 121
+  text "Wildcard patterns such as *!*@host.example - the same as ban and unban in the console.", 1148, 112 153 358 8
+  list 1595, 112 164 358 60, vsbar
+  edit "", 1597, 112 228 250 11, autohs
+  button "Add pattern", 1598, 366 227 56 13
+  button "Remove", 1596, 112 243 50 13
+  box "Auto-reply", 1149, 106 18 370 83
+  text "Record one private message per sender every (seconds)", 2384, 112 28 358 8
+  edit "", 2385, 112 37 358 11, autohs
+  text "", 2388, 112 51 358 8
+  edit "", 2389, 112 60 358 11, autohs
+  text "Reply to the same sender once every (seconds)", 2392, 112 74 358 8
+  edit "", 2393, 112 83 358 11, autohs
+  box "Rate limit", 1150, 106 105 370 60
+  text "Most replies to send in one burst window", 2396, 112 115 358 8
+  edit "", 2397, 112 124 358 11, autohs
+  text "How long that burst window is (seconds)", 2400, 112 138 358 8
+  edit "", 2401, 112 147 358 11, autohs
+  box "Access", 1151, 106 18 370 60
+  text "Admin hostmasks", 2404, 112 28 358 8
+  edit "", 2405, 112 37 358 11, autohs
+  text "DCC chat connection mode", 2408, 112 51 358 8
+  combo 2409, 112 60 120 80, drop
+  box "Behaviour", 1152, 106 82 370 36
+  check "Allow admin commands in channel", 2413, 112 92 358 10
+  check "Colour the tags in the admin DCC chat", 2417, 112 103 358 10
+  box "Server", 1153, 106 18 370 83
+  text "Host", 2420, 112 28 358 8
+  edit "", 2421, 112 37 358 11, autohs
+  text "Port", 2424, 112 51 358 8
+  edit "", 2425, 112 60 358 11, autohs
+  text "Other names the dashboard answers to", 2428, 112 74 358 8
+  edit "", 2429, 112 83 358 11, autohs
+  box "Console && browser", 1154, 106 105 370 59
+  text "Enable the Console page (remote admin)", 2432, 112 115 358 8
+  combo 2433, 112 124 120 80, drop
+  check "Open the dashboard in a browser at startup", 2437, 112 138 358 10
+  check "Folder picker on the Settings page", 2441, 112 149 358 10
+  box "What shows in @DCCore", 1155, 106 18 370 69
+  check "Show requests (who asked for what)", 2445, 112 28 358 10
+  check "Show queue positions", 2449, 112 39 358 10
+  check "Show transfers starting, resuming and completing", 2453, 112 50 358 10
+  check "Show failed transfers", 2457, 112 61 358 10
+  check "Show searches and their result counts", 2461, 112 72 358 10
+  box "Debug channel", 1156, 106 91 370 25
+  check "Also send requests, queue positions, starts and searches to the IRC debug channel", 2465, 112 101 358 10
+  text "What @DCCore shows and in which colours, its side panel, font and background, and the bot's nick and pairing are this mIRC's own options, kept in dccore.ini beside the script.", 1615, 106 18 358 24
+  button "@DCCore window options...", 1616, 106 46 100 13
+  box "Settings window", 1157, 106 67 370 44
+  text "Drawn with DCX (scripts\mirc\dcx) when this mIRC can load it, with mIRC's own controls when not - /dccore dcx says which and why. Takes effect the next time the window opens.", 1158, 112 77 358 16
+  check "Use the built-in settings window, not DCX", 2469, 112 96 358 10
+  box "Debug", 1159, 106 18 370 47
+  check "Debug mode", 2473, 112 28 358 10
+  check "Send debug lines to channel", 2477, 112 39 358 10
+  check "Send debug lines to admin console", 2481, 112 50 358 10
+  box "Logging", 1160, 106 69 370 106
+  text "Time prefix on every console line (strftime; blank = none)", 2484, 112 79 358 8
+  edit "", 2485, 112 88 358 11, autohs
+  text "Log file (blank = none)", 2488, 112 102 358 8
+  edit "", 2489, 112 111 342 11, autohs
+  button "...", 2490, 456 110 14 12
+  text "Start a new log file at (MB)", 2492, 112 125 358 8
+  edit "", 2493, 112 134 358 11, autohs
+  text "Old log files to keep", 2496, 112 148 358 8
+  edit "", 2497, 112 157 358 11, autohs
+  box "Window && project", 1161, 106 179 370 60
+  text "The bot's window on Windows (normal, minimised, hidden)", 2500, 112 189 358 8
+  combo 2501, 112 198 120 80, drop
+  text "Project URL", 2504, 112 212 358 8
+  edit "", 2505, 112 221 358 11, autohs
+  box "Library && lists", 1162, 106 18 181 74
+  text "Temp archive directory", 2508, 112 30 81 8
+  edit "", 2509, 197 28 68 11, autohs
+  button "...", 2510, 267 27 14 12
+  text "Master list directory", 2512, 112 42 81 8
+  edit "", 2513, 197 40 68 11, autohs
+  button "...", 2514, 267 39 14 12
+  text "Fetched files directory", 2516, 112 54 81 8
+  edit "", 2517, 197 52 68 11, autohs
+  button "...", 2518, 267 51 14 12
+  text "Served folders file", 2520, 112 66 81 8
+  edit "", 2521, 197 64 68 11, autohs
+  button "...", 2522, 267 63 14 12
+  text "Served lists file", 2524, 112 78 81 8
+  edit "", 2525, 197 76 68 11, autohs
+  button "...", 2526, 267 75 14 12
+  box "Security", 1163, 106 96 181 38
+  text "Bans file", 2528, 112 108 81 8
+  edit "", 2529, 197 106 68 11, autohs
+  button "...", 2530, 267 105 14 12
+  text "Hard bans file", 2532, 112 120 81 8
+  edit "", 2533, 197 118 68 11, autohs
+  button "...", 2534, 267 117 14 12
+  box "Stats && bots", 1164, 106 138 181 50
+  text "Stats file", 2536, 112 150 81 8
+  edit "", 2537, 197 148 68 11, autohs
+  button "...", 2538, 267 147 14 12
+  text "Known bots file", 2540, 112 162 81 8
+  edit "", 2541, 197 160 68 11, autohs
+  button "...", 2542, 267 159 14 12
+  text "Fetched bot lists file", 2544, 112 174 81 8
+  edit "", 2545, 197 172 68 11, autohs
+  button "...", 2546, 267 171 14 12
+  box "Search && audio", 1165, 106 192 181 38
+  text "Cross-list search index", 2548, 112 204 81 8
+  edit "", 2549, 197 202 68 11, autohs
+  button "...", 2550, 267 201 14 12
+  text "Audio info cache", 2552, 112 216 81 8
+  edit "", 2553, 197 214 68 11, autohs
+  button "...", 2554, 267 213 14 12
+  box "Fetch history", 1166, 295 18 181 50
+  text "Fetch history file", 2556, 301 30 81 8
+  edit "", 2557, 386 28 68 11, autohs
+  button "...", 2558, 456 27 14 12
+  text "Download counts file", 2560, 301 42 81 8
+  edit "", 2561, 386 40 68 11, autohs
+  button "...", 2562, 456 39 14 12
+  text "Transfer record file", 2564, 301 54 81 8
+  edit "", 2565, 386 52 68 11, autohs
+  button "...", 2566, 456 51 14 12
+  box "List build", 1167, 295 72 181 50
+  text "List size file", 2568, 301 84 81 8
+  edit "", 2569, 386 82 68 11, autohs
+  button "...", 2570, 456 81 14 12
+  text "List raw bytes file", 2572, 301 96 81 8
+  edit "", 2573, 386 94 68 11, autohs
+  button "...", 2574, 456 93 14 12
+  text "List rebuild progress file", 2576, 301 108 81 8
+  edit "", 2577, 386 106 68 11, autohs
+  button "...", 2578, 456 105 14 12
+  box "Console && messaging", 1168, 295 126 181 82
+  text "Paired console scripts file", 2580, 301 138 81 8
+  edit "", 2581, 386 136 68 11, autohs
+  button "...", 2582, 456 135 14 12
+  text "On-connect commands file", 2584, 301 150 81 16
+  edit "", 2585, 386 148 68 11, autohs
+  button "...", 2586, 456 147 14 12
+  text "Operator notices file", 2588, 301 170 81 8
+  edit "", 2589, 386 168 68 11, autohs
+  button "...", 2590, 456 167 14 12
+  text "Private messages file", 2592, 301 182 81 8
+  edit "", 2593, 386 180 68 11, autohs
+  button "...", 2594, 456 179 14 12
+  text "DCC queue file", 2596, 301 194 81 8
+  edit "", 2597, 386 192 68 11, autohs
+  button "...", 2598, 456 191 14 12
 }
 alias dccore.sw.data {
   if ($hget(dccore.swm)) { hfree dccore.swm }
   hmake dccore.swm 100
   hadd dccore.swm groups 6
   hadd dccore.swm slots 6
-  hadd dccore.swm size 420 298
-  hadd dccore.swm dcxtree 900 4 4 86 264
+  hadd dccore.swm size 480 340
+  hadd dccore.swm dcxtree 900 4 4 96 266
+  hadd dccore.swm dcxtitle 901 106 4 370 12
+  hadd dccore.swm lvs 1520 1540 1560 1580 1595
   hadd dccore.swm g.1 General
   hadd dccore.swm g.1.pages 1 2 3 4 5 6
   hadd dccore.swm g.2 Sharing
@@ -4180,86 +4318,123 @@ alias dccore.sw.data {
   hadd dccore.swm g.5.pages 19 20 21
   hadd dccore.swm g.6 Advanced
   hadd dccore.swm g.6.pages 22 23
+  hadd dccore.swm lv.1520 910 112 99 250 168
+  hadd dccore.swm lvc.1520 0 Channel
+  hadd dccore.swm lvx.1520 noheader
+  hadd dccore.swm lv.1540 911 112 59 358 48
+  hadd dccore.swm lvc.1540 150 Name,44 Primary,0 Folder path
+  hadd dccore.swm lv.1560 912 112 174 358 48
+  hadd dccore.swm lvc.1560 110 Channel,110 List,0 Mode
+  hadd dccore.swm lv.1580 913 112 39 358 60
+  hadd dccore.swm lvc.1580 160 Nick,0 Time left
+  hadd dccore.swm lv.1595 914 112 164 358 60
+  hadd dccore.swm lvc.1595 0 Pattern
   hadd dccore.swm pages 23
   hadd dccore.swm p.1 IRC Server
+  hadd dccore.swm p.1.layout roomy 1
   hadd dccore.swm p.1.n 1
-  hadd dccore.swm p.1.1 1100,2000,2001,2004,2005,2008,2009,2012,2013,1101,2016,2017,2020,2021,1102,1500,1501,1502,1503,1504,1505,1506
+  hadd dccore.swm p.1.1 1100,2000,2001,2004,2005,2008,2009,2012,2013,1101,2016,2017,2020,2021,1102,1500,1501,1502,1503,1506,1504,1505
   hadd dccore.swm p.1.w onconnect
   hadd dccore.swm p.1.ask onconnect
   hadd dccore.swm p.2 General Settings
+  hadd dccore.swm p.2.layout roomy 1
   hadd dccore.swm p.2.n 1
   hadd dccore.swm p.2.1 1103,1104,2025,2029,2033,1105,2037,1106,2041,2045,2049,1107,2053,2057,2061,1108,2065
   hadd dccore.swm p.3 Channels
+  hadd dccore.swm p.3.layout roomy 1
   hadd dccore.swm p.3.n 1
   hadd dccore.swm p.3.1 1109,1110,2068,2069,1111,1112,1520,1521,1522,1523
+  hadd dccore.swm p.3.lv 1520
   hadd dccore.swm p.3.w channels
   hadd dccore.swm p.4 Operator
+  hadd dccore.swm p.4.layout roomy 1
   hadd dccore.swm p.4.n 1
   hadd dccore.swm p.4.1 1113,2072,2073
   hadd dccore.swm p.5 Appearance
+  hadd dccore.swm p.5.layout roomy 1
   hadd dccore.swm p.5.n 1
   hadd dccore.swm p.5.1 1114,2076,2077,1610,1611,1115,1116,2080,2081,2082,2084,2085,2086,2088,2089,2090,1117,2092,2093,2094,2096,2097,2098,2100,2101,2102
   hadd dccore.swm p.5.w preview
   hadd dccore.swm p.6 Advertising
+  hadd dccore.swm p.6.layout roomy 1
   hadd dccore.swm p.6.n 1
   hadd dccore.swm p.6.1 1118,2104,2105,1119,2108,2109,2112,2113,1120,2116,2117,2120,2121
   hadd dccore.swm p.7 Search
+  hadd dccore.swm p.7.layout roomy 1
   hadd dccore.swm p.7.n 1
   hadd dccore.swm p.7.1 1121,2124,2125,2128,2129,2132,2133,1122,1123,2136,2137,2141,2144,2145,1124,2149,2153,2156,2157
   hadd dccore.swm p.8 Transfers
+  hadd dccore.swm p.8.layout roomy 1
   hadd dccore.swm p.8.n 1
   hadd dccore.swm p.8.1 1125,2160,2161,2164,2165,1126,2168,2169,2172,2173,2176,2177,2180,2181
   hadd dccore.swm p.9 Your list
+  hadd dccore.swm p.9.layout roomy 2
   hadd dccore.swm p.9.n 1
   hadd dccore.swm p.9.1 1127,2184,2185,2186,2188,2189,2192,2193,2196,2197,1128,2201,2204,2205,2208,2209,1129,2212,2213,2216,2217,2218,2220,2221,2224,2225,1130,2228,2229,2230,2232,2233,2237
   hadd dccore.swm p.10 Lists & channels
+  hadd dccore.swm p.10.layout roomy 1
   hadd dccore.swm p.10.n 1
-  hadd dccore.swm p.10.1 1131,1540,1541,1542,1543,1544,1545,1546,1547,1548,1549,1550,1551,1552,1553,1554,1555,1556,1557
-  hadd dccore.swm p.10.w served
+  hadd dccore.swm p.10.1 1131,1132,1540,1541,1542,1543,1548,1549,1550,1551,1553,1554,1555,1133,1560,1544,1561,1546,1545,1558,1547,1552,1562,1563,1556,1557
+  hadd dccore.swm p.10.lv 1540 1560
+  hadd dccore.swm p.10.w srvlists srvchans srvsave
   hadd dccore.swm p.10.ask served
   hadd dccore.swm p.11 Rebuild
+  hadd dccore.swm p.11.layout roomy 1
   hadd dccore.swm p.11.n 1
-  hadd dccore.swm p.11.1 1132,2240,2241,2244,2245,2248,2249,1133,2252,2253,2256,2257,2260,2261
+  hadd dccore.swm p.11.1 1134,2240,2241,2244,2245,2248,2249,1135,2252,2253,2256,2257,2260,2261
   hadd dccore.swm p.12 List discovery
+  hadd dccore.swm p.12.layout roomy 1
   hadd dccore.swm p.12.n 1
-  hadd dccore.swm p.12.1 1134,2265,2268,2269,2272,2273,2276,2277,1135,2281,2284,2285
+  hadd dccore.swm p.12.1 1136,2265,2268,2269,2272,2273,2276,2277,1137,2281,2284,2285
   hadd dccore.swm p.13 Fetch tuning
+  hadd dccore.swm p.13.layout roomy 2
   hadd dccore.swm p.13.n 1
-  hadd dccore.swm p.13.1 1136,2288,2289,2293,2296,2297,2300,2301,1137,2304,2305,2308,2309,2312,2313,2316,2317,2320,2321,1138,2324,2325,2328,2329,2332,2333,2336,2337,1139,2340,2341,2344,2345
+  hadd dccore.swm p.13.1 1138,2288,2289,2293,2296,2297,2300,2301,1139,2304,2305,2308,2309,2312,2313,2316,2317,2320,2321,1140,2324,2325,2328,2329,2332,2333,2336,2337,1141,2340,2341,2344,2345
   hadd dccore.swm p.14 Queue
+  hadd dccore.swm p.14.layout roomy 1
   hadd dccore.swm p.14.n 1
-  hadd dccore.swm p.14.1 1140,2348,2349,2352,2353,2356,2357,2360,2361,1141,2364,2365
+  hadd dccore.swm p.14.1 1142,2348,2349,2352,2353,2356,2357,2360,2361,1143,2364,2365
   hadd dccore.swm p.15 Anti-flood
+  hadd dccore.swm p.15.layout roomy 1
   hadd dccore.swm p.15.n 1
-  hadd dccore.swm p.15.1 1142,2368,2369,2372,2373,2376,2377,2380,2381
+  hadd dccore.swm p.15.1 1144,2368,2369,2372,2373,2376,2377,2380,2381
   hadd dccore.swm p.16 Bans & ignores
+  hadd dccore.swm p.16.layout roomy 1
   hadd dccore.swm p.16.n 1
-  hadd dccore.swm p.16.1 1143,1144,1580,1581,1582,1583,1584,1585,1586,1587,1145,1146,1595,1596,1597,1598
+  hadd dccore.swm p.16.1 1145,1146,1580,1583,1584,1585,1586,1587,1581,1582,1147,1148,1595,1597,1598,1596
+  hadd dccore.swm p.16.lv 1580 1595
   hadd dccore.swm p.16.w bantimed banperm
   hadd dccore.swm p.16.ask banlist
   hadd dccore.swm p.17 Private messages
+  hadd dccore.swm p.17.layout roomy 1
   hadd dccore.swm p.17.n 1
-  hadd dccore.swm p.17.1 1147,2384,2385,2388,2389,2392,2393,1148,2396,2397,2400,2401
+  hadd dccore.swm p.17.1 1149,2384,2385,2388,2389,2392,2393,1150,2396,2397,2400,2401
   hadd dccore.swm p.18 Admin console
+  hadd dccore.swm p.18.layout roomy 1
   hadd dccore.swm p.18.n 1
-  hadd dccore.swm p.18.1 1149,2404,2405,2408,2409,1150,2413,2417
+  hadd dccore.swm p.18.1 1151,2404,2405,2408,2409,1152,2413,2417
   hadd dccore.swm p.19 Web dashboard
+  hadd dccore.swm p.19.layout roomy 1
   hadd dccore.swm p.19.n 1
-  hadd dccore.swm p.19.1 1151,2420,2421,2424,2425,2428,2429,1152,2432,2433,2437,2441
+  hadd dccore.swm p.19.1 1153,2420,2421,2424,2425,2428,2429,1154,2432,2433,2437,2441
   hadd dccore.swm p.20 Console feed
+  hadd dccore.swm p.20.layout roomy 1
   hadd dccore.swm p.20.n 1
-  hadd dccore.swm p.20.1 1153,2445,2449,2453,2457,2461,1154,2465
+  hadd dccore.swm p.20.1 1155,2445,2449,2453,2457,2461,1156,2465
   hadd dccore.swm p.21 This mIRC window
+  hadd dccore.swm p.21.layout roomy 1
   hadd dccore.swm p.21.n 1
-  hadd dccore.swm p.21.1 1615,1616,1155,1156,2469
+  hadd dccore.swm p.21.1 1615,1616,1157,1158,2469
   hadd dccore.swm p.21.w mircwin
   hadd dccore.swm p.22 Debug & logging
+  hadd dccore.swm p.22.layout roomy 1
   hadd dccore.swm p.22.n 1
-  hadd dccore.swm p.22.1 1157,2473,2477,2481,1158,2484,2485,2488,2489,2490,2492,2493,2496,2497,1159,2500,2501,2504,2505
+  hadd dccore.swm p.22.1 1159,2473,2477,2481,1160,2484,2485,2488,2489,2490,2492,2493,2496,2497,1161,2500,2501,2504,2505
   hadd dccore.swm p.23 File locations
+  hadd dccore.swm p.23.layout compact 2
   hadd dccore.swm p.23.n 2
-  hadd dccore.swm p.23.1 1160,2508,2509,2510,2512,2513,2514,2516,2517,2518,2520,2521,2522,2524,2525,2526,1161,2528,2529,2530,2532,2533,2534,1162,2536,2537,2538,2540,2541,2542,2544,2545,2546,1163,2548,2549,2550,2552,2553,2554,1164,2556,2557,2558,2560,2561,2562,2564,2565,2566
-  hadd dccore.swm p.23.2 1165,2568,2569,2570,2572,2573,2574,2576,2577,2578,1166,2580,2581,2582,2584,2585,2586,2588,2589,2590,2592,2593,2594,2596,2597,2598
+  hadd dccore.swm p.23.1 1162,2508,2509,2510,2512,2513,2514,2516,2517,2518,2520,2521,2522,2524,2525,2526,1163,2528,2529,2530,2532,2533,2534,1164,2536,2537,2538,2540,2541,2542,2544,2545,2546,1165,2548,2549,2550,2552,2553,2554,1166,2556,2557,2558,2560,2561,2562,2564,2565,2566
+  hadd dccore.swm p.23.2 1167,2568,2569,2570,2572,2573,2574,2576,2577,2578,1168,2580,2581,2582,2584,2585,2586,2588,2589,2590,2592,2593,2594,2596,2597,2598
   hadd dccore.swm keys.n 10
   hadd dccore.swm keys.1 SERVER PORT NICKNAME ALT_NICKNAME REJOIN_ATTEMPTS ON_CONNECT_CHECK_MINUTES SEARCH_ENABLED ANNOUNCE_TRANSFERS RAR_ENABLED PRIVATE_MESSAGES_ENABLED WEBUI_ENABLED CTCP_VERSION_REPLY CHECK_FOR_UPDATES DEBUG_CHANNEL CHANNEL
   hadd dccore.swm keys.2 ADMIN_NICK THEME CUSTOM_THEME_BORDER CUSTOM_THEME_SEPARATOR CUSTOM_THEME_TEXTBOX CUSTOM_THEME_VALUE CUSTOM_THEME_ALERT CUSTOM_THEME_ACCENT ANNOUNCE_INTERVAL BROADCAST_SEARCH_CHANNEL BROADCAST_SEARCH_COOLDOWN MSG_DELAY DEBUG_MSG_DELAY MAX_DCC_SLOTS MAX_USER_QUEUE
@@ -4294,7 +4469,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.ON_CONNECT_CHECK_MINUTES 2021 int 1 2020
   hadd dccore.swm pg.ON_CONNECT_CHECK_MINUTES 1
   hadd dccore.swm n.ON_CONNECT_CHECK_MINUTES Check the on-connect commands worked every (minutes~2C 0 = never)
-  hadd dccore.swm h.ON_CONNECT_CHECK_MINUTES How often the bot checks that its on-connect commands worked. If they set a user mode such as +x and the server has not given it - or~2C for +x~2C has not hidden the host - the bot sends all of them again. This is for a net split~2C when the X login can go nowhere.
+  hadd dccore.swm h.ON_CONNECT_CHECK_MINUTES How often the bot checks that its on-connect commands worked. If they set a user mode such as +x and the server has not given it - or~2C for +x~2C has not hidden the host - the bot sends all of them again. This is for a net split~2C when the X login can go nowhere. At most six resends on one connection. 0 means never check.
   hadd dccore.swm k.SEARCH_ENABLED 2041 bool 1 2041
   hadd dccore.swm pg.SEARCH_ENABLED 2
   hadd dccore.swm n.SEARCH_ENABLED Answer @find searches
@@ -4436,11 +4611,11 @@ alias dccore.sw.data {
   hadd dccore.swm cl.DCC_BLOCK_SIZE.5 64 KB
   hadd dccore.swm cl.DCC_BLOCK_SIZE.6 128 KB
   hadd dccore.swm cl.DCC_BLOCK_SIZE.7 256 KB
-  hadd dccore.swm h.DCC_BLOCK_SIZE How much the bot sends at once~2C in bytes. The default~2C 64 KB~2C suits most bots. 128 or 256 KB use less CPU and suit a fast seedbox~2C but Speed now and the advert's Speed: then move a block at a time~2C so slow sends read 0 or jump~2C and a stalled receiver is dropped after a minute per 64 KB.
+  hadd dccore.swm h.DCC_BLOCK_SIZE How much the bot sends at once~2C in bytes. The default~2C 64 KB~2C suits most bots. 128 or 256 KB use less CPU and suit a fast seedbox~2C but Speed now and the advert's Speed: then move a block at a time~2C so slow sends read 0 or jump~2C and a stalled receiver is dropped after a minute per 64 KB. 4-16 KB cost 2-3 times the CPU.
   hadd dccore.swm k.DCC_SEND_BUFFER 2165 int 1024 2164
   hadd dccore.swm pg.DCC_SEND_BUFFER 8
   hadd dccore.swm n.DCC_SEND_BUFFER Socket send buffer (0 = the default for your platform) (KB)
-  hadd dccore.swm h.DCC_SEND_BUFFER How much data the operating system may hold in flight for one send~2C in bytes. 0 uses the platform default: 4 MB on Windows~2C which would otherwise hold only 64 KB~2C and the system's own tuning on Linux and macOS - right for nearly every connection.
+  hadd dccore.swm h.DCC_SEND_BUFFER How much data the operating system may hold in flight for one send~2C in bytes. 0 uses the platform default: 4 MB on Windows~2C which would otherwise hold only 64 KB~2C and the system's own tuning on Linux and macOS - right for nearly every connection. Only worth trying on a very fast link to a distant downloader.
   hadd dccore.swm k.DCC_PORT_START 2169 int 1 2168
   hadd dccore.swm pg.DCC_PORT_START 8
   hadd dccore.swm n.DCC_PORT_START DCC port range start
@@ -4516,7 +4691,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.LIST_SHOW_AUDIO_INFO 2237 bool 1 2237
   hadd dccore.swm pg.LIST_SHOW_AUDIO_INFO 9
   hadd dccore.swm n.LIST_SHOW_AUDIO_INFO Length and quality in the list
-  hadd dccore.swm h.LIST_SHOW_AUDIO_INFO Add each MP3 and FLAC file's length and quality after its size in your list~2C e.g. 10.3MB 4m31s 320/44.1/JS. Every audio file is read once~2C in the background after the list is published; searches and downloads pause only for the seconds the lengths take to swap in.
+  hadd dccore.swm h.LIST_SHOW_AUDIO_INFO Add each MP3 and FLAC file's length and quality after its size in your list~2C e.g. 10.3MB 4m31s 320/44.1/JS. Every audio file is read once~2C in the background after the list is published; searches and downloads pause only for the seconds the lengths take to swap in. Tools~2C Read audio info runs it alone.
   hadd dccore.swm k.LIST_REBUILD_SCHEDULE 2241 str 1 2240
   hadd dccore.swm pg.LIST_REBUILD_SCHEDULE 11
   hadd dccore.swm n.LIST_REBUILD_SCHEDULE Rebuild the list automatically
@@ -4571,7 +4746,7 @@ alias dccore.sw.data {
   hadd dccore.swm h.MAX_FETCH_SLOTS How many downloads FROM other bots you run at the same time. Separate from your own send slots~2C so your downloading never takes slots away from people downloading from you.
   hadd dccore.swm k.AUTO_REFETCH_LISTS 2293 bool 1 2293
   hadd dccore.swm pg.AUTO_REFETCH_LISTS 13
-  hadd dccore.swm n.AUTO_REFETCH_LISTS Re-fetch a held list when its bot advertises a new one
+  hadd dccore.swm n.AUTO_REFETCH_LISTS Re-fetch a list when its bot has a new one
   hadd dccore.swm h.AUTO_REFETCH_LISTS When another bot advertises that its list has changed~2C fetch the new list automatically. A list from a bot whose advert shows no date is fetched again once it is 14 days old. Off by default because it uses the other bot's bandwidth without you asking each time.
   hadd dccore.swm k.AUTO_REFETCH_INTERVAL_HOURS 2297 int 1 2296
   hadd dccore.swm pg.AUTO_REFETCH_INTERVAL_HOURS 13
@@ -4636,7 +4811,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.FETCH_BOT_MAX_FAILS 2357 int 1 2356
   hadd dccore.swm pg.FETCH_BOT_MAX_FAILS 14
   hadd dccore.swm n.FETCH_BOT_MAX_FAILS Failed requests in a row that pause a bot
-  hadd dccore.swm h.FETCH_BOT_MAX_FAILS How many of your requests to one bot may fail in a row - no answer~2C a connection that could not be made~2C a download that broke off - before that bot is paused for a while. A bot saying it does not have the file~2C or you cancelling~2C does not count; a finished download starts the count again.
+  hadd dccore.swm h.FETCH_BOT_MAX_FAILS How many of your requests to one bot may fail in a row - no answer~2C a connection that could not be made~2C a download that broke off - before that bot is paused for a while. A bot saying it does not have the file~2C or you cancelling~2C does not count; a finished download starts the count again. 0 never pauses.
   hadd dccore.swm k.FETCH_BOT_COOLDOWN_MINUTES 2361 int 1 2360
   hadd dccore.swm pg.FETCH_BOT_COOLDOWN_MINUTES 14
   hadd dccore.swm n.FETCH_BOT_COOLDOWN_MINUTES Minutes a failing bot stays paused
@@ -4644,7 +4819,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.LIST_REQUEST_TAG 2365 str 1 2364
   hadd dccore.swm pg.LIST_REQUEST_TAG 14
   hadd dccore.swm n.LIST_REQUEST_TAG Tag on your list requests
-  hadd dccore.swm h.LIST_REQUEST_TAG A short tag added after your list requests~2C the way AutoQ adds ::AutoQ::~2C so a channel can see what is fetching. It is sent only to other DCCore bots~2C which always accept it; other bots get the plain request~2C because many answer only that exact line. Plain text~2C up to 32 characters.
+  hadd dccore.swm h.LIST_REQUEST_TAG A short tag added after your list requests~2C the way AutoQ adds ::AutoQ::~2C so a channel can see what is fetching. It is sent only to other DCCore bots~2C which always accept it; other bots get the plain request~2C because many answer only that exact line. Plain text~2C up to 32 characters. Leave it empty to send no tag.
   hadd dccore.swm k.MAX_REQUESTS 2369 int 1 2368
   hadd dccore.swm pg.MAX_REQUESTS 15
   hadd dccore.swm n.MAX_REQUESTS Max commands per window
@@ -4784,7 +4959,7 @@ alias dccore.sw.data {
   hadd dccore.swm cl.BOT_WINDOW.1 normal
   hadd dccore.swm cl.BOT_WINDOW.2 minimised
   hadd dccore.swm cl.BOT_WINDOW.3 hidden
-  hadd dccore.swm h.BOT_WINDOW How the bot runs on Windows when start-dccore.bat starts it: in its window (normal)~2C minimised to the taskbar~2C or with no window (hidden)~2C its output then in the log file. Stop a hidden bot with start-dccore.bat stop~2C Tools > Stop the bot or shutdown now in the admin console.
+  hadd dccore.swm h.BOT_WINDOW How the bot runs on Windows when start-dccore.bat starts it: in its window (normal)~2C minimised to the taskbar~2C or with no window (hidden)~2C its output then in the log file. Stop a hidden bot with start-dccore.bat stop~2C Tools > Stop the bot or shutdown now in the admin console. The first run always has its window.
   hadd dccore.swm k.PROJECT_URL 2505 str 1 2504
   hadd dccore.swm pg.PROJECT_URL 22
   hadd dccore.swm n.PROJECT_URL Project URL
@@ -4844,7 +5019,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.DOWNLOAD_COUNTS_FILE 2561 str 1 2560
   hadd dccore.swm pg.DOWNLOAD_COUNTS_FILE 23
   hadd dccore.swm n.DOWNLOAD_COUNTS_FILE Download counts file
-  hadd dccore.swm h.DOWNLOAD_COUNTS_FILE Where the count of how often each file was sent is kept~2C for the Most downloaded table: a database beside it ending in .db.
+  hadd dccore.swm h.DOWNLOAD_COUNTS_FILE Where the count of how often each file was sent is kept~2C for the Most downloaded table: a database beside it ending in .db. An older download_counts.json is imported once and left as it was~2C so an older version still shows the counts up to the upgrade; what it counts is not brought back by upgrading again.
   hadd dccore.swm k.TRANSFER_LOG_FILE 2565 str 1 2564
   hadd dccore.swm pg.TRANSFER_LOG_FILE 23
   hadd dccore.swm n.TRANSFER_LOG_FILE Transfer record file
@@ -5221,11 +5396,11 @@ alias dccore.sw.data {
   hadd dccore.swm br.2594 file PRIVATE_MESSAGES_FILE
   hadd dccore.swm br.2598 file DCC_QUEUE_FILE
   hadd dccore.swm bot.n 5
-  hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1504,1505,1506,2041,2045,2049,2053,2057,2061,2065,2069,1520,1521,1522,1523,2073,2077,1610,1611,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2102,2105,2109,2113,2117,2121,2125,2129,2133,2137
-  hadd dccore.swm bot.2 2141,2145,2149,2153,2157,2161,2165,2169,2173,2177,2181,2185,2186,2189,2193,2197,2201,2205,2209,2213,2217,2218,2221,2225,2229,2230,2233,2237,1540,1541,1542,1543,1544,1545,1546,1547,1548,1549,1550,1551,1552,1553,1554,1555,1556,1557,2241,2245,2249,2253
-  hadd dccore.swm bot.3 2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,1580,1581,1582,1583,1584,1585,1586,1587,1595,1596,1597,1598,2385,2389,2393,2397,2401,2405
-  hadd dccore.swm bot.4 2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2473,2477,2481,2485,2489,2490,2493,2497,2501,2505,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545,2546,2549,2550,2553,2554,2557
-  hadd dccore.swm bot.5 2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598
+  hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1506,1504,1505,2041,2045,2049,2053,2057,2061,2065,2069,1520,1521,1522,1523,2073,2077,1610,1611,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2102,2105,2109,2113,2117,2121,2125,2129,2133,2137
+  hadd dccore.swm bot.2 2141,2145,2149,2153,2157,2161,2165,2169,2173,2177,2181,2185,2186,2189,2193,2197,2201,2205,2209,2213,2217,2218,2221,2225,2229,2230,2233,2237,1540,1541,1542,1543,1548,1549,1550,1551,1553,1554,1555,1560,1544,1561,1546,1545,1558,1547,1552,1562,1563,1556
+  hadd dccore.swm bot.3 1557,2241,2245,2249,2253,2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,1580,1583,1584,1585,1586,1587,1581,1582,1595,1597,1598,1596,2385
+  hadd dccore.swm bot.4 2389,2393,2397,2401,2405,2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2473,2477,2481,2485,2489,2490,2493,2497,2501,2505,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545,2546
+  hadd dccore.swm bot.5 2549,2550,2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598
   hadd dccore.swm confirm TMP_ZIP_DIR LOCAL_LIST_DIR FETCHED_FILES_DIR LIBRARY_FOLDERS_FILE LISTS_FILE BANS_FILE HARD_BANS_FILE STATS_FILE KNOWN_BOTS_FILE FETCHED_BOT_LISTS_FILE LIST_INDEX_FILE LIST_AUDIO_INFO_CACHE FETCH_HISTORY_FILE DOWNLOAD_COUNTS_FILE TRANSFER_LOG_FILE LIST_SIZE_FILE LIST_RAWBYTES_FILE LIST_PROGRESS_FILE ADMIN_TOKENS_FILE ON_CONNECT_FILE NOTICES_FILE PRIVATE_MESSAGES_FILE DCC_QUEUE_FILE
   hadd dccore.swm t.1500 Sent once the server has registered the bot~2C before it joins: one command per line~2C exactly as typed into a client. ~25nick~25 is the nickname the server gave it.
   hadd dccore.swm t.2388 That reply's wording (~25admin becomes the admin nick)
