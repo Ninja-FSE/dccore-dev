@@ -3338,6 +3338,153 @@ def resume_transfers():
     config.transfers_paused = False
 
 
+def path_from_published_lists(list_paths, requested_file, requested_size_hint, wanted_list):
+    """The path on disk a request names, found by reading the published lists
+    `list_paths` in order, or None if they do not place it on disk.
+
+    A row is matched case-insensitively and placed under the folder heading
+    above it; `requested_size_hint` (the pasted ::INFO:: size, lower case) picks
+    between same-named copies, and the list's own spelling of the name is the
+    one returned (#445). Reads files; may raise on one it cannot read, which the
+    caller reports.
+
+    Was a block inside handle_download_request() until #1298, the first step of
+    splitting dcc.py's largest functions (docs/FUTURE.md). Moved unchanged.
+    """
+    # STREAMED, NOT LOADED. This used to readlines() every
+    # published list into one Python list and then, on a match,
+    # walk BACKWARDS through it to the nearest folder heading.
+    # The only thing the whole list in memory was for was that
+    # backward walk. On a 5.4-million-file library that is
+    # 460 MB of text as ~5.9 GB of str objects, on EVERY file
+    # request - full_path below is "<first folder>/<name>" and a
+    # track is never in a folder's root, so the direct check
+    # fails and this runs each time. Measured live: a 5.9 GB
+    # peak and 1.5 GB held afterwards, because the allocator
+    # keeps its arenas. Three busy slots could mean three at
+    # once.
+    #
+    # Headings precede their rows, so "the nearest heading
+    # above the matching row" is simply the last heading seen
+    # on the way down. One variable carries it; nothing is kept.
+    # The heading is still resolved LAZILY, on a match only, so
+    # a miss costs exactly what it cost before minus the memory.
+    #
+    # One generator across every list, in order, so a `break`
+    # below leaves the whole lookup exactly as it left the old
+    # single loop over the concatenation - and the heading
+    # state carries across the file boundary the same way the
+    # concatenation carried it, which is what the comment above
+    # ("each list carries its own headings above its own rows")
+    # relies on.
+    def _list_lines(paths):
+        for one_list in paths:
+            with open(one_list, "r", encoding="utf-8",
+                      errors="ignore") as lf:
+                for raw_line in lf:
+                    yield raw_line
+
+    # THE LIST'S OWN SPELLING TRAVELS WITH THE FOLDER (#445).
+    #
+    # The match below is case-insensitive, deliberately -
+    # list.find_duplicate_filenames() gives the reason in its
+    # own docstring: "a requester typing a name back cannot be
+    # expected to reproduce its case". What was missing is that
+    # the path was then rebuilt from what the REQUESTER typed,
+    # which is the one spelling known not to be the one on
+    # disk. On Linux that names a file that does not exist and
+    # the request is refused for a file the bot is publicly
+    # advertising; on Windows it resolves, and the file is
+    # offered and received under the requester's casing rather
+    # than the operator's.
+    target_folder = None
+    target_name = ""
+    fallback_folder = None
+    fallback_name = ""
+    clean_req = str(requested_file).lower().strip()
+    request_prefix = f"!{config.NICKNAME} "
+    # The most recent heading line, unresolved. ANY known
+    # prefix, not just the one we write: this is what
+    # RECOGNISES a heading, and checking only the current
+    # prefix stops seeing the headings in every list already
+    # in somebody's hands. Found by the test that counts
+    # resolutions.
+    last_heading = None
+
+    for line in _list_lines(list_paths):
+        line_clean = line.strip()
+        if any(line_clean.upper().startswith(p)
+               for p in list_mod.LIST_FOLDER_PREFIXES):
+            last_heading = line_clean
+            continue
+        if not line_clean.startswith(request_prefix):
+            continue
+        # str.split() puts what came BEFORE the separator in
+        # [0], and the line starts with the separator - so [0]
+        # is the empty string on every line here. The filename
+        # is in [1]; the whole list lookup was dead code
+        # without it, leaving the os.walk() below to answer
+        # every request.
+        parts_nick = line_clean.split(request_prefix, 1)
+        rest_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
+
+        current_file_in_list, current_size_in_list = list_mod.strip_info_suffix(rest_in_list)
+
+        if clean_req != str(current_file_in_list).lower().strip():
+            continue
+        if last_heading is None:
+            continue
+        # The prefix-stripping itself is
+        # list_mod.resolve_list_folder() - this used to be a
+        # second, hand-written copy of it, which could drift
+        # from the original if the list format ever changed.
+        # No explicit base: the heading itself says which
+        # folder it belongs to once there is more than one
+        # (#164), and pinning it to base_directory would
+        # resolve every heading into the first.
+        found_folder = list_mod.resolve_list_folder(
+            last_heading, name=wanted_list)
+        if found_folder is None:
+            continue
+
+        # Two or more copies can share this exact name and
+        # differ only in size. Without a size hint, or if it
+        # matches nothing, the first copy the list names wins -
+        # same as before this change, and pinned by
+        # test_no_error_is_reported_for_a_duplicate. With one,
+        # a copy whose own ::INFO:: size matches it wins
+        # instead, so a request built from a search result's
+        # exact line reaches the copy that result actually
+        # named. A bare request (no hint - AutoQ.mrc and every
+        # existing caller) still stops at this first match
+        # exactly as before; only a hinted request that has
+        # not matched yet pays for scanning on, since that is
+        # the one case where the answer isn't already known.
+        if fallback_folder is None:
+            fallback_folder = found_folder
+            fallback_name = str(current_file_in_list).strip()
+            if not requested_size_hint:
+                break
+        if requested_size_hint and current_size_in_list.lower().strip() == requested_size_hint:
+            target_folder = found_folder
+            target_name = str(current_file_in_list).strip()
+            break
+
+    if target_folder is None:
+        target_folder = fallback_folder
+        target_name = fallback_name
+
+    if target_folder is not None:
+        # target_name, not requested_file (#445): the list's
+        # spelling is the one that exists on disk, because the
+        # list was written from the disk. The row that matched
+        # is the row that names it.
+        test_path = os.path.join(target_folder, target_name)
+        if os.path.exists(platform_compat.long_path(test_path)):
+            return test_path
+    return None
+
+
 def handle_download_request(irc_sock, user, requested_file, target_chan):
     """Runs when somebody requests a file, or a whole folder via !rar."""
     # ---------------------------------------------------------------------
@@ -3900,137 +4047,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 list_paths = list_mod.all_list_paths(wanted_list) if recalled is None else []
                 if list_paths:
                     try:
-                        # STREAMED, NOT LOADED. This used to readlines() every
-                        # published list into one Python list and then, on a match,
-                        # walk BACKWARDS through it to the nearest folder heading.
-                        # The only thing the whole list in memory was for was that
-                        # backward walk. On a 5.4-million-file library that is
-                        # 460 MB of text as ~5.9 GB of str objects, on EVERY file
-                        # request - full_path below is "<first folder>/<name>" and a
-                        # track is never in a folder's root, so the direct check
-                        # fails and this runs each time. Measured live: a 5.9 GB
-                        # peak and 1.5 GB held afterwards, because the allocator
-                        # keeps its arenas. Three busy slots could mean three at
-                        # once.
-                        #
-                        # Headings precede their rows, so "the nearest heading
-                        # above the matching row" is simply the last heading seen
-                        # on the way down. One variable carries it; nothing is kept.
-                        # The heading is still resolved LAZILY, on a match only, so
-                        # a miss costs exactly what it cost before minus the memory.
-                        #
-                        # One generator across every list, in order, so a `break`
-                        # below leaves the whole lookup exactly as it left the old
-                        # single loop over the concatenation - and the heading
-                        # state carries across the file boundary the same way the
-                        # concatenation carried it, which is what the comment above
-                        # ("each list carries its own headings above its own rows")
-                        # relies on.
-                        def _list_lines(paths):
-                            for one_list in paths:
-                                with open(one_list, "r", encoding="utf-8",
-                                          errors="ignore") as lf:
-                                    for raw_line in lf:
-                                        yield raw_line
-
-                        # THE LIST'S OWN SPELLING TRAVELS WITH THE FOLDER (#445).
-                        #
-                        # The match below is case-insensitive, deliberately -
-                        # list.find_duplicate_filenames() gives the reason in its
-                        # own docstring: "a requester typing a name back cannot be
-                        # expected to reproduce its case". What was missing is that
-                        # the path was then rebuilt from what the REQUESTER typed,
-                        # which is the one spelling known not to be the one on
-                        # disk. On Linux that names a file that does not exist and
-                        # the request is refused for a file the bot is publicly
-                        # advertising; on Windows it resolves, and the file is
-                        # offered and received under the requester's casing rather
-                        # than the operator's.
-                        target_folder = None
-                        target_name = ""
-                        fallback_folder = None
-                        fallback_name = ""
-                        clean_req = str(requested_file).lower().strip()
-                        request_prefix = f"!{config.NICKNAME} "
-                        # The most recent heading line, unresolved. ANY known
-                        # prefix, not just the one we write: this is what
-                        # RECOGNISES a heading, and checking only the current
-                        # prefix stops seeing the headings in every list already
-                        # in somebody's hands. Found by the test that counts
-                        # resolutions.
-                        last_heading = None
-
-                        for line in _list_lines(list_paths):
-                            line_clean = line.strip()
-                            if any(line_clean.upper().startswith(p)
-                                   for p in list_mod.LIST_FOLDER_PREFIXES):
-                                last_heading = line_clean
-                                continue
-                            if not line_clean.startswith(request_prefix):
-                                continue
-                            # str.split() puts what came BEFORE the separator in
-                            # [0], and the line starts with the separator - so [0]
-                            # is the empty string on every line here. The filename
-                            # is in [1]; the whole list lookup was dead code
-                            # without it, leaving the os.walk() below to answer
-                            # every request.
-                            parts_nick = line_clean.split(request_prefix, 1)
-                            rest_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
-
-                            current_file_in_list, current_size_in_list = list_mod.strip_info_suffix(rest_in_list)
-
-                            if clean_req != str(current_file_in_list).lower().strip():
-                                continue
-                            if last_heading is None:
-                                continue
-                            # The prefix-stripping itself is
-                            # list_mod.resolve_list_folder() - this used to be a
-                            # second, hand-written copy of it, which could drift
-                            # from the original if the list format ever changed.
-                            # No explicit base: the heading itself says which
-                            # folder it belongs to once there is more than one
-                            # (#164), and pinning it to base_directory would
-                            # resolve every heading into the first.
-                            found_folder = list_mod.resolve_list_folder(
-                                last_heading, name=wanted_list)
-                            if found_folder is None:
-                                continue
-
-                            # Two or more copies can share this exact name and
-                            # differ only in size. Without a size hint, or if it
-                            # matches nothing, the first copy the list names wins -
-                            # same as before this change, and pinned by
-                            # test_no_error_is_reported_for_a_duplicate. With one,
-                            # a copy whose own ::INFO:: size matches it wins
-                            # instead, so a request built from a search result's
-                            # exact line reaches the copy that result actually
-                            # named. A bare request (no hint - AutoQ.mrc and every
-                            # existing caller) still stops at this first match
-                            # exactly as before; only a hinted request that has
-                            # not matched yet pays for scanning on, since that is
-                            # the one case where the answer isn't already known.
-                            if fallback_folder is None:
-                                fallback_folder = found_folder
-                                fallback_name = str(current_file_in_list).strip()
-                                if not requested_size_hint:
-                                    break
-                            if requested_size_hint and current_size_in_list.lower().strip() == requested_size_hint:
-                                target_folder = found_folder
-                                target_name = str(current_file_in_list).strip()
-                                break
-
-                        if target_folder is None:
-                            target_folder = fallback_folder
-                            target_name = fallback_name
-
-                        if target_folder is not None:
-                            # target_name, not requested_file (#445): the list's
-                            # spelling is the one that exists on disk, because the
-                            # list was written from the disk. The row that matched
-                            # is the row that names it.
-                            test_path = os.path.join(target_folder, target_name)
-                            if os.path.exists(platform_compat.long_path(test_path)):
-                                full_path = test_path
+                        # The lookup itself is path_from_published_lists() (#1298).
+                        found_in_lists = path_from_published_lists(
+                            list_paths, requested_file, requested_size_hint, wanted_list)
+                        if found_in_lists is not None:
+                            full_path = found_in_lists
                     except Exception as list_err:
                         print(f"[DCC-LOOKUP ERROR] {list_err}")
                 if not os.path.exists(platform_compat.long_path(full_path)):
