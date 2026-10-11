@@ -4,6 +4,44 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧱 Splitting `dcc.py`, step 1: the published-list lookup is its own function (#1298)
+
+The first `dcc.py` step of "Splitting the largest functions" in `docs/FUTURE.md` (was #1150): *pull out the path
+resolver in `handle_download_request`*. The part that turns a requested name into a path on disk by streaming the
+published lists moved out unchanged into `path_from_published_lists(list_paths, requested_file, requested_size_hint,
+wanted_list)`, which returns the path or None. That part covers:
+
+- the folder heading above a matching row;
+- the case-insensitive match;
+- the `::INFO::` size hint that picks between same-named copies;
+- the list's own spelling (#445).
+
+It stays in `dcc.py`, so `!rehash` and the tests' patches keep working. The memories, the scan turns and slots, the
+walk fallback, the containment and stream checks, every reply to the user and the try/except around the lookup all
+stay in `handle_download_request()`, which goes from 871 to 745 lines. No behaviour changes.
+
+- **Tests:** `tests/test_the_published_list_lookup_on_its_own.py` (10 tests) calls it directly:
+  - the heading places a row;
+  - case is ignored and the list's spelling is returned;
+  - the first copy wins without a hint, and a hint picks the copy of that size or falls back to the first;
+  - headings carry across list files;
+  - a row before any heading is not placed, even with the file at the library's top;
+  - another bot's rows are not ours;
+  - a row the disk lacks, or a name no list has, gives None.
+
+  The request-level tests (`test_path_security.py`, the #445 file, `test_multi_folder_resolution.py`) still cover
+  the wiring.
+- **Mutation checks, 9/9 caught:**
+  - the caller ignores what was found;
+  - the match minds case;
+  - the requester's spelling is used;
+  - the hint is never consulted;
+  - no fallback to the first copy;
+  - a row before any heading is placed;
+  - only the first list is read;
+  - a path the disk lacks is returned;
+  - any bot's rows count.
+
 ### 🏷️ List requests to DCCore bots can carry a short tag: `LIST_REQUEST_TAG` (#1293)
 
 Built from `docs/FUTURE.md`'s "A short DCCore tag on list requests" (was #1051), as specified there. AutoQ's "Get
