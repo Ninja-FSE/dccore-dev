@@ -51,11 +51,16 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #                            config and web_common at import
 #   web_lists              - other bots' lists, split out (#1315); stdlib,
 #                            config, runtime and web_common at import
+#   web_fetch,             - the fetch queue and this bot's own list rebuild,
+#   web_list_update          split out (#1317); stdlib, config, runtime,
+#                            platform_compat, web_common and web_lists
 ALLOWED = {
     "webserver",
     "web_common",
     "web_search",
     "web_lists",
+    "web_fetch",
+    "web_list_update",
     "defaults",
     "runtime",
     "settings_file",
