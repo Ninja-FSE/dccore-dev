@@ -347,9 +347,14 @@ class TheSendPathUsesIt(unittest.TestCase):
         """A stale entry is not harmless: ports are reused, so the next offer
         on the same port to the same nick could read an offset agreed for a
         different file."""
-        finally_block = self.source().rsplit("    finally:", 1)[1]
+        # The finally block is finish_send() since #1336.
+        source = self.source()
+        send = source[source.index("def start_dcc_send("):]
+        finally_block = send.rsplit("\n    finally:", 1)[1]
+        ending = source[source.index("def finish_send("):source.index("def start_dcc_send(")]
 
-        self.assertIn("clear_send_offer(user, assigned_port)", finally_block)
+        self.assertIn("finish_send(SentFile(", finally_block)
+        self.assertIn("clear_send_offer(sent.user, sent.assigned_port)", ending)
 
 
 class TheDispatchIsThrottled(unittest.TestCase):
