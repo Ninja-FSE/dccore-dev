@@ -1872,6 +1872,311 @@ def wake_restored_queues(irc_sock):
         check_queue_and_send(irc_sock, "system_next_trigger_fallback")
 
 
+def _row_is_still_queued(row):
+    """Is `row` still in the queue? Caller holds queue_lock. By the row
+    itself, under any nick: a rename moves it to another key (#1268).
+    Was a closure in check_queue_and_send() until #1300."""
+    return any(queued is row
+               for rows in config.dcc_queue.values() if rows
+               for queued in rows)
+
+
+def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
+    """Pack the folder `next_file` asks for and hand the archive to a send.
+    Returns True once it has handed config.rar_inprogress and the user's
+    processing lock to another thread, as inline_rar_packer() expects; its
+    finally releases them otherwise.
+
+    `owner_nick` is a callable: the nick the claim is filed under NOW, which
+    a rename mid-pack changes (#1268).
+
+    Was _inline_rar_packer_body(), a closure inside check_queue_and_send(),
+    until #1300 - step 2 of splitting dcc.py's largest functions
+    (docs/FUTURE.md). Moved unchanged; inline_rar_packer() keeps the
+    interlocks and their release.
+    """
+    import announce as announce_mod
+    true_source_dir = next_file['path']
+
+    # SECOND LINE OF DEFENCE: queue entries survive restarts via dcc_queue.txt,
+    # so a poisoned row queued BEFORE the traversal guard existed would otherwise
+    # still be packed here. Re-verify the path immediately before calling rar.
+    #
+    # Checked against each configured folder rather than one
+    # global (#164). Unlike the request path above, this has a
+    # real path from the queue and no heading to resolve, so
+    # "which folder does this belong to" IS the question - a
+    # queued row can legitimately come from any of them. Still
+    # is_safe_path() per folder, so each comparison resolves
+    # symlinks and compares per separator exactly as before;
+    # what changed is how many roots are legitimate, not how
+    # any one of them is tested.
+    #
+    # EVERY list's folders (#26). The request path resolved
+    # this row against the folders of the list bound to the
+    # channel it arrived in - see resolve_list_folder_with_root
+    # (wanted_list) below - so a row from any list but the
+    # primary is legitimate here. folders() with no name means
+    # the PRIMARY's, which made this check disagree with the
+    # one that admitted the row: a !rar accepted in a channel
+    # bound to a second list was destroyed here minutes later,
+    # logged as a poisoned queue entry, and the user's queue
+    # row deleted with it.
+    if not path_is_in_our_library(true_source_dir):
+        print(f"[SECURITY] Blocked a poisoned queue entry for {owner_nick()}: {true_source_dir}")
+        with queue_lock:
+            # By the row itself, under whichever nick a rename
+            # filed it (#1268).
+            for q_key, q_rows in list(config.dcc_queue.items()):
+                kept = [e for e in q_rows if e is not next_file]
+                if len(kept) != len(q_rows):
+                    # The save no longer prunes an emptied key (#606).
+                    if kept:
+                        config.dcc_queue[q_key] = kept
+                    else:
+                        del config.dcc_queue[q_key]
+        db.save_dcc_queue()
+        # The interlocks are released ONCE, by the wrapper's
+        # finally (#714, audit L50): this exit used to clear
+        # rar_inprogress, wake the next waiting pack and drop
+        # the lock itself, and then return None - on which the
+        # finally did all three again. The second, unconditional
+        # `rar_inprogress = False` could clear a claim the first
+        # wake had just handed to another user's pack, leaving
+        # two rar processes on one archive path.
+        announce_mod.send_debug(
+            f"Poisoned queue entry discarded for {config.C_BOLD}{owner_nick()}{config.C_RESET}: path outside the music root.",
+            category="HARDBAN")
+        return
+
+    # The DCC-visible name: recomputed fresh from the folder
+    # leaf on disk, with the SAME sanitiser
+    # handle_download_request() used when this row was
+    # queued (see _sanitize_rar_leaf_name()'s own docstring).
+    # One shared function is what makes the apostrophe-
+    # recovery special case this replaced unnecessary - the
+    # two call sites can no longer disagree in the first
+    # place, so there is nothing left to detect and patch
+    # over here.
+    folder_leaf = os.path.basename(true_source_dir.rstrip('/\\'))
+    rar_filename = f"{_sanitize_rar_leaf_name(folder_leaf)}.rar"
+
+    # #162 finding #7: the archive's DISK location is
+    # collision-resistant - built from the path RELATIVE TO
+    # FILE_DIRECTORY, not the leaf alone - so two different
+    # artists' albums sharing a leaf name ("Greatest Hits")
+    # can no longer collide into the same file. Deliberately
+    # NOT the same string as rar_filename above; see
+    # _rar_archive_disk_name()'s own docstring for why
+    # changing what the user is OFFERED would break
+    # AutoQ.mrc's reconciliation.
+    target_rar_path = os.path.normpath(
+        os.path.join(config.TMP_ZIP_DIR, _rar_archive_disk_name(true_source_dir)))
+
+    if not os.path.exists(config.TMP_ZIP_DIR):
+        os.makedirs(config.TMP_ZIP_DIR, exist_ok=True)
+
+    # Strip any hidden line breaks (\n) out of the path
+    if isinstance(true_source_dir, str):
+        true_source_dir = true_source_dir.strip()
+
+    def point_row_at_archive():
+        # The folder it was packed from stays on the row: a
+        # repeat !rar of it is still a repeat while the
+        # archive is being sent (#1077).
+        next_file['source_path'] = next_file.get('source_path') or next_file.get('path')
+        next_file['path'] = target_rar_path
+        next_file['file'] = rar_filename
+        next_file['is_unpacked_rar_folder'] = False
+
+    # THE ARCHIVE MAY ALREADY BE SOMEBODY ELSE'S (#1268). The
+    # disk name comes from the folder, so a second nick's !rar
+    # of an album lands on the path the first nick's finished
+    # archive is waiting at - and this used to delete it as
+    # "stale", or let a failed run remove it outright. A
+    # finished archive another row still names is reused
+    # as it is; nothing is packed. Decided, and the pack
+    # registered, under one hold of queue_lock, so a send's
+    # cleanup cannot remove it in between.
+    long_target = platform_compat.long_path(target_rar_path)
+    job = None
+    with queue_lock:
+        withdrawn = not _row_is_still_queued(next_file)
+        reuse = (not withdrawn and os.path.exists(long_target)
+                 and temp_archive_in_use(target_rar_path))
+        if reuse:
+            point_row_at_archive()
+        elif not withdrawn:
+            # `rar a` ADDS to an existing archive rather than
+            # replacing it - a stale file left behind by an
+            # earlier crashed run would otherwise silently have
+            # the new album packed on TOP of whatever was
+            # already there. Removed first so a fresh pack
+            # always starts from nothing. Nothing needs it:
+            # temp_archive_in_use() said so above.
+            if os.path.exists(long_target):
+                try:
+                    os.remove(long_target)
+                except OSError as unlink_err:
+                    print(f"[LINEAR RAR] Could not remove a stale archive at "
+                          f"{target_rar_path}: {unlink_err}")
+            # Registered here, under the lock that answered,
+            # so temp_archive_in_use() counts this pack from
+            # now on (#1202 for the job itself).
+            job = _begin_pack_job(owner_nick(), folder_leaf, true_source_dir, target_rar_path, row=next_file)
+
+    if withdrawn:
+        # The user took the row out of their queue before the
+        # pack began (#1268): nothing to pack, nothing to send.
+        print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} before it was packed.")
+        _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED)
+        return False
+
+    if reuse:
+        print(f"[LINEAR RAR] {folder_leaf} is already packed and waiting for another "
+              f"request; {owner_nick()} is sent the same archive: {target_rar_path}")
+    else:
+        print(f"[LINEAR RAR] Starting to pack: {true_source_dir} -> {target_rar_path}")
+        announce_mod.send_debug(f"Packing {folder_leaf} for {owner_nick()}", category="PACK")
+
+        # A timeout is essential: with timeout=None a hung rar blocks this
+        # thread forever while config.rar_inprogress stays True, wedging folder
+        # packing for EVERY user until the daemon is restarted.
+        rar_timeout = getattr(config, 'RAR_TIMEOUT', 1800)
+        # See commands.py's note on the same call. rar is not
+        # Python, so nothing can guard what it writes - a
+        # filename in its error output is decoded here or
+        # nowhere, and a pack that failed for a nameable
+        # reason must not become a pack that failed silently.
+        #
+        # Run as a process this module holds a handle to (#1202),
+        # so the operator can see how far it has got and stop
+        # THAT process. The timeout stays: it is the backstop for
+        # a rar nobody is watching.
+        try:
+            # Arguments are passed as a list, never through a shell:
+            work_dir_switch = f"-w{os.path.abspath(config.TMP_ZIP_DIR)}"
+            # Resolve the binary rather than trusting a bare name on PATH:
+            # WinRAR installs rar.exe outside PATH entirely.
+            rar_bin = platform_compat.rar_command(getattr(config, 'RAR_BINARY', None))
+            if not rar_bin:
+                raise FileNotFoundError(
+                    "rar executable not found - set config.RAR_BINARY or put rar on PATH")
+            cmd = [rar_bin, "a", "-ep1", work_dir_switch, os.path.abspath(target_rar_path), os.path.abspath(true_source_dir)]
+            process = _run_rar(job, cmd, rar_timeout)
+        except subprocess.TimeoutExpired:
+            # rar was killed mid-write: whatever it wrote sits at
+            # the target path, and nothing else ever names that
+            # file (#717). Removed here; the wrapper's handling of
+            # the failure is unchanged.
+            _discard_partial_archive(target_rar_path, "timed out")
+            raise
+        finally:
+            _end_pack_job(job)
+
+    if job is not None and job["cancelled"]:
+        _discard_partial_archive(target_rar_path, "was cancelled")
+        if job.get("withdrawn"):
+            # The user's own remove stopped it (#1268), and
+            # that remove already took the row and told them.
+            print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
+                  f"being packed; the pack is stopped.")
+        else:
+            announce_mod.send_debug(
+                f"Pack for {owner_nick()} cancelled: {folder_leaf}", category="PACK")
+            release_queue_entry(owner_nick(), next_file, delivered=False,
+                                reason="cancelled by the operator", cancelled=True,
+                                shown_name=rar_filename)
+        _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED, job=job)
+        return False
+
+    if reuse or (process.returncode == 0 and os.path.exists(target_rar_path)):
+        if not reuse:
+            print(f"[LINEAR RAR] Compression succeeded. Waiting 2.0s for the disk to sync...")
+            time.sleep(2.0)
+
+        final_size = os.path.getsize(target_rar_path)
+        print(f"[LINEAR RAR] The archive is settled on disk: {final_size:,} bytes")
+
+        # CAPACITY RE-CHECKED HERE, UNDER THE LOCK. The check
+        # this branch already passed happened before rar even
+        # started, which for a large album is minutes ago -
+        # long enough for every slot to have filled with plain
+        # file sends, each of which re-checked correctly on its
+        # own way through. This was the one append that did
+        # not, so a finished pack could push active_transfers
+        # past MAX_DCC_SLOTS with nothing to stop it.
+        #
+        # The archive is already built and the queue row still
+        # points at it, so leaving it queued costs nothing but
+        # a wait - the same outcome, and the same message, the
+        # two sibling dispatch paths use when they find no
+        # slot.
+        #
+        # To the nick the claim is filed under NOW (#1268): a
+        # rename while rar ran used to have the archive offered
+        # to a nick that had gone. The row the claim carries
+        # names the archive, so temp_archive_in_use() sees it.
+        #
+        # AND THE ROW MAY HAVE GONE WHILE RAR RAN (#1268): the
+        # user's own remove, between the pack ending and this
+        # point, when nothing marks the row as in flight.
+        # Looked at in the same hold that claims the slot, so
+        # a removed folder is never sent - and its archive
+        # goes unless another row is waiting for it.
+        room = False
+        with queue_lock:
+            withdrawn = not _row_is_still_queued(next_file)
+            if withdrawn:
+                if not temp_archive_in_use(target_rar_path):
+                    _discard_partial_archive(target_rar_path, "was packed for a removed request")
+            else:
+                if not reuse:
+                    point_row_at_archive()
+                send_to = owner_nick()
+                room = len(config.active_transfers) < config.MAX_DCC_SLOTS
+                if room:
+                    config.active_transfers.append({"user": send_to, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename,
+                                                     "queue_row": next_file})
+        if withdrawn:
+            print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
+                  f"being packed; it is not sent.")
+            _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED, job=job)
+            return False
+        if not room:
+            print(f"[DCC-BLOCK] {send_to}: all {config.MAX_DCC_SLOTS} slot(s) busy, "
+                  f"the packed archive stays queued for the next trigger.")
+            # Released by the wrapper's finally, once (#714).
+            return
+        if oserve: oserve.active_downloads = len(config.active_transfers)
+
+        announce_mod.send_dcc_sending_notice(send_to, rar_filename, channel=target_chan)
+
+        threading.Thread(
+            target=start_dcc_send,
+            args=(sock, send_to, target_rar_path, rar_filename, target_chan, next_file, True),
+            daemon=True
+        ).start()
+        # Ownership of both interlocks now belongs to that send thread (the
+        # trailing True is owns_packer), which releases them in its own
+        # finally. Pack and send stay serialised.
+        return True
+    else:
+        error_msg = process.stderr.strip() if process.stderr else "Unknown RAR engine issue"
+        print(f"[LINJAR RAR ERROR] {error_msg}")
+        _discard_partial_archive(target_rar_path, "rar exited " + str(process.returncode))
+        announce_mod.send_debug(f"Pack FAILED in queue slot for {owner_nick()}: {error_msg}", category="PART")
+        # Charge the failure to the retry budget instead of recursing. The old
+        # code cleared the interlocks and called check_queue_and_send inline,
+        # which re-selected the SAME row and started another packer thread from
+        # inside this one - unbudgeted, and the wrapper finally would then strip
+        # the interlocks that new thread had just claimed.
+        release_queue_entry(owner_nick(), next_file, delivered=False,
+                            reason="rar exited " + str(process.returncode))
+        _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_PACK_FAILED, job=job)
+        return False
+
+
 def check_queue_and_send(irc_sock, completed_user):
     """Check the queues and run RAR packing one at a time, without flooding the server."""
     import announce as announce_mod
@@ -2093,7 +2398,9 @@ def check_queue_and_send(irc_sock, completed_user):
                     handed_off = False
                     runtime.packer_thread = threading.current_thread()
                     try:
-                        handed_off = _inline_rar_packer_body(sock)
+                        # The packing itself is pack_folder_for_request() (#1300).
+                        handed_off = pack_folder_for_request(
+                            sock, next_file, owner_nick, target_chan, oserve)
                     except Exception as packer_err:
                         print("[LINJAR RAR ERROR] Packing failed for " + str(owner_nick()) + ": " + str(packer_err))
                         try:
@@ -2132,294 +2439,6 @@ def check_queue_and_send(irc_sock, completed_user):
                 def owner_nick():
                     # The nick the claim is filed under now (#1268).
                     return str(pack_owner["nick"])
-
-                def _inline_rar_packer_body(sock):
-                    true_source_dir = next_file['path']
-
-                    # SECOND LINE OF DEFENCE: queue entries survive restarts via dcc_queue.txt,
-                    # so a poisoned row queued BEFORE the traversal guard existed would otherwise
-                    # still be packed here. Re-verify the path immediately before calling rar.
-                    #
-                    # Checked against each configured folder rather than one
-                    # global (#164). Unlike the request path above, this has a
-                    # real path from the queue and no heading to resolve, so
-                    # "which folder does this belong to" IS the question - a
-                    # queued row can legitimately come from any of them. Still
-                    # is_safe_path() per folder, so each comparison resolves
-                    # symlinks and compares per separator exactly as before;
-                    # what changed is how many roots are legitimate, not how
-                    # any one of them is tested.
-                    #
-                    # EVERY list's folders (#26). The request path resolved
-                    # this row against the folders of the list bound to the
-                    # channel it arrived in - see resolve_list_folder_with_root
-                    # (wanted_list) below - so a row from any list but the
-                    # primary is legitimate here. folders() with no name means
-                    # the PRIMARY's, which made this check disagree with the
-                    # one that admitted the row: a !rar accepted in a channel
-                    # bound to a second list was destroyed here minutes later,
-                    # logged as a poisoned queue entry, and the user's queue
-                    # row deleted with it.
-                    if not path_is_in_our_library(true_source_dir):
-                        print(f"[SECURITY] Blocked a poisoned queue entry for {owner_nick()}: {true_source_dir}")
-                        with queue_lock:
-                            # By the row itself, under whichever nick a rename
-                            # filed it (#1268).
-                            for q_key, q_rows in list(config.dcc_queue.items()):
-                                kept = [e for e in q_rows if e is not next_file]
-                                if len(kept) != len(q_rows):
-                                    # The save no longer prunes an emptied key (#606).
-                                    if kept:
-                                        config.dcc_queue[q_key] = kept
-                                    else:
-                                        del config.dcc_queue[q_key]
-                        db.save_dcc_queue()
-                        # The interlocks are released ONCE, by the wrapper's
-                        # finally (#714, audit L50): this exit used to clear
-                        # rar_inprogress, wake the next waiting pack and drop
-                        # the lock itself, and then return None - on which the
-                        # finally did all three again. The second, unconditional
-                        # `rar_inprogress = False` could clear a claim the first
-                        # wake had just handed to another user's pack, leaving
-                        # two rar processes on one archive path.
-                        announce_mod.send_debug(
-                            f"Poisoned queue entry discarded for {config.C_BOLD}{owner_nick()}{config.C_RESET}: path outside the music root.",
-                            category="HARDBAN")
-                        return
-
-                    # The DCC-visible name: recomputed fresh from the folder
-                    # leaf on disk, with the SAME sanitiser
-                    # handle_download_request() used when this row was
-                    # queued (see _sanitize_rar_leaf_name()'s own docstring).
-                    # One shared function is what makes the apostrophe-
-                    # recovery special case this replaced unnecessary - the
-                    # two call sites can no longer disagree in the first
-                    # place, so there is nothing left to detect and patch
-                    # over here.
-                    folder_leaf = os.path.basename(true_source_dir.rstrip('/\\'))
-                    rar_filename = f"{_sanitize_rar_leaf_name(folder_leaf)}.rar"
-
-                    # #162 finding #7: the archive's DISK location is
-                    # collision-resistant - built from the path RELATIVE TO
-                    # FILE_DIRECTORY, not the leaf alone - so two different
-                    # artists' albums sharing a leaf name ("Greatest Hits")
-                    # can no longer collide into the same file. Deliberately
-                    # NOT the same string as rar_filename above; see
-                    # _rar_archive_disk_name()'s own docstring for why
-                    # changing what the user is OFFERED would break
-                    # AutoQ.mrc's reconciliation.
-                    target_rar_path = os.path.normpath(
-                        os.path.join(config.TMP_ZIP_DIR, _rar_archive_disk_name(true_source_dir)))
-
-                    if not os.path.exists(config.TMP_ZIP_DIR):
-                        os.makedirs(config.TMP_ZIP_DIR, exist_ok=True)
-
-                    # Strip any hidden line breaks (\n) out of the path
-                    if isinstance(true_source_dir, str):
-                        true_source_dir = true_source_dir.strip()
-
-                    def point_row_at_archive():
-                        # The folder it was packed from stays on the row: a
-                        # repeat !rar of it is still a repeat while the
-                        # archive is being sent (#1077).
-                        next_file['source_path'] = next_file.get('source_path') or next_file.get('path')
-                        next_file['path'] = target_rar_path
-                        next_file['file'] = rar_filename
-                        next_file['is_unpacked_rar_folder'] = False
-
-                    # THE ARCHIVE MAY ALREADY BE SOMEBODY ELSE'S (#1268). The
-                    # disk name comes from the folder, so a second nick's !rar
-                    # of an album lands on the path the first nick's finished
-                    # archive is waiting at - and this used to delete it as
-                    # "stale", or let a failed run remove it outright. A
-                    # finished archive another row still names is reused
-                    # as it is; nothing is packed. Decided, and the pack
-                    # registered, under one hold of queue_lock, so a send's
-                    # cleanup cannot remove it in between.
-                    long_target = platform_compat.long_path(target_rar_path)
-                    job = None
-                    with queue_lock:
-                        withdrawn = not row_is_still_queued()
-                        reuse = (not withdrawn and os.path.exists(long_target)
-                                 and temp_archive_in_use(target_rar_path))
-                        if reuse:
-                            point_row_at_archive()
-                        elif not withdrawn:
-                            # `rar a` ADDS to an existing archive rather than
-                            # replacing it - a stale file left behind by an
-                            # earlier crashed run would otherwise silently have
-                            # the new album packed on TOP of whatever was
-                            # already there. Removed first so a fresh pack
-                            # always starts from nothing. Nothing needs it:
-                            # temp_archive_in_use() said so above.
-                            if os.path.exists(long_target):
-                                try:
-                                    os.remove(long_target)
-                                except OSError as unlink_err:
-                                    print(f"[LINEAR RAR] Could not remove a stale archive at "
-                                          f"{target_rar_path}: {unlink_err}")
-                            # Registered here, under the lock that answered,
-                            # so temp_archive_in_use() counts this pack from
-                            # now on (#1202 for the job itself).
-                            job = _begin_pack_job(owner_nick(), folder_leaf, true_source_dir, target_rar_path, row=next_file)
-
-                    if withdrawn:
-                        # The user took the row out of their queue before the
-                        # pack began (#1268): nothing to pack, nothing to send.
-                        print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} before it was packed.")
-                        _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED)
-                        return False
-
-                    if reuse:
-                        print(f"[LINEAR RAR] {folder_leaf} is already packed and waiting for another "
-                              f"request; {owner_nick()} is sent the same archive: {target_rar_path}")
-                    else:
-                        print(f"[LINEAR RAR] Starting to pack: {true_source_dir} -> {target_rar_path}")
-                        announce_mod.send_debug(f"Packing {folder_leaf} for {owner_nick()}", category="PACK")
-
-                        # A timeout is essential: with timeout=None a hung rar blocks this
-                        # thread forever while config.rar_inprogress stays True, wedging folder
-                        # packing for EVERY user until the daemon is restarted.
-                        rar_timeout = getattr(config, 'RAR_TIMEOUT', 1800)
-                        # See commands.py's note on the same call. rar is not
-                        # Python, so nothing can guard what it writes - a
-                        # filename in its error output is decoded here or
-                        # nowhere, and a pack that failed for a nameable
-                        # reason must not become a pack that failed silently.
-                        #
-                        # Run as a process this module holds a handle to (#1202),
-                        # so the operator can see how far it has got and stop
-                        # THAT process. The timeout stays: it is the backstop for
-                        # a rar nobody is watching.
-                        try:
-                            # Arguments are passed as a list, never through a shell:
-                            work_dir_switch = f"-w{os.path.abspath(config.TMP_ZIP_DIR)}"
-                            # Resolve the binary rather than trusting a bare name on PATH:
-                            # WinRAR installs rar.exe outside PATH entirely.
-                            rar_bin = platform_compat.rar_command(getattr(config, 'RAR_BINARY', None))
-                            if not rar_bin:
-                                raise FileNotFoundError(
-                                    "rar executable not found - set config.RAR_BINARY or put rar on PATH")
-                            cmd = [rar_bin, "a", "-ep1", work_dir_switch, os.path.abspath(target_rar_path), os.path.abspath(true_source_dir)]
-                            process = _run_rar(job, cmd, rar_timeout)
-                        except subprocess.TimeoutExpired:
-                            # rar was killed mid-write: whatever it wrote sits at
-                            # the target path, and nothing else ever names that
-                            # file (#717). Removed here; the wrapper's handling of
-                            # the failure is unchanged.
-                            _discard_partial_archive(target_rar_path, "timed out")
-                            raise
-                        finally:
-                            _end_pack_job(job)
-
-                    if job is not None and job["cancelled"]:
-                        _discard_partial_archive(target_rar_path, "was cancelled")
-                        if job.get("withdrawn"):
-                            # The user's own remove stopped it (#1268), and
-                            # that remove already took the row and told them.
-                            print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
-                                  f"being packed; the pack is stopped.")
-                        else:
-                            announce_mod.send_debug(
-                                f"Pack for {owner_nick()} cancelled: {folder_leaf}", category="PACK")
-                            release_queue_entry(owner_nick(), next_file, delivered=False,
-                                                reason="cancelled by the operator", cancelled=True,
-                                                shown_name=rar_filename)
-                        _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED, job=job)
-                        return False
-
-                    if reuse or (process.returncode == 0 and os.path.exists(target_rar_path)):
-                        if not reuse:
-                            print(f"[LINEAR RAR] Compression succeeded. Waiting 2.0s for the disk to sync...")
-                            time.sleep(2.0)
-
-                        final_size = os.path.getsize(target_rar_path)
-                        print(f"[LINEAR RAR] The archive is settled on disk: {final_size:,} bytes")
-
-                        # CAPACITY RE-CHECKED HERE, UNDER THE LOCK. The check
-                        # this branch already passed happened before rar even
-                        # started, which for a large album is minutes ago -
-                        # long enough for every slot to have filled with plain
-                        # file sends, each of which re-checked correctly on its
-                        # own way through. This was the one append that did
-                        # not, so a finished pack could push active_transfers
-                        # past MAX_DCC_SLOTS with nothing to stop it.
-                        #
-                        # The archive is already built and the queue row still
-                        # points at it, so leaving it queued costs nothing but
-                        # a wait - the same outcome, and the same message, the
-                        # two sibling dispatch paths use when they find no
-                        # slot.
-                        #
-                        # To the nick the claim is filed under NOW (#1268): a
-                        # rename while rar ran used to have the archive offered
-                        # to a nick that had gone. The row the claim carries
-                        # names the archive, so temp_archive_in_use() sees it.
-                        #
-                        # AND THE ROW MAY HAVE GONE WHILE RAR RAN (#1268): the
-                        # user's own remove, between the pack ending and this
-                        # point, when nothing marks the row as in flight.
-                        # Looked at in the same hold that claims the slot, so
-                        # a removed folder is never sent - and its archive
-                        # goes unless another row is waiting for it.
-                        room = False
-                        with queue_lock:
-                            withdrawn = not row_is_still_queued()
-                            if withdrawn:
-                                if not temp_archive_in_use(target_rar_path):
-                                    _discard_partial_archive(target_rar_path, "was packed for a removed request")
-                            else:
-                                if not reuse:
-                                    point_row_at_archive()
-                                send_to = owner_nick()
-                                room = len(config.active_transfers) < config.MAX_DCC_SLOTS
-                                if room:
-                                    config.active_transfers.append({"user": send_to, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename,
-                                                                     "queue_row": next_file})
-                        if withdrawn:
-                            print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
-                                  f"being packed; it is not sent.")
-                            _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED, job=job)
-                            return False
-                        if not room:
-                            print(f"[DCC-BLOCK] {send_to}: all {config.MAX_DCC_SLOTS} slot(s) busy, "
-                                  f"the packed archive stays queued for the next trigger.")
-                            # Released by the wrapper's finally, once (#714).
-                            return
-                        if oserve: oserve.active_downloads = len(config.active_transfers)
-
-                        announce_mod.send_dcc_sending_notice(send_to, rar_filename, channel=target_chan)
-
-                        threading.Thread(
-                            target=start_dcc_send,
-                            args=(sock, send_to, target_rar_path, rar_filename, target_chan, next_file, True),
-                            daemon=True
-                        ).start()
-                        # Ownership of both interlocks now belongs to that send thread (the
-                        # trailing True is owns_packer), which releases them in its own
-                        # finally. Pack and send stay serialised.
-                        return True
-                    else:
-                        error_msg = process.stderr.strip() if process.stderr else "Unknown RAR engine issue"
-                        print(f"[LINJAR RAR ERROR] {error_msg}")
-                        _discard_partial_archive(target_rar_path, "rar exited " + str(process.returncode))
-                        announce_mod.send_debug(f"Pack FAILED in queue slot for {owner_nick()}: {error_msg}", category="PART")
-                        # Charge the failure to the retry budget instead of recursing. The old
-                        # code cleared the interlocks and called check_queue_and_send inline,
-                        # which re-selected the SAME row and started another packer thread from
-                        # inside this one - unbudgeted, and the wrapper finally would then strip
-                        # the interlocks that new thread had just claimed.
-                        release_queue_entry(owner_nick(), next_file, delivered=False,
-                                            reason="rar exited " + str(process.returncode))
-                        _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_PACK_FAILED, job=job)
-                        return False
-
-                def row_is_still_queued():
-                    # Caller holds queue_lock. By the row itself, under any
-                    # nick: a rename moves it to another key (#1268).
-                    return any(row is next_file
-                               for rows in config.dcc_queue.values() if rows
-                               for row in rows)
 
                 # At exactly the right level, so it wakes the function above immediately
                 threading.Thread(target=inline_rar_packer, args=(irc_sock,), daemon=True).start()
