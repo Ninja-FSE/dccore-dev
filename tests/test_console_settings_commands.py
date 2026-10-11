@@ -788,7 +788,8 @@ class OnlyTheConsoleReachesThem(DCCoreTestCase):
                 reaching[name] = reaches(source("src", name), name)
         self.assertEqual({name: found for name, found in reaching.items() if found},
                          {"adminchat.py": {"handle_command", "console_settings"},
-                          "webserver.py": {"handle_command"}})
+                          # The dashboard's console, web_console.py since #1322.
+                          "web_console.py": {"handle_command"}})
 
     def test_the_channel_gate_dispatches_none_of_them(self):
         gate = source("src", "irc.py").split("ADMIN_CHANNEL_COMMANDS", 1)[1]
