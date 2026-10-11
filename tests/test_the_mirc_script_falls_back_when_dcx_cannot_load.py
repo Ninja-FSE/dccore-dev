@@ -478,7 +478,16 @@ class TheMockupLayout(unittest.TestCase):
                       "$dccore.sw.srv.mode($calc(%base + 2))", rowclick)
         self.assertIn("hadd dccore.sws srv.dirty 1", rowclick)
         # the spare rows are hidden, and hidden again each time the page is shown
-        self.assertIn("did $iif($calc(%off + %r) <= %n,-v,-h) dccore.set", alias("dccore.sw.srv.rowsvis"))
+        rowsvis = statements(alias("dccore.sw.srv.rowsvis"))
+        self.assertIn("did $iif($calc(%off + %r) <= %n,-v,-h) dccore.set", "\n".join(rowsvis))
+        # and no row is shown while another page is up: the lists arrive from
+        # the bot after they were asked for, and were drawn over whatever
+        # page was shown by then
+        self.assertEqual(rowsvis[0], "if (!$istok($dccore.sw.m(p. $+ $dccore.sw.s(page) $+ .w),srvchans,32)) { return }")
+        shows = [line for line in handwritten().split("\n") if "did -v dccore.set" in line or "-v,-h" in line]
+        for line in shows:
+            self.assertTrue("dccore.sw.showpage" in line or "$calc(1019 + %i)" in line
+                            or "-v,-h" in line, line)
         self.assertIn("if ($istok($dccore.sw.m(p. $+ $1 $+ .w),srvchans,32)) { dccore.sw.srv.rowsvis }",
                       alias("dccore.sw.page"))
         self.assertIn("srvchans", self.data["p.%d.w" % page].split())

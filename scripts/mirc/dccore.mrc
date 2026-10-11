@@ -3704,8 +3704,12 @@ alias dccore.sw.scrolled {
   dccore.sw.srv.drawrows
 }
 ; The rows with a binding shown, the rest hidden - again each time the
-; page is shown, since showing a page shows every control of it
+; page is shown, since showing a page shows every control of it. Only
+; while that page IS the one shown: the lists arrive from the bot a moment
+; after they were asked for, by which time another page may be up, and a
+; row shown then sits on top of it.
 alias dccore.sw.srv.rowsvis {
+  if (!$istok($dccore.sw.m(p. $+ $dccore.sw.s(page) $+ .w),srvchans,32)) { return }
   var %r = 1, %n = $numtok($dccore.sw.s(srv.corder),32), %off = $dccore.sw.s(bind.off)
   if (%off == $null) { %off = 0 }
   while (%r <= 15) {
