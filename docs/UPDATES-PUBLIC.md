@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (security): a download request could reach more than the file it names.** On Windows, a specially written name could read hidden data stored alongside a shared file, including where the file was downloaded from. With several lists, a channel could be sent another channel's list. Such requests are now refused. A resumed download that sent nothing is no longer counted or announced as sent.
 - **Fixed (mIRC): the settings window's Unlock accepts a password with a space at either end or two spaces in a row.** Such a password could log in but not unlock the window. Update `dccore.mrc` to 1.19.3 and reload it with `/reload -rs dccore.mrc`.
 - **Fixed: with rejoining turned off (`REJOIN_ATTEMPTS = 0`), the kick notice no longer says the bot will rejoin on the next advert.**
 - **Fixed: the List Browser's filter finds a name whether it is written with composed or decomposed accents**, as libraries copied from a Mac often are - for Vietnamese, Cyrillic, Japanese and Korean names as well. The search index is rebuilt once after the update, from the lists you hold.
