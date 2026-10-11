@@ -650,7 +650,7 @@ class TheWindowsBehaviour(unittest.TestCase):
 
     def test_the_local_switches_are_this_mircs(self):
         data = generated_data()
-        self.assertEqual(data["locals"].split(), ["start.main", "start.chat", "start.downloads", "auto"])
+        self.assertEqual(data["locals"].split(), ["start.main", "start.chat", "start.downloads", "auto", "nodcx"])
         save = alias("dccore.sw.savelocal")
         self.assertIn("if (%state != $dccore.opt(%o)) { hadd dccore %o %state | inc %n }", save)
         self.assertIn("if (%n) { dccore.save }", save)
@@ -756,8 +756,8 @@ class TheExamplesAreInvented(unittest.TestCase):
 
 class TheVersion(unittest.TestCase):
 
-    def test_the_script_is_1_19_4(self):
-        self.assertIn("\nalias dccore.ver { return 1.19.4 }\n", code())
+    def test_the_script_is_1_20_0(self):
+        self.assertIn("\nalias dccore.ver { return 1.20.0 }\n", code())
 
 
 class TheReviewOfTheFirstVersion(unittest.TestCase):

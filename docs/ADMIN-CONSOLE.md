@@ -842,7 +842,8 @@ it still works as a plain console, without the panel.
 
 ### First time
 
-Save the file anywhere (your mIRC folder is fine) and, in mIRC:
+Save the file anywhere (your mIRC folder is fine), with the `dcx` folder from
+`scripts/mirc/` beside it (see "DCX" below), and, in mIRC:
 
 ```
 /load -rs dccore.mrc
@@ -942,6 +943,27 @@ page has them, over the console commands above. Six tabs - **General**,
 each with its pages as a column of buttons on the left, and **Apply**, **OK** and **Cancel**
 at the bottom.
 
+#### DCX (#1288)
+
+The settings window is being moved onto **DCX** (Dialog Control eXtensions,
+https://github.com/twig/dcxdll, BSD-3-Clause), which gives it a real tree for the
+pages and tables with columns for the bans, channels and lists. `dcx.dll` ships
+unmodified in `scripts/mirc/dcx/`, beside its licence and a README naming the
+release and its SHA-256; the script checks that hash before it loads the file.
+Whenever DCX cannot be used, the window drawn with mIRC's own controls opens,
+exactly as before:
+
+- the option *Use the built-in settings window, not DCX* is on (the window's
+  **This mIRC window** page);
+- the mIRC version is below 7.45 (DCX 3.1 needs 7.45 or later), or it is the 64-bit build - the dll
+  is 32-bit;
+- `dcx\dcx.dll` is not beside the script, is not that release, or will not load.
+
+`/dccore dcx` says which applies. `/dccore dcx check` opens a small window that
+tests DCX in this mIRC and writes what it found in `@DCCore`. In this first
+step the settings window itself is still the built-in one; the DCX window comes
+next, built on what that check shows.
+
 - **The labels, units, choices and help are the dashboard's.** Point at a
   setting and its help shows under the page. Sizes show in KB or MB and go back
   in bytes, as on the dashboard.
@@ -1006,6 +1028,7 @@ whether the block is up to date.
 /dccore trust                accept the bot's current host as the one to send the token to
 /dccore options              what to show, colours, panel, title bar, beep, windows at start
 /dccore settings             the bot's own settings, as its dashboard's Settings page has them
+/dccore dcx [check]          whether the settings window can draw with DCX, and why not; check tests it in this mIRC
 /dccore window               open or focus @DCCore
 /dccore chat [text]          open DCCore Chat, or say something in it (public)
 /dccore downloads            open @DCCore-Downloads: what the bot is fetching from other bots (needs 1.10)
