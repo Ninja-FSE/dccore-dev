@@ -2177,6 +2177,177 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         return False
 
 
+def claim_next_in_line():
+    """Section B of check_queue_and_send(): under queue_lock, give a free
+    slot to the next in line and claim them. Returns (promoted,
+    promoted_key, pack_to_wake, absent_users):
+
+      promoted      (nick, path, file, channel, row) claimed, or None
+      promoted_key  its queue key, or None
+      pack_to_wake  the nick whose folder pack has waited longest and may
+                    start now (#1034), or None
+      absent_users  [(nick, channel)] not present anywhere, to freeze
+
+    Nothing here is sent or announced: the notice stat()s the library and
+    must not run under the lock (#605), so the caller does that, as it
+    always did. With every slot taken by the time the lock is held, nothing
+    is claimed - check_queue_and_send() used to return there, and with
+    nothing claimed what follows it does nothing.
+
+    Was section B's sweep inside check_queue_and_send() until #1304, step 3
+    of splitting dcc.py's largest functions (docs/FUTURE.md). Moved
+    unchanged.
+    """
+    promoted = None
+    promoted_key = None
+    pack_to_wake = None
+    absent_users = []
+    with queue_lock:
+        # FIXED: re-check the slot count INSIDE the lock. The test above is already
+        # stale by the time we acquire, so two concurrent callers could both pass it
+        # and overshoot MAX_DCC_SLOTS.
+        if len(config.active_transfers) >= config.MAX_DCC_SLOTS:
+            return promoted, promoted_key, pack_to_wake, absent_users
+
+
+        forget_stamps_of_empty_queues()
+        # A list waiting at a queue's head is offered the slot first (#1205),
+        # while no other list that went first is being sent; then the
+        # longest wait, as before.
+        lists_first = a_list_may_go_first()
+        for waiting_user, user_files in sorted(config.dcc_queue.items(),
+                                               key=lambda entry: list_first_rank(entry[0], entry[1], lists_first)):
+            # Use the dcc_queue dict key for every lock/queue operation. The old code
+            # tested the guards with one key and then rebound w_key to the display
+            # name further down, so the guard and the claim could disagree.
+            queue_key = str(waiting_user).lower()
+
+            if hasattr(config, 'user_processing_lock') and queue_key in config.user_processing_lock:
+                continue
+
+            if not user_files or len(user_files) == 0 or queue_key in config.frozen_queues:
+                continue
+
+            # FIXED (issue #4): user_files is the LIST of this user's queued files, not a
+            # single file. Without [0] the isinstance test below was always true (a list is
+            # never a dict), so every waiting user was skipped and section B was dead code.
+            g_next = user_files[0]
+            if not isinstance(g_next, dict):
+                continue
+
+            # FIXED: section B had no admission control at all. It was dead code until the
+            # [0] fix above woke it up, and nothing had ever audited what it does when it
+            # actually runs. It never claimed the entry, so two overlapping triggers - the
+            # 3s fallback fires after EVERY transfer, plus the 353 and JOIN thaws - both
+            # promoted the same queue head. The user received two DCC offers for one file,
+            # two slots were burned on it, and then both finally blocks popped position 0:
+            # the first removed the file that was sent, the second removed the NEXT file,
+            # which had never been sent. Silent loss, persisted straight to dcc_queue.txt.
+            already_sending = any(
+                str(tx.get('user', '')).lower() == queue_key
+                for tx in config.active_transfers
+            )
+            if already_sending:
+                continue
+
+            real_username = g_next.get('user_raw', waiting_user)
+
+            # TWO different questions, and one value used to answer both.
+            #
+            # "which channels prove this user is present" wants a LIST -
+            # the entry may name one, and an entry that names none has to
+            # be checked against every configured channel. "where do we
+            # announce the finished transfer" wants exactly ONE, because
+            # it ends up in `f"PRIVMSG {channel} :"`.
+            #
+            # g_chan answered both, so an entry with no 'channel' key
+            # handed a list to start_dcc_send() below and the wire line was
+            # `PRIVMSG ['#one', '#two'] :Sent ...` - a malformed target,
+            # answered with a numeric nothing here reads, so the
+            # announcement was lost while the transfer it announced had
+            # already succeeded.
+            #
+            # #272 fixed the identical shape at check_queue_and_send()'s
+            # other site and recorded that THIS one deliberately kept a
+            # list, on the grounds that it was only a membership test. It
+            # is not: g_chan is passed to start_dcc_send() at the thread
+            # spawn below. Found by audit, and the test written then to
+            # protect the list form was protecting a defect.
+            g_chan = announce_channel_for(g_next)
+            g_name = g_next.get('file', '')
+            g_path = g_next.get('path', '')
+
+            # PRESENCE IS ASKED OF EVERY CHANNEL WE ARE IN, NOT OF THE
+            # ROW (#530). This used to build a list from g_next['channel']
+            # and look for the user only there. A request made by PRIVATE
+            # MESSAGE records the wire target as its channel - which is
+            # the bot's own nick, and no such key ever exists in
+            # channel_users - so a PM-originated head row was invisible
+            # to this sweep however many channels the user was sitting
+            # in. The specific-user branch above has always asked every
+            # channel; this is the same question and now the same answer.
+            # The row's channel is where to ANNOUNCE (g_chan, above), not
+            # where to LOOK.
+            user_is_globally_active = user_is_present_in_ram(queue_key)
+
+            if not user_is_globally_active:
+                # Not here. Until #530 this was a silent `continue`, and
+                # a queue only the sweep ever looked at could sit
+                # forever. Freeze them exactly as the specific-user
+                # branch does - after the lock is released, because the
+                # freeze announces to the debug channel.
+                absent_users.append((real_username, g_chan))
+                continue
+
+            if user_is_globally_active is True:
+                if g_next.get('is_unpacked_rar_folder') is True:
+                    # A PACK WHOSE TURN HAS COME GETS THE SLOT (#1034). Only the
+                    # specific-user path (section A) can start a pack, and every
+                    # caller hands it the nick that just finished - so a pack
+                    # turned away at [DCC-BLOCK], all slots busy, was never
+                    # tried again: queued until its owner's next transfer
+                    # ended, which for a nick with only the pack is never.
+                    # In wait order with a slot free, so its owner's own dispatch
+                    # is started (after the lock) and a slot is kept for it: a
+                    # nick further on is promoted only if a second one is free,
+                    # or with one slot the plain file would win the race every
+                    # time and the pack wait for ever again. While another pack
+                    # is being made it could not start; the packer's release
+                    # wakes it ([RAR-HOLD], redispatch_waiting_pack()), and the
+                    # sweep looks further, as it always did.
+                    if not getattr(config, 'rar_inprogress', False):
+                        if pack_to_wake is None:
+                            pack_to_wake = real_username
+                        continue
+                    print(f"[DCC QUEUE] Folder pack already pending for {real_username}. Skipping to the next waiting user.")
+                    continue
+
+                # The slot kept for a pack woken above (#1034).
+                if pack_to_wake is not None and len(config.active_transfers) + 1 >= config.MAX_DCC_SLOTS:
+                    break
+
+                # CLAIM the user before releasing the lock, so a concurrent caller sees
+                # them as busy. start_dcc_send's finally already discards this key on
+                # every exit path, including the early aborts.
+                if not hasattr(config, 'user_processing_lock'):
+                    config.user_processing_lock = set()
+                config.user_processing_lock.add(queue_key)
+
+                claim = {"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name,
+                         "queue_row": g_next}
+                # Counted by the cap only when the list took the slot from
+                # a nick that had waited longer (#1205).
+                if (lists_first and is_a_list_row(g_next)
+                        and a_list_passes_a_longer_wait(queue_key, not getattr(config, 'rar_inprogress', False))):
+                    claim["list_went_first"] = True
+                config.active_transfers.append(claim)
+                promoted = (real_username, g_path, g_name, g_chan, g_next)
+                promoted_key = queue_key
+                break
+
+    return promoted, promoted_key, pack_to_wake, absent_users
+
+
 def check_queue_and_send(irc_sock, completed_user):
     """Check the queues and run RAR packing one at a time, without flooding the server."""
     import announce as announce_mod
@@ -2553,147 +2724,9 @@ def check_queue_and_send(irc_sock, completed_user):
     promoted = None
     pack_to_wake = None
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
-        with queue_lock:
-            # FIXED: re-check the slot count INSIDE the lock. The test above is already
-            # stale by the time we acquire, so two concurrent callers could both pass it
-            # and overshoot MAX_DCC_SLOTS.
-            if len(config.active_transfers) >= config.MAX_DCC_SLOTS:
-                return
-
-            forget_stamps_of_empty_queues()
-            # A list waiting at a queue's head is offered the slot first (#1205),
-            # while no other list that went first is being sent; then the
-            # longest wait, as before.
-            lists_first = a_list_may_go_first()
-            for waiting_user, user_files in sorted(config.dcc_queue.items(),
-                                                   key=lambda entry: list_first_rank(entry[0], entry[1], lists_first)):
-                # Use the dcc_queue dict key for every lock/queue operation. The old code
-                # tested the guards with one key and then rebound w_key to the display
-                # name further down, so the guard and the claim could disagree.
-                queue_key = str(waiting_user).lower()
-
-                if hasattr(config, 'user_processing_lock') and queue_key in config.user_processing_lock:
-                    continue
-
-                if not user_files or len(user_files) == 0 or queue_key in config.frozen_queues:
-                    continue
-
-                # FIXED (issue #4): user_files is the LIST of this user's queued files, not a
-                # single file. Without [0] the isinstance test below was always true (a list is
-                # never a dict), so every waiting user was skipped and section B was dead code.
-                g_next = user_files[0]
-                if not isinstance(g_next, dict):
-                    continue
-
-                # FIXED: section B had no admission control at all. It was dead code until the
-                # [0] fix above woke it up, and nothing had ever audited what it does when it
-                # actually runs. It never claimed the entry, so two overlapping triggers - the
-                # 3s fallback fires after EVERY transfer, plus the 353 and JOIN thaws - both
-                # promoted the same queue head. The user received two DCC offers for one file,
-                # two slots were burned on it, and then both finally blocks popped position 0:
-                # the first removed the file that was sent, the second removed the NEXT file,
-                # which had never been sent. Silent loss, persisted straight to dcc_queue.txt.
-                already_sending = any(
-                    str(tx.get('user', '')).lower() == queue_key
-                    for tx in config.active_transfers
-                )
-                if already_sending:
-                    continue
-
-                real_username = g_next.get('user_raw', waiting_user)
-
-                # TWO different questions, and one value used to answer both.
-                #
-                # "which channels prove this user is present" wants a LIST -
-                # the entry may name one, and an entry that names none has to
-                # be checked against every configured channel. "where do we
-                # announce the finished transfer" wants exactly ONE, because
-                # it ends up in `f"PRIVMSG {channel} :"`.
-                #
-                # g_chan answered both, so an entry with no 'channel' key
-                # handed a list to start_dcc_send() below and the wire line was
-                # `PRIVMSG ['#one', '#two'] :Sent ...` - a malformed target,
-                # answered with a numeric nothing here reads, so the
-                # announcement was lost while the transfer it announced had
-                # already succeeded.
-                #
-                # #272 fixed the identical shape at check_queue_and_send()'s
-                # other site and recorded that THIS one deliberately kept a
-                # list, on the grounds that it was only a membership test. It
-                # is not: g_chan is passed to start_dcc_send() at the thread
-                # spawn below. Found by audit, and the test written then to
-                # protect the list form was protecting a defect.
-                g_chan = announce_channel_for(g_next)
-                g_name = g_next.get('file', '')
-                g_path = g_next.get('path', '')
-
-                # PRESENCE IS ASKED OF EVERY CHANNEL WE ARE IN, NOT OF THE
-                # ROW (#530). This used to build a list from g_next['channel']
-                # and look for the user only there. A request made by PRIVATE
-                # MESSAGE records the wire target as its channel - which is
-                # the bot's own nick, and no such key ever exists in
-                # channel_users - so a PM-originated head row was invisible
-                # to this sweep however many channels the user was sitting
-                # in. The specific-user branch above has always asked every
-                # channel; this is the same question and now the same answer.
-                # The row's channel is where to ANNOUNCE (g_chan, above), not
-                # where to LOOK.
-                user_is_globally_active = user_is_present_in_ram(queue_key)
-
-                if not user_is_globally_active:
-                    # Not here. Until #530 this was a silent `continue`, and
-                    # a queue only the sweep ever looked at could sit
-                    # forever. Freeze them exactly as the specific-user
-                    # branch does - after the lock is released, because the
-                    # freeze announces to the debug channel.
-                    absent_users.append((real_username, g_chan))
-                    continue
-
-                if user_is_globally_active is True:
-                    if g_next.get('is_unpacked_rar_folder') is True:
-                        # A PACK WHOSE TURN HAS COME GETS THE SLOT (#1034). Only the
-                        # specific-user path (section A) can start a pack, and every
-                        # caller hands it the nick that just finished - so a pack
-                        # turned away at [DCC-BLOCK], all slots busy, was never
-                        # tried again: queued until its owner's next transfer
-                        # ended, which for a nick with only the pack is never.
-                        # In wait order with a slot free, so its owner's own dispatch
-                        # is started (after the lock) and a slot is kept for it: a
-                        # nick further on is promoted only if a second one is free,
-                        # or with one slot the plain file would win the race every
-                        # time and the pack wait for ever again. While another pack
-                        # is being made it could not start; the packer's release
-                        # wakes it ([RAR-HOLD], redispatch_waiting_pack()), and the
-                        # sweep looks further, as it always did.
-                        if not getattr(config, 'rar_inprogress', False):
-                            if pack_to_wake is None:
-                                pack_to_wake = real_username
-                            continue
-                        print(f"[DCC QUEUE] Folder pack already pending for {real_username}. Skipping to the next waiting user.")
-                        continue
-
-                    # The slot kept for a pack woken above (#1034).
-                    if pack_to_wake is not None and len(config.active_transfers) + 1 >= config.MAX_DCC_SLOTS:
-                        break
-
-                    # CLAIM the user before releasing the lock, so a concurrent caller sees
-                    # them as busy. start_dcc_send's finally already discards this key on
-                    # every exit path, including the early aborts.
-                    if not hasattr(config, 'user_processing_lock'):
-                        config.user_processing_lock = set()
-                    config.user_processing_lock.add(queue_key)
-
-                    claim = {"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name,
-                             "queue_row": g_next}
-                    # Counted by the cap only when the list took the slot from
-                    # a nick that had waited longer (#1205).
-                    if (lists_first and is_a_list_row(g_next)
-                            and a_list_passes_a_longer_wait(queue_key, not getattr(config, 'rar_inprogress', False))):
-                        claim["list_went_first"] = True
-                    config.active_transfers.append(claim)
-                    promoted = (real_username, g_path, g_name, g_chan, g_next)
-                    promoted_key = queue_key
-                    break
+        # The sweep under queue_lock is claim_next_in_line() (#1304).
+        promoted, promoted_key, pack_to_wake, swept_absent = claim_next_in_line()
+        absent_users.extend(swept_absent)
 
     if promoted is not None and drop_an_unshared_row(promoted[0], promoted[4], lock_key=promoted_key):
         # Not shared any more (#1268): the slot goes to the next in line.
