@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **New: your list requests can carry a short tag**, the way AutoQ's carry `::AutoQ::`, so a channel can see what is fetching. Set *Tag on your list requests* (`LIST_REQUEST_TAG`) on the Settings page under *Fetching from bots*, or in the mIRC settings window. It is sent only to other DCCore bots, which always accept it. Other bots get the plain request, because many only answer that exact line. Plain text, up to 32 characters. It is empty out of the box, so nothing changes until you set it.
+
 ## v1.16.2 — The Hardened Release
 
 - **Fixed (security): several holes in admin access are closed.** `dccore.mrc` could accept a new login token from someone other than your bot, so update it to 1.19.4 and reload it with `/reload -rs dccore.mrc`. The console's fallback connection now waits for you alone. Console logins made at the same time from one address no longer get more password tries than the limit. A `!rehash` that cannot read `settings.conf` keeps the settings it had, and a line you delete from `admin_config.py` is gone after a `!rehash`. `unpair` now says so when it could not revoke a token. **Update if you use the DCC console or `dccore.mrc`.**

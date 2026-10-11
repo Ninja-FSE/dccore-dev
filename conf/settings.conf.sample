@@ -1322,6 +1322,21 @@
 # Hard cap on finished rows, whatever their age
 #FETCH_HISTORY_MAX_ROWS = 500
 
+# A short tag added after your list requests, the way AutoQ adds ::AutoQ::, so
+# a channel can see what is fetching. It is sent only to other DCCore bots,
+# which always accept it; other bots get the plain request, because many
+# answer only that exact line. Plain text, up to 32 characters. Leave it empty
+# to send no tag.
+#
+# A short tag after your list requests (#1293), the way AutoQ sends
+# "@<nick>  ::AutoQ::", so a channel can see what is fetching. Sent ONLY to
+# bots known to be DCCore, which always accept it; every other bot gets the
+# bare "@<nick>", since many server scripts answer only that exact line.
+# Plain text, at most 32 characters, no colour codes. Never added to a file
+# or folder request. Empty sends no tag.
+# LIST_REQUEST_TAG = ::DCCore::
+#LIST_REQUEST_TAG = 
+
 # The biggest single file you will accept from another bot, in bytes. Anything
 # larger is refused before the download starts. 0 means no limit - except that
 # a fetched list still may not unpack to more than 8 lists of the biggest size

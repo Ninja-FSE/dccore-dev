@@ -150,6 +150,7 @@ GROUPS = (
         ("Queue", (
             ("Fetch queue", ("FETCH_MAX_PER_BOT", "FETCH_QUEUED_TIMEOUT", "FETCH_BOT_MAX_FAILS",
                              "FETCH_BOT_COOLDOWN_MINUTES")),
+            ("List requests", ("LIST_REQUEST_TAG",)),
         )),
     )),
     ("Security", (

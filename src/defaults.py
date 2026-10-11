@@ -858,6 +858,14 @@ MULTI_CHANNEL_LIST_STABLE_SECONDS: int = 3600
 REHASH_TRANSFER_WAIT: int   = 120
 FETCH_HISTORY_DAYS: int     = 30       # Days a finished fetch stays in the history
 FETCH_HISTORY_MAX_ROWS: int = 500      # Hard cap on finished rows, whatever their age
+# A short tag after your list requests (#1293), the way AutoQ sends
+# "@<nick>  ::AutoQ::", so a channel can see what is fetching. Sent ONLY to
+# bots known to be DCCore, which always accept it; every other bot gets the
+# bare "@<nick>", since many server scripts answer only that exact line.
+# Plain text, at most 32 characters, no colour codes. Never added to a file
+# or folder request. Empty sends no tag.
+#   LIST_REQUEST_TAG = ::DCCore::
+LIST_REQUEST_TAG: str = ""
 # Interacts with flood protection: a bot's DCC SEND offers are metered like any
 # other command, so this must stay well below MAX_REQUESTS (per REQUEST_WINDOW)
 # or a bot answering your own fetch requests can trip the flood gate and be muted.
