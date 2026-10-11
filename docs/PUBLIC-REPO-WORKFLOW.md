@@ -217,6 +217,14 @@ the omissions surface, because it is the last point at which they are cheap.
    were invisible from here — every one of them a test whose assumptions
    only held on this side of the extraction. `dccore-dev`'s own green CI
    does not prove the tree steps 1-3 produce is green; only running it does.
+5. **The website** (`site/`, #1309) publishes itself. `.github/workflows/pages.yml`
+   deploys `site/` on a push to `dccore`'s `main` that touches it; its deploy
+   job is guarded to `Ninja-FSE/dccore`, so here it is skipped. Once, before
+   the first release that carries it: in `dccore`'s Settings > Pages set
+   **Source** to **GitHub Actions**. The site is then at
+   `ninja-fse.github.io/dccore`. A custom domain is that same page's
+   **Custom domain** box plus one DNS record (a `CNAME` for a subdomain,
+   pointing at `ninja-fse.github.io`); no file in the tree changes.
 
 ## Identity scrubbing — what actually failed before
 
