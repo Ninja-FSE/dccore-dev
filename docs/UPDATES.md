@@ -50,6 +50,7 @@ layer.
   `WEBUI_ALLOWED_HOSTS` as a setting re-read on a rehash.
 - **Not changed here:** the DCC CHAT console (`adminchat.is_bad_ip()`/`note_bad_ip()`) has the same check-then-count
   shape; each attempt there needs its own DCC connection and session.
+
 ### 🛡️ A request gets the file it names, and only that
 
 Reported privately and fixed before the release, because each of these is one line any peer can send.
