@@ -213,6 +213,13 @@ On Windows, `scripts\windows\allow-firewall.bat` adds the rule (it asks for an
 administrator's yes; `remove-firewall.bat` takes it out). On macOS the
 firewall asks per application the first time, like Windows does.
 
+**Opening the dashboard by a name.** The dashboard answers to an IP address (`http://192.168.1.20:8420/`),
+to `localhost` and, when `WEBUI_HOST` is `0.0.0.0`, to the computer's own name. Any other name in the
+address bar is refused with a page that says so - that is what stops a web page from pointing its own
+name at your machine to reach the login. If you use another name (one your router hands out, a VPN
+name, a reverse proxy in front), add it to `WEBUI_ALLOWED_HOSTS` in `settings.conf` or on the Settings
+page: `WEBUI_ALLOWED_HOSTS = dccore.lan`.
+
 **Port forwarding.** Behind a home router, connections from the internet
 reach the router, not this machine, until the router is told where to send
 them. In the router's admin page (usually `http://192.168.1.1` or
@@ -459,6 +466,8 @@ Nothing breaks if you skip this — every setting has a working default and the 
 That diff only catches settings that are new. **`PAUSE_ON_UPDATE` is not new in v1.13.1, but its meaning changed**: it now pauses searching and sharing only for the few seconds a rebuilt list is being swapped in, not for the whole rebuild. If you were relying on the old whole-rebuild pause, turn on the new `PAUSE_FOR_WHOLE_UPDATE` setting to keep it.
 
 **Coming from before v1.16:** a peer's list held from back then never tracked which channel it came from, which can send a cross-bot request to the wrong channel after upgrading - run `purgealllists confirm` (console) or "Purge every held list" (List Browser) once; every list rebuilds on its own with its channel resolved fresh.
+
+**If you open the dashboard by a name** other than an IP address, `localhost` or the computer's own name, add that name to `WEBUI_ALLOWED_HOSTS` - the dashboard now refuses names it does not know (see [Opening the dashboard by a name](#reaching-it-from-outside-the-firewall-and-the-router)).
 
 **5. Read the changelog.** [UPDATES-PUBLIC.md](UPDATES-PUBLIC.md) says what changed and, where it matters, what you have to do about it.
 

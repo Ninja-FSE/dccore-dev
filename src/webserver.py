@@ -28,10 +28,13 @@ unauthenticated, not even briefly on a fresh install.
 
 The login route ("/login") is the ONLY exemption from the require_login()
 before_request hook below; everything else, static files included, is behind
-it. The session is a plain signed Flask cookie (app.secret_key, generated
+it. The session is a signed Flask cookie (app.secret_key, generated
 fresh per process) - it does not survive a daemon restart, which is a
 deliberate simplification: re-logging in after a restart costs nothing, and
-it avoids a second secret to persist and protect. This is real
+it avoids a second secret to persist and protect. The cookie is not the
+whole session, though: it carries an id the server must still hold (a
+logout drops it) and a stamp of the password it was opened with (a password
+change ends every session opened with the old one) - see create_app(). This is real
 authentication, not the workaround kind the module docstring used to warn
 against (an API key in a query string, a cookie nobody checks) - the password
 is verified against ADMIN_PASSWORD_HASH via adminchat.verify_password() on
@@ -44,7 +47,12 @@ since the password is shared, a shared block budget would let a web attacker
 spend it down and lock the real operator out of the DCC console too. A POST
 whose Origin (or Referer) names another site is refused unread and uncounted
 (_login_origin_ok(), #609): on the loopback install a hostile page in the
-operator's own browser arrives from the same address as the operator.
+operator's own browser arrives from the same address as the operator. An
+attempt is claimed before its password is hashed (_reserve_web_login()), so
+parallel requests from one address get no more guesses than the limit. A
+request for a host name the dashboard does not answer to (DNS rebinding) is
+refused before anything else (_dashboard_host_ok()), and no response may be
+shown inside another page's frame (_refuse_framing()).
 
 What plain-HTTP session/password transmission still cannot fix: an attacker
 already sharing the network segment can read the password and the session
@@ -3748,7 +3756,7 @@ SETTINGS_CATEGORIES = (
     ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
                                                 "ADMIN_CHANNEL_COMMANDS", "ADMIN_CHAT_COLOURS"]),
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
-                                                "WEBUI_CONSOLE_ENABLED", "WEBUI_OPEN_BROWSER",
+                                                "WEBUI_ALLOWED_HOSTS", "WEBUI_CONSOLE_ENABLED", "WEBUI_OPEN_BROWSER",
                                                 "WEBUI_FOLDER_BROWSER_ENABLED"]),
     ("console-feed",  "Console feed",          ["CONSOLE_SHOW_REQUESTS", "CONSOLE_SHOW_QUEUE",
                                                 "CONSOLE_SHOW_SENDS", "CONSOLE_SHOW_FAILURES",
@@ -3926,6 +3934,7 @@ SETTINGS_LABELS = {
     "WEBUI_ENABLED": "Enable web dashboard",
     "WEBUI_HOST": "Host",
     "WEBUI_PORT": "Port",
+    "WEBUI_ALLOWED_HOSTS": "Other names the dashboard answers to",
     "WEBUI_FOLDER_BROWSER_ENABLED": "Folder picker on the Settings page",
     "WEBUI_CONSOLE_ENABLED": "Enable the Console page (remote admin)",
     "WEBUI_OPEN_BROWSER": "Open the dashboard in a browser at startup",
@@ -4939,7 +4948,15 @@ def build_password_change_result(new_password, confirm_password):
         return 400, {"error": "Passwords do not match."}
 
     new_hash = adminchat.make_password_hash(new_password)
-    return _save_settings_and_rehash({"ADMIN_PASSWORD_HASH": new_hash})
+    status, result = _save_settings_and_rehash({"ADMIN_PASSWORD_HASH": new_hash})
+    if status == 200:
+        # In force NOW, not when the rehash it started gets round to it: a
+        # dashboard session is stamped with the password it was opened with
+        # (_password_stamp), so this is also the moment every session opened
+        # with the old password stops working. The rehash reads the same
+        # hash back from settings.conf.
+        config.ADMIN_PASSWORD_HASH = new_hash
+    return status, result
 
 
 # ==========================================================================
@@ -4984,24 +5001,118 @@ LOGIN_PAGE = """<!doctype html>
 # console too. Same policy, separate pools: one abusive address costs it
 # access to this route only.
 _web_bad_ips = {}
-_web_bad_ips_lock = threading.Lock()
+# address -> how many of its logins are being checked right now. A login
+# claims its attempt here BEFORE the password is hashed (_reserve_web_login)
+# and settles it after (_settle_web_login), so parallel requests from one
+# address cannot all pass the limit before any of them is counted.
+_web_logins_in_flight = {}
+# Bound from runtime.py, not built here: every lock lives there (see
+# tests/test_no_reloaded_module_owns_a_lock.py and runtime.py's comment).
+_web_bad_ips_lock = runtime.web_login_lock
+
+# How long a login waits for one of runtime.web_password_checks' slots
+# before it is told the dashboard is busy. Long enough that a few people
+# logging in at once all get through; short enough that a flood is answered
+# rather than queued for ever.
+WEB_PASSWORD_CHECK_WAIT_SECONDS = 10.0
+
+# How many dashboard sessions are kept open at once (see create_app()'s
+# live_sessions); past it the oldest is logged out.
+WEB_MAX_LIVE_SESSIONS = 100
+
+
+def _note_bad_web_login_locked(ip, now):
+    """Count one failure for `ip`. The caller holds _web_bad_ips_lock."""
+    # The addresses that never reached a block are forgotten after the
+    # block window (#677): the expiry below only ever saw blocked ones,
+    # and on an internet-exposed bind the rest stayed for ever.
+    adminchat.forget_stale_failures(_web_bad_ips, now)
+    entry = _web_bad_ips.get(ip) or [0, 0.0, now]
+    entry[0] += 1
+    entry[2] = now
+    if entry[0] >= adminchat.MAX_PASSWORD_ATTEMPTS:
+        entry[1] = now + adminchat.BAD_IP_BLOCK_SECONDS
+    _web_bad_ips[ip] = entry
 
 
 def _note_bad_web_login(ip):
     if not ip:
         return
     with _web_bad_ips_lock:
+        _note_bad_web_login_locked(ip, time.time())
+
+
+def _reserve_web_login(ip):
+    """Claim one of `ip`'s login attempts before its password is checked.
+
+    Returns "ok" (claimed - the caller MUST call _settle_web_login() once,
+    whatever happens next), "blocked" (the address is blocked) or "busy"
+    (its earlier failures plus the attempts still being checked already
+    use up MAX_PASSWORD_ATTEMPTS).
+
+    The check and the claim are one step under the pool's lock. They used
+    to be apart: the login checked the address, hashed the password, and
+    only then counted a failure, so N parallel requests from one address
+    all passed the check and N guesses were verified where the limit allows
+    MAX_PASSWORD_ATTEMPTS. Counting the attempts in flight closes that:
+    however many arrive at once, at most the remaining allowance is hashed.
+    """
+    if not ip:
+        return "ok"
+    with _web_bad_ips_lock:
         now = time.time()
-        # The addresses that never reached a block are forgotten after the
-        # block window (#677): the expiry below only ever saw blocked ones,
-        # and on an internet-exposed bind the rest stayed for ever.
         adminchat.forget_stale_failures(_web_bad_ips, now)
-        entry = _web_bad_ips.get(ip) or [0, 0.0, now]
-        entry[0] += 1
-        entry[2] = now
-        if entry[0] >= adminchat.MAX_PASSWORD_ATTEMPTS:
-            entry[1] = now + adminchat.BAD_IP_BLOCK_SECONDS
-        _web_bad_ips[ip] = entry
+        entry = _web_bad_ips.get(ip)
+        if entry and entry[1]:
+            if now < entry[1]:
+                return "blocked"
+            del _web_bad_ips[ip]  # block expired; forget it so a typo is not permanent
+            entry = None
+        failed = entry[0] if entry else 0
+        in_flight = _web_logins_in_flight.get(ip, 0)
+        if failed + in_flight >= adminchat.MAX_PASSWORD_ATTEMPTS:
+            return "busy"
+        _web_logins_in_flight[ip] = in_flight + 1
+        return "ok"
+
+
+def _settle_web_login(ip, outcome):
+    """Release the attempt _reserve_web_login() claimed for `ip`.
+
+    `outcome` is True for the right password (the address's failures are
+    forgotten), False for a wrong one (counted, and blocking at the limit
+    exactly as before) or None when the password was never checked (the
+    dashboard was too busy) - released without counting.
+    """
+    if not ip:
+        return
+    with _web_bad_ips_lock:
+        left = _web_logins_in_flight.get(ip, 0) - 1
+        if left > 0:
+            _web_logins_in_flight[ip] = left
+        else:
+            _web_logins_in_flight.pop(ip, None)
+        if outcome is True:
+            _web_bad_ips.pop(ip, None)
+        elif outcome is False:
+            _note_bad_web_login_locked(ip, time.time())
+
+
+def _check_web_password(stored, supplied, wait=None):
+    """adminchat.verify_password(), but never more than
+    runtime.WEB_PASSWORD_CHECKS_AT_ONCE at a time across the dashboard.
+
+    None when no slot came free within `wait` seconds: the password was
+    not checked, and the caller says the dashboard is busy instead of
+    counting anything against the address.
+    """
+    wait = WEB_PASSWORD_CHECK_WAIT_SECONDS if wait is None else wait
+    if not runtime.web_password_checks.acquire(timeout=wait):
+        return None
+    try:
+        return bool(adminchat.verify_password(stored, supplied))
+    finally:
+        runtime.web_password_checks.release()
 
 
 def _is_bad_web_ip(ip):
@@ -5020,6 +5131,126 @@ def _is_bad_web_ip(ip):
 def _clear_bad_web_ip(ip):
     with _web_bad_ips_lock:
         _web_bad_ips.pop(ip, None)
+
+
+def _host_name(host_header):
+    """The name half of a Host header: lower-cased, without the port, the
+    IPv6 brackets or a trailing dot."""
+    text = (host_header or "").strip().lower()
+    if text.startswith("["):
+        return text[1:].split("]", 1)[0]
+    if text.count(":") == 1:
+        text = text.rsplit(":", 1)[0]
+    return text.rstrip(".")
+
+
+def _configured_dashboard_names():
+    """The host names the operator has said the dashboard answers to:
+    WEBUI_ALLOWED_HOSTS, plus WEBUI_HOST itself when that is a name."""
+    raw = getattr(config, "WEBUI_ALLOWED_HOSTS", []) or []
+    if isinstance(raw, str):
+        raw = raw.replace(",", " ").split()
+    names = {_host_name(str(item)) for item in raw}
+    names.add(_host_name(str(getattr(config, "WEBUI_HOST", "127.0.0.1") or "")))
+    names.discard("")
+    return names
+
+
+# This machine's own names, looked up once: socket.getfqdn() can ask DNS.
+_machine_name_cache = []
+
+
+def _machine_names():
+    """This computer's own host names - what somebody on the LAN types to
+    reach a dashboard bound to every interface. Its short name, its full
+    name and the short name's mDNS (.local) spelling."""
+    if not _machine_name_cache:
+        import socket
+        names = set()
+        for lookup in (socket.gethostname, socket.getfqdn):
+            try:
+                name = _host_name(lookup())
+            except (OSError, UnicodeError):
+                continue
+            if name:
+                names.add(name)
+                names.add(name.split(".", 1)[0])
+                names.add(name.split(".", 1)[0] + ".local")
+        _machine_name_cache.append(frozenset(names))
+    return _machine_name_cache[0]
+
+
+def _dashboard_host_ok(host_header, bound=None):
+    """Is `host_header` a name this dashboard answers to?
+
+    DNS REBINDING. A page on evil.example can point its own name at
+    127.0.0.1 (or at the machine's LAN address) after it has loaded. The
+    browser then sends that page's requests to the dashboard as SAME-ORIGIN
+    - the Origin check (_login_origin_ok) compares Origin with Host, and
+    both say evil.example - so the page could spend the operator's own
+    login attempts and lock them out, and with the password it would reach
+    every route. What the browser cannot change is the Host header: it
+    always carries the name the page was loaded from. So the dashboard
+    answers only to names that cannot be an attacker's:
+
+      * any IP address - a page loaded from an IP literal is the dashboard
+        (or whatever else answers on that address) and no DNS is involved;
+      * localhost;
+      * WEBUI_ALLOWED_HOSTS and WEBUI_HOST itself when it is a name - the
+        names the operator configured (a reverse proxy, a LAN DNS name);
+      * this machine's own host names, when the dashboard is bound to
+        something other than loopback (WEBUI_HOST = 0.0.0.0) - so a phone on
+        the LAN that opens http://<computer name>:8420/ still works.
+
+    WEBUI_ALLOWED_HOSTS = * turns the check off. The port is not compared:
+    a router's port forward or a proxy may change it, and it is not what a
+    rebinding page controls.
+    """
+    import ipaddress
+
+    name = _host_name(host_header)
+    if not name:
+        return False
+    if name == "localhost":
+        return True
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    configured = _configured_dashboard_names()
+    if "*" in configured or name in configured:
+        return True
+    if not dashboard_is_loopback_only(bound):
+        return name in _machine_names()
+    return False
+
+
+def _refuse_framing(response):
+    """No other page may show the dashboard inside a frame (clickjacking).
+
+    A page on another port of the same host is the same SITE to a browser,
+    so the SameSite=Lax session cookie goes with a framed dashboard, and a
+    click lured onto a framed button arrives from the dashboard's own page
+    - past the Origin check. X-Frame-Options for older browsers, CSP
+    frame-ancestors for current ones; the dashboard never frames itself.
+    """
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    return response
+
+
+def _password_stamp(secret_key, stored_hash):
+    """What a dashboard session records about the password it was opened
+    with: an HMAC of ADMIN_PASSWORD_HASH under the app's own secret. A
+    session whose stamp no longer matches the current hash is refused, so
+    changing the password ends every session opened with the old one. The
+    hash itself never goes into the cookie, which the browser can read."""
+    import hashlib
+    import hmac
+    key = secret_key if isinstance(secret_key, bytes) else str(secret_key).encode("utf-8")
+    message = ("dccore-dashboard-session:" + str(stored_hash or "")).encode("utf-8")
+    return hmac.new(key, message, hashlib.sha256).hexdigest()[:32]
 
 
 def _origin_netloc(url):
@@ -5411,15 +5642,88 @@ if HAVE_FLASK:
         app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
         _keep_json_key_order(app)
 
+        # SESSIONS THE SERVER CAN END. The cookie alone used to be the whole
+        # session - {"authenticated": True}, signed - so a logout only
+        # forgot it in the browser that clicked, and a copied cookie stayed
+        # good until the daemon restarted. Now each login gets an id that
+        # must still be in this table (a logout takes it out), and a stamp
+        # of the password it was opened with (_password_stamp) that must
+        # still match the current one (a password change ends them all).
+        # Oldest dropped first past WEB_MAX_LIVE_SESSIONS: that is a lot of
+        # browsers for one operator, and the table must not grow for ever.
+        live_sessions = collections.OrderedDict()
+
+        def start_session():
+            import secrets
+            sid = secrets.token_urlsafe(24)
+            with runtime.web_sessions_lock:
+                live_sessions[sid] = time.time()
+                while len(live_sessions) > WEB_MAX_LIVE_SESSIONS:
+                    live_sessions.popitem(last=False)
+            # A fresh session, not the one the request came with: nothing
+            # set before the login survives into the logged-in one.
+            session.clear()
+            session["authenticated"] = True
+            session["sid"] = sid
+            session["pw"] = _password_stamp(
+                app.secret_key, getattr(config, "ADMIN_PASSWORD_HASH", ""))
+
+        def session_is_live():
+            import hmac
+            if not session.get("authenticated"):
+                return False
+            sid, stamp = session.get("sid"), session.get("pw")
+            if not isinstance(sid, str) or not isinstance(stamp, str):
+                return False
+            current = _password_stamp(app.secret_key,
+                                      getattr(config, "ADMIN_PASSWORD_HASH", ""))
+            if not hmac.compare_digest(stamp, current):
+                return False
+            with runtime.web_sessions_lock:
+                return sid in live_sessions
+
+        def end_session():
+            sid = session.get("sid")
+            if isinstance(sid, str):
+                with runtime.web_sessions_lock:
+                    live_sessions.pop(sid, None)
+            session.clear()
+
+        def restamp_session():
+            """After this session changed the password: it stays open, every
+            other session opened with the old password does not."""
+            session["pw"] = _password_stamp(
+                app.secret_key, getattr(config, "ADMIN_PASSWORD_HASH", ""))
+
+        @app.after_request
+        def deny_framing(response):
+            return _refuse_framing(response)
+
         @app.before_request
         def require_login():
+            # FIRST, before the login and before any file: a request for a
+            # name this dashboard does not answer to is a DNS-rebinding
+            # page, or a name the operator has not configured - refused
+            # without reading the password and without counting anything
+            # against the address (see _dashboard_host_ok).
+            if not _dashboard_host_ok(request.host):
+                text = ("This dashboard does not answer to the name {}. Open it by "
+                        "its IP address or as localhost, or add the name to "
+                        "WEBUI_ALLOWED_HOSTS.").format(_host_name(request.host) or "(none)")
+                if request.path.startswith("/api/"):
+                    return jsonify({"error": text}), 403
+                return Response(text, status=403, mimetype="text/plain")
             # The sole exemption: everything else, static files included,
             # needs a session already marked authenticated by a prior POST
             # here. Endpoint rather than path, so a future route can't
             # accidentally slip past this by sharing a path prefix.
             if request.endpoint == "login":
                 return None
-            if not session.get("authenticated"):
+            if not session_is_live():
+                # A cookie from before a logout or a password change is
+                # dropped, so the browser does not keep sending it.
+                if session:
+                    session.clear()
                 if request.path.startswith("/api/"):
                     return jsonify({"error": "Authentication required."}), 401
                 return redirect("/login")
@@ -5455,28 +5759,43 @@ if HAVE_FLASK:
                              "ignored. Open the dashboard at its own address.")
                     return LOGIN_PAGE.format(
                         error_html='<p class="error">{}</p>'.format(error)), 403
-                if _is_bad_web_ip(ip):
-                    error = "Too many failed attempts. Try again later."
+                # The attempt is claimed BEFORE the password is hashed and
+                # settled after, so a burst of parallel POSTs from one
+                # address gets no more guesses than the limit allows.
+                claim = _reserve_web_login(ip)
+                if claim == "blocked":
+                    error, status = "Too many failed attempts. Try again later.", 401
+                elif claim == "busy":
+                    error, status = ("Another login from this address is still being "
+                                     "checked. Try again in a moment."), 429
                 else:
-                    stored = getattr(config, "ADMIN_PASSWORD_HASH", "")
-                    supplied = request.form.get("password", "")
-                    if adminchat.verify_password(stored, supplied):
-                        _clear_bad_web_ip(ip)
-                        session["authenticated"] = True
+                    outcome = None
+                    try:
+                        outcome = _check_web_password(
+                            getattr(config, "ADMIN_PASSWORD_HASH", ""),
+                            request.form.get("password", ""))
+                    finally:
+                        _settle_web_login(ip, outcome)
+                    if outcome:
+                        start_session()
                         return redirect("/")
-                    _note_bad_web_login(ip)
-                    error = "Incorrect password."
+                    if outcome is None:
+                        error, status = ("The dashboard is busy checking other logins. "
+                                         "Try again in a moment."), 503
+                    else:
+                        error, status = "Incorrect password.", 401
             error_html = '<p class="error">{}</p>'.format(error) if error else ""
-            status = 401 if error else 200
-            return LOGIN_PAGE.format(error_html=error_html), status
+            return LOGIN_PAGE.format(error_html=error_html), (status if error else 200)
 
         # POST only (#673, audit L9): the page's own button is a form, and a
         # GET that changes state is a link any other site can make the
         # operator's browser follow with the Lax cookie attached - a cross-
         # site navigation to /logout dropped the dashboard to the login form.
+        # Ended on the server too: a copy of this session's cookie is
+        # refused from now on, not only the browser that clicked.
         @app.route("/logout", methods=["POST"])
         def logout():
-            session.clear()
+            end_session()
             return redirect("/login")
 
         @app.route("/")
@@ -5932,6 +6251,8 @@ if HAVE_FLASK:
             body = json_object(request.get_json(silent=True))
             status, result = build_password_change_result(
                 body.get("new_password", ""), body.get("confirm_password", ""))
+            if status == 200:
+                restamp_session()
             return jsonify(result), status
 
         # 404, not 403, when the Console is off. 403 would confirm the routes
@@ -6488,7 +6809,7 @@ if HAVE_FLASK:
             value = getattr(g, "setup_cookie_to_set", None)
             if value:
                 response.set_cookie(SETUP_COOKIE, value, httponly=True, samesite="Lax", path="/")
-            return response
+            return _refuse_framing(response)
 
         @app.route("/")
         def root():
