@@ -4045,6 +4045,127 @@ def answer_ctcp(line, msg, user, target_chan, sock, oserve):
         return
 
 
+def answer_command(msg, msg_lower, user, user_host, target_chan, bot_aliases, sock, oserve):
+    """A PRIVMSG that is not CTCP: the @nick- commands, @find and @locator,
+    the list triggers and !list, the admin's !debugnames, !ping and channel
+    commands, and file requests.
+
+    The elif chain behind answer_privmsg()'s CTCP arm until #1342, step 8 of
+    splitting irc_loop() (docs/FUTURE.md). Moved unchanged; nothing followed
+    the chain, so each `return` still ends the line's handling, and an
+    exception still reaches answer_privmsg()'s `except`.
+    """
+    import commands
+    if is_list_request(msg, msg_lower):
+        threading.Thread(target=list.send_file_list, args=(sock, user, target_chan),
+                         daemon=True).start()
+    elif msg_lower == f"@{config.NICKNAME.lower()}-help":
+        threading.Thread(target=commands.handle_help_request, args=(sock, user, target_chan), daemon=True).start()
+        return
+    elif msg_lower == f"@{config.NICKNAME.lower()}-stats":
+        threading.Thread(target=commands.handle_stats_request, args=(sock, user, target_chan), daemon=True).start()
+        return
+    elif msg_lower == f"@{config.NICKNAME.lower()}-top":
+        threading.Thread(target=commands.handle_top_request, args=(sock, user, target_chan), daemon=True).start()
+        return
+    elif msg_lower == f"@{config.NICKNAME.lower()}-que":
+        threading.Thread(target=commands.handle_queue_check, args=(sock, user, target_chan), daemon=True).start()
+        return
+    elif msg_lower == f"@{config.NICKNAME.lower()}-remove":
+        threading.Thread(target=commands.handle_queue_remove, args=(sock, user, target_chan), daemon=True).start()
+        return
+    elif msg_lower.startswith(f"@{config.NICKNAME.lower()}-remove ") and msg[len(config.NICKNAME) + 9:].strip():
+        threading.Thread(target=commands.handle_queue_remove_file,
+                         args=(sock, user, target_chan, msg[len(config.NICKNAME) + 9:].strip()),
+                         daemon=True).start()
+        return
+    elif msg.startswith("@find ") or msg.startswith("@locator "):
+        parts = msg.split(" ", 1)
+        if len(parts) > 1:
+            # Formatting and control characters come
+            # off here, before the text is printed,
+            # logged or fed to the console (#670).
+            search_term = list.printable_text(parts[1]).strip()
+            if search_term:
+                threading.Thread(target=list.execute_search, args=(sock, user, search_term, target_chan), daemon=True).start()
+    elif msg_lower == "!list":
+        list.send_list_trigger_info(sock, user)
+    elif msg.lower() == "!debugnames":
+        # The operator's diagnostic, not a public command
+        # - see commands.diagnostics_are_for_the_admin().
+        # Silently: an answer or a log line per stranger
+        # is the noise this removes.
+        if not commands.diagnostics_are_for_the_admin(user, user_host):
+            return
+        with runtime.channel_users_lock():
+            have_count = hasattr(config, 'channel_users') and channel_key(target_chan) in config.channel_users
+            if have_count:
+                current_qty = len(config.channel_users[channel_key(target_chan)])
+        # Queued VIP and paced, not sent straight to the
+        # socket - same reasoning as the CTCP VERSION
+        # reply above (#406): a direct send here shares
+        # nothing with queue_mgr.py's or announce.py's
+        # own pacing, so however unlikely a flood of
+        # !debugnames is, this is one more line that
+        # could add to one without the shared clock
+        # knowing it happened.
+        if have_count:
+            ram_check = f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n"
+        else:
+            ram_check = f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n"
+        if oserve:
+            oserve.queue_message(user, ram_check, is_vip=True)
+    elif msg.lower() == "!ping":
+        # Same rule as !debugnames above: a stranger's
+        # !ping used to make every DCCore in the channel
+        # spend a paced line and report to its own admin.
+        if not commands.diagnostics_are_for_the_admin(user, user_host):
+            return
+        threading.Thread(target=commands.handle_ping_request, args=(sock, user, target_chan), daemon=True).start()
+    # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these
+    # once the DCC console is trusted; the console reaches the same
+    # handlers with authorised=True. User commands are unaffected.
+    #
+    # #437: !ban/!unban used to be matched on the raw, case-sensitive
+    # `msg` while !rehash/!update/!clearqueue beside them already used
+    # msg_lower - so "!Ban" or "!BAN" failed this gate entirely. Admin
+    # commands are deliberately excluded from is_bot_command's metering,
+    # so a mistyped ban was not just refused: nothing ran, nothing was
+    # written to hard_bans.txt, and nothing was logged either - in
+    # channel it looked identical to an applied ban.
+    elif (getattr(config, 'ADMIN_CHANNEL_COMMANDS', True)
+          and (msg.lower() in ('!rehash', '!update')
+               or msg_lower.startswith('!ban ') or msg_lower.startswith('!unban ')
+               or msg_lower == '!clearqueue'
+               or msg_lower.startswith('!clearqueue '))):
+        if msg.lower() == "!rehash":
+            threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
+        elif msg_lower.startswith("!ban "):
+            threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
+        elif msg_lower.startswith("!unban "):
+            threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
+        elif msg.lower() == "!update":
+            threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
+        elif msg_lower == "!clearqueue" or msg_lower.startswith("!clearqueue "):
+            # commands.handle_admin_clear_queue was added in #16 but never
+            # wired into this dispatch chain, so the command had no caller
+            # anywhere and typing it did nothing at all. The handler does
+            # its own admin check.
+            threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
+    elif any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases):
+        # Split on the first space only, so "!DCCore !rar Artist/Album"
+        # still hands "!rar Artist/Album" to the download handler.
+        parts = msg.split(" ", 1)
+        if len(parts) > 1:
+            # As for a search (#670): what reaches the
+            # handler is what the terminal, the debug
+            # channel and the admin chat will show.
+            requested_file = list.printable_text(parts[1]).strip()
+            threading.Thread(target=dcc.handle_download_request,
+                            args=(sock, user, requested_file, target_chan),
+                            daemon=True).start()
+
+
 def answer_privmsg(line, privmsg_parsed, sock, oserve):
     """A PRIVMSG, parsed: the flood gate, the chat and advert captures, CTCP,
     and every channel and private-message command - the whole dispatch.
@@ -4238,114 +4359,9 @@ def answer_privmsg(line, privmsg_parsed, sock, oserve):
         if msg.startswith("\x01") and msg.endswith("\x01"):
             # answer_ctcp() since #1338.
             answer_ctcp(line, msg, user, target_chan, sock, oserve)
-        elif is_list_request(msg, msg_lower):
-            threading.Thread(target=list.send_file_list, args=(sock, user, target_chan),
-                             daemon=True).start()
-        elif msg_lower == f"@{config.NICKNAME.lower()}-help":
-            threading.Thread(target=commands.handle_help_request, args=(sock, user, target_chan), daemon=True).start()
-            return
-        elif msg_lower == f"@{config.NICKNAME.lower()}-stats":
-            threading.Thread(target=commands.handle_stats_request, args=(sock, user, target_chan), daemon=True).start()
-            return
-        elif msg_lower == f"@{config.NICKNAME.lower()}-top":
-            threading.Thread(target=commands.handle_top_request, args=(sock, user, target_chan), daemon=True).start()
-            return
-        elif msg_lower == f"@{config.NICKNAME.lower()}-que":
-            threading.Thread(target=commands.handle_queue_check, args=(sock, user, target_chan), daemon=True).start()
-            return
-        elif msg_lower == f"@{config.NICKNAME.lower()}-remove":
-            threading.Thread(target=commands.handle_queue_remove, args=(sock, user, target_chan), daemon=True).start()
-            return
-        elif msg_lower.startswith(f"@{config.NICKNAME.lower()}-remove ") and msg[len(config.NICKNAME) + 9:].strip():
-            threading.Thread(target=commands.handle_queue_remove_file,
-                             args=(sock, user, target_chan, msg[len(config.NICKNAME) + 9:].strip()),
-                             daemon=True).start()
-            return
-        elif msg.startswith("@find ") or msg.startswith("@locator "):
-            parts = msg.split(" ", 1)
-            if len(parts) > 1:
-                # Formatting and control characters come
-                # off here, before the text is printed,
-                # logged or fed to the console (#670).
-                search_term = list.printable_text(parts[1]).strip()
-                if search_term:
-                    threading.Thread(target=list.execute_search, args=(sock, user, search_term, target_chan), daemon=True).start()
-        elif msg_lower == "!list":
-            list.send_list_trigger_info(sock, user)
-        elif msg.lower() == "!debugnames":
-            # The operator's diagnostic, not a public command
-            # - see commands.diagnostics_are_for_the_admin().
-            # Silently: an answer or a log line per stranger
-            # is the noise this removes.
-            if not commands.diagnostics_are_for_the_admin(user, user_host):
-                return
-            with runtime.channel_users_lock():
-                have_count = hasattr(config, 'channel_users') and channel_key(target_chan) in config.channel_users
-                if have_count:
-                    current_qty = len(config.channel_users[channel_key(target_chan)])
-            # Queued VIP and paced, not sent straight to the
-            # socket - same reasoning as the CTCP VERSION
-            # reply above (#406): a direct send here shares
-            # nothing with queue_mgr.py's or announce.py's
-            # own pacing, so however unlikely a flood of
-            # !debugnames is, this is one more line that
-            # could add to one without the shared clock
-            # knowing it happened.
-            if have_count:
-                ram_check = f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n"
-            else:
-                ram_check = f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n"
-            if oserve:
-                oserve.queue_message(user, ram_check, is_vip=True)
-        elif msg.lower() == "!ping":
-            # Same rule as !debugnames above: a stranger's
-            # !ping used to make every DCCore in the channel
-            # spend a paced line and report to its own admin.
-            if not commands.diagnostics_are_for_the_admin(user, user_host):
-                return
-            threading.Thread(target=commands.handle_ping_request, args=(sock, user, target_chan), daemon=True).start()
-        # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these
-        # once the DCC console is trusted; the console reaches the same
-        # handlers with authorised=True. User commands are unaffected.
-        #
-        # #437: !ban/!unban used to be matched on the raw, case-sensitive
-        # `msg` while !rehash/!update/!clearqueue beside them already used
-        # msg_lower - so "!Ban" or "!BAN" failed this gate entirely. Admin
-        # commands are deliberately excluded from is_bot_command's metering,
-        # so a mistyped ban was not just refused: nothing ran, nothing was
-        # written to hard_bans.txt, and nothing was logged either - in
-        # channel it looked identical to an applied ban.
-        elif (getattr(config, 'ADMIN_CHANNEL_COMMANDS', True)
-              and (msg.lower() in ('!rehash', '!update')
-                   or msg_lower.startswith('!ban ') or msg_lower.startswith('!unban ')
-                   or msg_lower == '!clearqueue'
-                   or msg_lower.startswith('!clearqueue '))):
-            if msg.lower() == "!rehash":
-                threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
-            elif msg_lower.startswith("!ban "):
-                threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
-            elif msg_lower.startswith("!unban "):
-                threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
-            elif msg.lower() == "!update":
-                threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
-            elif msg_lower == "!clearqueue" or msg_lower.startswith("!clearqueue "):
-                # commands.handle_admin_clear_queue was added in #16 but never
-                # wired into this dispatch chain, so the command had no caller
-                # anywhere and typing it did nothing at all. The handler does
-                # its own admin check.
-                threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
-        elif any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases):
-            # Split on the first space only, so "!DCCore !rar Artist/Album"
-            # still hands "!rar Artist/Album" to the download handler.
-            parts = msg.split(" ", 1)
-            if len(parts) > 1:
-                # As for a search (#670): what reaches the
-                # handler is what the terminal, the debug
-                # channel and the admin chat will show.
-                requested_file = list.printable_text(parts[1]).strip()
-                threading.Thread(target=dcc.handle_download_request,
-                                args=(sock, user, requested_file, target_chan),
-                                daemon=True).start()
+        else:
+            # answer_command() since #1342.
+            answer_command(msg, msg_lower, user, user_host, target_chan, bot_aliases, sock, oserve)
 
     except Exception as cmd_err:
         print(f"[ERROR] Error handling a bot command from {user}: {cmd_err}")
