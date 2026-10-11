@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟨 Unreleased
+## 🟩 v1.16.2 (2026-10-11) - "The Hardened Release"
 
 ### 🛡️ Admin access: the script's pairing token, the console's listener and logins, and what a rehash keeps
 
