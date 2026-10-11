@@ -169,15 +169,15 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
 
     def test_the_registration_guard_accepts_001_and_376_independently(self):
         """Catches an or/and slip, which would stop the bot ever joining a channel."""
-        condition = _guard_condition_for("joined = True")
+        condition = _guard_condition_for("    answer_welcome(line, conn)")
         for code in ("001", "376"):
             with self.subTest(code=code):
-                self.assertTrue(_evaluate(condition, REAL_LINES[code], joined=False), condition)
+                self.assertTrue(_evaluate(condition, REAL_LINES[code], conn=__import__("types").SimpleNamespace(joined=False)), condition)
 
     def test_the_registration_guard_ignores_a_track_named_001(self):
-        condition = _guard_condition_for("joined = True")
+        condition = _guard_condition_for("    answer_welcome(line, conn)")
         track = ":alice!u@h PRIVMSG #dccore-test :!DCCore 001 - Enter Sandman.flac"
-        self.assertFalse(_evaluate(condition, track, joined=False), condition)
+        self.assertFalse(_evaluate(condition, track, conn=__import__("types").SimpleNamespace(joined=False)), condition)
 
     def test_the_whois_guard_is_wired_to_352_not_something_else(self):
         """Catches the guards being swapped between the 352 and 353 handlers."""

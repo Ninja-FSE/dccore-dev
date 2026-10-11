@@ -3281,6 +3281,319 @@ def ctcp_version_reply(user):
     return f"NOTICE {user} :\x01VERSION {detail}\x01\r\n"
 
 
+# Seconds after the JOIN before activation_watchdog() gives up on the
+# channels that have not confirmed (issue #9). Was a local of irc_loop().
+ACTIVATION_TIMEOUT = 20.0
+
+
+class Connection:
+    """One connection's state, shared with the threads it starts (#1306).
+
+    delayed_join(), activation_watchdog() and delayed_activate() were
+    closures over irc_loop()'s frame, which every reconnect rebinds: a
+    watchdog from a dead connection, waking 20 s later, read the NEXT
+    connection's `joined`, which is why the connect-failure paths had to
+    reset it. Each connection now has its own object and each thread reads
+    the one it was started for. The epoch check stays the staleness guard.
+    """
+
+    def __init__(self, sock, epoch):
+        self.sock = sock
+        self.epoch = epoch
+        self.joined = False             # 001 (or 376) seen
+        self.channels_confirmed = set()  # 366 seen for these
+
+
+def answer_welcome(line, conn):
+    """The server's 001 (or a 376 with no 001 before it): `conn` is
+    registered. Adopt the name the 001 gives, look at the DCC address again,
+    and start delayed_join(). irc_loop() guards on `not conn.joined` and the
+    numerics.
+
+    The body of that branch in irc_loop() until #1306, step 3 of splitting
+    the loop (docs/FUTURE.md).
+    """
+    if is_server_numeric(line, "001"):
+        adopt_registered_nick(line)
+    conn.joined = True
+    print(f"[INFO] Connected to the server. Waiting 5 seconds to settle before JOIN...")
+    # The DCC address, looked at again for this
+    # connection (#1271): the network is plainly up now,
+    # and the drop that preceded it may have been the
+    # ISP handing out a new address. Off the read thread
+    # - the lookup can take five seconds.
+    if not str(getattr(config, "MY_IP_OR_DOCK", "") or "").strip():
+        threading.Thread(target=refresh_dcc_address,
+                         daemon=True).start()
+
+
+    # Normalised, not raw: a space after a comma turns the
+    # rest of the list into a channel key and joins only the
+    # first - see join_batches(), which inherits that from
+    # configured_channels() stripping every entry.
+    #
+    # The DEBUG CHANNEL is in here too (#510). It used to be
+    # a second JOIN command sent after this one with no gap,
+    # which made it the most exposed line in the burst.
+    threading.Thread(target=delayed_join,
+                     args=(conn, channels_we_should_be_in()),
+                     daemon=True).start()
+
+
+def delayed_join(conn, channels):
+    """Five seconds after the welcome: the on-connect commands, then JOIN for
+    `channels` in batches, then the activation watchdog and the on-connect
+    check. Started by answer_welcome(); `conn` is the connection it is for.
+
+    A closure inside irc_loop() until #1306, which took the socket and bound
+    the epoch as a default argument (#1066 - read later, the epoch would be
+    the next connection's). Both are read off `conn` now.
+    """
+    socket_conn, epoch = conn.sock, conn.epoch
+    time.sleep(5)
+    # ON-CONNECT COMMANDS, BEFORE THE JOIN. The order is
+    # the point, not a preference: on Undernet, logging
+    # in to X takes +x, and +x replaces the host every
+    # person in the channel sees. Joining first puts the
+    # real host in front of everybody already sitting
+    # there, and no later mode change takes it back.
+    #
+    # So: auth, mode, THEN join. Anything that fails
+    # here is logged and the join happens anyway - a bot
+    # that will not join because one optional line was
+    # refused is worse off than one that joined without
+    # its usermode.
+    try:
+        import on_connect
+
+        commands, gap = on_connect.load()
+        if commands:
+            # COMMAND WORDS ONLY, never the arguments.
+            # These lines hold an X password, and
+            # send_debug() writes to a CHANNEL -
+            # printing one there hands it to everybody
+            # watching.
+            shown = ", ".join(on_connect.redacted(commands))
+            print(f"[CONNECT] Sending {len(commands)} "
+                  f"on-connect command(s): {shown}")
+        for index, command in enumerate(commands):
+            if index:
+                time.sleep(gap)
+            # normalize() first: translates the one
+            # client shorthand (msg -> PRIVMSG) that
+            # does not match its own wire form, so
+            # the dashboard's "exactly as you would
+            # type it into a client" is actually
+            # true for the X-login/NickServ line
+            # nearly every operator pastes in here.
+            line = on_connect.expand(
+                on_connect.normalize(command),
+                config.NICKNAME)
+            socket_conn.sendall(
+                (line + "\r\n").encode(
+                    "utf-8", errors="ignore"))
+        if commands:
+            # One more gap before the JOIN, so the last
+            # command gets the same chance to be acted
+            # on as the ones before it. A login sent
+            # immediately before a JOIN can still be in
+            # flight when the channel sees us.
+            time.sleep(gap)
+    except Exception as on_connect_err:
+        print(f"[CONNECT] On-connect commands failed "
+              f"({on_connect_err}); joining anyway.")
+    # Registered, and the commands are out: the
+    # dashboard's Resend may send them from here on,
+    # joined to the channel or not (#1085).
+    import on_connect
+    on_connect.mark_sent(epoch)
+    try:
+        # A FEW AT A TIME, NOT ALL AT ONCE (#510).
+        #
+        # This was one JOIN carrying every channel,
+        # followed by a second command for the debug
+        # channel with no gap at all. Reported live:
+        # fourteen configured channels, eleven joined,
+        # the missing ones being the tail of the line -
+        # and the debug channel, which was last of all.
+        # The server takes what it will and drops the
+        # rest, and nothing here noticed.
+        #
+        # The debug channel rides in the batching now
+        # rather than trailing it. It was the most
+        # exposed line in the burst and is the one
+        # whose loss costs the operator the message
+        # saying anything was lost.
+        wanted = channels
+        batches = join_batches(wanted)
+        for index, payload in enumerate(batches):
+            if index:
+                time.sleep(JOIN_BATCH_GAP)
+            socket_conn.sendall(
+                f"JOIN {payload}\r\n".encode(
+                    "utf-8", errors="ignore"))
+        debug_chan = str(getattr(config, 'DEBUG_CHANNEL', '') or '').strip()
+        if debug_chan:
+            print(f"[JOIN] Asked for {len(wanted)} channel(s) "
+                  f"in {len(batches)} batch(es), including the "
+                  f"debug channel {debug_chan}.")
+        else:
+            # The sentence is kept whole rather than
+            # wrapped mid-phrase: an operator greps
+            # their log for it, and so does
+            # tests/test_debug_channel_default.py.
+            print(f"[JOIN] Asked for {len(wanted)} channel(s) "
+                  f"in {len(batches)} batch(es). "
+                  f"No DEBUG_CHANNEL is set, so none was joined.")
+        # NEW (issue #9): start the watchdog HERE, right after the JOIN
+        # has actually been sent, so the timeout starts from the right moment.
+        threading.Thread(target=activation_watchdog, args=(conn,), daemon=True).start()
+        # And a look, now and then, that the on-connect
+        # commands took (#1066): in a net split the X
+        # login can go nowhere, and +x with it.
+        import on_connect
+        threading.Thread(target=on_connect.watch,
+                         args=(socket_conn, epoch),
+                         daemon=True).start()
+    except Exception as join_err:
+        print(f"[ERROR] Could not send JOIN: {join_err}")
+
+
+def activation_watchdog(conn):
+    """NEW (issue #9): forces activation after a reasonable wait, even if
+    some channels never answered the JOIN - banned, invite-only, misspelled.
+    Without this watchdog, two or more broken channels could silence ALL
+    advertising for the whole life of the connection, with no error at all."""
+    import announce
+    epoch = conn.epoch
+    time.sleep(ACTIVATION_TIMEOUT)
+    # Bail if this connection is gone. config.activation_triggered alone is not a
+    # staleness guard: the disconnect epilogue RESETS it, which re-armed exactly
+    # the threads it should have invalidated.
+    if config.connection_epoch != epoch:
+        print("[WATCHDOG] Connection changed before the timeout elapsed. Standing down.")
+        return
+    if conn.joined and not getattr(config, 'activation_triggered', False):
+        # THE WIDER SET (#510). target_channels is CHANNEL only, and
+        # deliberately so - activation must not wait on the debug
+        # channel, or one broken debug channel silences every advert.
+        # But "what never confirmed" is a different question from
+        # "may we start advertising", and answering it with the
+        # narrow set is why a debug channel lost to a truncated JOIN
+        # was not even in the list of things that went missing.
+        missing = channels_we_should_be_in_set() - conn.channels_confirmed
+        config.activation_triggered = True
+        if missing:
+            print(f"[WARNING] Activating the advert despite {len(missing)} unconfirmed channel(s): {', '.join(sorted(missing))}")
+            # TRIED AGAIN, not just reported (#510). This set is
+            # already exactly the right answer and was only ever
+            # printed; feeding it to the retry machinery gives a
+            # channel that never let us in the same bounded second
+            # chance a channel that threw us out has had since #191.
+            for unconfirmed in sorted(missing):
+                note_join_unconfirmed(unconfirmed)
+            try:
+                # notice="error", which send_debug() turns into a
+                # dashboard notice (#510). Without it the ONLY
+                # operator-facing copy of this went to the debug
+                # channel - which, when a truncated JOIN is the cause,
+                # is routinely one of the channels that went missing.
+                # The message about losing channels cannot be
+                # delivered only to one of them.
+                announce.send_debug(
+                    f"Activated after {int(ACTIVATION_TIMEOUT)}s with {config.C_BOLD}{len(missing)}{config.C_RESET} channel(s) never confirmed via NAMES: {', '.join(sorted(missing))}. Retrying them on the advert timer.",
+                    category="PART", notice="error")
+            except Exception as watchdog_debug_err:
+                print(f"[WARNING] Could not send the watchdog debug notice: {watchdog_debug_err}")
+        else:
+            print(f"[INFO] Watchdog: every channel confirmed just in time.")
+        threading.Thread(target=delayed_activate, args=(conn,), daemon=True).start()
+
+
+def delayed_activate(conn):
+    """Start advertising on `conn` once its channels are joined: five
+    seconds to settle, the channel-sync claim, the advert and the nick
+    monitor. Started by the 366 handler in irc_loop() or by
+    activation_watchdog(); does nothing for a connection that is gone.
+
+    A closure inside irc_loop() until #1306, with `sock` and `epoch` bound as
+    default arguments - the comment below gives the reason - and now read
+    off the connection it was started for.
+    """
+    sock, epoch = conn.sock, conn.epoch
+    # `sock` and `epoch` are bound as DEFAULT ARGUMENTS on purpose. Both were
+    # previously free variables resolved through irc_loop's frame, and that frame
+    # is rebound by every reconnect - so a thread from a dead connection read the
+    # CURRENT connection's values and published the wrong socket.
+    import sys
+    import time
+    import announce
+    import threading
+
+    if config.connection_epoch != epoch:
+        return
+
+    time.sleep(5)
+
+    # Re-check after sleeping: the connection can die inside this window.
+    if config.connection_epoch != epoch:
+        print("[ACTIVATE] Connection changed while settling. Abandoning stale activation.")
+        return
+
+    # Only claim channel sync if NAMES actually populated something -
+    # see claim_channel_sync(). When nothing has, the claim waits for
+    # the first NAMES of this connection instead of the next one.
+    if not claim_channel_sync(sock, epoch):
+        print("[ACTIVATE] No channel members known yet; advertising "
+              "without claiming channel sync until a channel's member "
+              "list arrives.")
+
+    oserve_mod = sys.modules.get('oserve')
+    if oserve_mod:
+        oserve_mod.bot_joined_channel = config.bot_joined_channel
+        oserve_mod.irc_connection = sock
+
+    announce.is_ready = True
+    if hasattr(announce, 'last_announce_time'):
+        announce.last_announce_time = time.time()
+
+    # Watches for the main nick to free up after a netsplit, and reclaims it
+    def background_nick_monitor(sock_inst):
+        main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
+        # Check every 10 seconds, for up to 5 minutes after JOIN
+        for _ in range(30):
+            if str(config.NICKNAME).lower() == main_nick.lower():
+                break  # Already on the main nick; stop watching
+
+            main_nick_active = False
+            with runtime.channel_users_lock():
+                if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
+                    for chan_name, users_set in config.channel_users.items():
+                        if main_nick.lower() in [u.lower() for u in users_set]:
+                            main_nick_active = True
+                            break
+
+            if not main_nick_active:
+                print(f"\n[NICK RECOVERY] The ghost nick {main_nick} timed out. Changing nick...")
+                try:
+                    # Asked for, not yet held: config.NICKNAME
+                    # follows the server's NICK event (#635).
+                    sock_inst.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
+                    break
+                except:
+                    break
+            time.sleep(10)
+
+    # Start the persistent timer in the background - with THIS activation's
+    # socket (#1306). This was `s`, irc_loop's current socket read through its
+    # frame: the stale-socket shape the comment at the top warns about.
+    threading.Thread(target=background_nick_monitor, args=(sock,), daemon=True).start()
+
+    print("[CONNECT FIX] Restarting the channel advert automatically...")
+    threading.Thread(target=announce.announce_worker, daemon=True).start()
+    config.announce_thread_alive = True
+
+
 def irc_loop():
     """The connection, PING/PONG, and every incoming PRIVMSG from Undernet."""
     global bot_joined_channel
@@ -3330,10 +3643,6 @@ def irc_loop():
             registration_failures += 1
             delay = reconnect_delay(registration_failures)
             print(f"[ERROR] Connection failed: {e}. Reconnecting in {delay:.0f} seconds...")
-            # `joined` lives in the irc_loop frame and is only reset after a SUCCESSFUL
-            # handshake, so a failed attempt used to leave it latched True from the
-            # previous connection - which is what let a stale watchdog pass its guard.
-            joined = False
             time.sleep(delay)
             continue
             
@@ -3373,7 +3682,6 @@ def irc_loop():
             try: s.close()
             except: pass
             _release_socket()
-            joined = False
             # BACKOFF: without a pause here the loop spun as fast as TCP could connect.
             # Undernet's connection throttle closes the link immediately when you come
             # back too fast, which gave tens of attempts a second and guaranteed we
@@ -3387,11 +3695,14 @@ def irc_loop():
         # a previous connection holds an older token and will bail out on its next check.
         config.connection_epoch += 1
         my_epoch = config.connection_epoch
+        # This connection's state, which the threads it starts read (#1306):
+        # their own, not whatever irc_loop's variables hold by the time they
+        # look.
+        conn = Connection(s, my_epoch)
 
         # Bytes - see take_complete_lines() for why this must not be str.
         buffer = b""
-        joined = False
-        # Reset per connection, like `joined` above and for the same reason: a
+        # Reset per connection, like `conn` above and for the same reason: a
         # reconnect to a different server may well have a different NICKLEN,
         # and the operator should be told again if it matters there too.
         announced_nicklen = False
@@ -3414,8 +3725,7 @@ def irc_loop():
         # never answered - and if two or more failed the threshold was never reached,
         # which silenced ALL advertising permanently, with no error message.
         target_channels = set(c.strip().lower() for c in config.CHANNEL.split(",") if c.strip())
-        channels_confirmed = set()
-        ACTIVATION_TIMEOUT = 20.0  # seconds after JOIN before giving up on the rest
+        channels_confirmed = conn.channels_confirmed
         last_recv_time = time.time()
 
         # ---------------------------------------------------------------------
@@ -3443,128 +3753,10 @@ def irc_loop():
         # connection on a bot that may never disconnect at all.
         recent_lines = collections.deque(maxlen=RECENT_LINE_MEMORY)
 
-        # HOISTED (issue #9): delayed_activate lives here now, once, instead of being
-        # nested inside the 366 handler - so both the ordinary NAMES path AND
-        # the timeout watchdog below can trigger the same activation logic.
-        def delayed_activate(sock=s, epoch=my_epoch):
-            # `sock` and `epoch` are bound as DEFAULT ARGUMENTS on purpose. Both were
-            # previously free variables resolved through irc_loop's frame, and that frame
-            # is rebound by every reconnect - so a thread from a dead connection read the
-            # CURRENT connection's values and published the wrong socket.
-            import sys
-            import time
-            import announce
-            import threading
-
-            if config.connection_epoch != epoch:
-                return
-
-            time.sleep(5)
-
-            # Re-check after sleeping: the connection can die inside this window.
-            if config.connection_epoch != epoch:
-                print("[ACTIVATE] Connection changed while settling. Abandoning stale activation.")
-                return
-
-            # Only claim channel sync if NAMES actually populated something -
-            # see claim_channel_sync(). When nothing has, the claim waits for
-            # the first NAMES of this connection instead of the next one.
-            if not claim_channel_sync(sock, epoch):
-                print("[ACTIVATE] No channel members known yet; advertising "
-                      "without claiming channel sync until a channel's member "
-                      "list arrives.")
-
-            oserve_mod = sys.modules.get('oserve')
-            if oserve_mod:
-                oserve_mod.bot_joined_channel = config.bot_joined_channel
-                oserve_mod.irc_connection = sock
-                
-            announce.is_ready = True
-            if hasattr(announce, 'last_announce_time'):
-                announce.last_announce_time = time.time()
-                
-            # Watches for the main nick to free up after a netsplit, and reclaims it
-            def background_nick_monitor(sock_inst):
-                main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
-                # Check every 10 seconds, for up to 5 minutes after JOIN
-                for _ in range(30):
-                    if str(config.NICKNAME).lower() == main_nick.lower():
-                        break  # Already on the main nick; stop watching
-                        
-                    main_nick_active = False
-                    with runtime.channel_users_lock():
-                        if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
-                            for chan_name, users_set in config.channel_users.items():
-                                if main_nick.lower() in [u.lower() for u in users_set]:
-                                    main_nick_active = True
-                                    break
-                                
-                    if not main_nick_active:
-                        print(f"\n[NICK RECOVERY] The ghost nick {main_nick} timed out. Changing nick...")
-                        try:
-                            # Asked for, not yet held: config.NICKNAME
-                            # follows the server's NICK event (#635).
-                            sock_inst.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
-                            break
-                        except:
-                            break
-                    time.sleep(10)
-            
-            # Start the persistent timer in the background
-            threading.Thread(target=background_nick_monitor, args=(s,), daemon=True).start()
-                
-            print("[CONNECT FIX] Restarting the channel advert automatically...")
-            threading.Thread(target=announce.announce_worker, daemon=True).start()
-            config.announce_thread_alive = True
-
-        def activation_watchdog(epoch=my_epoch):
-            """NEW (issue #9): forces activation after a reasonable wait, even if
-            some channels never answered the JOIN - banned, invite-only, misspelled.
-            Without this watchdog, two or more broken channels could silence ALL
-            advertising for the whole life of the connection, with no error at all."""
-            time.sleep(ACTIVATION_TIMEOUT)
-            # Bail if this connection is gone. config.activation_triggered alone is not a
-            # staleness guard: the disconnect epilogue RESETS it, which re-armed exactly
-            # the threads it should have invalidated.
-            if config.connection_epoch != epoch:
-                print("[WATCHDOG] Connection changed before the timeout elapsed. Standing down.")
-                return
-            if joined and not getattr(config, 'activation_triggered', False):
-                # THE WIDER SET (#510). target_channels is CHANNEL only, and
-                # deliberately so - activation must not wait on the debug
-                # channel, or one broken debug channel silences every advert.
-                # But "what never confirmed" is a different question from
-                # "may we start advertising", and answering it with the
-                # narrow set is why a debug channel lost to a truncated JOIN
-                # was not even in the list of things that went missing.
-                missing = channels_we_should_be_in_set() - channels_confirmed
-                config.activation_triggered = True
-                if missing:
-                    print(f"[WARNING] Activating the advert despite {len(missing)} unconfirmed channel(s): {', '.join(sorted(missing))}")
-                    # TRIED AGAIN, not just reported (#510). This set is
-                    # already exactly the right answer and was only ever
-                    # printed; feeding it to the retry machinery gives a
-                    # channel that never let us in the same bounded second
-                    # chance a channel that threw us out has had since #191.
-                    for unconfirmed in sorted(missing):
-                        note_join_unconfirmed(unconfirmed)
-                    try:
-                        # notice="error", which send_debug() turns into a
-                        # dashboard notice (#510). Without it the ONLY
-                        # operator-facing copy of this went to the debug
-                        # channel - which, when a truncated JOIN is the cause,
-                        # is routinely one of the channels that went missing.
-                        # The message about losing channels cannot be
-                        # delivered only to one of them.
-                        announce.send_debug(
-                            f"Activated after {int(ACTIVATION_TIMEOUT)}s with {config.C_BOLD}{len(missing)}{config.C_RESET} channel(s) never confirmed via NAMES: {', '.join(sorted(missing))}. Retrying them on the advert timer.",
-                            category="PART", notice="error")
-                    except Exception as watchdog_debug_err:
-                        print(f"[WARNING] Could not send the watchdog debug notice: {watchdog_debug_err}")
-                else:
-                    print(f"[INFO] Watchdog: every channel confirmed just in time.")
-                threading.Thread(target=delayed_activate, daemon=True).start()
-
+        # The welcome, the JOIN, the watchdog and the activation run as
+        # answer_welcome(), delayed_join(), activation_watchdog() and
+        # delayed_activate(), each with `conn` (#1306). delayed_activate() is
+        # one function so the 366 handler and the watchdog share it (issue #9).
         while True:
             try:
                 try:
@@ -3760,7 +3952,7 @@ def irc_loop():
                     # tested against it (tests/test_membership_events.py);
                     # answer_nick_refusal() does the rest (#1287).
                     if is_server_numeric(line, "433") or is_server_numeric(line, "432") or is_server_numeric(line, "437"):
-                        nick_refusals = answer_nick_refusal(line, s, joined, nick_refusals)
+                        nick_refusals = answer_nick_refusal(line, s, conn.joined, nick_refusals)
 
                     # Reclaim the main nick the moment the other client releases it
                     # Anchored twice over. The old test matched " QUIT "/" PART " anywhere,
@@ -3775,140 +3967,8 @@ def irc_loop():
 
                     # Anchored: "001" in line matched any message containing those three
                     # digits anywhere, including a perfectly ordinary track request.
-                    if not joined and (is_server_numeric(line, "001") or is_server_numeric(line, "376")):
-                        if is_server_numeric(line, "001"):
-                            adopt_registered_nick(line)
-                        joined = True
-                        print(f"[INFO] Connected to the server. Waiting 5 seconds to settle before JOIN...")
-                        # The DCC address, looked at again for this
-                        # connection (#1271): the network is plainly up now,
-                        # and the drop that preceded it may have been the
-                        # ISP handing out a new address. Off the read thread
-                        # - the lookup can take five seconds.
-                        if not str(getattr(config, "MY_IP_OR_DOCK", "") or "").strip():
-                            threading.Thread(target=refresh_dcc_address,
-                                             daemon=True).start()
-                        
-                        def delayed_join(socket_conn, channels, epoch=my_epoch):
-                            time.sleep(5)
-                            # ON-CONNECT COMMANDS, BEFORE THE JOIN. The order is
-                            # the point, not a preference: on Undernet, logging
-                            # in to X takes +x, and +x replaces the host every
-                            # person in the channel sees. Joining first puts the
-                            # real host in front of everybody already sitting
-                            # there, and no later mode change takes it back.
-                            #
-                            # So: auth, mode, THEN join. Anything that fails
-                            # here is logged and the join happens anyway - a bot
-                            # that will not join because one optional line was
-                            # refused is worse off than one that joined without
-                            # its usermode.
-                            try:
-                                import on_connect
-
-                                commands, gap = on_connect.load()
-                                if commands:
-                                    # COMMAND WORDS ONLY, never the arguments.
-                                    # These lines hold an X password, and
-                                    # send_debug() writes to a CHANNEL -
-                                    # printing one there hands it to everybody
-                                    # watching.
-                                    shown = ", ".join(on_connect.redacted(commands))
-                                    print(f"[CONNECT] Sending {len(commands)} "
-                                          f"on-connect command(s): {shown}")
-                                for index, command in enumerate(commands):
-                                    if index:
-                                        time.sleep(gap)
-                                    # normalize() first: translates the one
-                                    # client shorthand (msg -> PRIVMSG) that
-                                    # does not match its own wire form, so
-                                    # the dashboard's "exactly as you would
-                                    # type it into a client" is actually
-                                    # true for the X-login/NickServ line
-                                    # nearly every operator pastes in here.
-                                    line = on_connect.expand(
-                                        on_connect.normalize(command),
-                                        config.NICKNAME)
-                                    socket_conn.sendall(
-                                        (line + "\r\n").encode(
-                                            "utf-8", errors="ignore"))
-                                if commands:
-                                    # One more gap before the JOIN, so the last
-                                    # command gets the same chance to be acted
-                                    # on as the ones before it. A login sent
-                                    # immediately before a JOIN can still be in
-                                    # flight when the channel sees us.
-                                    time.sleep(gap)
-                            except Exception as on_connect_err:
-                                print(f"[CONNECT] On-connect commands failed "
-                                      f"({on_connect_err}); joining anyway.")
-                            # Registered, and the commands are out: the
-                            # dashboard's Resend may send them from here on,
-                            # joined to the channel or not (#1085).
-                            import on_connect
-                            on_connect.mark_sent(epoch)
-                            try:
-                                # A FEW AT A TIME, NOT ALL AT ONCE (#510).
-                                #
-                                # This was one JOIN carrying every channel,
-                                # followed by a second command for the debug
-                                # channel with no gap at all. Reported live:
-                                # fourteen configured channels, eleven joined,
-                                # the missing ones being the tail of the line -
-                                # and the debug channel, which was last of all.
-                                # The server takes what it will and drops the
-                                # rest, and nothing here noticed.
-                                #
-                                # The debug channel rides in the batching now
-                                # rather than trailing it. It was the most
-                                # exposed line in the burst and is the one
-                                # whose loss costs the operator the message
-                                # saying anything was lost.
-                                wanted = channels
-                                batches = join_batches(wanted)
-                                for index, payload in enumerate(batches):
-                                    if index:
-                                        time.sleep(JOIN_BATCH_GAP)
-                                    socket_conn.sendall(
-                                        f"JOIN {payload}\r\n".encode(
-                                            "utf-8", errors="ignore"))
-                                debug_chan = str(getattr(config, 'DEBUG_CHANNEL', '') or '').strip()
-                                if debug_chan:
-                                    print(f"[JOIN] Asked for {len(wanted)} channel(s) "
-                                          f"in {len(batches)} batch(es), including the "
-                                          f"debug channel {debug_chan}.")
-                                else:
-                                    # The sentence is kept whole rather than
-                                    # wrapped mid-phrase: an operator greps
-                                    # their log for it, and so does
-                                    # tests/test_debug_channel_default.py.
-                                    print(f"[JOIN] Asked for {len(wanted)} channel(s) "
-                                          f"in {len(batches)} batch(es). "
-                                          f"No DEBUG_CHANNEL is set, so none was joined.")
-                                # NEW (issue #9): start the watchdog HERE, right after the JOIN
-                                # has actually been sent, so the timeout starts from the right moment.
-                                threading.Thread(target=activation_watchdog, daemon=True).start()
-                                # And a look, now and then, that the on-connect
-                                # commands took (#1066): in a net split the X
-                                # login can go nowhere, and +x with it.
-                                import on_connect
-                                threading.Thread(target=on_connect.watch,
-                                                 args=(socket_conn, epoch),
-                                                 daemon=True).start()
-                            except Exception as join_err:
-                                print(f"[ERROR] Could not send JOIN: {join_err}")
-                                
-                        # Normalised, not raw: a space after a comma turns the
-                        # rest of the list into a channel key and joins only the
-                        # first - see join_batches(), which inherits that from
-                        # configured_channels() stripping every entry.
-                        #
-                        # The DEBUG CHANNEL is in here too (#510). It used to be
-                        # a second JOIN command sent after this one with no gap,
-                        # which made it the most exposed line in the burst.
-                        threading.Thread(target=delayed_join,
-                                         args=(s, channels_we_should_be_in()),
-                                         daemon=True).start()
+                    if not conn.joined and (is_server_numeric(line, "001") or is_server_numeric(line, "376")):
+                        answer_welcome(line, conn)
 
                     # A JOIN that worked, whether it was the first one or
                     # a rejoin. Clearing here rather than in the branch below
@@ -3927,7 +3987,7 @@ def irc_loop():
                         if back and runtime.channel_sync_waiting == my_epoch:
                             claim_channel_sync(s, my_epoch, late=True)
 
-                    if joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
+                    if conn.joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
                         # FIXED (issue #9): parses WHICH channel the 366 line refers to instead
                         # of just counting them. Activates only once every real target channel
                         # is confirmed - the debug channel's 366 can no longer mask a broken
@@ -3948,7 +4008,7 @@ def irc_loop():
                         if target_channels.issubset(channels_confirmed):
                             config.activation_triggered = True
                             print(f"[INFO] All channels joined successfully! Waiting 5 seconds for settle...")
-                            threading.Thread(target=delayed_activate, daemon=True).start()
+                            threading.Thread(target=delayed_activate, args=(conn,), daemon=True).start()
                             # DCCore Chat (#371 follow-up): NAMES (353/366)
                             # gives nicknames only, never a realname - so
                             # this is the earliest point a WHO round can
@@ -4661,7 +4721,7 @@ def irc_loop():
         # A link that registered and then dropped comes back in ten seconds;
         # one that never got a 001 - refused, throttled, closed during the
         # handshake - waits longer each time (#663).
-        if joined:
+        if conn.joined:
             registration_failures = 0
         else:
             registration_failures += 1

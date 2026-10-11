@@ -313,14 +313,14 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
 
     def test_the_433_handler_accepts_433_and_432_independently(self):
         """432 is ERR_ERRONEUSNICKNAME - previously matched by English wording."""
-        condition = _guard_condition_for("= answer_nick_refusal(line, s, joined, nick_refusals)")
+        condition = _guard_condition_for("= answer_nick_refusal(line, s, conn.joined, nick_refusals)")
         for key in ("433", "432"):
             with self.subTest(numeric=key):
                 self.assertTrue(_evaluate(condition, GENUINE[key]), condition)
 
     def test_the_433_handler_refuses_a_forged_part_reason(self):
         """The old PRIVMSG/NOTICE exclusion did not cover PART or QUIT reasons."""
-        condition = _guard_condition_for("= answer_nick_refusal(line, s, joined, nick_refusals)")
+        condition = _guard_condition_for("= answer_nick_refusal(line, s, conn.joined, nick_refusals)")
         for forged in (":attacker!u@h PART #dccore-test :bye 433 all",
                        ":attacker!u@h QUIT :erroneous nickname lol",
                        ":attacker!u@h TOPIC #dccore-test :read 433 rules"):
@@ -329,7 +329,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
 
     def test_a_genuine_433_mentioning_privmsg_is_still_accepted(self):
         """The dropped exclusion was not merely dead - it could reject a real one."""
-        condition = _guard_condition_for("= answer_nick_refusal(line, s, joined, nick_refusals)")
+        condition = _guard_condition_for("= answer_nick_refusal(line, s, conn.joined, nick_refusals)")
         line = ":irc.undernet.org 433 * DCCore :Nickname PRIVMSG is already in use"
         self.assertTrue(_evaluate(condition, line), condition)
 
