@@ -1312,7 +1312,6 @@ from web_lists import (  # noqa: F401
     PACK_FETCH_CONFLICT_ERROR,
     _ADVERT_LIVE_FIELDS,
     _MAX_SAFE_JS_INT,
-    _NICK_RE,
     _advert_live,
     _advert_now,
     _display_nick,

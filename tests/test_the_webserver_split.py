@@ -39,6 +39,17 @@ def module_tree(name):
         return parse_source(handle.read())
 
 
+def rebound_names(name):
+    """Names the module reassigns through `global` - a lazily built cache,
+    say. An import-back would copy the value at import time and go stale the
+    first time the module reassigns it (#1315: web_lists._NICK_RE)."""
+    found = set()
+    for node in ast.walk(module_tree(name)):
+        if isinstance(node, ast.Global):
+            found.update(node.names)
+    return found
+
+
 def defined_names(name):
     names = []
     for node in module_tree(name).body:
@@ -59,9 +70,17 @@ class WebserverStillAnswersForEveryName(unittest.TestCase):
     def test_each_is_the_same_object_there(self):
         for module in SPLIT_MODULES:
             loaded = importlib.import_module(module)
-            for name in defined_names(module):
+            for name in set(defined_names(module)) - rebound_names(module):
                 with self.subTest(module=module, name=name):
                     self.assertIs(getattr(webserver, name, None), getattr(loaded, name))
+
+    def test_a_name_the_module_reassigns_is_not_copied(self):
+        """A copy would hold the value from import time - None, for a cache
+        built on first use - while the module moves on."""
+        for module in SPLIT_MODULES:
+            for name in rebound_names(module):
+                with self.subTest(module=module, name=name):
+                    self.assertFalse(hasattr(webserver, name), "webserver holds a copy that goes stale")
 
 
 class ItStandsOnItsOwn(unittest.TestCase):
