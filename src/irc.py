@@ -3934,6 +3934,117 @@ def answer_notice(notice_parsed):
             dcc_fetch.handle_bot_reply(notice_user, notice_text)
 
 
+def answer_ctcp(line, msg, user, target_chan, sock, oserve):
+    """A CTCP request, parsed out of a PRIVMSG: DCC CHAT, SEND and RESUME offers,
+    VERSION, and the QUE and REMOVE queue commands.
+
+    The body of that branch in answer_privmsg() until #1338, step 7 of
+    splitting irc_loop() (docs/FUTURE.md). Moved unchanged; the guard stays
+    where it was, and each `return` still ends the line's handling: nothing
+    followed the branch.
+    """
+    import commands
+    ctcp_cmd = msg.strip("\x01").strip().upper()
+    # Admin console. Only ever from a private message -
+    # a DCC CHAT offer addressed to a channel is
+    # meaningless, and accepting one would mean acting
+    # on a line every user in that channel can send.
+    if (ctcp_cmd.startswith("DCC CHAT ")
+            and target_chan.lower() == config.NICKNAME.lower()):
+        import adminchat
+        adminchat.handle_dcc_chat(
+            sock, line, user, msg.strip("\x01").strip())
+        return
+    # Cross-bot file fetch: a DCC SEND offer answering
+    # a fetch WE requested (see dcc_fetch.py). Private
+    # only, same reasoning as DCC CHAT above - a DCC
+    # SEND offer addressed to a channel is meaningless
+    # and would mean acting on a line any channel
+    # member could send. Admission control lives
+    # entirely inside handle_incoming_offer(): it only
+    # proceeds if this matches a row we ourselves
+    # marked 'offered' a moment ago, so an unsolicited
+    # offer from anyone is dropped there, not here.
+    if (ctcp_cmd.startswith("DCC SEND ")
+            and target_chan.lower() == config.NICKNAME.lower()):
+        import dcc_fetch
+        threading.Thread(
+            target=dcc_fetch.handle_incoming_offer,
+            args=(sock, user, msg.strip("\x01").strip()),
+            daemon=True).start()
+        return
+    # A receiver telling us it already holds part
+    # of the file we just offered, and asking us
+    # to send from there. It will not connect
+    # until we answer with a DCC ACCEPT - which
+    # is what "Requesting resume" sitting still
+    # in mIRC forever meant: the client keeping
+    # its side of a bargain we had never been
+    # able to answer.
+    #
+    # Private only, like the two branches above.
+    # The lookup is answered INLINE - it is one dict
+    # read and it must settle the resume position
+    # before the receiver can connect - but the
+    # ACCEPT itself is paced and waits up to
+    # MSG_DELAY for a slot, which on this thread
+    # stalled every PING and every other line
+    # (#577, #602). handle_resume_request(
+    # background=True) sends it from a short
+    # thread. Admission control is entirely
+    # inside handle_resume_request() - it matches
+    # on a port WE are listening on for this exact
+    # nick, so a stray or forged line finds
+    # nothing and is dropped there.
+    if (ctcp_cmd.startswith("DCC RESUME ")
+            and target_chan.lower() == config.NICKNAME.lower()):
+        dcc.handle_resume_request(
+            sock, user, msg.strip("\x01").strip(),
+            background=True)
+        return
+    if ctcp_cmd == "VERSION":
+        # Answered inline rather than on a thread:
+        # one send, nothing read from disk. Not
+        # answered DIRECTLY to the socket any more
+        # though (see the RAM-CHECK reply below
+        # for why that changed) - queued VIP so it
+        # still jumps ahead of an ordinary
+        # per-user backlog, and paced through
+        # runtime.outbound_pacer like every other
+        # outbound line (#406).
+        #
+        # VERSION is in the is_bot_command list
+        # above, so a flooding user's own query is
+        # dropped before reaching here - but many
+        # ordinary clients send exactly one CTCP
+        # VERSION unasked, on sight, the moment
+        # they see a new nick. A bot that just
+        # joined 14 channels can collect a dozen
+        # of those within a second or two, and an
+        # unpaced responder answering each the
+        # instant it arrived was a second way to
+        # flood the bot off - ordinary politeness
+        # from a dozen strangers, nobody
+        # misbehaving, and no per-user gate to
+        # catch it because it is a dozen different
+        # users asking once each.
+        version_reply = ctcp_version_reply(user)
+        if version_reply and oserve:
+            oserve.queue_message(user, version_reply, is_vip=True)
+        return
+    if ctcp_cmd == "QUE":
+        threading.Thread(target=commands.handle_queue_check, args=(sock, user, target_chan), daemon=True).start()
+        return
+    elif ctcp_cmd == "REMOVE":
+        threading.Thread(target=commands.handle_queue_remove, args=(sock, user, target_chan), daemon=True).start()
+        return
+    elif ctcp_cmd.startswith("REMOVE "):
+        threading.Thread(target=commands.handle_queue_remove_file,
+                         args=(sock, user, target_chan, msg.strip("\x01").strip()[7:].strip()),
+                         daemon=True).start()
+        return
+
+
 def answer_privmsg(line, privmsg_parsed, sock, oserve):
     """A PRIVMSG, parsed: the flood gate, the chat and advert captures, CTCP,
     and every channel and private-message command - the whole dispatch.
@@ -4125,105 +4236,8 @@ def answer_privmsg(line, privmsg_parsed, sock, oserve):
         rotate_the_day_without_stopping_the_bot()
 
         if msg.startswith("\x01") and msg.endswith("\x01"):
-            ctcp_cmd = msg.strip("\x01").strip().upper()
-            # Admin console. Only ever from a private message -
-            # a DCC CHAT offer addressed to a channel is
-            # meaningless, and accepting one would mean acting
-            # on a line every user in that channel can send.
-            if (ctcp_cmd.startswith("DCC CHAT ")
-                    and target_chan.lower() == config.NICKNAME.lower()):
-                import adminchat
-                adminchat.handle_dcc_chat(
-                    sock, line, user, msg.strip("\x01").strip())
-                return
-            # Cross-bot file fetch: a DCC SEND offer answering
-            # a fetch WE requested (see dcc_fetch.py). Private
-            # only, same reasoning as DCC CHAT above - a DCC
-            # SEND offer addressed to a channel is meaningless
-            # and would mean acting on a line any channel
-            # member could send. Admission control lives
-            # entirely inside handle_incoming_offer(): it only
-            # proceeds if this matches a row we ourselves
-            # marked 'offered' a moment ago, so an unsolicited
-            # offer from anyone is dropped there, not here.
-            if (ctcp_cmd.startswith("DCC SEND ")
-                    and target_chan.lower() == config.NICKNAME.lower()):
-                import dcc_fetch
-                threading.Thread(
-                    target=dcc_fetch.handle_incoming_offer,
-                    args=(sock, user, msg.strip("\x01").strip()),
-                    daemon=True).start()
-                return
-            # A receiver telling us it already holds part
-            # of the file we just offered, and asking us
-            # to send from there. It will not connect
-            # until we answer with a DCC ACCEPT - which
-            # is what "Requesting resume" sitting still
-            # in mIRC forever meant: the client keeping
-            # its side of a bargain we had never been
-            # able to answer.
-            #
-            # Private only, like the two branches above.
-            # The lookup is answered INLINE - it is one dict
-            # read and it must settle the resume position
-            # before the receiver can connect - but the
-            # ACCEPT itself is paced and waits up to
-            # MSG_DELAY for a slot, which on this thread
-            # stalled every PING and every other line
-            # (#577, #602). handle_resume_request(
-            # background=True) sends it from a short
-            # thread. Admission control is entirely
-            # inside handle_resume_request() - it matches
-            # on a port WE are listening on for this exact
-            # nick, so a stray or forged line finds
-            # nothing and is dropped there.
-            if (ctcp_cmd.startswith("DCC RESUME ")
-                    and target_chan.lower() == config.NICKNAME.lower()):
-                dcc.handle_resume_request(
-                    sock, user, msg.strip("\x01").strip(),
-                    background=True)
-                return
-            if ctcp_cmd == "VERSION":
-                # Answered inline rather than on a thread:
-                # one send, nothing read from disk. Not
-                # answered DIRECTLY to the socket any more
-                # though (see the RAM-CHECK reply below
-                # for why that changed) - queued VIP so it
-                # still jumps ahead of an ordinary
-                # per-user backlog, and paced through
-                # runtime.outbound_pacer like every other
-                # outbound line (#406).
-                #
-                # VERSION is in the is_bot_command list
-                # above, so a flooding user's own query is
-                # dropped before reaching here - but many
-                # ordinary clients send exactly one CTCP
-                # VERSION unasked, on sight, the moment
-                # they see a new nick. A bot that just
-                # joined 14 channels can collect a dozen
-                # of those within a second or two, and an
-                # unpaced responder answering each the
-                # instant it arrived was a second way to
-                # flood the bot off - ordinary politeness
-                # from a dozen strangers, nobody
-                # misbehaving, and no per-user gate to
-                # catch it because it is a dozen different
-                # users asking once each.
-                version_reply = ctcp_version_reply(user)
-                if version_reply and oserve:
-                    oserve.queue_message(user, version_reply, is_vip=True)
-                return
-            if ctcp_cmd == "QUE":
-                threading.Thread(target=commands.handle_queue_check, args=(sock, user, target_chan), daemon=True).start()
-                return
-            elif ctcp_cmd == "REMOVE":
-                threading.Thread(target=commands.handle_queue_remove, args=(sock, user, target_chan), daemon=True).start()
-                return
-            elif ctcp_cmd.startswith("REMOVE "):
-                threading.Thread(target=commands.handle_queue_remove_file,
-                                 args=(sock, user, target_chan, msg.strip("\x01").strip()[7:].strip()),
-                                 daemon=True).start()
-                return
+            # answer_ctcp() since #1338.
+            answer_ctcp(line, msg, user, target_chan, sock, oserve)
         elif is_list_request(msg, msg_lower):
             threading.Thread(target=list.send_file_list, args=(sock, user, target_chan),
                              daemon=True).start()
