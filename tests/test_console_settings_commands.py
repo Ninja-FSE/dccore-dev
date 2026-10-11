@@ -26,6 +26,7 @@ if REPO_ROOT not in sys.path:
 import adminchat  # noqa: E402
 import commands  # noqa: E402
 import console_settings  # noqa: E402
+import web_settings  # noqa: E402
 import defaults as config  # noqa: E402
 import library  # noqa: E402
 import on_connect  # noqa: E402
@@ -226,7 +227,8 @@ class TheSettingsSnapshot(SettingsCase):
         import runtime
         import threading
         seen = []
-        real = webserver._settings_payload_unlocked
+        # web_settings since #1320: build_settings_payload() reads its own name.
+        real = web_settings._settings_payload_unlocked
 
         def held_by_someone():
             # RLock.locked() is new in Python 3.14, and an RLock is free to
@@ -247,8 +249,8 @@ class TheSettingsSnapshot(SettingsCase):
         def spy(settings_module):
             seen.append(held_by_someone())
             return real(settings_module)
-        webserver._settings_payload_unlocked = spy
-        self.addCleanup(setattr, webserver, "_settings_payload_unlocked", real)
+        web_settings._settings_payload_unlocked = spy
+        self.addCleanup(setattr, web_settings, "_settings_payload_unlocked", real)
         self.snapshot()
         self.assertEqual(seen, [True])
 
