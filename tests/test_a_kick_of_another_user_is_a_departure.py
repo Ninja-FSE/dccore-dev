@@ -161,7 +161,8 @@ class TheReadLoopIsWired(unittest.TestCase):
         self.assertIn("forget_channel_members(kicked_chan)", self.kick_branch())
 
     def test_the_names_reply_goes_through_the_helper(self):
-        names_branch = self.source().split('is_server_numeric(line, "353")', 1)[1][:1500]
+        # answer_names() since #1330, step 4 of splitting irc_loop().
+        names_branch = self.source().split("def answer_names(", 1)[1].split(chr(10) + "def ", 1)[0]
 
         self.assertIn("learn_channel_names(chan, names)", names_branch)
         self.assertNotIn(".update(names)", names_branch,
