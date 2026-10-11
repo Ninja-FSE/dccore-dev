@@ -115,8 +115,8 @@ GROUPS = (
         )),
         ("List settings", (
             ("Library", ("FILE_DIRECTORY", "LIST_BASE_NAME", "LIST_FORMAT", "LIST_IGNORED_EXTENSIONS")),
-            ("Film & series", ("SEPARATE_VIDEO_LIST", "LIST_VIDEO_EXTENSIONS",
-                               "LIST_VIDEO_COMPANION_EXTENSIONS")),
+            ("Film & series", ({"key": "SEPARATE_VIDEO_LIST", "label": "Separate film and series list"},
+                               "LIST_VIDEO_EXTENSIONS", "LIST_VIDEO_COMPANION_EXTENSIONS")),
             ("!rar packing", ("RAR_ENABLED", "RAR_EXTENSIONS", "RAR_BINARY", "MAX_RAR_FOLDER_SIZE", "RAR_TIMEOUT")),
             ("List banner", ("LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES", "LIST_SHOW_AUDIO_INFO")),
         )),
@@ -148,7 +148,7 @@ GROUPS = (
         )),
         ("Fetch tuning", (
             ("Slots & re-fetch", ("MAX_FETCH_SLOTS",
-                                  {"key": "AUTO_REFETCH_LISTS", "label": "Re-fetch a list when its bot has a new one"},
+                                  {"key": "AUTO_REFETCH_LISTS", "label": "Re-fetch when a bot has a new list"},
                                   "AUTO_REFETCH_INTERVAL_HOURS", "AUTO_REFETCH_MAX_PER_RUN")),
             ("Timeouts", ("FETCH_OFFER_TIMEOUT", "FETCH_TRANSFER_TIMEOUT", "FETCH_FOLDER_OFFER_TIMEOUT",
                           "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED", "FETCH_FOLDER_TRANSFER_TIMEOUT")),
@@ -199,15 +199,6 @@ GROUPS = (
                                        "CONSOLE_SHOW_FAILURES", "CONSOLE_SHOW_SEARCHES")),
             ("Debug channel", ("DEBUG_CHANNEL_FEED",)),
         )),
-        ("This mIRC window", (
-            ("", ({"widget": "mircwin"},)),
-            ("Settings window", (
-                {"note": "Drawn with DCX (scripts\\mirc\\dcx) when this mIRC can load it, with mIRC's own "
-                         "controls when not - /dccore dcx says which and why. Takes effect the next time "
-                         "the window opens."},
-                {"local": "nodcx", "label": "Use the built-in settings window, not DCX"},
-            )),
-        )),
     )),
     ("Advanced", (
         ("Debug & logging", (
@@ -226,6 +217,48 @@ GROUPS = (
             ("List build", ("LIST_SIZE_FILE", "LIST_RAWBYTES_FILE", "LIST_PROGRESS_FILE")),
             ("Console & messaging", ("ADMIN_TOKENS_FILE", "ON_CONNECT_FILE", "NOTICES_FILE",
                                      "PRIVATE_MESSAGES_FILE", "DCC_QUEUE_FILE")),
+        )),
+    )),
+    # This mIRC's own settings (dccore.ini), in the same window and form as
+    # the bot's: what was the Options dialog. The locals are saved by Apply
+    # like every other; the widgets by dccore.sw.opt.save.
+    ("Script", (
+        ("@DCCore window", (
+            ("Show in @DCCore", ({"widget": "showin"},)),
+            ("Colours", (
+                {"note": "Search text is the term searched for, the same as File names until you choose. "
+                         "Nicks and Channels are the same as their line until you choose; Nicks can also "
+                         "be per nick, a colour of its own from the name."},
+                {"widget": "showcolours"},
+            )),
+        )),
+        ("Window", (
+            ("Window", (
+                {"local": "panel", "label": "Side panel: slots, queue and totals"},
+                {"local": "titlebar", "label": "Slots, queue and speed in the title bar"},
+                {"local": "separate", "label": "Console replies in a separate window"},
+                {"local": "beep", "label": "Beep on a failed transfer"},
+                {"widget": "winlook"},
+            )),
+            ("Settings window", (
+                {"note": "Drawn with DCX (scripts\\mirc\\dcx) when this mIRC can load it, with mIRC's own "
+                         "controls when not - /dccore dcx says which and why. Takes effect the next time "
+                         "the window opens."},
+                {"local": "nodcx", "label": "Use the built-in settings window, not DCX"},
+            )),
+        )),
+        ("Connection", (
+            ("Bot", (
+                {"note": "The bot this mIRC is paired with. Reconnecting and logging in by itself when it "
+                         "comes back is under General > General Settings."},
+                {"widget": "botlink"},
+            )),
+        )),
+        ("Chat", (
+            ("DCCore Chat (public)", (
+                {"local": "chat.all", "label": "Listen on every channel the bot is in, not only the ticked ones"},
+                {"local": "chat.popup", "label": "Open the chat window when a line arrives"},
+            )),
         )),
     )),
 )

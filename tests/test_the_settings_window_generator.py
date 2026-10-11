@@ -165,7 +165,8 @@ class EverySettingHasAPlace(unittest.TestCase):
 
     def test_the_tabs_and_pages_are_the_mockups(self):
         self.assertEqual([group for group, _pages in layout.GROUPS],
-                         ["General", "Sharing", "Downloads", "Security", "Dashboard & Console", "Advanced"])
+                         ["General", "Sharing", "Downloads", "Security", "Dashboard & Console", "Advanced",
+                          "Script"])
         pages = {group: [page for page, _sections in pages] for group, pages in layout.GROUPS}
         self.assertEqual(pages["General"], ["IRC Server", "General Settings", "Channels", "Operator",
                                             "Appearance", "Advertising"])
@@ -175,7 +176,9 @@ class EverySettingHasAPlace(unittest.TestCase):
         self.assertEqual(pages["Downloads"], ["List discovery", "Fetch tuning", "Queue"])
         self.assertEqual(pages["Security"], ["Anti-flood", "Bans & ignores", "Private messages",
                                              "Admin console"])
-        self.assertEqual(pages["Dashboard & Console"], ["Web dashboard", "Console feed", "This mIRC window"])
+        self.assertEqual(pages["Dashboard & Console"], ["Web dashboard", "Console feed"])
+        # this mIRC's own settings, the Options dialog that was, in the same form
+        self.assertEqual(pages["Script"], ["@DCCore window", "Window", "Connection", "Chat"])
         self.assertEqual(pages["Advanced"], ["Debug & logging", "File locations"])
 
 
@@ -217,7 +220,7 @@ class TheGeneratorRefusesABadLayout(unittest.TestCase):
         # List settings is two roomy columns; a check that fits one column of
         # the page's width but not half of it makes it one column instead
         def wider(groups):
-            groups[1][1][2][1][1][1].append({"local": "x", "label": "A check box label " * 5})
+            groups[1][1][2][1][1][1].append({"local": "x", "label": "A check box label " * 3})
         builder = self.build(layout_copy(GROUPS=with_groups(wider)))
         page = next(number for number, _group, name in builder.pages if name == "List settings")
         self.assertEqual(builder.page_layout[page], "compact 1")

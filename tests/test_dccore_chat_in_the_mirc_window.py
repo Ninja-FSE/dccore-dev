@@ -271,7 +271,7 @@ class ItSaysItIsPublic(unittest.TestCase):
         title = statements(block(text, "alias dccore.chat.title"))
         self.assertTrue(any("DCCore Chat $dccore.dot public" in s for s in title))
         self.assertIn("dccore.chat.sys Public: everyone in the channel reads what is typed here", text)
-        self.assertIn('box "DCCore Chat (public)", 600,', text)
+        self.assertIn('box "DCCore Chat (public)", ', text)
 
     def test_an_arriving_line_does_not_take_the_focus(self):
         body = statements(block(script(), "alias dccore.chat.window"))
@@ -337,12 +337,13 @@ class TheWindowIsTheInterface(unittest.TestCase):
         self.assertIn("dccore.set chat.to $1", body)
         self.assertTrue(any("$addtok($dccore.opt(chat.listen),$1,32)" in s for s in body))
 
-    def test_the_options_dialog_keeps_both_boxes(self):
+    def test_the_settings_window_keeps_both_switches(self):
         text = script()
-        init = block(text, "on *:dialog:dccore.opt:init:0:")
-        ok = block(text, "on *:dialog:dccore.opt:sclick:1:")
-        self.assertIn("if ($dccore.opt(chat.all)) { did -c dccore.opt 601 }", init)
-        self.assertIn("hadd dccore chat.popup $did(dccore.opt,602).state", ok)
+        data = text.split("alias dccore.sw.data {", 1)[1].split("\n}", 1)[0]
+        for option in ("chat.all", "chat.popup"):
+            self.assertIn("\n  hadd dccore.swm lo.%s " % option, data)
+        self.assertIn("if (%state != $dccore.opt(%o)) { hadd dccore %o %state | inc %n }",
+                      block(text, "alias dccore.sw.savelocal"))
 
     def test_no_flood_table_of_its_own(self):
         """The bot limits what arrives; a second limit here would only hide

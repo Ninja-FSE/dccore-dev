@@ -901,33 +901,40 @@ the bot's network fills it in. Closing the window does not stop it opening next 
 **Open when mIRC starts** in the options does. DCCore Chat and the Downloads
 window can open the same way; both are off by default.
 
-### Options
+### Script Settings
 
-`/dccore options` (or right-click → Script Settings):
+`/dccore options` (or right-click → Script Settings) opens the settings
+window on its **Script** tab: this mIRC's own settings, in the same form
+as the bot's, saved by Apply or OK like everything else in the window.
+(They were a dialog of their own, "Options", until dccore.mrc 1.20.)
 
-- a tickbox and a colour for each kind of event - requests, queue
-  positions, sends, failures, searches, joins/parts/quits, bans, other log
-  lines - plus the colour of file names, of console replies and of the side
-  panel's headings, and how
-  often the `[STATUS]` line is written when the side panel is off (0 = never);
-- under those, the colours inside a line (dccore.mrc 1.18 or later): **Search
-  text** (the searched term; *same as File names* until you choose), **Nicks** and
-  **Channels** (both *same as the line*, no colour of their own, until you choose).
-  **Nicks** can also be *per nick*: each nick gets a colour of its own from its
-  name, the same every time whatever its case, out of the colours that can be
-  read on the window's background. A new choice colours new lines; what is
-  already in the window stays as it was drawn;
-- the side panel, the title bar figures, console replies in a separate
-  window, the beep, the fixed-width font and its size (the Status window's
-  size until you set one - on a high-resolution screen you may want a
-  bigger number), and the window's background colour (one of mIRC's sixteen,
-  or "none" to leave the window as mIRC has it). mIRC has no per-window
-  colour setting, so the script writes a one-pixel picture of the colour
-  beside itself (`dccore-bg-<n>.bmp`) and tiles it behind the text;
-- the bot's nick, whether the script reconnects by itself, the pairing
-  state with **Pair again...** and **Forget token**.
-- **Open when mIRC starts (minimised)**: `@DCCore` (on by default),
-  `@DCCore-Chat` and `@DCCore-Downloads` (both off by default).
+- **@DCCore window**: a tickbox and a colour for each kind of event -
+  requests, queue positions, sends, failures, searches, joins/parts/quits,
+  bans, other log lines - and how often the `[STATUS]` line is written when
+  the side panel is off (0 = never); then the colours of file names, of
+  console replies and of the side panel's headings, and the colours inside a
+  line: **Search text** (the searched term; *same as File names* until you
+  choose), **Nicks** and **Channels** (both *same as the line*, no colour of
+  their own, until you choose). **Nicks** can also be *per nick*: each nick
+  gets a colour of its own from its name, the same every time whatever its
+  case, out of the colours that can be read on the window's background. A
+  new choice colours new lines; what is already in the window stays as it
+  was drawn.
+- **Window**: the side panel, the title bar figures, console replies in a
+  separate window, the beep, the fixed-width font and its size (the Status
+  window's size until you set one - on a high-resolution screen you may
+  want a bigger number), the window's background colour (one of mIRC's
+  sixteen, or "none" to leave the window as mIRC has it; mIRC has no
+  per-window colour setting, so the script writes a one-pixel picture of the
+  colour beside itself, `dccore-bg-<n>.bmp`, and tiles it behind the text),
+  how many finished downloads the Downloads window shows, and whether the
+  settings window itself is drawn with DCX.
+- **Connection**: the bot's nick, the pairing state with **Pair again...**
+  and **Forget token**, and whether the console feed is on (the bot's own
+  state, never saved here). Reconnecting by itself is under **General →
+  General Settings**, with the windows to open when mIRC starts.
+- **Chat**: whether DCCore Chat listens on every channel, and opens when a
+  line arrives.
 
 These are the script's own filters, kept by mIRC in `dccore.ini`. The
 bot's **Settings → Console feed** tickboxes remain the ceiling on what is
@@ -1021,8 +1028,8 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
 - **Appearance**: the theme and the six custom colours as menus of mIRC's
   sixteen. **Preview** draws the sample advert and notice, with the colours as
   chosen and not saved, in `@DCCore-preview`.
-- **This mIRC window** opens the old **Options** dialog - `/dccore options` is
-  still that one.
+- **Script** holds this mIRC's own settings (see *Script Settings* above);
+  `/dccore options` opens the window on that tab.
 - **Paths** are the bot's. The **...** buttons that browse for one work only when
   the bot runs on this PC - the console connection is 127.0.0.1, or the computer
   name the bot reports (`machine:` in its `CAPS` line) is this one's; otherwise
@@ -1048,7 +1055,7 @@ whether the block is up to date.
 /dccore disconnect           close the chat and stop reconnecting
 /dccore unpair               forget the token here and revoke it on the bot
 /dccore trust                accept the bot's current host as the one to send the token to
-/dccore options              what to show, colours, panel, title bar, beep, windows at start
+/dccore options              this mIRC's own settings: the settings window on its Script tab
 /dccore settings             the bot's own settings, as its dashboard's Settings page has them
 /dccore dcx [check]          whether the settings window can draw with DCX, and why not; check tests it in this mIRC
 /dccore window               open or focus @DCCore

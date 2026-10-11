@@ -129,7 +129,7 @@ def slot_ids():
     return set(range(1020, 1020 + int(generated_data()["slots"])))
 
 
-GLOBAL_IDS = set(range(1001, 1007)) | {1012, 1013, 1014, 1015, 1016, 1017, 1018} | slot_ids()
+GLOBAL_IDS = set(range(1001, 1008)) | {1012, 1013, 1014, 1015, 1016, 1017, 1018} | slot_ids()
 
 
 # ---------------------------------------------------------------------------
@@ -546,7 +546,7 @@ class TheDialog(unittest.TestCase):
     def test_ids_are_unique_and_clear_of_the_other_dialogs(self):
         ids = [c[2] for c in self.controls]
         self.assertEqual(len(ids), len(set(ids)))
-        others = {c[2] for c in dialog("dccore.opt")} | {c[2] for c in dialog("dccore.dq")}
+        others = {c[2] for c in dialog("dccore.dq")}
         self.assertEqual(set(ids) & others, set())
         self.assertGreater(min(ids), 1000)
 
@@ -623,7 +623,7 @@ class TheDialog(unittest.TestCase):
     def test_the_tabs_are_a_strip_above_the_pages(self):
         tabs = [c for c in self.controls if c[0] == "tab"]
         self.assertEqual([t[1] for t in tabs], ["General", "Sharing", "Downloads", "Security",
-                                                "Dashboard & Console", "Advanced"])
+                                                "Dashboard & Console", "Advanced", "Script"])
         top = min(c[4] for c in self.controls if c[0] != "tab")
         self.assertLessEqual(tabs[0][4] + tabs[0][6], top)
 
@@ -659,16 +659,22 @@ class TheWindowsBehaviour(unittest.TestCase):
         for match in re.finditer(r"\$input\(([^%][^)]*)\)", handwritten()):
             self.assertEqual(match.group(1).count(","), 2, match.group(0))
 
-    def test_this_mirc_window_page_opens_the_old_options(self):
-        self.assertIn("if (%id == 1616) { dccore.options | return }", alias("dccore.sw.click"))
-        self.assertIn('"@DCCore window options..."', block("dialog dccore.set {"))
-        # /dccore options is still the old dialog
+    def test_script_settings_open_the_window_on_its_script_tab(self):
+        # /dccore options and Script Settings in the menus: the same window
+        self.assertEqual(statements(alias("dccore.options")), ["dccore.settings script"])
         self.assertIn("if (%cmd == options) { dccore.options | return }", alias("dccore"))
         self.assertIn("if (%cmd == settings) { dccore.settings | return }", alias("dccore"))
+        settings = alias("dccore.settings")
+        self.assertIn("hadd dccore.live sw.open $iif($1 == script,script,general)", settings)
+        self.assertIn("if ($1 == script) { dccore.sw.go tab $dccore.sw.group(Script) }", settings)
+        self.assertIn("dccore.sw.tab $iif($hget(dccore.live,sw.open) == script,$dccore.sw.group(Script),1)",
+                      alias("dccore.sw.init"))
+        self.assertNotIn("dialog dccore.opt {", code())
 
     def test_the_local_switches_are_this_mircs(self):
         data = generated_data()
-        self.assertEqual(data["locals"].split(), ["start.main", "start.chat", "start.downloads", "auto", "nodcx"])
+        self.assertEqual(data["locals"].split(), ["start.main", "start.chat", "start.downloads", "auto", "panel",
+                                          "titlebar", "separate", "beep", "nodcx", "chat.all", "chat.popup"])
         save = alias("dccore.sw.savelocal")
         self.assertIn("if (%state != $dccore.opt(%o)) { hadd dccore %o %state | inc %n }", save)
         self.assertIn("if (%n) { dccore.save }", save)
@@ -680,10 +686,10 @@ class TheWindowsBehaviour(unittest.TestCase):
         for menu in menus:
             lines = [line.strip() for line in menu.split("\n")]
             for n, line in enumerate(lines):
-                if line.lstrip(".").startswith("Options...:"):
+                if line.lstrip(".").startswith("Script Settings...:"):
                     with_options += 1
                     dots = line[:len(line) - len(line.lstrip("."))]
-                    self.assertEqual(lines[n + 1], dots + "Settings...:dccore.settings")
+                    self.assertEqual(lines[n + 1], dots + "Bot Settings...:dccore.settings")
         self.assertEqual(with_options, 3)
         self.assertIn("\n  Bot Settings:dccore.settings\n", block("menu @DCCore {"))
 

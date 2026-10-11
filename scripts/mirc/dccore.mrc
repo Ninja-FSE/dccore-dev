@@ -1490,8 +1490,8 @@ menu @DCCore-Downloads {
   Clear the finished ones...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
   -
   Open the dashboard in the browser:dccore.dl.web
-  Options...:dccore.options
-  Settings...:dccore.settings
+  Script Settings...:dccore.options
+  Bot Settings...:dccore.settings
   Close:window -c @DCCore-Downloads
 }
 
@@ -1756,214 +1756,106 @@ menu status,channel {
   .Fetch the changed lists:dccore fetch
   .Command list:dccore
   .$iif($chat($dccore.bot),Disconnect,Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
-  .Options...:dccore.options
-  .Settings...:dccore.settings
+  .Script Settings...:dccore.options
+  .Bot Settings...:dccore.settings
 }
 
 ; ---------------------------------------------------------------------
-;  Options dialog
+;  Script Settings: this mIRC's own settings, on the settings window's
+;  Script tab (#1288)
 ; ---------------------------------------------------------------------
+;
+;  What @DCCore shows and in which colours, the window's look, the bot
+;  this mIRC is paired with, DCCore Chat - kept in dccore.ini beside the
+;  script, never on the bot. They were the Options dialog; they are pages
+;  of the settings window now, in its form, and /dccore options or Script
+;  Settings in the menus open the window on that tab. The checks among
+;  them are the window's locals (dccore.sw.savelocal); the menus, the
+;  fields, the pairing line and the console feed check are filled by
+;  dccore.sw.opt.fill and read back by dccore.sw.opt.save, which Apply
+;  runs and which redraws what changed. The console feed check is the
+;  bot's own live state, never saved here.
 
-alias dccore.options {
-  dccore.init
-  if ($dialog(dccore.opt)) { dialog -v dccore.opt | return }
-  dialog -m dccore.opt dccore.opt
-}
-
-dialog dccore.opt {
-  title "DCCore window - options"
-  size -1 -1 322 340
-  option dbu
-  box "Show in @DCCore", 100, 5 3 312 126
-  check "Requests (who asked for what)", 101, 10 13 170 10
-  check "Queue positions", 102, 10 24 170 10
-  check "Sends: starting, resuming, done", 103, 10 35 170 10
-  check "Failed transfers", 104, 10 46 170 10
-  check "Searches and result counts", 105, 10 57 170 10
-  check "Joins, parts, quits of queued users", 106, 10 68 170 10
-  check "Bans, mutes, floods", 107, 10 79 170 10
-  check "Other log lines", 108, 10 90 170 10
-  combo 201, 192 12 52 70, drop
-  combo 202, 192 23 52 70, drop
-  combo 203, 192 34 52 70, drop
-  combo 204, 192 45 52 70, drop
-  combo 205, 192 56 52 70, drop
-  combo 206, 192 67 52 70, drop
-  combo 207, 192 78 52 70, drop
-  combo 208, 192 89 52 70, drop
-  text "File names", 210, 248 14 66 8
-  combo 211, 248 23 52 70, drop
-  text "Console replies", 212, 248 36 66 8
-  combo 213, 248 45 52 70, drop
-  text "Status every", 214, 248 60 66 8
-  edit "", 215, 248 69 18 11, autohs
-  text "min, 0 = off", 216, 268 71 49 8
-  text "Panel headings", 217, 248 83 66 8
-  combo 218, 248 91 52 70, drop
-  text "Search text", 220, 10 104 92 8
-  combo 221, 10 113 92 80, drop
-  text "Nicks", 222, 112 104 92 8
-  combo 223, 112 113 92 80, drop
-  text "Channels", 224, 214 104 92 8
-  combo 225, 214 113 92 80, drop
-  box "Window", 300, 5 132 312 58
-  check "Side panel: slots, queue and totals", 301, 10 142 170 10
-  check "Slots, queue and speed in the title bar", 302, 10 153 170 10
-  check "Console replies in a separate window", 303, 10 164 170 10
-  check "Beep on a failed transfer", 304, 192 142 118 10
-  check "Fixed-width font, size", 305, 192 153 100 10
-  edit "", 306, 294 152 18 11, autohs
-  text "Finished downloads to show", 309, 10 177 130 8
-  edit "", 310, 142 175 18 11, autohs
-  text "Background", 307, 192 166 48 8
-  combo 308, 242 164 56 70, drop
-  box "Connection", 400, 5 193 312 63
-  text "Bot nick", 401, 10 205 36 8
-  edit "", 402, 48 203 56 11, autohs
-  text "", 403, 110 205 204 8
-  check "Reconnect and log in by itself when the bot comes back", 404, 10 218 300 10
-  check "Console feed on (also requests and sends - not just status)", 405, 10 230 300 10
-  check "Check GitHub for a new DCCore version", 406, 10 242 260 10
-  box "DCCore Chat (public)", 600, 5 259 312 36
-  check "Listen on every channel the bot is in, not only the ticked ones", 601, 10 269 300 10
-  check "Open the chat window when a line arrives", 602, 10 280 300 10
-  box "Open when mIRC starts (minimised)", 700, 5 298 312 24
-  check "@DCCore", 701, 10 308 60 10
-  check "@DCCore-Chat", 702, 90 308 80 10
-  check "@DCCore-Downloads", 703, 192 308 110 10
-  button "OK", 1, 232 326 40 12, ok default
-  button "Cancel", 2, 276 326 40 12, cancel
-  button "Pair again...", 501, 5 326 46 12
-  button "Forget token", 502, 54 326 46 12
-}
+alias dccore.options { dccore.settings script }
 
 alias dccore.colours { return 00 white,01 black,02 navy,03 green,04 red,05 maroon,06 purple,07 orange,08 yellow,09 lime,10 teal,11 cyan,12 blue,13 pink,14 grey,15 silver }
 alias dccore.groups { return request queued sends fail search joins bans info }
 
-on *:dialog:dccore.opt:init:0: {
+; The Script pages filled from dccore.ini: the line types' checks and
+; colours (1620 up, a check and a menu each), the colours of file names,
+; console replies, panel headings, search text, nicks and channels (1640
+; to 1645), the status line's minutes (1637), the font (1670, 1671), the
+; background (1673), the finished downloads shown (1675), the bot's nick
+; and pairing (1681, 1682), the console feed (1685).
+alias dccore.sw.opt.fill {
   var %i = 1
   while (%i <= 8) {
     var %g = $gettok($dccore.groups,%i,32)
-    if ($dccore.opt(show. $+ %g)) { did -c dccore.opt $calc(100 + %i) }
-    dccore.fillcombo $calc(200 + %i) $dccore.opt(col. $+ %g)
+    if ($dccore.opt(show. $+ %g)) { did -c dccore.set $calc(1618 + 2 * %i) }
+    dccore.fillcombo $calc(1619 + 2 * %i) $dccore.opt(col. $+ %g)
     inc %i
   }
-  dccore.fillcombo 211 $dccore.opt(col.name)
-  dccore.fillcombo 213 $dccore.opt(col.console)
-  dccore.fillcombo 218 $dccore.opt(col.head)
-  dccore.fillspan 221 $dccore.opt(col.term) name -1
-  dccore.fillspan 223 $dccore.opt(col.nick) -1 per
-  dccore.fillspan 225 $dccore.opt(col.chan) -1
-  did -ra dccore.opt 215 $dccore.opt(statusmin)
-  if ($dccore.opt(panel)) { did -c dccore.opt 301 }
-  if ($dccore.opt(titlebar)) { did -c dccore.opt 302 }
-  if ($dccore.opt(separate)) { did -c dccore.opt 303 }
-  if ($dccore.opt(beep)) { did -c dccore.opt 304 }
-  if ($dccore.opt(font)) { did -c dccore.opt 305 }
-  did -ra dccore.opt 306 $dccore.fontsize
-  did -ra dccore.opt 310 $dccore.dl.rows
-  dccore.fillbg
-  if ($dccore.bot) { did -ra dccore.opt 402 $dccore.bot }
-  did -ra dccore.opt 403 $iif($dccore.opt(token),Paired $dccore.opt(paired) (token in dccore.ini),Not paired: the bot will ask for the password)
-  if ($dccore.opt(auto)) { did -c dccore.opt 404 }
-  ; The bot's own setting, not a local pref (#572 follow-up) - nothing is
+  dccore.fillcombo 1640 $dccore.opt(col.name)
+  dccore.fillcombo 1641 $dccore.opt(col.console)
+  dccore.fillcombo 1642 $dccore.opt(col.head)
+  dccore.fillspan 1643 $dccore.opt(col.term) name -1
+  dccore.fillspan 1644 $dccore.opt(col.nick) -1 per
+  dccore.fillspan 1645 $dccore.opt(col.chan) -1
+  did -ra dccore.set 1637 $dccore.opt(statusmin)
+  if ($dccore.opt(font)) { did -c dccore.set 1670 }
+  did -ra dccore.set 1671 $dccore.fontsize
+  dccore.fillbg 1673
+  did -ra dccore.set 1675 $dccore.dl.rows
+  if ($dccore.bot) { did -ra dccore.set 1681 $dccore.bot }
+  did -ra dccore.set 1682 $iif($dccore.opt(token),Paired $dccore.opt(paired) (token in dccore.ini),Not paired: the bot will ask for the password)
+  ; The bot's own setting, not a local pref (#572 follow-up): nothing is
   ; saved for it in dccore.ini, it lives only in dccore.live, refreshed
-  ; every time the bot says HELLO. Unknown (never told yet - a dialog
+  ; every time the bot says HELLO. Unknown (never told yet - a window
   ; opened in the instant after connecting) leaves it unchecked rather
-  ; than guessing either way.
-  ; Same "unknown leaves it unchecked" reasoning as checkupdates just above -
-  ; dccore.live, never dccore.ini (#1006 follow-up).
-  if ($dccore.st(consolefeed) == on) { did -c dccore.opt 405 }
-  if ($dccore.st(checkupdates) == on) { did -c dccore.opt 406 }
-  if ($dccore.opt(chat.all)) { did -c dccore.opt 601 }
-  if ($dccore.opt(chat.popup)) { did -c dccore.opt 602 }
-  if ($dccore.opt(start.main)) { did -c dccore.opt 701 }
-  if ($dccore.opt(start.chat)) { did -c dccore.opt 702 }
-  if ($dccore.opt(start.downloads)) { did -c dccore.opt 703 }
+  ; than guessing either way (#1006 follow-up).
+  if ($dccore.st(consolefeed) == on) { did -c dccore.set 1685 }
+  hadd dccore.sws opt.sig $dccore.sw.opt.sig
 }
-; "none" first, then the sixteen colours: the selected line is the colour + 2
-alias dccore.fillbg {
-  var %i = 1
-  did -a dccore.opt 308 none (mIRC's)
-  while (%i <= 16) { did -a dccore.opt 308 $gettok($dccore.colours,%i,44) | inc %i }
-  did -c dccore.opt 308 $calc($dccore.opt(bg) + 2)
+; Every one of those controls as it is now, in one line: what "changed"
+; means for them (the checks among the locals have their own test)
+alias dccore.sw.opt.sig {
+  var %i = 1, %s
+  while (%i <= 8) { %s = %s $did(dccore.set,$calc(1618 + 2 * %i)).state $did(dccore.set,$calc(1619 + 2 * %i)).sel | inc %i }
+  %i = 1640
+  while (%i <= 1645) { %s = %s $did(dccore.set,%i).sel | inc %i }
+  return %s $did(dccore.set,1637).text $did(dccore.set,1670).state $did(dccore.set,1671).text $did(dccore.set,1673).sel $did(dccore.set,1675).text $did(dccore.set,1681).text $did(dccore.set,1685).state
 }
-alias dccore.fillcombo {
-  var %i = 1
-  while (%i <= 16) { did -a dccore.opt $1 $gettok($dccore.colours,%i,44) | inc %i }
-  did -c dccore.opt $1 $calc($2 + 1)
-}
-; The nick, channel and search text combos (#1259): their own lines first,
-; then the sixteen colours. $1 the combo, $2 the saved value, $3- the values
-; of the lines before the colours, in order (-1 "same as the line", per
-; "per nick", name "same as File names"). With N such lines, colour C is
-; line C + N + 1.
-alias dccore.fillspan {
-  var %own = $3-, %n = $numtok(%own,32), %i = 1
-  while (%i <= %n) { did -a dccore.opt $1 $dccore.spanlabel($gettok(%own,%i,32)) | inc %i }
-  %i = 1
-  while (%i <= 16) { did -a dccore.opt $1 $gettok($dccore.colours,%i,44) | inc %i }
-  var %at = $findtok(%own,$2,1,32)
-  if (!%at) { %at = $iif($2 isnum 0-15,$calc($2 + %n + 1),1) }
-  did -c dccore.opt $1 %at
-}
-alias dccore.spanlabel {
-  if ($1 == name) { return same as File names }
-  if ($1 == per) { return per nick }
-  return same as the line
-}
-; What the selected line of such a combo means: $1 the combo, $2 the same
-; values dccore.fillspan was given, as one argument.
-alias dccore.spanval {
-  var %sel = $did(dccore.opt,$1).sel, %n = $numtok($2,32)
-  if (%sel <= %n) { return $gettok($2,$iif(%sel < 1,1,%sel),32) }
-  return $calc(%sel - %n - 1)
-}
-on *:dialog:dccore.opt:sclick:1: {
-  var %i = 1
-  var %panel = $dccore.opt(panel)
-  var %bg = $dccore.opt(bg)
-  var %dl = $dccore.dl.rows
+alias dccore.sw.opt.dirty { return $iif($dccore.sw.opt.sig === $dccore.sw.s(opt.sig),$false,$true) }
+; Apply: this mIRC's switches (the locals) and the pages above into
+; dccore.ini, and the window redrawn where that changes it. How many
+; switches changed.
+alias dccore.sw.opt.save {
+  var %panel = $dccore.opt(panel), %bg = $dccore.opt(bg), %dl = $dccore.dl.rows, %n = $dccore.sw.savelocal, %i = 1
   while (%i <= 8) {
     var %g = $gettok($dccore.groups,%i,32)
-    hadd dccore show. $+ %g $did(dccore.opt,$calc(100 + %i)).state
-    hadd dccore col. $+ %g $calc($did(dccore.opt,$calc(200 + %i)).sel - 1)
+    hadd dccore show. $+ %g $did(dccore.set,$calc(1618 + 2 * %i)).state
+    hadd dccore col. $+ %g $calc($did(dccore.set,$calc(1619 + 2 * %i)).sel - 1)
     inc %i
   }
-  hadd dccore col.name $calc($did(dccore.opt,211).sel - 1)
-  hadd dccore col.console $calc($did(dccore.opt,213).sel - 1)
-  hadd dccore col.head $calc($did(dccore.opt,218).sel - 1)
-  hadd dccore col.term $dccore.spanval(221,name -1)
-  hadd dccore col.nick $dccore.spanval(223,-1 per)
-  hadd dccore col.chan $dccore.spanval(225,-1)
-  hadd dccore statusmin $iif($did(dccore.opt,215).text isnum,$int($did(dccore.opt,215).text),5)
-  hadd dccore panel $did(dccore.opt,301).state
-  hadd dccore titlebar $did(dccore.opt,302).state
-  hadd dccore separate $did(dccore.opt,303).state
-  hadd dccore beep $did(dccore.opt,304).state
-  hadd dccore font $did(dccore.opt,305).state
-  if ($did(dccore.opt,306).text isnum) && ($did(dccore.opt,306).text >= 6) { hadd dccore fontsize $did(dccore.opt,306).text }
-  hadd dccore bg $calc($did(dccore.opt,308).sel - 2)
-  hadd dccore dlfinished $iif($did(dccore.opt,310).text isnum 1-15,$int($did(dccore.opt,310).text),15)
-  hadd dccore auto $did(dccore.opt,404).state
-  hadd dccore chat.all $did(dccore.opt,601).state
-  hadd dccore chat.popup $did(dccore.opt,602).state
-  hadd dccore start.main $did(dccore.opt,701).state
-  hadd dccore start.chat $did(dccore.opt,702).state
-  hadd dccore start.downloads $did(dccore.opt,703).state
-  if ($did(dccore.opt,402).text != $null) { hadd dccore bot $did(dccore.opt,402).text }
+  hadd dccore col.name $calc($did(dccore.set,1640).sel - 1)
+  hadd dccore col.console $calc($did(dccore.set,1641).sel - 1)
+  hadd dccore col.head $calc($did(dccore.set,1642).sel - 1)
+  hadd dccore col.term $dccore.spanval(1643,name -1)
+  hadd dccore col.nick $dccore.spanval(1644,-1 per)
+  hadd dccore col.chan $dccore.spanval(1645,-1)
+  hadd dccore statusmin $iif($did(dccore.set,1637).text isnum,$int($did(dccore.set,1637).text),5)
+  hadd dccore font $did(dccore.set,1670).state
+  if ($did(dccore.set,1671).text isnum) && ($did(dccore.set,1671).text >= 6) { hadd dccore fontsize $did(dccore.set,1671).text }
+  hadd dccore bg $calc($did(dccore.set,1673).sel - 2)
+  hadd dccore dlfinished $iif($did(dccore.set,1675).text isnum 1-15,$int($did(dccore.set,1675).text),15)
+  if ($did(dccore.set,1681).text != $null) { hadd dccore bot $did(dccore.set,1681).text }
   dccore.save
-  ; checkupdates is the bot's own setting (#572 follow-up): sent only when
-  ; the checkbox actually disagrees with what the bot last told us, so
-  ; opening and closing the dialog untouched does not trigger a rehash.
-  ; And only once the bot HAS told us: before its first CHECKUPDATES line
-  ; the state is empty, the box shows unticked, and an empty state never
-  ; equals "off" - so OK pressed in that moment used to turn the check off.
-  var %checkupdates = $iif($did(dccore.opt,406).state == 1,on,off)
-  if ($dccore.st(checkupdates) != $null && %checkupdates != $dccore.st(checkupdates)) { dccore.send checkupdates %checkupdates }
-  ; consolefeed (#1006 follow-up): same "only when it actually disagrees,
-  ; and only once the bot has told us" reasoning as checkupdates above.
-  var %consolefeed = $iif($did(dccore.opt,405).state == 1,on,off)
+  ; consolefeed is the bot's own (#1006 follow-up): sent only when the
+  ; check disagrees with what the bot last told us, so an Apply that did
+  ; not touch it does not rehash the bot - and only once the bot HAS told
+  ; us: before its first line the state is empty, the box shows unticked,
+  ; and empty never equals "off"
+  var %consolefeed = $iif($did(dccore.set,1685).state == 1,on,off)
   if ($dccore.st(consolefeed) != $null && %consolefeed != $dccore.st(consolefeed)) { dccore.send consolefeed %consolefeed }
   if ($window($dccore.dl.win)) && (%dl != $dccore.dl.rows) { dccore.dl.tell }
   if ($window($dccore.win)) {
@@ -1973,15 +1865,57 @@ on *:dialog:dccore.opt:sclick:1: {
     dccore.title
     dccore.panel
   }
+  hadd dccore.sws opt.sig $dccore.sw.opt.sig
+  return %n
 }
-on *:dialog:dccore.opt:sclick:501: {
-  if ($did(dccore.opt,402).text != $null) { dccore.set bot $did(dccore.opt,402).text }
-  dialog -x dccore.opt
+; Pair again, Forget token: the window closes and the pairing takes over
+alias dccore.sw.opt.pair {
+  if ($did(dccore.set,1681).text != $null) { dccore.set bot $did(dccore.set,1681).text }
+  dialog -x dccore.set
   dccore pair
 }
-on *:dialog:dccore.opt:sclick:502: {
-  dialog -x dccore.opt
+alias dccore.sw.opt.unpair {
+  dialog -x dccore.set
   dccore unpair
+}
+; $1 a menu: "none" first, then the sixteen colours - the selected line is the colour + 2
+alias dccore.fillbg {
+  var %i = 1
+  did -a dccore.set $1 none (mIRC's)
+  while (%i <= 16) { did -a dccore.set $1 $gettok($dccore.colours,%i,44) | inc %i }
+  did -c dccore.set $1 $calc($dccore.opt(bg) + 2)
+}
+; $1 a menu, $2 the saved colour: the sixteen colours, colour C on line C + 1
+alias dccore.fillcombo {
+  var %i = 1
+  while (%i <= 16) { did -a dccore.set $1 $gettok($dccore.colours,%i,44) | inc %i }
+  did -c dccore.set $1 $calc($2 + 1)
+}
+; The nick, channel and search text menus (#1259): their own lines first,
+; then the sixteen colours. $1 the menu, $2 the saved value, $3- the values
+; of the lines before the colours, in order (-1 "same as the line", per
+; "per nick", name "same as File names"). With N such lines, colour C is
+; line C + N + 1.
+alias dccore.fillspan {
+  var %own = $3-, %n = $numtok(%own,32), %i = 1
+  while (%i <= %n) { did -a dccore.set $1 $dccore.spanlabel($gettok(%own,%i,32)) | inc %i }
+  %i = 1
+  while (%i <= 16) { did -a dccore.set $1 $gettok($dccore.colours,%i,44) | inc %i }
+  var %at = $findtok(%own,$2,1,32)
+  if (!%at) { %at = $iif($2 isnum 0-15,$calc($2 + %n + 1),1) }
+  did -c dccore.set $1 %at
+}
+alias dccore.spanlabel {
+  if ($1 == name) { return same as File names }
+  if ($1 == per) { return per nick }
+  return same as the line
+}
+; What the selected line of such a menu means: $1 the menu, $2 the same
+; values dccore.fillspan was given, as one argument.
+alias dccore.spanval {
+  var %sel = $did(dccore.set,$1).sel, %n = $numtok($2,32)
+  if (%sel <= %n) { return $gettok($2,$iif(%sel < 1,1,%sel),32) }
+  return $calc(%sel - %n - 1)
 }
 
 
@@ -2023,11 +1957,22 @@ on *:dialog:dccore.opt:sclick:502: {
 ;
 ;  It needs mIRC 6.17 or later, for $regsubex, which decodes the values.
 
+; $1 script: opened on its Script tab - this mIRC's own settings
 alias dccore.settings {
   dccore.init
   if ($version < 6.17) { dccore.sys The settings window needs mIRC 6.17 or later. The console has the same: type settings in this window. | return }
-  if ($dialog(dccore.set)) { dialog -v dccore.set | return }
+  if ($dialog(dccore.set)) { dialog -v dccore.set | if ($1 == script) { dccore.sw.go tab $dccore.sw.group(Script) } | return }
+  hadd dccore.live sw.open $iif($1 == script,script,general)
   dialog -m dccore.set dccore.set
+}
+; $1 a tab's name: its number, or 1
+alias dccore.sw.group {
+  var %g = 1
+  while (%g <= $dccore.sw.m(groups)) {
+    if ($dccore.sw.m(g. $+ %g) == $1) { return %g }
+    inc %g
+  }
+  return 1
 }
 
 ; ---- DCX (#1288) -------------------------------------------------------
@@ -2247,6 +2192,7 @@ alias dccore.sw.init {
     inc %i
   }
   dccore.sw.combos
+  dccore.sw.opt.fill
   ; this mIRC's own switches, from dccore.ini
   var %all = $dccore.sw.m(locals)
   %i = 1
@@ -2258,7 +2204,8 @@ alias dccore.sw.init {
   while (%i <= $dccore.sw.m(pages)) { dccore.sw.showpage %i -h | inc %i }
   dccore.sw.enable 0
   dccore.sw.dcx
-  dccore.sw.tab 1
+  dccore.sw.tab $iif($hget(dccore.live,sw.open) == script,$dccore.sw.group(Script),1)
+  if ($hget(dccore.live,sw.open)) { hdel dccore.live sw.open }
   .timerdccoreSwTick 0 5 dccore.sw.tick
   dccore.sw.start
 }
@@ -3240,7 +3187,7 @@ alias dccore.sw.label {
 alias dccore.sw.apply {
   if ($istok(apply confirm aborting preview locked,$dccore.sw.s(phase),32)) { dccore.sw.status Still waiting for the bot... | return }
   hadd dccore.sws close $iif($1 == close,1,0)
-  var %local = $dccore.sw.savelocal, %sent = 0
+  var %local = $dccore.sw.opt.save, %sent = 0
   if ($dccore.sw.ocdirty) && (!$dccore.sw.s(saving.oc)) { dccore.sw.oc.save | inc %sent }
   if ($dccore.sw.s(srv.dirty)) && (!$dccore.sw.s(saving.srv)) { dccore.sw.srv.save | inc %sent }
   var %keys = $iif($dccore.sw.s(loaded),$dccore.sw.changed)
@@ -3326,7 +3273,8 @@ alias dccore.sw.leaveask {
 alias dccore.sw.anydirty {
   if ($dccore.sw.s(srv.dirty)) || ($dccore.sw.ocdirty) { return $true }
   if ($dccore.sw.s(loaded)) && ($dccore.sw.changed != $null) { return $true }
-  return $dccore.sw.localdirty
+  if ($dccore.sw.localdirty) { return $true }
+  return $dccore.sw.opt.dirty
 }
 alias dccore.sw.localdirty {
   var %all = $dccore.sw.m(locals), %i = 1
@@ -3403,7 +3351,7 @@ alias dccore.sw.closed {
 
 alias dccore.sw.click {
   var %id = $1
-  if (%id isnum 1001-1006) { dccore.sw.go tab $calc(%id - 1000) | return }
+  if (%id isnum 1001-1007) { dccore.sw.go tab $calc(%id - 1000) | return }
   ; a page button: slot N of the tab shown is its Nth page
   if (%id >= 1020) && (%id < $calc(1020 + $dccore.sw.m(slots))) {
     var %p = $gettok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$calc(%id - 1019),32)
@@ -3433,9 +3381,10 @@ alias dccore.sw.click {
   if (%id == 1587) { dccore.sw.ban.ignore | return }
   if (%id == 1596) { dccore.sw.ban.unban | return }
   if (%id == 1598) { dccore.sw.ban.add | return }
-  ; Appearance, and This mIRC window
+  ; Appearance, and the Script tab's pairing
   if (%id == 1610) { dccore.sw.preview | return }
-  if (%id == 1616) { dccore.options | return }
+  if (%id == 1683) { dccore.sw.opt.pair | return }
+  if (%id == 1684) { dccore.sw.opt.unpair | return }
   ; a setting: its help, and a background colour follows its foreground
   var %k = $dccore.sw.m(i. $+ %id)
   if (%k != $null) {
@@ -4066,6 +4015,7 @@ dialog dccore.set {
   tab "Security", 1004
   tab "Dashboard && Console", 1005
   tab "Advanced", 1006
+  tab "Script", 1007
   radio "", 1020, 4 20 96 15, push group
   radio "", 1021, 4 37 96 15, push
   radio "", 1022, 4 54 96 15, push
@@ -4096,10 +4046,10 @@ dialog dccore.set {
   box "On connect", 1102, 106 206 370 91
   text "", 1500, 112 216 358 16
   edit "", 1501, 112 234 358 40, multi return autohs autovs hsbar vsbar
-  text "Seconds between commands", 1502, 112 279 92 8
-  edit "", 1503, 206 277 24 11, autohs
-  button "Unlock", 1506, 234 276 44 13
-  button "Resend now", 1505, 282 276 52 13
+  text "Seconds between commands", 1502, 112 279 120 8
+  edit "", 1503, 236 277 24 11, autohs
+  button "Unlock", 1506, 268 276 44 13
+  button "Resend now", 1505, 320 276 56 13
   text "The on/off switches used most, here from their own pages so there is one place to check.", 1103, 106 32 370 8
   box "Open when mIRC starts (minimised)", 1104, 106 47 370 47
   check "DCCore window", 2025, 112 57 358 10
@@ -4116,16 +4066,16 @@ dialog dccore.set {
   check "Answer CTCP VERSION", 2057, 112 199 358 10
   box "Updates", 1108, 106 218 370 25
   check "Tell me when a new version is out", 2061, 112 228 358 10
-  box "Admin channels", 1109, 106 32 370 48
-  text "A separate channel the bot sends its own diagnostic lines to - never one it also serves files in.", 1110, 112 42 358 8
-  text "Debug channel", 2064, 112 53 358 8
-  edit "", 2065, 112 62 358 11, autohs
-  box "Serving channels", 1111, 106 84 370 205
-  text "Which channels the bot joins and sits in. What each one serves - which list, which folders, Normal, Silent or Request only - is set under Sharing > Lists and Channel bindings.", 1112, 112 94 358 16
-  list 1520, 112 113 250 168, vsbar
-  edit "", 1521, 368 113 102 11, autohs
-  button "Add channel", 1522, 368 127 56 13
-  button "Remove", 1523, 368 143 56 13
+  box "Admin channels", 1109, 106 32 370 56
+  text "A separate channel the bot sends its own diagnostic lines to - never one it also serves files in.", 1110, 112 42 358 16
+  text "Debug channel", 2064, 112 61 358 8
+  edit "", 2065, 112 70 358 11, autohs
+  box "Serving channels", 1111, 106 92 370 213
+  text "Which channels the bot joins and sits in. What each one serves - which list, which folders, Normal, Silent or Request only - is set under Sharing > Lists and Channel bindings.", 1112, 112 102 358 24
+  list 1520, 112 129 250 168, vsbar
+  edit "", 1521, 368 129 102 11, autohs
+  button "Add channel", 1522, 368 143 56 13
+  button "Remove", 1523, 368 159 56 13
   box "Admin", 1113, 106 32 370 37
   text "Admin nick(s)", 2068, 112 42 358 8
   edit "", 2069, 112 51 358 11, autohs
@@ -4168,13 +4118,13 @@ dialog dccore.set {
   edit "", 2113, 112 156 358 11, autohs
   text "Debug message delay (seconds)", 2116, 112 170 358 8
   edit "", 2117, 112 179 358 11, autohs
-  text "What each list shares: a name, its folders, and whether it is primary (it answers a private message, and any channel bound to none). Add list and Edit open a window for one list; Apply sends the whole set to the bot.", 1121, 106 32 370 16
-  box "Lists", 1122, 106 55 370 99
-  list 1540, 112 65 358 64, hsbar vsbar
-  button "Add list", 1551, 112 133 50 13
-  button "Edit", 1554, 165 133 46 13
-  button "Delete", 1555, 214 133 46 13
-  button "Refresh", 1557, 263 133 46 13
+  text "What each list shares: a name, its folders, and whether it is primary (it answers a private message, and any channel bound to none). Add list and Edit open a window for one list; Apply sends the whole set to the bot.", 1121, 106 32 370 24
+  box "Lists", 1122, 106 63 370 99
+  list 1540, 112 73 358 64, hsbar vsbar
+  button "Add list", 1551, 112 141 50 13
+  button "Edit", 1554, 165 141 46 13
+  button "Delete", 1555, 214 141 46 13
+  button "Refresh", 1557, 263 141 46 13
   text "Which list answers in each channel, and that channel's mode. A change in a menu is kept at once; Apply sends the set to the bot.", 1123, 106 32 370 16
   box "Channel bindings", 1124, 106 55 370 229
   text "", 1700, 112 67 98 8
@@ -4244,40 +4194,40 @@ dialog dccore.set {
   button "Add", 1773, 396 263 56 13
   button "Refresh", 1567, 106 288 46 13
   text "", 1568, 158 290 200 8
-  box "Library", 1125, 106 32 181 106
-  text "Music directory (used only when no folders are set)", 2120, 112 42 169 8
-  edit "", 2121, 112 51 153 11, autohs
-  button "...", 2122, 267 50 14 12
-  text "List base name", 2124, 112 65 169 8
-  edit "", 2125, 112 74 169 11, autohs
-  text "List delivery format", 2128, 112 88 169 8
-  combo 2129, 112 97 120 80, drop
-  text "File types to leave out of the list", 2132, 112 111 169 8
-  edit "", 2133, 112 120 169 11, autohs
-  box "Film && series", 1126, 106 142 181 79
-  check "Publish film and series as a separate list", 2137, 112 152 169 10
-  text "File types that go in the film list", 2140, 112 163 169 8
-  edit "", 2141, 112 172 169 11, autohs
-  text "File types that follow a film into its list (subtitles, .nfo, .sfv)", 2144, 112 186 169 16
-  edit "", 2145, 112 203 169 11, autohs
-  box "!rar packing", 1127, 295 32 181 117
+  box "Library", 1125, 106 32 181 114
+  text "Music directory (used only when no folders are set)", 2120, 112 42 169 16
+  edit "", 2121, 112 59 153 11, autohs
+  button "...", 2122, 267 58 14 12
+  text "List base name", 2124, 112 73 169 8
+  edit "", 2125, 112 82 169 11, autohs
+  text "List delivery format", 2128, 112 96 169 8
+  combo 2129, 112 105 120 80, drop
+  text "File types to leave out of the list", 2132, 112 119 169 8
+  edit "", 2133, 112 128 169 11, autohs
+  box "Film && series", 1126, 106 150 181 79
+  check "Separate film and series list", 2137, 112 160 169 10
+  text "File types that go in the film list", 2140, 112 171 169 8
+  edit "", 2141, 112 180 169 11, autohs
+  text "File types that follow a film into its list (subtitles, .nfo, .sfv)", 2144, 112 194 169 16
+  edit "", 2145, 112 211 169 11, autohs
+  box "!rar packing", 1127, 295 32 181 133
   check "Enable !rar folder packing", 2149, 301 42 169 10
-  text "File types a folder needs to be !rar-packable", 2152, 301 53 169 8
-  edit "", 2153, 301 62 169 11, autohs
-  text "RAR binary path", 2156, 301 76 169 8
-  edit "", 2157, 301 85 153 11, autohs
-  button "...", 2158, 456 84 14 12
-  text "Largest folder !rar will pack (0 = no limit) (MB)", 2160, 301 99 169 8
-  edit "", 2161, 301 108 169 11, autohs
-  text "RAR pack timeout (seconds)", 2164, 301 122 169 8
-  edit "", 2165, 301 131 169 11, autohs
-  box "List banner", 1128, 295 153 181 71
-  text "List banner file", 2168, 301 163 169 8
-  edit "", 2169, 301 172 153 11, autohs
-  button "...", 2170, 456 171 14 12
-  text "List banner size limit (KB)", 2172, 301 186 169 8
-  edit "", 2173, 301 195 169 11, autohs
-  check "Length and quality in the list", 2177, 301 209 169 10
+  text "File types a folder needs to be !rar-packable", 2152, 301 53 169 16
+  edit "", 2153, 301 70 169 11, autohs
+  text "RAR binary path", 2156, 301 84 169 8
+  edit "", 2157, 301 93 153 11, autohs
+  button "...", 2158, 456 92 14 12
+  text "Largest folder !rar will pack (0 = no limit) (MB)", 2160, 301 107 169 16
+  edit "", 2161, 301 124 169 11, autohs
+  text "RAR pack timeout (seconds)", 2164, 301 138 169 8
+  edit "", 2165, 301 147 169 11, autohs
+  box "List banner", 1128, 295 169 181 71
+  text "List banner file", 2168, 301 179 169 8
+  edit "", 2169, 301 188 153 11, autohs
+  button "...", 2170, 456 187 14 12
+  text "List banner size limit (KB)", 2172, 301 202 169 8
+  edit "", 2173, 301 211 169 11, autohs
+  check "Length and quality in the list", 2177, 301 225 169 10
   box "Automatic rebuild", 1129, 106 32 370 83
   text "Rebuild the list automatically", 2180, 112 42 358 8
   edit "", 2181, 112 51 358 11, autohs
@@ -4313,18 +4263,18 @@ dialog dccore.set {
   edit "", 2233, 112 74 358 11, autohs
   text "Max global queue", 2236, 112 88 358 8
   edit "", 2237, 112 97 358 11, autohs
-  box "Search (@find)", 1134, 106 119 370 82
-  text "How much the bot says back once it answers (the on/off switch is under General > General Settings).", 1135, 112 129 358 8
-  text "Max search results", 2240, 112 140 358 8
-  edit "", 2241, 112 149 358 11, autohs
-  check "Name the folder in search replies", 2245, 112 163 358 10
-  text "Longest folder shown (characters)", 2248, 112 174 358 8
-  edit "", 2249, 112 183 358 11, autohs
-  box "During a rebuild", 1136, 106 205 370 59
-  check "Pause sharing during !update", 2253, 112 215 358 10
-  check "Pause for the whole rebuild", 2257, 112 226 358 10
-  text "Seconds a rehash waits for transfers to finish", 2260, 112 237 358 8
-  edit "", 2261, 112 246 358 11, autohs
+  box "Search (@find)", 1134, 106 119 370 90
+  text "How much the bot says back once it answers (the on/off switch is under General > General Settings).", 1135, 112 129 358 16
+  text "Max search results", 2240, 112 148 358 8
+  edit "", 2241, 112 157 358 11, autohs
+  check "Name the folder in search replies", 2245, 112 171 358 10
+  text "Longest folder shown (characters)", 2248, 112 182 358 8
+  edit "", 2249, 112 191 358 11, autohs
+  box "During a rebuild", 1136, 106 213 370 59
+  check "Pause sharing during !update", 2253, 112 223 358 10
+  check "Pause for the whole rebuild", 2257, 112 234 358 10
+  text "Seconds a rehash waits for transfers to finish", 2260, 112 245 358 8
+  edit "", 2261, 112 254 358 11, autohs
   box "Auto-grab", 1137, 106 32 370 94
   check "Grab the lists of bots you have no list from", 2265, 112 42 358 10
   text "Minutes between automatic grabs", 2268, 112 53 358 8
@@ -4337,39 +4287,39 @@ dialog dccore.set {
   check "Discover a bot's other channel-bound lists", 2281, 112 140 358 10
   text "Hold stable this long first (seconds)", 2284, 112 151 358 8
   edit "", 2285, 112 160 358 11, autohs
-  box "Slots && re-fetch", 1139, 106 32 181 94
+  box "Slots && re-fetch", 1139, 106 32 181 102
   text "Max fetch slots", 2288, 112 42 169 8
   edit "", 2289, 112 51 169 11, autohs
-  check "Re-fetch a list when its bot has a new one", 2293, 112 65 169 10
-  text "Least time between re-fetches of one bot (hours)", 2296, 112 76 169 8
-  edit "", 2297, 112 85 169 11, autohs
-  text "Most lists to re-fetch in one sweep", 2300, 112 99 169 8
-  edit "", 2301, 112 108 169 11, autohs
-  box "Timeouts", 1140, 106 130 181 129
-  text "Wait for a reply to a fetch request (seconds)", 2304, 112 140 169 8
-  edit "", 2305, 112 149 169 11, autohs
-  text "Fetch transfer timeout (seconds)", 2308, 112 163 169 8
-  edit "", 2309, 112 172 169 11, autohs
-  text "Wait for a reply to a folder (.rar) request (seconds)", 2312, 112 186 169 8
-  edit "", 2313, 112 195 169 11, autohs
-  text "...from a bot that publishes no .rar list (seconds)", 2316, 112 209 169 8
-  edit "", 2317, 112 218 169 11, autohs
-  text "Folder (.rar) fetch transfer timeout (seconds)", 2320, 112 232 169 8
-  edit "", 2321, 112 241 169 11, autohs
-  box "Size limits", 1141, 295 32 181 106
+  check "Re-fetch when a bot has a new list", 2293, 112 65 169 10
+  text "Least time between re-fetches of one bot (hours)", 2296, 112 76 169 16
+  edit "", 2297, 112 93 169 11, autohs
+  text "Most lists to re-fetch in one sweep", 2300, 112 107 169 8
+  edit "", 2301, 112 116 169 11, autohs
+  box "Timeouts", 1140, 106 138 181 161
+  text "Wait for a reply to a fetch request (seconds)", 2304, 112 148 169 16
+  edit "", 2305, 112 165 169 11, autohs
+  text "Fetch transfer timeout (seconds)", 2308, 112 179 169 8
+  edit "", 2309, 112 188 169 11, autohs
+  text "Wait for a reply to a folder (.rar) request (seconds)", 2312, 112 202 169 16
+  edit "", 2313, 112 219 169 11, autohs
+  text "...from a bot that publishes no .rar list (seconds)", 2316, 112 233 169 16
+  edit "", 2317, 112 250 169 11, autohs
+  text "Folder (.rar) fetch transfer timeout (seconds)", 2320, 112 264 169 16
+  edit "", 2321, 112 281 169 11, autohs
+  box "Size limits", 1141, 295 32 181 114
   text "Max fetch file size (MB)", 2324, 301 42 169 8
   edit "", 2325, 301 51 169 11, autohs
   text "Max folder (.rar) fetch size (MB)", 2328, 301 65 169 8
   edit "", 2329, 301 74 169 11, autohs
   text "Max fetched master-list zip size (MB)", 2332, 301 88 169 8
   edit "", 2333, 301 97 169 11, autohs
-  text "Largest list text accepted from a peer (MB)", 2336, 301 111 169 8
-  edit "", 2337, 301 120 169 11, autohs
-  box "History", 1142, 295 142 181 60
-  text "Keep finished downloads for (days)", 2340, 301 152 169 8
-  edit "", 2341, 301 161 169 11, autohs
-  text "Maximum finished downloads kept", 2344, 301 175 169 8
-  edit "", 2345, 301 184 169 11, autohs
+  text "Largest list text accepted from a peer (MB)", 2336, 301 111 169 16
+  edit "", 2337, 301 128 169 11, autohs
+  box "History", 1142, 295 150 181 60
+  text "Keep finished downloads for (days)", 2340, 301 160 169 8
+  edit "", 2341, 301 169 169 11, autohs
+  text "Maximum finished downloads kept", 2344, 301 183 169 8
+  edit "", 2345, 301 192 169 11, autohs
   box "Fetch queue", 1143, 106 32 370 106
   text "Files asked of one bot at once", 2348, 112 42 358 8
   edit "", 2349, 112 51 358 11, autohs
@@ -4401,12 +4351,12 @@ dialog dccore.set {
   button "Ignore", 1587, 300 116 50 13
   button "Lift now", 1581, 112 132 50 13
   button "Refresh", 1582, 165 132 46 13
-  box "Permanent (by hostmask pattern)", 1148, 106 157 370 121
-  text "Wildcard patterns such as *!*@host.example - the same as ban and unban in the console.", 1149, 112 167 358 8
-  list 1595, 112 178 358 60, vsbar
-  edit "", 1597, 112 242 250 11, autohs
-  button "Add pattern", 1598, 366 241 56 13
-  button "Remove", 1596, 112 257 50 13
+  box "Permanent (by hostmask pattern)", 1148, 106 157 370 129
+  text "Wildcard patterns such as *!*@host.example - the same as ban and unban in the console.", 1149, 112 167 358 16
+  list 1595, 112 186 358 60, vsbar
+  edit "", 1597, 112 250 250 11, autohs
+  button "Add pattern", 1598, 366 249 56 13
+  button "Remove", 1596, 112 265 50 13
   box "Auto-reply", 1150, 106 32 370 83
   text "Record one private message per sender every (seconds)", 2384, 112 42 358 8
   edit "", 2385, 112 51 358 11, autohs
@@ -4447,111 +4397,165 @@ dialog dccore.set {
   check "Show searches and their result counts", 2461, 112 86 358 10
   box "Debug channel", 1157, 106 105 370 25
   check "Also send requests, queue positions, starts and searches to the IRC debug channel", 2465, 112 115 358 10
-  text "What @DCCore shows and in which colours, its side panel, font and background, and the bot's nick and pairing are this mIRC's own options, kept in dccore.ini beside the script.", 1615, 106 32 358 24
-  button "@DCCore window options...", 1616, 106 60 100 13
-  box "Settings window", 1158, 106 81 370 44
-  text "Drawn with DCX (scripts\mirc\dcx) when this mIRC can load it, with mIRC's own controls when not - /dccore dcx says which and why. Takes effect the next time the window opens.", 1159, 112 91 358 16
-  check "Use the built-in settings window, not DCX", 2469, 112 110 358 10
-  box "Debug", 1160, 106 32 370 47
-  check "Debug mode", 2473, 112 42 358 10
-  check "Send debug lines to channel", 2477, 112 53 358 10
-  check "Send debug lines to admin console", 2481, 112 64 358 10
-  box "Logging", 1161, 106 83 370 106
-  text "Time prefix on every console line (strftime; blank = none)", 2484, 112 93 358 8
-  edit "", 2485, 112 102 358 11, autohs
-  text "Log file (blank = none)", 2488, 112 116 358 8
-  edit "", 2489, 112 125 342 11, autohs
-  button "...", 2490, 456 124 14 12
-  text "Start a new log file at (MB)", 2492, 112 139 358 8
-  edit "", 2493, 112 148 358 11, autohs
-  text "Old log files to keep", 2496, 112 162 358 8
-  edit "", 2497, 112 171 358 11, autohs
-  box "Window && project", 1162, 106 193 370 60
-  text "The bot's window on Windows (normal, minimised, hidden)", 2500, 112 203 358 8
-  combo 2501, 112 212 120 80, drop
-  text "Project URL", 2504, 112 226 358 8
-  edit "", 2505, 112 235 358 11, autohs
-  box "Library && lists", 1163, 106 32 181 74
-  text "Temp archive directory", 2508, 112 44 81 8
-  edit "", 2509, 197 42 68 11, autohs
-  button "...", 2510, 267 41 14 12
-  text "Master list directory", 2512, 112 56 81 8
-  edit "", 2513, 197 54 68 11, autohs
-  button "...", 2514, 267 53 14 12
-  text "Fetched files directory", 2516, 112 68 81 8
-  edit "", 2517, 197 66 68 11, autohs
-  button "...", 2518, 267 65 14 12
-  text "Served folders file", 2520, 112 80 81 8
-  edit "", 2521, 197 78 68 11, autohs
-  button "...", 2522, 267 77 14 12
-  text "Served lists file", 2524, 112 92 81 8
-  edit "", 2525, 197 90 68 11, autohs
-  button "...", 2526, 267 89 14 12
-  box "Security", 1164, 106 110 181 38
-  text "Bans file", 2528, 112 122 81 8
-  edit "", 2529, 197 120 68 11, autohs
-  button "...", 2530, 267 119 14 12
-  text "Hard bans file", 2532, 112 134 81 8
-  edit "", 2533, 197 132 68 11, autohs
-  button "...", 2534, 267 131 14 12
-  box "Stats && bots", 1165, 106 152 181 50
-  text "Stats file", 2536, 112 164 81 8
-  edit "", 2537, 197 162 68 11, autohs
-  button "...", 2538, 267 161 14 12
-  text "Known bots file", 2540, 112 176 81 8
-  edit "", 2541, 197 174 68 11, autohs
-  button "...", 2542, 267 173 14 12
-  text "Fetched bot lists file", 2544, 112 188 81 8
-  edit "", 2545, 197 186 68 11, autohs
-  button "...", 2546, 267 185 14 12
-  box "Search && audio", 1166, 106 206 181 38
-  text "Cross-list search index", 2548, 112 218 81 8
-  edit "", 2549, 197 216 68 11, autohs
-  button "...", 2550, 267 215 14 12
-  text "Audio info cache", 2552, 112 230 81 8
-  edit "", 2553, 197 228 68 11, autohs
-  button "...", 2554, 267 227 14 12
-  box "Fetch history", 1167, 295 32 181 50
-  text "Fetch history file", 2556, 301 44 81 8
-  edit "", 2557, 386 42 68 11, autohs
-  button "...", 2558, 456 41 14 12
-  text "Download counts file", 2560, 301 56 81 8
-  edit "", 2561, 386 54 68 11, autohs
-  button "...", 2562, 456 53 14 12
-  text "Transfer record file", 2564, 301 68 81 8
-  edit "", 2565, 386 66 68 11, autohs
-  button "...", 2566, 456 65 14 12
-  box "List build", 1168, 295 86 181 50
-  text "List size file", 2568, 301 98 81 8
-  edit "", 2569, 386 96 68 11, autohs
-  button "...", 2570, 456 95 14 12
-  text "List raw bytes file", 2572, 301 110 81 8
-  edit "", 2573, 386 108 68 11, autohs
-  button "...", 2574, 456 107 14 12
-  text "List rebuild progress file", 2576, 301 122 81 8
-  edit "", 2577, 386 120 68 11, autohs
-  button "...", 2578, 456 119 14 12
-  box "Console && messaging", 1169, 295 140 181 82
-  text "Paired console scripts file", 2580, 301 152 81 8
-  edit "", 2581, 386 150 68 11, autohs
-  button "...", 2582, 456 149 14 12
-  text "On-connect commands file", 2584, 301 164 81 16
-  edit "", 2585, 386 162 68 11, autohs
-  button "...", 2586, 456 161 14 12
-  text "Operator notices file", 2588, 301 184 81 8
-  edit "", 2589, 386 182 68 11, autohs
-  button "...", 2590, 456 181 14 12
-  text "Private messages file", 2592, 301 196 81 8
-  edit "", 2593, 386 194 68 11, autohs
-  button "...", 2594, 456 193 14 12
-  text "DCC queue file", 2596, 301 208 81 8
-  edit "", 2597, 386 206 68 11, autohs
-  button "...", 2598, 456 205 14 12
+  box "Debug", 1158, 106 32 370 47
+  check "Debug mode", 2469, 112 42 358 10
+  check "Send debug lines to channel", 2473, 112 53 358 10
+  check "Send debug lines to admin console", 2477, 112 64 358 10
+  box "Logging", 1159, 106 83 370 106
+  text "Time prefix on every console line (strftime; blank = none)", 2480, 112 93 358 8
+  edit "", 2481, 112 102 358 11, autohs
+  text "Log file (blank = none)", 2484, 112 116 358 8
+  edit "", 2485, 112 125 342 11, autohs
+  button "...", 2486, 456 124 14 12
+  text "Start a new log file at (MB)", 2488, 112 139 358 8
+  edit "", 2489, 112 148 358 11, autohs
+  text "Old log files to keep", 2492, 112 162 358 8
+  edit "", 2493, 112 171 358 11, autohs
+  box "Window && project", 1160, 106 193 370 60
+  text "The bot's window on Windows (normal, minimised, hidden)", 2496, 112 203 358 8
+  combo 2497, 112 212 120 80, drop
+  text "Project URL", 2500, 112 226 358 8
+  edit "", 2501, 112 235 358 11, autohs
+  box "Library && lists", 1161, 106 32 181 90
+  text "Temp archive directory", 2504, 112 44 81 16
+  edit "", 2505, 197 42 68 11, autohs
+  button "...", 2506, 267 41 14 12
+  text "Master list directory", 2508, 112 64 81 8
+  edit "", 2509, 197 62 68 11, autohs
+  button "...", 2510, 267 61 14 12
+  text "Fetched files directory", 2512, 112 76 81 16
+  edit "", 2513, 197 74 68 11, autohs
+  button "...", 2514, 267 73 14 12
+  text "Served folders file", 2516, 112 96 81 8
+  edit "", 2517, 197 94 68 11, autohs
+  button "...", 2518, 267 93 14 12
+  text "Served lists file", 2520, 112 108 81 8
+  edit "", 2521, 197 106 68 11, autohs
+  button "...", 2522, 267 105 14 12
+  box "Security", 1162, 106 126 181 38
+  text "Bans file", 2524, 112 138 81 8
+  edit "", 2525, 197 136 68 11, autohs
+  button "...", 2526, 267 135 14 12
+  text "Hard bans file", 2528, 112 150 81 8
+  edit "", 2529, 197 148 68 11, autohs
+  button "...", 2530, 267 147 14 12
+  box "Stats && bots", 1163, 106 168 181 50
+  text "Stats file", 2532, 112 180 81 8
+  edit "", 2533, 197 178 68 11, autohs
+  button "...", 2534, 267 177 14 12
+  text "Known bots file", 2536, 112 192 81 8
+  edit "", 2537, 197 190 68 11, autohs
+  button "...", 2538, 267 189 14 12
+  text "Fetched bot lists file", 2540, 112 204 81 8
+  edit "", 2541, 197 202 68 11, autohs
+  button "...", 2542, 267 201 14 12
+  box "Search && audio", 1164, 106 222 181 46
+  text "Cross-list search index", 2544, 112 234 81 16
+  edit "", 2545, 197 232 68 11, autohs
+  button "...", 2546, 267 231 14 12
+  text "Audio info cache", 2548, 112 254 81 8
+  edit "", 2549, 197 252 68 11, autohs
+  button "...", 2550, 267 251 14 12
+  box "Fetch history", 1165, 295 32 181 58
+  text "Fetch history file", 2552, 301 44 81 8
+  edit "", 2553, 386 42 68 11, autohs
+  button "...", 2554, 456 41 14 12
+  text "Download counts file", 2556, 301 56 81 16
+  edit "", 2557, 386 54 68 11, autohs
+  button "...", 2558, 456 53 14 12
+  text "Transfer record file", 2560, 301 76 81 8
+  edit "", 2561, 386 74 68 11, autohs
+  button "...", 2562, 456 73 14 12
+  box "List build", 1166, 295 94 181 58
+  text "List size file", 2564, 301 106 81 8
+  edit "", 2565, 386 104 68 11, autohs
+  button "...", 2566, 456 103 14 12
+  text "List raw bytes file", 2568, 301 118 81 8
+  edit "", 2569, 386 116 68 11, autohs
+  button "...", 2570, 456 115 14 12
+  text "List rebuild progress file", 2572, 301 130 81 16
+  edit "", 2573, 386 128 68 11, autohs
+  button "...", 2574, 456 127 14 12
+  box "Console && messaging", 1167, 295 156 181 106
+  text "Paired console scripts file", 2576, 301 168 81 16
+  edit "", 2577, 386 166 68 11, autohs
+  button "...", 2578, 456 165 14 12
+  text "On-connect commands file", 2580, 301 188 81 16
+  edit "", 2581, 386 186 68 11, autohs
+  button "...", 2582, 456 185 14 12
+  text "Operator notices file", 2584, 301 208 81 16
+  edit "", 2585, 386 206 68 11, autohs
+  button "...", 2586, 456 205 14 12
+  text "Private messages file", 2588, 301 228 81 16
+  edit "", 2589, 386 226 68 11, autohs
+  button "...", 2590, 456 225 14 12
+  text "DCC queue file", 2592, 301 248 81 8
+  edit "", 2593, 386 246 68 11, autohs
+  button "...", 2594, 456 245 14 12
+  box "Show in @DCCore", 1168, 106 32 370 133
+  check "Requests (who asked for what)", 1620, 112 43 176 10
+  combo 1621, 300 42 96 80, drop
+  check "Queue positions", 1622, 112 56 176 10
+  combo 1623, 300 55 96 80, drop
+  check "Sends: starting, resuming, done", 1624, 112 69 176 10
+  combo 1625, 300 68 96 80, drop
+  check "Failed transfers", 1626, 112 82 176 10
+  combo 1627, 300 81 96 80, drop
+  check "Searches and result counts", 1628, 112 95 176 10
+  combo 1629, 300 94 96 80, drop
+  check "Joins, parts, quits of queued users", 1630, 112 108 176 10
+  combo 1631, 300 107 96 80, drop
+  check "Bans, mutes, floods", 1632, 112 121 176 10
+  combo 1633, 300 120 96 80, drop
+  check "Other log lines", 1634, 112 134 176 10
+  combo 1635, 300 133 96 80, drop
+  text "Status every", 1636, 112 148 60 8
+  edit "", 1637, 174 146 24 11, autohs
+  text "min, 0 = off", 1638, 206 148 70 8
+  box "Colours", 1169, 106 169 370 122
+  text "Search text is the term searched for, the same as File names until you choose. Nicks and Channels are the same as their line until you choose; Nicks can also be per nick, a colour of its own from the name.", 1170, 112 179 358 24
+  text "File names", 1660, 112 208 110 8
+  combo 1640, 226 206 96 80, drop
+  text "Console replies", 1661, 112 221 110 8
+  combo 1641, 226 219 96 80, drop
+  text "Panel headings", 1662, 112 234 110 8
+  combo 1642, 226 232 96 80, drop
+  text "Search text", 1663, 112 247 110 8
+  combo 1643, 226 245 96 80, drop
+  text "Nicks", 1664, 112 260 110 8
+  combo 1644, 226 258 96 80, drop
+  text "Channels", 1665, 112 273 110 8
+  combo 1645, 226 271 96 80, drop
+  box "Window", 1171, 106 32 370 99
+  check "Side panel: slots, queue and totals", 2597, 112 42 358 10
+  check "Slots, queue and speed in the title bar", 2601, 112 53 358 10
+  check "Console replies in a separate window", 2605, 112 64 358 10
+  check "Beep on a failed transfer", 2609, 112 75 358 10
+  check "Fixed-width font, size", 1670, 112 87 110 10
+  edit "", 1671, 246 86 24 11, autohs
+  text "Background", 1672, 112 101 120 8
+  combo 1673, 246 99 96 80, drop
+  text "Finished downloads to show", 1674, 112 114 120 8
+  edit "", 1675, 246 112 24 11, autohs
+  box "Settings window", 1172, 106 135 370 52
+  text "Drawn with DCX (scripts\mirc\dcx) when this mIRC can load it, with mIRC's own controls when not - /dccore dcx says which and why. Takes effect the next time the window opens.", 1173, 112 145 358 24
+  check "Use the built-in settings window, not DCX", 2613, 112 172 358 10
+  box "Bot", 1174, 106 32 370 78
+  text "The bot this mIRC is paired with. Reconnecting and logging in by itself when it comes back is under General > General Settings.", 1175, 112 42 358 16
+  text "Bot nick", 1680, 112 63 36 8
+  edit "", 1681, 152 61 80 11, autohs
+  text "", 1682, 238 63 232 8
+  button "Pair again...", 1683, 112 75 56 13
+  button "Forget token", 1684, 171 75 56 13
+  check "Console feed on (also requests and sends - not just status)", 1685, 112 92 358 10
+  box "DCCore Chat (public)", 1176, 106 32 370 36
+  check "Listen on every channel the bot is in, not only the ticked ones", 2617, 112 42 358 10
+  check "Open the chat window when a line arrives", 2621, 112 53 358 10
 }
 alias dccore.sw.data {
   if ($hget(dccore.swm)) { hfree dccore.swm }
   hmake dccore.swm 100
-  hadd dccore.swm groups 6
+  hadd dccore.swm groups 7
   hadd dccore.swm slots 6
   hadd dccore.swm size 480 354
   hadd dccore.swm dcxpages 900 4 20 96 288
@@ -4566,19 +4570,21 @@ alias dccore.sw.data {
   hadd dccore.swm g.4 Security
   hadd dccore.swm g.4.pages 16 17 18 19
   hadd dccore.swm g.5 Dashboard & Console
-  hadd dccore.swm g.5.pages 20 21 22
+  hadd dccore.swm g.5.pages 20 21
   hadd dccore.swm g.6 Advanced
-  hadd dccore.swm g.6.pages 23 24
-  hadd dccore.swm lv.1520 910 112 113 250 168
+  hadd dccore.swm g.6.pages 22 23
+  hadd dccore.swm g.7 Script
+  hadd dccore.swm g.7.pages 24 25 26 27
+  hadd dccore.swm lv.1520 910 112 129 250 168
   hadd dccore.swm lvc.1520 0 Channel
   hadd dccore.swm lvx.1520 noheader
-  hadd dccore.swm lv.1540 911 112 65 358 64
+  hadd dccore.swm lv.1540 911 112 73 358 64
   hadd dccore.swm lvc.1540 120 Name,44 Primary,0 Folders
   hadd dccore.swm lv.1580 913 112 53 358 60
   hadd dccore.swm lvc.1580 160 Nick,0 Time left
-  hadd dccore.swm lv.1595 914 112 178 358 60
+  hadd dccore.swm lv.1595 914 112 186 358 60
   hadd dccore.swm lvc.1595 0 Pattern
-  hadd dccore.swm pages 24
+  hadd dccore.swm pages 27
   hadd dccore.swm p.1 IRC Server
   hadd dccore.swm p.1.layout roomy 1
   hadd dccore.swm p.1.n 1
@@ -4677,20 +4683,34 @@ alias dccore.sw.data {
   hadd dccore.swm p.21.layout roomy 1
   hadd dccore.swm p.21.n 1
   hadd dccore.swm p.21.1 1156,2445,2449,2453,2457,2461,1157,2465
-  hadd dccore.swm p.22 This mIRC window
+  hadd dccore.swm p.22 Debug & logging
   hadd dccore.swm p.22.layout roomy 1
   hadd dccore.swm p.22.n 1
-  hadd dccore.swm p.22.1 1615,1616,1158,1159,2469
-  hadd dccore.swm p.22.w mircwin
-  hadd dccore.swm p.23 Debug & logging
-  hadd dccore.swm p.23.layout roomy 1
-  hadd dccore.swm p.23.n 1
-  hadd dccore.swm p.23.1 1160,2473,2477,2481,1161,2484,2485,2488,2489,2490,2492,2493,2496,2497,1162,2500,2501,2504,2505
-  hadd dccore.swm p.24 File locations
-  hadd dccore.swm p.24.layout compact 2
-  hadd dccore.swm p.24.n 2
-  hadd dccore.swm p.24.1 1163,2508,2509,2510,2512,2513,2514,2516,2517,2518,2520,2521,2522,2524,2525,2526,1164,2528,2529,2530,2532,2533,2534,1165,2536,2537,2538,2540,2541,2542,2544,2545,2546,1166,2548,2549,2550,2552,2553,2554,1167,2556,2557,2558,2560,2561,2562,2564,2565,2566
-  hadd dccore.swm p.24.2 1168,2568,2569,2570,2572,2573,2574,2576,2577,2578,1169,2580,2581,2582,2584,2585,2586,2588,2589,2590,2592,2593,2594,2596,2597,2598
+  hadd dccore.swm p.22.1 1158,2469,2473,2477,1159,2480,2481,2484,2485,2486,2488,2489,2492,2493,1160,2496,2497,2500,2501
+  hadd dccore.swm p.23 File locations
+  hadd dccore.swm p.23.layout compact 2
+  hadd dccore.swm p.23.n 2
+  hadd dccore.swm p.23.1 1161,2504,2505,2506,2508,2509,2510,2512,2513,2514,2516,2517,2518,2520,2521,2522,1162,2524,2525,2526,2528,2529,2530,1163,2532,2533,2534,2536,2537,2538,2540,2541,2542,1164,2544,2545,2546,2548,2549,2550,1165,2552,2553,2554,2556,2557,2558,2560,2561,2562
+  hadd dccore.swm p.23.2 1166,2564,2565,2566,2568,2569,2570,2572,2573,2574,1167,2576,2577,2578,2580,2581,2582,2584,2585,2586,2588,2589,2590,2592,2593,2594
+  hadd dccore.swm p.24 @DCCore window
+  hadd dccore.swm p.24.layout roomy 1
+  hadd dccore.swm p.24.n 1
+  hadd dccore.swm p.24.1 1168,1620,1621,1622,1623,1624,1625,1626,1627,1628,1629,1630,1631,1632,1633,1634,1635,1636,1637,1638,1169,1170,1660,1640,1661,1641,1662,1642,1663,1643,1664,1644,1665,1645
+  hadd dccore.swm p.24.w showin showcolours
+  hadd dccore.swm p.25 Window
+  hadd dccore.swm p.25.layout roomy 1
+  hadd dccore.swm p.25.n 1
+  hadd dccore.swm p.25.1 1171,2597,2601,2605,2609,1670,1671,1672,1673,1674,1675,1172,1173,2613
+  hadd dccore.swm p.25.w winlook
+  hadd dccore.swm p.26 Connection
+  hadd dccore.swm p.26.layout roomy 1
+  hadd dccore.swm p.26.n 1
+  hadd dccore.swm p.26.1 1174,1175,1680,1681,1682,1683,1684,1685
+  hadd dccore.swm p.26.w botlink
+  hadd dccore.swm p.27 Chat
+  hadd dccore.swm p.27.layout roomy 1
+  hadd dccore.swm p.27.n 1
+  hadd dccore.swm p.27.1 1176,2617,2621
   hadd dccore.swm keys.n 10
   hadd dccore.swm keys.1 SERVER PORT NICKNAME ALT_NICKNAME REJOIN_ATTEMPTS ON_CONNECT_CHECK_MINUTES SEARCH_ENABLED ANNOUNCE_TRANSFERS PRIVATE_MESSAGES_ENABLED WEBUI_ENABLED CTCP_VERSION_REPLY CHECK_FOR_UPDATES DEBUG_CHANNEL CHANNEL ADMIN_NICK
   hadd dccore.swm keys.2 THEME CUSTOM_THEME_BORDER CUSTOM_THEME_SEPARATOR CUSTOM_THEME_TEXTBOX CUSTOM_THEME_VALUE CUSTOM_THEME_ALERT CUSTOM_THEME_ACCENT ANNOUNCE_INTERVAL BROADCAST_SEARCH_CHANNEL BROADCAST_SEARCH_COOLDOWN MSG_DELAY DEBUG_MSG_DELAY FILE_DIRECTORY LIST_BASE_NAME LIST_FORMAT
@@ -4725,7 +4745,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.ON_CONNECT_CHECK_MINUTES 2021 int 1 2020
   hadd dccore.swm pg.ON_CONNECT_CHECK_MINUTES 1
   hadd dccore.swm n.ON_CONNECT_CHECK_MINUTES Check the on-connect commands worked every (minutes~2C 0 = never)
-  hadd dccore.swm h.ON_CONNECT_CHECK_MINUTES How often the bot checks that its on-connect commands worked. If they set a user mode such as +x and the server has not given it - or~2C for +x~2C has not hidden the host - the bot sends all of them again. This is for a net split~2C when the X login can go nowhere. At most six resends on one connection. 0 means never check.
+  hadd dccore.swm h.ON_CONNECT_CHECK_MINUTES How often the bot checks that its on-connect commands worked. If they set a user mode such as +x and the server has not given it - or~2C for +x~2C has not hidden the host - the bot sends all of them again. This is for a net split~2C when the X login can go nowhere.
   hadd dccore.swm k.SEARCH_ENABLED 2041 bool 1 2041
   hadd dccore.swm pg.SEARCH_ENABLED 2
   hadd dccore.swm n.SEARCH_ENABLED Answer @find searches
@@ -4815,7 +4835,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.DEBUG_MSG_DELAY 2117 float 1 2116
   hadd dccore.swm pg.DEBUG_MSG_DELAY 6
   hadd dccore.swm n.DEBUG_MSG_DELAY Debug message delay (seconds)
-  hadd dccore.swm h.DEBUG_MSG_DELAY How long to wait between lines to your debug channel. Never less than MSG_DELAY - every line the bot sends shares one clock~2C and a smaller number here has no effect. Set it higher than MSG_DELAY to slow the debug channel down further; 0 means the same as MSG_DELAY.
+  hadd dccore.swm h.DEBUG_MSG_DELAY How long to wait between lines to your debug channel. Never less than MSG_DELAY - every line the bot sends shares one clock~2C and a smaller number here has no effect.
   hadd dccore.swm k.FILE_DIRECTORY 2121 str 1 2120
   hadd dccore.swm pg.FILE_DIRECTORY 9
   hadd dccore.swm n.FILE_DIRECTORY Music directory (used only when no folders are set)
@@ -4838,7 +4858,7 @@ alias dccore.sw.data {
   hadd dccore.swm h.LIST_IGNORED_EXTENSIONS File types to leave out of your list~2C separated by commas (for example .db~2C .ini). Everything else under your shared folders is listed and can be downloaded~2C so keep private files out of those folders.
   hadd dccore.swm k.SEPARATE_VIDEO_LIST 2137 bool 1 2137
   hadd dccore.swm pg.SEPARATE_VIDEO_LIST 9
-  hadd dccore.swm n.SEPARATE_VIDEO_LIST Publish film and series as a separate list
+  hadd dccore.swm n.SEPARATE_VIDEO_LIST Separate film and series list
   hadd dccore.swm h.SEPARATE_VIDEO_LIST Put films and series in their own list file~2C separate from the music~2C instead of one list with everything mixed. Both files are sent together when somebody asks for your list.
   hadd dccore.swm k.LIST_VIDEO_EXTENSIONS 2141 list 1 2140
   hadd dccore.swm pg.LIST_VIDEO_EXTENSIONS 9
@@ -4879,7 +4899,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.LIST_SHOW_AUDIO_INFO 2177 bool 1 2177
   hadd dccore.swm pg.LIST_SHOW_AUDIO_INFO 9
   hadd dccore.swm n.LIST_SHOW_AUDIO_INFO Length and quality in the list
-  hadd dccore.swm h.LIST_SHOW_AUDIO_INFO Add each MP3 and FLAC file's length and quality after its size in your list~2C e.g. 10.3MB 4m31s 320/44.1/JS. Every audio file is read once~2C in the background after the list is published; searches and downloads pause only for the seconds the lengths take to swap in. Tools~2C Read audio info runs it alone.
+  hadd dccore.swm h.LIST_SHOW_AUDIO_INFO Add each MP3 and FLAC file's length and quality after its size in your list~2C e.g. 10.3MB 4m31s 320/44.1/JS. Every audio file is read once~2C in the background after the list is published; searches and downloads pause only for the seconds the lengths take to swap in.
   hadd dccore.swm k.LIST_REBUILD_SCHEDULE 2181 str 1 2180
   hadd dccore.swm pg.LIST_REBUILD_SCHEDULE 10
   hadd dccore.swm n.LIST_REBUILD_SCHEDULE Rebuild the list automatically
@@ -4915,11 +4935,11 @@ alias dccore.sw.data {
   hadd dccore.swm cl.DCC_BLOCK_SIZE.5 64 KB
   hadd dccore.swm cl.DCC_BLOCK_SIZE.6 128 KB
   hadd dccore.swm cl.DCC_BLOCK_SIZE.7 256 KB
-  hadd dccore.swm h.DCC_BLOCK_SIZE How much the bot sends at once~2C in bytes. The default~2C 64 KB~2C suits most bots. 128 or 256 KB use less CPU and suit a fast seedbox~2C but Speed now and the advert's Speed: then move a block at a time~2C so slow sends read 0 or jump~2C and a stalled receiver is dropped after a minute per 64 KB. 4-16 KB cost 2-3 times the CPU.
+  hadd dccore.swm h.DCC_BLOCK_SIZE How much the bot sends at once~2C in bytes. The default~2C 64 KB~2C suits most bots.
   hadd dccore.swm k.DCC_SEND_BUFFER 2209 int 1024 2208
   hadd dccore.swm pg.DCC_SEND_BUFFER 11
   hadd dccore.swm n.DCC_SEND_BUFFER Socket send buffer (0 = the default for your platform) (KB)
-  hadd dccore.swm h.DCC_SEND_BUFFER How much data the operating system may hold in flight for one send~2C in bytes. 0 uses the platform default: 4 MB on Windows~2C which would otherwise hold only 64 KB~2C and the system's own tuning on Linux and macOS - right for nearly every connection. Only worth trying on a very fast link to a distant downloader.
+  hadd dccore.swm h.DCC_SEND_BUFFER How much data the operating system may hold in flight for one send~2C in bytes. 0 uses the platform default: 4 MB on Windows~2C which would otherwise hold only 64 KB~2C and the system's own tuning on Linux and macOS - right for nearly every connection.
   hadd dccore.swm k.DCC_PORT_START 2213 int 1 2212
   hadd dccore.swm pg.DCC_PORT_START 11
   hadd dccore.swm n.DCC_PORT_START DCC port range start
@@ -4955,7 +4975,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.SEARCH_SHOW_FOLDER 2245 bool 1 2245
   hadd dccore.swm pg.SEARCH_SHOW_FOLDER 12
   hadd dccore.swm n.SEARCH_SHOW_FOLDER Name the folder in search replies
-  hadd dccore.swm h.SEARCH_SHOW_FOLDER In the reply to an @find~2C name each result's folder on a line of its own above its files~2C e.g. From: D:\MEDIA\Rock\Some Band\1999 - Some Album. One extra line per folder~2C not per file; the result lines stay exactly as they are. Off by default: every line is paced~2C so it slows the reply.
+  hadd dccore.swm h.SEARCH_SHOW_FOLDER In the reply to an @find~2C name each result's folder on a line of its own above its files~2C e.g. From: D:\MEDIA\Rock\Some Band\1999 - Some Album. One extra line per folder~2C not per file; the result lines stay exactly as they are.
   hadd dccore.swm k.SEARCH_FOLDER_MAX_CHARS 2249 int 1 2248
   hadd dccore.swm pg.SEARCH_FOLDER_MAX_CHARS 12
   hadd dccore.swm n.SEARCH_FOLDER_MAX_CHARS Longest folder shown (characters)
@@ -4975,7 +4995,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.AUTO_GRAB_LISTS 2265 bool 1 2265
   hadd dccore.swm pg.AUTO_GRAB_LISTS 13
   hadd dccore.swm n.AUTO_GRAB_LISTS Grab the lists of bots you have no list from
-  hadd dccore.swm h.AUTO_GRAB_LISTS Fetch the list of each bot that advertises one you do not have~2C one at a time: after a random wait~2C not if someone else just asked that bot~2C and at most 3 tries per bot. A list you remove is not fetched again. Off by default: it uses other bots' bandwidth without you asking.
+  hadd dccore.swm h.AUTO_GRAB_LISTS Fetch the list of each bot that advertises one you do not have~2C one at a time: after a random wait~2C not if someone else just asked that bot~2C and at most 3 tries per bot. A list you remove is not fetched again.
   hadd dccore.swm k.AUTO_GRAB_EVERY_MINUTES 2269 int 1 2268
   hadd dccore.swm pg.AUTO_GRAB_EVERY_MINUTES 13
   hadd dccore.swm n.AUTO_GRAB_EVERY_MINUTES Minutes between automatic grabs
@@ -5002,7 +5022,7 @@ alias dccore.sw.data {
   hadd dccore.swm h.MAX_FETCH_SLOTS How many downloads FROM other bots you run at the same time. Separate from your own send slots~2C so your downloading never takes slots away from people downloading from you.
   hadd dccore.swm k.AUTO_REFETCH_LISTS 2293 bool 1 2293
   hadd dccore.swm pg.AUTO_REFETCH_LISTS 14
-  hadd dccore.swm n.AUTO_REFETCH_LISTS Re-fetch a list when its bot has a new one
+  hadd dccore.swm n.AUTO_REFETCH_LISTS Re-fetch when a bot has a new list
   hadd dccore.swm h.AUTO_REFETCH_LISTS When another bot advertises that its list has changed~2C fetch the new list automatically. A list from a bot whose advert shows no date is fetched again once it is 14 days old. Off by default because it uses the other bot's bandwidth without you asking each time.
   hadd dccore.swm k.AUTO_REFETCH_INTERVAL_HOURS 2297 int 1 2296
   hadd dccore.swm pg.AUTO_REFETCH_INTERVAL_HOURS 14
@@ -5067,7 +5087,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.FETCH_BOT_MAX_FAILS 2357 int 1 2356
   hadd dccore.swm pg.FETCH_BOT_MAX_FAILS 15
   hadd dccore.swm n.FETCH_BOT_MAX_FAILS Failed requests in a row that pause a bot
-  hadd dccore.swm h.FETCH_BOT_MAX_FAILS How many of your requests to one bot may fail in a row - no answer~2C a connection that could not be made~2C a download that broke off - before that bot is paused for a while. A bot saying it does not have the file~2C or you cancelling~2C does not count; a finished download starts the count again. 0 never pauses.
+  hadd dccore.swm h.FETCH_BOT_MAX_FAILS How many of your requests to one bot may fail in a row - no answer~2C a connection that could not be made~2C a download that broke off - before that bot is paused for a while.
   hadd dccore.swm k.FETCH_BOT_COOLDOWN_MINUTES 2361 int 1 2360
   hadd dccore.swm pg.FETCH_BOT_COOLDOWN_MINUTES 15
   hadd dccore.swm n.FETCH_BOT_COOLDOWN_MINUTES Minutes a failing bot stays paused
@@ -5075,7 +5095,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.LIST_REQUEST_TAG 2365 str 1 2364
   hadd dccore.swm pg.LIST_REQUEST_TAG 15
   hadd dccore.swm n.LIST_REQUEST_TAG Tag on your list requests
-  hadd dccore.swm h.LIST_REQUEST_TAG A short tag added after your list requests~2C the way AutoQ adds ::AutoQ::~2C so a channel can see what is fetching. It is sent only to other DCCore bots~2C which always accept it; other bots get the plain request~2C because many answer only that exact line. Plain text~2C up to 32 characters. Leave it empty to send no tag.
+  hadd dccore.swm h.LIST_REQUEST_TAG A short tag added after your list requests~2C the way AutoQ adds ::AutoQ::~2C so a channel can see what is fetching. It is sent only to other DCCore bots~2C which always accept it; other bots get the plain request~2C because many answer only that exact line.
   hadd dccore.swm k.MAX_REQUESTS 2369 int 1 2368
   hadd dccore.swm pg.MAX_REQUESTS 16
   hadd dccore.swm n.MAX_REQUESTS Max commands per window
@@ -5180,136 +5200,136 @@ alias dccore.sw.data {
   hadd dccore.swm pg.DEBUG_CHANNEL_FEED 21
   hadd dccore.swm n.DEBUG_CHANNEL_FEED Also send requests~2C queue positions~2C starts and searches to the IRC debug channel
   hadd dccore.swm h.DEBUG_CHANNEL_FEED Also send requests~2C queue positions~2C transfer starts and searches to your IRC debug channel. Off by default: every line to a channel takes a turn in the same queue as the adverts and replies people are waiting for. Finished and failed transfers go there regardless.
-  hadd dccore.swm k.DEBUG_MODE 2473 bool 1 2473
-  hadd dccore.swm pg.DEBUG_MODE 23
+  hadd dccore.swm k.DEBUG_MODE 2469 bool 1 2469
+  hadd dccore.swm pg.DEBUG_MODE 22
   hadd dccore.swm n.DEBUG_MODE Debug mode
   hadd dccore.swm h.DEBUG_MODE Print every raw line the bot sends to the server in its own window. Very noisy - only for tracking down a connection problem.
-  hadd dccore.swm k.DEBUG_TO_CHANNEL 2477 bool 1 2477
-  hadd dccore.swm pg.DEBUG_TO_CHANNEL 23
+  hadd dccore.swm k.DEBUG_TO_CHANNEL 2473 bool 1 2473
+  hadd dccore.swm pg.DEBUG_TO_CHANNEL 22
   hadd dccore.swm n.DEBUG_TO_CHANNEL Send debug lines to channel
   hadd dccore.swm h.DEBUG_TO_CHANNEL Send the bot's running report (transfers~2C joins~2C bans~2C problems) to your debug channel.
-  hadd dccore.swm k.DEBUG_TO_CONSOLE 2481 bool 1 2481
-  hadd dccore.swm pg.DEBUG_TO_CONSOLE 23
+  hadd dccore.swm k.DEBUG_TO_CONSOLE 2477 bool 1 2477
+  hadd dccore.swm pg.DEBUG_TO_CONSOLE 22
   hadd dccore.swm n.DEBUG_TO_CONSOLE Send debug lines to admin console
   hadd dccore.swm h.DEBUG_TO_CONSOLE Send that same report to the admin console and the dashboard's Console page.
-  hadd dccore.swm k.CONSOLE_TIMESTAMP_FORMAT 2485 str 1 2484
-  hadd dccore.swm pg.CONSOLE_TIMESTAMP_FORMAT 23
+  hadd dccore.swm k.CONSOLE_TIMESTAMP_FORMAT 2481 str 1 2480
+  hadd dccore.swm pg.CONSOLE_TIMESTAMP_FORMAT 22
   hadd dccore.swm n.CONSOLE_TIMESTAMP_FORMAT Time prefix on every console line (strftime; blank = none)
   hadd dccore.swm h.CONSOLE_TIMESTAMP_FORMAT The time shown at the start of every line in the bot's window. ~25H:~25M:~25S is hours:minutes:seconds; use ~25Y-~25m-~25d ~25H:~25M:~25S to include the date; leave blank for no time.
-  hadd dccore.swm k.CONSOLE_LOG_FILE 2489 str 1 2488
-  hadd dccore.swm pg.CONSOLE_LOG_FILE 23
+  hadd dccore.swm k.CONSOLE_LOG_FILE 2485 str 1 2484
+  hadd dccore.swm pg.CONSOLE_LOG_FILE 22
   hadd dccore.swm n.CONSOLE_LOG_FILE Log file (blank = none)
   hadd dccore.swm h.CONSOLE_LOG_FILE Everything the bot's window shows is also saved here~2C with the date on every line~2C so it is still there after the window is closed. Leave blank for no log file.
-  hadd dccore.swm k.CONSOLE_LOG_MAX_MB 2493 int 1 2492
-  hadd dccore.swm pg.CONSOLE_LOG_MAX_MB 23
+  hadd dccore.swm k.CONSOLE_LOG_MAX_MB 2489 int 1 2488
+  hadd dccore.swm pg.CONSOLE_LOG_MAX_MB 22
   hadd dccore.swm n.CONSOLE_LOG_MAX_MB Start a new log file at (MB)
   hadd dccore.swm h.CONSOLE_LOG_MAX_MB When the log file reaches this size it is renamed dccore.log.1 and a new one is started.
-  hadd dccore.swm k.CONSOLE_LOG_KEEP 2497 int 1 2496
-  hadd dccore.swm pg.CONSOLE_LOG_KEEP 23
+  hadd dccore.swm k.CONSOLE_LOG_KEEP 2493 int 1 2492
+  hadd dccore.swm pg.CONSOLE_LOG_KEEP 22
   hadd dccore.swm n.CONSOLE_LOG_KEEP Old log files to keep
   hadd dccore.swm h.CONSOLE_LOG_KEEP How many of those older log files are kept before the oldest is deleted.
-  hadd dccore.swm k.BOT_WINDOW 2501 choice 1 2500
-  hadd dccore.swm pg.BOT_WINDOW 23
+  hadd dccore.swm k.BOT_WINDOW 2497 choice 1 2496
+  hadd dccore.swm pg.BOT_WINDOW 22
   hadd dccore.swm n.BOT_WINDOW The bot's window on Windows (normal~2C minimised~2C hidden)
   hadd dccore.swm ch.BOT_WINDOW normal minimised hidden
   hadd dccore.swm cl.BOT_WINDOW.1 normal
   hadd dccore.swm cl.BOT_WINDOW.2 minimised
   hadd dccore.swm cl.BOT_WINDOW.3 hidden
-  hadd dccore.swm h.BOT_WINDOW How the bot runs on Windows when start-dccore.bat starts it: in its window (normal)~2C minimised to the taskbar~2C or with no window (hidden)~2C its output then in the log file. Stop a hidden bot with start-dccore.bat stop~2C Tools > Stop the bot or shutdown now in the admin console. The first run always has its window.
-  hadd dccore.swm k.PROJECT_URL 2505 str 1 2504
-  hadd dccore.swm pg.PROJECT_URL 23
+  hadd dccore.swm h.BOT_WINDOW How the bot runs on Windows when start-dccore.bat starts it: in its window (normal)~2C minimised to the taskbar~2C or with no window (hidden)~2C its output then in the log file.
+  hadd dccore.swm k.PROJECT_URL 2501 str 1 2500
+  hadd dccore.swm pg.PROJECT_URL 22
   hadd dccore.swm n.PROJECT_URL Project URL
   hadd dccore.swm h.PROJECT_URL Where DCCore comes from. Shown at the top of your list and in the reply to a version request.
-  hadd dccore.swm k.TMP_ZIP_DIR 2509 str 1 2508
-  hadd dccore.swm pg.TMP_ZIP_DIR 24
+  hadd dccore.swm k.TMP_ZIP_DIR 2505 str 1 2504
+  hadd dccore.swm pg.TMP_ZIP_DIR 23
   hadd dccore.swm n.TMP_ZIP_DIR Temp archive directory
   hadd dccore.swm h.TMP_ZIP_DIR Where packed folders and list archives are built before sending. Cleaned up after each transfer.
-  hadd dccore.swm k.LOCAL_LIST_DIR 2513 str 1 2512
-  hadd dccore.swm pg.LOCAL_LIST_DIR 24
+  hadd dccore.swm k.LOCAL_LIST_DIR 2509 str 1 2508
+  hadd dccore.swm pg.LOCAL_LIST_DIR 23
   hadd dccore.swm n.LOCAL_LIST_DIR Master list directory
   hadd dccore.swm h.LOCAL_LIST_DIR Where your published list files are kept.
-  hadd dccore.swm k.FETCHED_FILES_DIR 2517 str 1 2516
-  hadd dccore.swm pg.FETCHED_FILES_DIR 24
+  hadd dccore.swm k.FETCHED_FILES_DIR 2513 str 1 2512
+  hadd dccore.swm pg.FETCHED_FILES_DIR 23
   hadd dccore.swm n.FETCHED_FILES_DIR Fetched files directory
   hadd dccore.swm h.FETCHED_FILES_DIR Where files you download from other bots are saved. Kept separate from your shared folders so they are not offered to others.
-  hadd dccore.swm k.LIBRARY_FOLDERS_FILE 2521 str 1 2520
-  hadd dccore.swm pg.LIBRARY_FOLDERS_FILE 24
+  hadd dccore.swm k.LIBRARY_FOLDERS_FILE 2517 str 1 2516
+  hadd dccore.swm pg.LIBRARY_FOLDERS_FILE 23
   hadd dccore.swm n.LIBRARY_FOLDERS_FILE Served folders file
   hadd dccore.swm h.LIBRARY_FOLDERS_FILE Where the folders you added on the Library page are saved.
-  hadd dccore.swm k.LISTS_FILE 2525 str 1 2524
-  hadd dccore.swm pg.LISTS_FILE 24
+  hadd dccore.swm k.LISTS_FILE 2521 str 1 2520
+  hadd dccore.swm pg.LISTS_FILE 23
   hadd dccore.swm n.LISTS_FILE Served lists file
   hadd dccore.swm h.LISTS_FILE Where your list definitions are saved~2C if you serve more than one list.
-  hadd dccore.swm k.BANS_FILE 2529 str 1 2528
-  hadd dccore.swm pg.BANS_FILE 24
+  hadd dccore.swm k.BANS_FILE 2525 str 1 2524
+  hadd dccore.swm pg.BANS_FILE 23
   hadd dccore.swm n.BANS_FILE Bans file
   hadd dccore.swm h.BANS_FILE Where timed bans are saved.
-  hadd dccore.swm k.HARD_BANS_FILE 2533 str 1 2532
-  hadd dccore.swm pg.HARD_BANS_FILE 24
+  hadd dccore.swm k.HARD_BANS_FILE 2529 str 1 2528
+  hadd dccore.swm pg.HARD_BANS_FILE 23
   hadd dccore.swm n.HARD_BANS_FILE Hard bans file
   hadd dccore.swm h.HARD_BANS_FILE Where permanent bans (from !ban) are saved.
-  hadd dccore.swm k.STATS_FILE 2537 str 1 2536
-  hadd dccore.swm pg.STATS_FILE 24
+  hadd dccore.swm k.STATS_FILE 2533 str 1 2532
+  hadd dccore.swm pg.STATS_FILE 23
   hadd dccore.swm n.STATS_FILE Stats file
   hadd dccore.swm h.STATS_FILE Where the lifetime totals~2C the speed record and the daily figures are saved.
-  hadd dccore.swm k.KNOWN_BOTS_FILE 2541 str 1 2540
-  hadd dccore.swm pg.KNOWN_BOTS_FILE 24
+  hadd dccore.swm k.KNOWN_BOTS_FILE 2537 str 1 2536
+  hadd dccore.swm pg.KNOWN_BOTS_FILE 23
   hadd dccore.swm n.KNOWN_BOTS_FILE Known bots file
   hadd dccore.swm h.KNOWN_BOTS_FILE Where the bot remembers the other bots it has seen advertising.
-  hadd dccore.swm k.FETCHED_BOT_LISTS_FILE 2545 str 1 2544
-  hadd dccore.swm pg.FETCHED_BOT_LISTS_FILE 24
+  hadd dccore.swm k.FETCHED_BOT_LISTS_FILE 2541 str 1 2540
+  hadd dccore.swm pg.FETCHED_BOT_LISTS_FILE 23
   hadd dccore.swm n.FETCHED_BOT_LISTS_FILE Fetched bot lists file
   hadd dccore.swm h.FETCHED_BOT_LISTS_FILE Where the bot remembers which other bots' lists it holds.
-  hadd dccore.swm k.LIST_INDEX_FILE 2549 str 1 2548
-  hadd dccore.swm pg.LIST_INDEX_FILE 24
+  hadd dccore.swm k.LIST_INDEX_FILE 2545 str 1 2544
+  hadd dccore.swm pg.LIST_INDEX_FILE 23
   hadd dccore.swm n.LIST_INDEX_FILE Cross-list search index
   hadd dccore.swm h.LIST_INDEX_FILE The search index over every list you have fetched from other bots. Can be large. Safe to delete with the bot stopped: the next start builds it again from the lists on disk~2C which takes a while with big lists.
-  hadd dccore.swm k.LIST_AUDIO_INFO_CACHE 2553 str 1 2552
-  hadd dccore.swm pg.LIST_AUDIO_INFO_CACHE 24
+  hadd dccore.swm k.LIST_AUDIO_INFO_CACHE 2549 str 1 2548
+  hadd dccore.swm pg.LIST_AUDIO_INFO_CACHE 23
   hadd dccore.swm n.LIST_AUDIO_INFO_CACHE Audio info cache
   hadd dccore.swm h.LIST_AUDIO_INFO_CACHE Where the length and quality read from your audio files are kept between rebuilds. Safe to delete; the next rebuild reads every file again.
-  hadd dccore.swm k.FETCH_HISTORY_FILE 2557 str 1 2556
-  hadd dccore.swm pg.FETCH_HISTORY_FILE 24
+  hadd dccore.swm k.FETCH_HISTORY_FILE 2553 str 1 2552
+  hadd dccore.swm pg.FETCH_HISTORY_FILE 23
   hadd dccore.swm n.FETCH_HISTORY_FILE Fetch history file
   hadd dccore.swm h.FETCH_HISTORY_FILE Where finished downloads from other bots are recorded for the Downloads page.
-  hadd dccore.swm k.DOWNLOAD_COUNTS_FILE 2561 str 1 2560
-  hadd dccore.swm pg.DOWNLOAD_COUNTS_FILE 24
+  hadd dccore.swm k.DOWNLOAD_COUNTS_FILE 2557 str 1 2556
+  hadd dccore.swm pg.DOWNLOAD_COUNTS_FILE 23
   hadd dccore.swm n.DOWNLOAD_COUNTS_FILE Download counts file
-  hadd dccore.swm h.DOWNLOAD_COUNTS_FILE Where the count of how often each file was sent is kept~2C for the Most downloaded table: a database beside it ending in .db. An older download_counts.json is imported once and left as it was~2C so an older version still shows the counts up to the upgrade; what it counts is not brought back by upgrading again.
-  hadd dccore.swm k.TRANSFER_LOG_FILE 2565 str 1 2564
-  hadd dccore.swm pg.TRANSFER_LOG_FILE 24
+  hadd dccore.swm h.DOWNLOAD_COUNTS_FILE Where the count of how often each file was sent is kept~2C for the Most downloaded table: a database beside it ending in .db.
+  hadd dccore.swm k.TRANSFER_LOG_FILE 2561 str 1 2560
+  hadd dccore.swm pg.TRANSFER_LOG_FILE 23
   hadd dccore.swm n.TRANSFER_LOG_FILE Transfer record file
-  hadd dccore.swm h.TRANSFER_LOG_FILE Where a record of every transfer that ends - completed~2C failed or cancelled - is kept: what it was~2C its size~2C its speed~2C how long it waited in the queue~2C and the nick it went to or came from (no host~2C no channel). Shown on the Stats page~2C where a nick can be forgotten. Empty turns it off.
-  hadd dccore.swm k.LIST_SIZE_FILE 2569 str 1 2568
-  hadd dccore.swm pg.LIST_SIZE_FILE 24
+  hadd dccore.swm h.TRANSFER_LOG_FILE Where a record of every transfer that ends - completed~2C failed or cancelled - is kept: what it was~2C its size~2C its speed~2C how long it waited in the queue~2C and the nick it went to or came from (no host~2C no channel). Shown on the Stats page~2C where a nick can be forgotten.
+  hadd dccore.swm k.LIST_SIZE_FILE 2565 str 1 2564
+  hadd dccore.swm pg.LIST_SIZE_FILE 23
   hadd dccore.swm n.LIST_SIZE_FILE List size file
   hadd dccore.swm h.LIST_SIZE_FILE The name of the small file written beside your list holding the library's total size~2C as shown in the advert.
-  hadd dccore.swm k.LIST_RAWBYTES_FILE 2573 str 1 2572
-  hadd dccore.swm pg.LIST_RAWBYTES_FILE 24
+  hadd dccore.swm k.LIST_RAWBYTES_FILE 2569 str 1 2568
+  hadd dccore.swm pg.LIST_RAWBYTES_FILE 23
   hadd dccore.swm n.LIST_RAWBYTES_FILE List raw bytes file
   hadd dccore.swm h.LIST_RAWBYTES_FILE The name of the small file beside your list holding the exact byte total.
-  hadd dccore.swm k.LIST_PROGRESS_FILE 2577 str 1 2576
-  hadd dccore.swm pg.LIST_PROGRESS_FILE 24
+  hadd dccore.swm k.LIST_PROGRESS_FILE 2573 str 1 2572
+  hadd dccore.swm pg.LIST_PROGRESS_FILE 23
   hadd dccore.swm n.LIST_PROGRESS_FILE List rebuild progress file
   hadd dccore.swm h.LIST_PROGRESS_FILE Where a running list rebuild reports its progress for the dashboard.
-  hadd dccore.swm k.ADMIN_TOKENS_FILE 2581 str 1 2580
-  hadd dccore.swm pg.ADMIN_TOKENS_FILE 24
+  hadd dccore.swm k.ADMIN_TOKENS_FILE 2577 str 1 2576
+  hadd dccore.swm pg.ADMIN_TOKENS_FILE 23
   hadd dccore.swm n.ADMIN_TOKENS_FILE Paired console scripts file
   hadd dccore.swm h.ADMIN_TOKENS_FILE Where the login tokens of scripts paired with the admin console are kept (hashed~2C like the password). Made by the console's pair command; remove one with unpair.
-  hadd dccore.swm k.ON_CONNECT_FILE 2585 str 1 2584
-  hadd dccore.swm pg.ON_CONNECT_FILE 24
+  hadd dccore.swm k.ON_CONNECT_FILE 2581 str 1 2580
+  hadd dccore.swm pg.ON_CONNECT_FILE 23
   hadd dccore.swm n.ON_CONNECT_FILE On-connect commands file
   hadd dccore.swm h.ON_CONNECT_FILE Where the commands sent on connect (such as your X login) are saved.
-  hadd dccore.swm k.NOTICES_FILE 2589 str 1 2588
-  hadd dccore.swm pg.NOTICES_FILE 24
+  hadd dccore.swm k.NOTICES_FILE 2585 str 1 2584
+  hadd dccore.swm pg.NOTICES_FILE 23
   hadd dccore.swm n.NOTICES_FILE Operator notices file
   hadd dccore.swm h.NOTICES_FILE Where the notices shown on the dashboard - a lost connection~2C a kick or a refused join~2C a failed list rebuild - are saved.
-  hadd dccore.swm k.PRIVATE_MESSAGES_FILE 2593 str 1 2592
-  hadd dccore.swm pg.PRIVATE_MESSAGES_FILE 24
+  hadd dccore.swm k.PRIVATE_MESSAGES_FILE 2589 str 1 2588
+  hadd dccore.swm pg.PRIVATE_MESSAGES_FILE 23
   hadd dccore.swm n.PRIVATE_MESSAGES_FILE Private messages file
   hadd dccore.swm h.PRIVATE_MESSAGES_FILE Where private messages to the bot are saved.
-  hadd dccore.swm k.DCC_QUEUE_FILE 2597 str 1 2596
-  hadd dccore.swm pg.DCC_QUEUE_FILE 24
+  hadd dccore.swm k.DCC_QUEUE_FILE 2593 str 1 2592
+  hadd dccore.swm pg.DCC_QUEUE_FILE 23
   hadd dccore.swm n.DCC_QUEUE_FILE DCC queue file
   hadd dccore.swm h.DCC_QUEUE_FILE Where the per-user send queue is saved. The single-instance lock lives beside it.
   hadd dccore.swm i.2000 SERVER
@@ -5527,92 +5547,98 @@ alias dccore.sw.data {
   hadd dccore.swm i.2457 CONSOLE_SHOW_FAILURES
   hadd dccore.swm i.2461 CONSOLE_SHOW_SEARCHES
   hadd dccore.swm i.2465 DEBUG_CHANNEL_FEED
-  hadd dccore.swm i.2469 @nodcx
-  hadd dccore.swm i.2473 DEBUG_MODE
-  hadd dccore.swm i.2477 DEBUG_TO_CHANNEL
-  hadd dccore.swm i.2481 DEBUG_TO_CONSOLE
-  hadd dccore.swm i.2484 CONSOLE_TIMESTAMP_FORMAT
-  hadd dccore.swm i.2485 CONSOLE_TIMESTAMP_FORMAT
-  hadd dccore.swm i.2488 CONSOLE_LOG_FILE
-  hadd dccore.swm i.2489 CONSOLE_LOG_FILE
-  hadd dccore.swm i.2490 CONSOLE_LOG_FILE
-  hadd dccore.swm i.2492 CONSOLE_LOG_MAX_MB
-  hadd dccore.swm i.2493 CONSOLE_LOG_MAX_MB
-  hadd dccore.swm i.2496 CONSOLE_LOG_KEEP
-  hadd dccore.swm i.2497 CONSOLE_LOG_KEEP
-  hadd dccore.swm i.2500 BOT_WINDOW
-  hadd dccore.swm i.2501 BOT_WINDOW
-  hadd dccore.swm i.2504 PROJECT_URL
-  hadd dccore.swm i.2505 PROJECT_URL
-  hadd dccore.swm i.2508 TMP_ZIP_DIR
-  hadd dccore.swm i.2509 TMP_ZIP_DIR
-  hadd dccore.swm i.2510 TMP_ZIP_DIR
-  hadd dccore.swm i.2512 LOCAL_LIST_DIR
-  hadd dccore.swm i.2513 LOCAL_LIST_DIR
-  hadd dccore.swm i.2514 LOCAL_LIST_DIR
-  hadd dccore.swm i.2516 FETCHED_FILES_DIR
-  hadd dccore.swm i.2517 FETCHED_FILES_DIR
-  hadd dccore.swm i.2518 FETCHED_FILES_DIR
-  hadd dccore.swm i.2520 LIBRARY_FOLDERS_FILE
-  hadd dccore.swm i.2521 LIBRARY_FOLDERS_FILE
-  hadd dccore.swm i.2522 LIBRARY_FOLDERS_FILE
-  hadd dccore.swm i.2524 LISTS_FILE
-  hadd dccore.swm i.2525 LISTS_FILE
-  hadd dccore.swm i.2526 LISTS_FILE
-  hadd dccore.swm i.2528 BANS_FILE
-  hadd dccore.swm i.2529 BANS_FILE
-  hadd dccore.swm i.2530 BANS_FILE
-  hadd dccore.swm i.2532 HARD_BANS_FILE
-  hadd dccore.swm i.2533 HARD_BANS_FILE
-  hadd dccore.swm i.2534 HARD_BANS_FILE
-  hadd dccore.swm i.2536 STATS_FILE
-  hadd dccore.swm i.2537 STATS_FILE
-  hadd dccore.swm i.2538 STATS_FILE
-  hadd dccore.swm i.2540 KNOWN_BOTS_FILE
-  hadd dccore.swm i.2541 KNOWN_BOTS_FILE
-  hadd dccore.swm i.2542 KNOWN_BOTS_FILE
-  hadd dccore.swm i.2544 FETCHED_BOT_LISTS_FILE
-  hadd dccore.swm i.2545 FETCHED_BOT_LISTS_FILE
-  hadd dccore.swm i.2546 FETCHED_BOT_LISTS_FILE
-  hadd dccore.swm i.2548 LIST_INDEX_FILE
-  hadd dccore.swm i.2549 LIST_INDEX_FILE
-  hadd dccore.swm i.2550 LIST_INDEX_FILE
-  hadd dccore.swm i.2552 LIST_AUDIO_INFO_CACHE
-  hadd dccore.swm i.2553 LIST_AUDIO_INFO_CACHE
-  hadd dccore.swm i.2554 LIST_AUDIO_INFO_CACHE
-  hadd dccore.swm i.2556 FETCH_HISTORY_FILE
-  hadd dccore.swm i.2557 FETCH_HISTORY_FILE
-  hadd dccore.swm i.2558 FETCH_HISTORY_FILE
-  hadd dccore.swm i.2560 DOWNLOAD_COUNTS_FILE
-  hadd dccore.swm i.2561 DOWNLOAD_COUNTS_FILE
-  hadd dccore.swm i.2562 DOWNLOAD_COUNTS_FILE
-  hadd dccore.swm i.2564 TRANSFER_LOG_FILE
-  hadd dccore.swm i.2565 TRANSFER_LOG_FILE
-  hadd dccore.swm i.2566 TRANSFER_LOG_FILE
-  hadd dccore.swm i.2568 LIST_SIZE_FILE
-  hadd dccore.swm i.2569 LIST_SIZE_FILE
-  hadd dccore.swm i.2570 LIST_SIZE_FILE
-  hadd dccore.swm i.2572 LIST_RAWBYTES_FILE
-  hadd dccore.swm i.2573 LIST_RAWBYTES_FILE
-  hadd dccore.swm i.2574 LIST_RAWBYTES_FILE
-  hadd dccore.swm i.2576 LIST_PROGRESS_FILE
-  hadd dccore.swm i.2577 LIST_PROGRESS_FILE
-  hadd dccore.swm i.2578 LIST_PROGRESS_FILE
-  hadd dccore.swm i.2580 ADMIN_TOKENS_FILE
-  hadd dccore.swm i.2581 ADMIN_TOKENS_FILE
-  hadd dccore.swm i.2582 ADMIN_TOKENS_FILE
-  hadd dccore.swm i.2584 ON_CONNECT_FILE
-  hadd dccore.swm i.2585 ON_CONNECT_FILE
-  hadd dccore.swm i.2586 ON_CONNECT_FILE
-  hadd dccore.swm i.2588 NOTICES_FILE
-  hadd dccore.swm i.2589 NOTICES_FILE
-  hadd dccore.swm i.2590 NOTICES_FILE
-  hadd dccore.swm i.2592 PRIVATE_MESSAGES_FILE
-  hadd dccore.swm i.2593 PRIVATE_MESSAGES_FILE
-  hadd dccore.swm i.2594 PRIVATE_MESSAGES_FILE
-  hadd dccore.swm i.2596 DCC_QUEUE_FILE
-  hadd dccore.swm i.2597 DCC_QUEUE_FILE
-  hadd dccore.swm i.2598 DCC_QUEUE_FILE
+  hadd dccore.swm i.2469 DEBUG_MODE
+  hadd dccore.swm i.2473 DEBUG_TO_CHANNEL
+  hadd dccore.swm i.2477 DEBUG_TO_CONSOLE
+  hadd dccore.swm i.2480 CONSOLE_TIMESTAMP_FORMAT
+  hadd dccore.swm i.2481 CONSOLE_TIMESTAMP_FORMAT
+  hadd dccore.swm i.2484 CONSOLE_LOG_FILE
+  hadd dccore.swm i.2485 CONSOLE_LOG_FILE
+  hadd dccore.swm i.2486 CONSOLE_LOG_FILE
+  hadd dccore.swm i.2488 CONSOLE_LOG_MAX_MB
+  hadd dccore.swm i.2489 CONSOLE_LOG_MAX_MB
+  hadd dccore.swm i.2492 CONSOLE_LOG_KEEP
+  hadd dccore.swm i.2493 CONSOLE_LOG_KEEP
+  hadd dccore.swm i.2496 BOT_WINDOW
+  hadd dccore.swm i.2497 BOT_WINDOW
+  hadd dccore.swm i.2500 PROJECT_URL
+  hadd dccore.swm i.2501 PROJECT_URL
+  hadd dccore.swm i.2504 TMP_ZIP_DIR
+  hadd dccore.swm i.2505 TMP_ZIP_DIR
+  hadd dccore.swm i.2506 TMP_ZIP_DIR
+  hadd dccore.swm i.2508 LOCAL_LIST_DIR
+  hadd dccore.swm i.2509 LOCAL_LIST_DIR
+  hadd dccore.swm i.2510 LOCAL_LIST_DIR
+  hadd dccore.swm i.2512 FETCHED_FILES_DIR
+  hadd dccore.swm i.2513 FETCHED_FILES_DIR
+  hadd dccore.swm i.2514 FETCHED_FILES_DIR
+  hadd dccore.swm i.2516 LIBRARY_FOLDERS_FILE
+  hadd dccore.swm i.2517 LIBRARY_FOLDERS_FILE
+  hadd dccore.swm i.2518 LIBRARY_FOLDERS_FILE
+  hadd dccore.swm i.2520 LISTS_FILE
+  hadd dccore.swm i.2521 LISTS_FILE
+  hadd dccore.swm i.2522 LISTS_FILE
+  hadd dccore.swm i.2524 BANS_FILE
+  hadd dccore.swm i.2525 BANS_FILE
+  hadd dccore.swm i.2526 BANS_FILE
+  hadd dccore.swm i.2528 HARD_BANS_FILE
+  hadd dccore.swm i.2529 HARD_BANS_FILE
+  hadd dccore.swm i.2530 HARD_BANS_FILE
+  hadd dccore.swm i.2532 STATS_FILE
+  hadd dccore.swm i.2533 STATS_FILE
+  hadd dccore.swm i.2534 STATS_FILE
+  hadd dccore.swm i.2536 KNOWN_BOTS_FILE
+  hadd dccore.swm i.2537 KNOWN_BOTS_FILE
+  hadd dccore.swm i.2538 KNOWN_BOTS_FILE
+  hadd dccore.swm i.2540 FETCHED_BOT_LISTS_FILE
+  hadd dccore.swm i.2541 FETCHED_BOT_LISTS_FILE
+  hadd dccore.swm i.2542 FETCHED_BOT_LISTS_FILE
+  hadd dccore.swm i.2544 LIST_INDEX_FILE
+  hadd dccore.swm i.2545 LIST_INDEX_FILE
+  hadd dccore.swm i.2546 LIST_INDEX_FILE
+  hadd dccore.swm i.2548 LIST_AUDIO_INFO_CACHE
+  hadd dccore.swm i.2549 LIST_AUDIO_INFO_CACHE
+  hadd dccore.swm i.2550 LIST_AUDIO_INFO_CACHE
+  hadd dccore.swm i.2552 FETCH_HISTORY_FILE
+  hadd dccore.swm i.2553 FETCH_HISTORY_FILE
+  hadd dccore.swm i.2554 FETCH_HISTORY_FILE
+  hadd dccore.swm i.2556 DOWNLOAD_COUNTS_FILE
+  hadd dccore.swm i.2557 DOWNLOAD_COUNTS_FILE
+  hadd dccore.swm i.2558 DOWNLOAD_COUNTS_FILE
+  hadd dccore.swm i.2560 TRANSFER_LOG_FILE
+  hadd dccore.swm i.2561 TRANSFER_LOG_FILE
+  hadd dccore.swm i.2562 TRANSFER_LOG_FILE
+  hadd dccore.swm i.2564 LIST_SIZE_FILE
+  hadd dccore.swm i.2565 LIST_SIZE_FILE
+  hadd dccore.swm i.2566 LIST_SIZE_FILE
+  hadd dccore.swm i.2568 LIST_RAWBYTES_FILE
+  hadd dccore.swm i.2569 LIST_RAWBYTES_FILE
+  hadd dccore.swm i.2570 LIST_RAWBYTES_FILE
+  hadd dccore.swm i.2572 LIST_PROGRESS_FILE
+  hadd dccore.swm i.2573 LIST_PROGRESS_FILE
+  hadd dccore.swm i.2574 LIST_PROGRESS_FILE
+  hadd dccore.swm i.2576 ADMIN_TOKENS_FILE
+  hadd dccore.swm i.2577 ADMIN_TOKENS_FILE
+  hadd dccore.swm i.2578 ADMIN_TOKENS_FILE
+  hadd dccore.swm i.2580 ON_CONNECT_FILE
+  hadd dccore.swm i.2581 ON_CONNECT_FILE
+  hadd dccore.swm i.2582 ON_CONNECT_FILE
+  hadd dccore.swm i.2584 NOTICES_FILE
+  hadd dccore.swm i.2585 NOTICES_FILE
+  hadd dccore.swm i.2586 NOTICES_FILE
+  hadd dccore.swm i.2588 PRIVATE_MESSAGES_FILE
+  hadd dccore.swm i.2589 PRIVATE_MESSAGES_FILE
+  hadd dccore.swm i.2590 PRIVATE_MESSAGES_FILE
+  hadd dccore.swm i.2592 DCC_QUEUE_FILE
+  hadd dccore.swm i.2593 DCC_QUEUE_FILE
+  hadd dccore.swm i.2594 DCC_QUEUE_FILE
+  hadd dccore.swm i.2597 @panel
+  hadd dccore.swm i.2601 @titlebar
+  hadd dccore.swm i.2605 @separate
+  hadd dccore.swm i.2609 @beep
+  hadd dccore.swm i.2613 @nodcx
+  hadd dccore.swm i.2617 @chat.all
+  hadd dccore.swm i.2621 @chat.popup
   hadd dccore.swm lo.start.main 2025
   hadd dccore.swm h.@start.main This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
   hadd dccore.swm lo.start.chat 2029
@@ -5621,43 +5647,55 @@ alias dccore.sw.data {
   hadd dccore.swm h.@start.downloads This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
   hadd dccore.swm lo.auto 2037
   hadd dccore.swm h.@auto This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
-  hadd dccore.swm lo.nodcx 2469
+  hadd dccore.swm lo.panel 2597
+  hadd dccore.swm h.@panel This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
+  hadd dccore.swm lo.titlebar 2601
+  hadd dccore.swm h.@titlebar This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
+  hadd dccore.swm lo.separate 2605
+  hadd dccore.swm h.@separate This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
+  hadd dccore.swm lo.beep 2609
+  hadd dccore.swm h.@beep This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
+  hadd dccore.swm lo.nodcx 2613
   hadd dccore.swm h.@nodcx This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
-  hadd dccore.swm locals start.main start.chat start.downloads auto nodcx
+  hadd dccore.swm lo.chat.all 2617
+  hadd dccore.swm h.@chat.all This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
+  hadd dccore.swm lo.chat.popup 2621
+  hadd dccore.swm h.@chat.popup This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
+  hadd dccore.swm locals start.main start.chat start.downloads auto panel titlebar separate beep nodcx chat.all chat.popup
   hadd dccore.swm br.2122 dir FILE_DIRECTORY
   hadd dccore.swm br.2158 file RAR_BINARY
   hadd dccore.swm br.2170 file LIST_HEADER_FILE
-  hadd dccore.swm br.2490 file CONSOLE_LOG_FILE
-  hadd dccore.swm br.2510 dir TMP_ZIP_DIR
-  hadd dccore.swm br.2514 dir LOCAL_LIST_DIR
-  hadd dccore.swm br.2518 dir FETCHED_FILES_DIR
-  hadd dccore.swm br.2522 file LIBRARY_FOLDERS_FILE
-  hadd dccore.swm br.2526 file LISTS_FILE
-  hadd dccore.swm br.2530 file BANS_FILE
-  hadd dccore.swm br.2534 file HARD_BANS_FILE
-  hadd dccore.swm br.2538 file STATS_FILE
-  hadd dccore.swm br.2542 file KNOWN_BOTS_FILE
-  hadd dccore.swm br.2546 file FETCHED_BOT_LISTS_FILE
-  hadd dccore.swm br.2550 file LIST_INDEX_FILE
-  hadd dccore.swm br.2554 file LIST_AUDIO_INFO_CACHE
-  hadd dccore.swm br.2558 file FETCH_HISTORY_FILE
-  hadd dccore.swm br.2562 file DOWNLOAD_COUNTS_FILE
-  hadd dccore.swm br.2566 file TRANSFER_LOG_FILE
-  hadd dccore.swm br.2570 file LIST_SIZE_FILE
-  hadd dccore.swm br.2574 file LIST_RAWBYTES_FILE
-  hadd dccore.swm br.2578 file LIST_PROGRESS_FILE
-  hadd dccore.swm br.2582 file ADMIN_TOKENS_FILE
-  hadd dccore.swm br.2586 file ON_CONNECT_FILE
-  hadd dccore.swm br.2590 file NOTICES_FILE
-  hadd dccore.swm br.2594 file PRIVATE_MESSAGES_FILE
-  hadd dccore.swm br.2598 file DCC_QUEUE_FILE
+  hadd dccore.swm br.2486 file CONSOLE_LOG_FILE
+  hadd dccore.swm br.2506 dir TMP_ZIP_DIR
+  hadd dccore.swm br.2510 dir LOCAL_LIST_DIR
+  hadd dccore.swm br.2514 dir FETCHED_FILES_DIR
+  hadd dccore.swm br.2518 file LIBRARY_FOLDERS_FILE
+  hadd dccore.swm br.2522 file LISTS_FILE
+  hadd dccore.swm br.2526 file BANS_FILE
+  hadd dccore.swm br.2530 file HARD_BANS_FILE
+  hadd dccore.swm br.2534 file STATS_FILE
+  hadd dccore.swm br.2538 file KNOWN_BOTS_FILE
+  hadd dccore.swm br.2542 file FETCHED_BOT_LISTS_FILE
+  hadd dccore.swm br.2546 file LIST_INDEX_FILE
+  hadd dccore.swm br.2550 file LIST_AUDIO_INFO_CACHE
+  hadd dccore.swm br.2554 file FETCH_HISTORY_FILE
+  hadd dccore.swm br.2558 file DOWNLOAD_COUNTS_FILE
+  hadd dccore.swm br.2562 file TRANSFER_LOG_FILE
+  hadd dccore.swm br.2566 file LIST_SIZE_FILE
+  hadd dccore.swm br.2570 file LIST_RAWBYTES_FILE
+  hadd dccore.swm br.2574 file LIST_PROGRESS_FILE
+  hadd dccore.swm br.2578 file ADMIN_TOKENS_FILE
+  hadd dccore.swm br.2582 file ON_CONNECT_FILE
+  hadd dccore.swm br.2586 file NOTICES_FILE
+  hadd dccore.swm br.2590 file PRIVATE_MESSAGES_FILE
+  hadd dccore.swm br.2594 file DCC_QUEUE_FILE
   hadd dccore.swm bot.n 6
   hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1506,1505,2041,2045,2049,2053,2057,2061,2065,1520,1521,1522,1523,2069,2073,1610,1611,2077,2078,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2105,2109,2113,2117,1540,1551,1554,1555,1557,1700
   hadd dccore.swm bot.2 1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747,1748,1749,1750
   hadd dccore.swm bot.3 1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1567,1568,2121,2122,2125,2129,2133,2137,2141,2145,2149,2153,2157,2158,2161,2165,2169,2170,2173,2177,2181,2185,2189,2193,2197,2201,2205,2209,2213,2217,2221,2225,2229,2233,2237,2241
   hadd dccore.swm bot.4 2245,2249,2253,2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,1580,1583,1584,1585,1586,1587,1581,1582,1595,1597,1598,1596,2385,2389,2393
-  hadd dccore.swm bot.5 2397,2401,2405,2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2473,2477,2481,2485,2489,2490,2493,2497,2501,2505,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545,2546,2549,2550
-  hadd dccore.swm bot.6 2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598
+  hadd dccore.swm bot.5 2397,2401,2405,2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2469,2473,2477,2481,2485,2486,2489,2493,2497,2501,2505,2506,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545,2546
+  hadd dccore.swm bot.6 2549,2550,2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594
   hadd dccore.swm confirm TMP_ZIP_DIR LOCAL_LIST_DIR FETCHED_FILES_DIR LIBRARY_FOLDERS_FILE LISTS_FILE BANS_FILE HARD_BANS_FILE STATS_FILE KNOWN_BOTS_FILE FETCHED_BOT_LISTS_FILE LIST_INDEX_FILE LIST_AUDIO_INFO_CACHE FETCH_HISTORY_FILE DOWNLOAD_COUNTS_FILE TRANSFER_LOG_FILE LIST_SIZE_FILE LIST_RAWBYTES_FILE LIST_PROGRESS_FILE ADMIN_TOKENS_FILE ON_CONNECT_FILE NOTICES_FILE PRIVATE_MESSAGES_FILE DCC_QUEUE_FILE
   hadd dccore.swm t.1500 Sent once the server has registered the bot~2C before it joins: one command per line~2C exactly as typed into a client. ~25nick~25 is the nickname the server gave it.
   hadd dccore.swm t.2388 That reply's wording (~25admin becomes the admin nick)
@@ -5950,8 +5988,8 @@ menu @DCCore-Chat {
   $iif($sline($dccore.chat.win,1),Message this bot privately):dccore.chat.pickpeer $sline($dccore.chat.win,1).ln
   -
   Clear window:clear $dccore.chat.win
-  Options...:dccore.options
-  Settings...:dccore.settings
+  Script Settings...:dccore.options
+  Bot Settings...:dccore.settings
 }
 
 ; A PEERS line: the DCCore bots WHO found in one channel, right now - kept

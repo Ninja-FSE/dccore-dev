@@ -86,10 +86,18 @@ def text_px(text):
     return sum(CHAR_PX[c] for c in text)
 
 
+# The real dialog font renders wider than the table (#782: a label the table
+# gave 10% to spare ran into its neighbour), so a label is wrapped, and a
+# check box held to fit, as if its control were a fifth narrower. Every
+# label on one line then has that fifth to spare, which
+# tests/test_the_options_dialog_labels_have_room_to_spare.py holds it to.
+FONT_SLACK = 0.8
+
+
 def wrapped_lines(text, width_dbu):
     """How many lines `text` takes in a static text `width_dbu` wide: Windows
     breaks at spaces, so this is a greedy word wrap with the same widths."""
-    width = width_dbu * PX_PER_DBU
+    width = width_dbu * PX_PER_DBU * FONT_SLACK
     lines, current = 1, 0
     space = CHAR_PX[" "]
     for word in text.split(" "):
@@ -153,7 +161,7 @@ ROW_PITCH, COMBO_PITCH, CHECK_PITCH = 12, 13, 11
 # Control ids. Every dialog's ids are its own, but these stay clear of the
 # options dialog's (1-703) and the download queues' (1-6) all the same, so a
 # grep for an id finds one dialog.
-TAB_IDS = range(1001, 1007)
+TAB_IDS = range(1001, 1008)
 FIRST_SLOT_ID = 1020                        # the page buttons: 1020, 1021, ...
 HELP_ID, CONNECTED_ID, STATUS_ID = 1012, 1013, 1018
 FIRST_TEXT_ID = 1100                        # frames and notes
@@ -169,12 +177,12 @@ WIDGETS = {
                        "exactly as typed into a client. %nick% is the nickname the server gave it.",
          0, 0, 358, 16, ""),
         (1501, "edit", "", 0, 18, 358, 40, "multi return autohs autovs hsbar vsbar"),
-        (1502, "text", "Seconds between commands", 0, 63, 92, 8, ""),
-        (1503, "edit", "", 94, 61, 24, 11, "autohs"),
+        (1502, "text", "Seconds between commands", 0, 63, 120, 8, ""),
+        (1503, "edit", "", 124, 61, 24, 11, "autohs"),
         # the on-connect commands need the admin password on a token login
         # (#1264); Apply saves them, with everything else
-        (1506, "button", "Unlock", 122, 60, 44, 13, ""),
-        (1505, "button", "Resend now", 170, 60, 52, 13, ""),
+        (1506, "button", "Unlock", 156, 60, 44, 13, ""),
+        (1505, "button", "Resend now", 208, 60, 56, 13, ""),
     ),
     # The tables (the "list" controls) are each a native list, and with DCX a
     # listview with the columns LISTVIEWS gives it, over the same rectangle.
@@ -222,13 +230,65 @@ WIDGETS = {
         (1611, "text", "Draws the sample advert and notice in @DCCore-preview with the colours chosen here, "
                        "before they are saved.", 56, 0, 302, 16, ""),
     ),
-    "mircwin": (
-        (1615, "text", "What @DCCore shows and in which colours, its side panel, font and background, and "
-                       "the bot's nick and pairing are this mIRC's own options, kept in dccore.ini beside "
-                       "the script.", 0, 0, 358, 24, ""),
-        (1616, "button", "@DCCore window options...", 0, 28, 100, 13, ""),
+    # The Script tab: this mIRC's own settings, from the Options dialog that
+    # was (dccore.sw.opt.fill fills them from dccore.ini, dccore.sw.opt.save
+    # reads them back on Apply). "showin" is built below: a check and a
+    # colour menu per line type @DCCore shows, then the status line.
+    "showin": None,
+    "showcolours": (
+        (1660, "text", "File names", 0, 2, 110, 8, ""),
+        (1640, "combo", "", 114, 0, 96, 80, "drop"),
+        (1661, "text", "Console replies", 0, 15, 110, 8, ""),
+        (1641, "combo", "", 114, 13, 96, 80, "drop"),
+        (1662, "text", "Panel headings", 0, 28, 110, 8, ""),
+        (1642, "combo", "", 114, 26, 96, 80, "drop"),
+        (1663, "text", "Search text", 0, 41, 110, 8, ""),
+        (1643, "combo", "", 114, 39, 96, 80, "drop"),
+        (1664, "text", "Nicks", 0, 54, 110, 8, ""),
+        (1644, "combo", "", 114, 52, 96, 80, "drop"),
+        (1665, "text", "Channels", 0, 67, 110, 8, ""),
+        (1645, "combo", "", 114, 65, 96, 80, "drop"),
+    ),
+    "winlook": (
+        (1670, "check", "Fixed-width font, size", 0, 1, 110, 10, ""),
+        (1671, "edit", "", 134, 0, 24, 11, "autohs"),
+        (1672, "text", "Background", 0, 15, 120, 8, ""),
+        (1673, "combo", "", 134, 13, 96, 80, "drop"),
+        (1674, "text", "Finished downloads to show", 0, 28, 120, 8, ""),
+        (1675, "edit", "", 134, 26, 24, 11, "autohs"),
+    ),
+    "botlink": (
+        (1680, "text", "Bot nick", 0, 2, 36, 8, ""),
+        (1681, "edit", "", 40, 0, 80, 11, "autohs"),
+        (1682, "text", "", 126, 2, 232, 8, ""),
+        (1683, "button", "Pair again...", 0, 14, 56, 13, ""),
+        (1684, "button", "Forget token", 59, 14, 56, 13, ""),
+        (1685, "check", "Console feed on (also requests and sends - not just status)", 0, 31, 358, 10, ""),
     ),
 }
+
+# @DCCore's line types, in dccore.groups' order: a check and a colour menu
+# each (1620 + 2r, 1621 + 2r), then "Status every [ ] min, 0 = off".
+SHOW_LINES = ("Requests (who asked for what)", "Queue positions", "Sends: starting, resuming, done",
+              "Failed transfers", "Searches and result counts", "Joins, parts, quits of queued users",
+              "Bans, mutes, floods", "Other log lines")
+SHOW_FIRST_ID = 1620
+
+
+def show_rows():
+    parts = []
+    for r, label in enumerate(SHOW_LINES):
+        y = 13 * r
+        parts += [(SHOW_FIRST_ID + 2 * r, "check", label, 0, y + 1, 176, 10, ""),
+                  (SHOW_FIRST_ID + 2 * r + 1, "combo", "", 188, y, 96, 80, "drop")]
+    y = 13 * len(SHOW_LINES)
+    parts += [(1636, "text", "Status every", 0, y + 2, 60, 8, ""),
+              (1637, "edit", "", 62, y, 24, 11, "autohs"),
+              (1638, "text", "min, 0 = off", 94, y + 2, 70, 8, "")]
+    return tuple(parts)
+
+
+WIDGETS["showin"] = show_rows()
 # The Channel bindings page: the mockup's rows. A row per channel, each with
 # its own List and Mode menus and a Remove button, a scrollbar beside them
 # for the channels beyond the BIND_ROWS shown, then the row that adds one.
@@ -264,8 +324,8 @@ WIDGETS["srvchans"] = binding_rows()
 WIDGET_H = {name: max(y + (12 if kind == "combo" else h) for _i, kind, _t, _x, y, _w, h, _s in parts) + 4
             for name, parts in WIDGETS.items()}
 # The widgets that talk to the bot (disabled with the settings when the bot
-# cannot be edited); "mircwin" is this mIRC's own.
-LOCAL_WIDGETS = ("mircwin",)
+# cannot be edited); these are this mIRC's own, editable whatever the bot says.
+LOCAL_WIDGETS = ("showin", "showcolours", "winlook", "botlink")
 # The command each structured page asks with, the first time it is shown.
 WIDGET_ASKS = {"onconnect": "onconnect", "srvlists": "served", "srvchans": "served", "srvsaveb": "served",
                "bantimed": "banlist", "banperm": "banlist"}
@@ -632,9 +692,9 @@ class Builder:
         self.labels[key] = label
 
     def check_fits(self, label, width):
-        """Whether a check box's label fits: a check does not wrap, its label
-        is cut off instead."""
-        return text_px(label) + CHECK_BOX_PX <= width * PX_PER_DBU
+        """Whether a check box's label fits, with the fifth to spare: a check
+        does not wrap, its label is cut off instead."""
+        return text_px(label) + CHECK_BOX_PX <= width * PX_PER_DBU * FONT_SLACK
 
     def claim(self, key):
         if key in self.placed:

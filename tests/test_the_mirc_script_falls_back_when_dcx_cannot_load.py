@@ -98,9 +98,9 @@ class TheOption(unittest.TestCase):
     def test_it_defaults_to_dcx(self):
         self.assertIn("dccore.default nodcx 0", alias("dccore.init"))
 
-    def test_it_is_on_the_this_mirc_window_page(self):
+    def test_it_is_on_the_script_tabs_window_page(self):
         pages = {name: sections for _group, ps in layout.GROUPS for name, sections in ps}
-        items = [item for _title, section in pages["This mIRC window"] for item in section]
+        items = [item for _title, section in pages["Window"] for item in section]
         self.assertIn({"local": "nodcx", "label": "Use the built-in settings window, not DCX"}, items)
 
     def test_the_generated_window_carries_it(self):
@@ -165,7 +165,8 @@ class ThePageList(unittest.TestCase):
 
     def test_it_is_built_before_the_first_page_is_shown(self):
         lines = statements(alias("dccore.sw.init"))
-        self.assertLess(lines.index("dccore.sw.dcx"), lines.index("dccore.sw.tab 1"))
+        self.assertLess(lines.index("dccore.sw.dcx"), lines.index("dccore.sw.tab $iif($hget(dccore.live,sw.open) == script,"
+                                                           "$dccore.sw.group(Script),1)"))
 
     def test_nothing_happens_when_dcx_cannot_be_used(self):
         lines = statements(alias("dccore.sw.dcx"))
@@ -312,7 +313,7 @@ class TheMockupLayout(unittest.TestCase):
         import settings_window_layout as layout
         fetch = dict(dict(layout.GROUPS)["Downloads"])["Fetch tuning"]
         labels = [item["label"] for _h, items in fetch for item in items if isinstance(item, dict) and "label" in item]
-        self.assertIn("Re-fetch a list when its bot has a new one", labels)
+        self.assertIn("Re-fetch when a bot has a new list", labels)
 
     def test_the_title_sits_between_the_tabs_and_the_page(self):
         tid, x, y, w, h = (int(n) for n in self.data["dcxtitle"].split())
@@ -551,7 +552,7 @@ class ApplySavesEverything(unittest.TestCase):
 
     def test_leaving_a_page_with_changes_asks_first(self):
         click = alias("dccore.sw.click")
-        self.assertIn("if (%id isnum 1001-1006) { dccore.sw.go tab $calc(%id - 1000) | return }", click)
+        self.assertIn("if (%id isnum 1001-1007) { dccore.sw.go tab $calc(%id - 1000) | return }", click)
         self.assertIn("if (%p) { dccore.sw.go page %p }", click)
         self.assertEqual(statements(alias("dccore.sw.dcxcb"))[-1], "dccore.sw.go page %p")
         go = statements(alias("dccore.sw.go"))
@@ -570,7 +571,8 @@ class ApplySavesEverything(unittest.TestCase):
         lines = statements(alias("dccore.sw.anydirty"))
         self.assertEqual(lines, ["if ($dccore.sw.s(srv.dirty)) || ($dccore.sw.ocdirty) { return $true }",
                                  "if ($dccore.sw.s(loaded)) && ($dccore.sw.changed != $null) { return $true }",
-                                 "return $dccore.sw.localdirty"])
+                                 "if ($dccore.sw.localdirty) { return $true }",
+                                 "return $dccore.sw.opt.dirty"])
         local = alias("dccore.sw.localdirty")
         self.assertIn("if ($did(dccore.set,$dccore.sw.m(lo. $+ %o)).state != $iif($dccore.opt(%o),1,0)) { return $true }",
                       local)
