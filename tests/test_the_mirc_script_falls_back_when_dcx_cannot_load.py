@@ -465,6 +465,10 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("if ($istok($dccore.sw.m(p. $+ $1 $+ .w),srvchans,32)) { dccore.sw.srv.rowsvis }",
                       alias("dccore.sw.page"))
         self.assertIn("srvchans", self.data["p.%d.w" % page].split())
+        # the row that adds one offers the first list and mode, never line 0
+        draw = alias("dccore.sw.srv.drawrows")
+        self.assertIn("dccore.sw.pickline 1771 $iif($dccore.sw.s(srv.order) != $null,1,0)", draw)
+        self.assertIn("if (!$did(dccore.set,1772).sel) { did -c dccore.set 1772 1 }", draw)
         # every Mode menu gets the modes once, at init
         combos = alias("dccore.sw.combos")
         self.assertIn("while (%r <= 15) { dccore.sw.fillfrom $calc($dccore.sw.srv.rowbase(%r) + 2)", combos)

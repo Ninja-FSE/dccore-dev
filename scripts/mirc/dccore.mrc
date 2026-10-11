@@ -3685,7 +3685,10 @@ alias dccore.sw.srv.drawrows {
     }
     inc %r
   }
+  ; the row that adds one offers the first list and the first mode, as the mockup does
   dccore.sw.srv.listsinto 1771
+  dccore.sw.pickline 1771 $iif($dccore.sw.s(srv.order) != $null,1,0)
+  if (!$did(dccore.set,1772).sel) { did -c dccore.set 1772 1 }
   dccore.sw.srv.rowsvis
   dccore.sw.put 1568 $iif(%n,$calc(%off + 1) - $iif($calc(%off + 15) < %n,$calc(%off + 15),%n) of %n,No channel bindings yet)
 }
