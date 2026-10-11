@@ -344,7 +344,7 @@ class ListTriggerIsCaseInsensitive(unittest.TestCase):
     """
 
     def test_the_list_trigger_accepts_any_casing(self):
-        condition = _guard_condition_for("list.send_list_trigger_info(s, user)",
+        condition = _guard_condition_for("list.send_list_trigger_info(sock, user)",
                                          helper=("msg_lower", "msg =="))
         for typed in ("!list", "!LIST", "!List"):
             with self.subTest(typed=typed):
@@ -353,7 +353,7 @@ class ListTriggerIsCaseInsensitive(unittest.TestCase):
 
     def test_the_dispatch_compares_the_lowercased_message(self):
         """The gate itself is already asserted by tests/test_irc_dispatch.py."""
-        condition = _guard_condition_for("list.send_list_trigger_info(s, user)",
+        condition = _guard_condition_for("list.send_list_trigger_info(sock, user)",
                                          helper=("msg_lower", "msg =="))
         self.assertNotIn("msg ==", condition,
                          "!list must compare msg_lower, like !ping and !debugnames")

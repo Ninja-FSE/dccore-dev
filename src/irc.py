@@ -3934,6 +3934,409 @@ def answer_notice(notice_parsed):
             dcc_fetch.handle_bot_reply(notice_user, notice_text)
 
 
+def answer_privmsg(line, privmsg_parsed, sock, oserve):
+    """A PRIVMSG, parsed: the flood gate, the chat and advert captures, CTCP,
+    and every channel and private-message command - the whole dispatch.
+
+    The body of irc_loop()'s `if privmsg_parsed:` until #1334, step 6 of
+    splitting the loop (docs/FUTURE.md). It was the last statement of the
+    loop's per-line `for`, so each `continue` that ended the line's handling
+    is a `return` here; nothing else changed. `oserve` is irc_loop()'s own
+    look-up of the module, passed in.
+    """
+    import announce
+    user, user_host, target_chan, msg = privmsg_parsed
+    # One of our channels under the server's spelling
+    # ("#music{1}" for a configured "#music[1]") is
+    # carried on in the configured one (#1271): the
+    # queue rows, the per-channel lists and the replies
+    # all look the channel up by what CHANNEL says.
+    target_chan = configured_spelling(target_chan) or target_chan
+    msg = msg.strip()
+    if user.lower() == config.NICKNAME.lower():
+        return
+
+    # Cross-bot search broadcast capture, PRIVMSG half (see
+    # the NOTICE branch above and _capture_broadcast_search_reply()'s
+    # own docstring). Placed before the ban check on
+    # purpose: a foreign bot answering a broadcast we asked
+    # for is not subject to OUR channel's ban list, and
+    # this never dispatches anything of its own for a ban
+    # to meaningfully gate.
+    _capture_broadcast_search_reply(user, target_chan, msg)
+
+    # Bot registry, same placement and the same reasoning:
+    # observational, dispatches nothing, and a foreign bot
+    # advertising in a channel we sit in is not subject to
+    # our ban list.
+    _capture_channel_advert(user, target_chan, msg)
+    # #376: a known bot's ident, memory only.
+    _capture_bot_ident(user, user_host)
+
+    # Someone else asking a bot for its list (#926): the
+    # automatic grab leaves that bot alone for a while.
+    _capture_list_ask(user, msg)
+
+    # DCCore Chat (#371): a tagged message from another
+    # DCCore bot, relayed to the operator's console.
+    _capture_chat_message(user, target_chan, msg, user_host)
+
+    # A private message from a bot we asked for a file
+    # (#926): some servers answer a request that way
+    # rather than by NOTICE (SDFind's queue position,
+    # BWI's "not found"). Not a CTCP - DCC SEND is those,
+    # and has its own path. Same placement and reasoning
+    # as the two above: observational, and only ever
+    # moves a request we sent to this sender.
+    if (target_chan.lower() == config.NICKNAME.lower()
+            and not msg.startswith("\x01")):
+        try:
+            import dcc_fetch
+            dcc_fetch.handle_bot_reply(user, msg)
+        except Exception as reply_err:
+            print(f"[FETCH] Could not read {user}'s reply: {reply_err}")
+
+    if not security.check_user_status(user, hostmask=user_host):
+        return
+
+    msg_lower = msg.lower()
+    bot_aliases = get_bot_aliases()
+    # FIXED (issue #35): the gate previously covered only 4 of the ~11
+    # dispatch paths below, so -que, -remove, both CTCP variants, !list,
+    # !debugnames and !ping could each spawn a thread or send a NOTICE
+    # for ANY user with no rate limit at all. Admin commands (!ban,
+    # !unban, !rehash, !update, !clearqueue) are deliberately left out:
+    # each self-checks against ADMIN_NICK in its own handler already, so
+    # gating them here would only meter the operator against themselves.
+    #
+    # FIXED (#219): a private CTCP DCC SEND - the cross-bot fetch reply
+    # path below - was not in this set either. Its own admission control
+    # only decides whether an OFFER is one we solicited; deciding that
+    # costs a thread and a fetch-queue scan per message regardless, and
+    # nothing bounded how many any single, non-banned user could send.
+    # Self-contained, like the QUE/REMOVE clause above it: this whole
+    # expression is lifted out of this file's source text and evaluated
+    # by tests/test_irc_dispatch.py, so a local computed outside it (a
+    # `ctcp_upper = ...` line before this block, tried first) is invisible
+    # to that harness and breaks it with a NameError.
+    is_bot_command = (
+        is_list_request(msg, msg_lower)
+        or msg_lower == f"@{config.NICKNAME.lower()}-help"
+        or msg_lower == f"@{config.NICKNAME.lower()}-stats"
+        or msg_lower == f"@{config.NICKNAME.lower()}-top"
+        or msg_lower == f"@{config.NICKNAME.lower()}-que"
+        or msg_lower == f"@{config.NICKNAME.lower()}-remove"
+        or msg_lower.startswith(f"@{config.NICKNAME.lower()}-remove ")
+        or msg.startswith("@find ")
+        or msg.startswith("@locator ")
+        or any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
+        or msg_lower in ("!list", "!debugnames", "!ping")
+        or (msg.startswith("\x01") and (msg.strip("\x01").strip().upper() in ("QUE", "REMOVE", "VERSION")
+                                            or msg.strip("\x01").strip().upper().startswith("REMOVE ")))
+        or (msg.startswith("\x01")
+            and msg.strip("\x01").strip().upper().startswith("DCC SEND ")
+            and target_chan.lower() == config.NICKNAME.lower())
+        # DCC RESUME, for the same reason #219 gives just
+        # above. It is cheaper than an offer - a dict
+        # lookup, no thread, no disk - but it answers with
+        # an outbound PRIVMSG, and an unthrottled
+        # responder is a standard way to make a bot flood
+        # ITSELF off the network. Being unmatched costs
+        # nothing, so being unthrottled costs everything.
+        or (msg.startswith("\x01")
+            and msg.strip("\x01").strip().upper().startswith("DCC RESUME ")
+            and target_chan.lower() == config.NICKNAME.lower())
+    )
+    # ASKING FOR FILES IS NOT FLOODING (#888). Its own
+    # expression, self-contained for the same reason the
+    # one above is - tests/test_irc_dispatch.py lifts
+    # each of them out of this file's source text and
+    # evaluates it, so neither may lean on a local
+    # computed outside itself.
+    #
+    # A user pasting fifteen rows from the list - one
+    # album, the ordinary way these lists are used - sent
+    # ten requests, was muted on the eleventh and BANNED
+    # FOR AN HOUR on the twelfth. Undernet's own paste
+    # pacing is the only reason that was rare rather than
+    # routine; any client or bouncer that sends faster
+    # turned asking for an album into a ban.
+    #
+    # So a file request never meters, never mutes, never
+    # escalates a mute into a ban, and is served during a
+    # mute earned by other commands. The operator's
+    # decision (#888): "i dont care if they paste a lot
+    # of lines at channel at once as long as the channel
+    # accepts it. bot should just add them to queue one
+    # by one as he requests."
+    #
+    # WHAT STILL BOUNDS IT, none of it the flood gate:
+    # the queue caps (MAX_USER_QUEUE per person,
+    # MAX_GLOBAL_QUEUE overall) are the real limit and
+    # refuse past it; the library lookup each request
+    # costs is bounded by #580/#886 (a few scans at a
+    # time, and three memories so a pasted album is one
+    # scan); packing is one at a time by the packer's own
+    # interlock; and the server's own flood control
+    # decides how fast the lines may arrive in the first
+    # place, which is what the operator is relying on.
+    #
+    # Bans are untouched: check_user_status() runs above
+    # and still refuses a banned user's requests. Every
+    # other trigger in is_bot_command - searches, -que,
+    # -remove, list requests, the CTCPs - is metered
+    # exactly as before.
+    is_file_request = (
+        names_a_file_request(msg_lower, bot_aliases)
+    )
+    if is_bot_command and not is_file_request and security.is_flooding(user):
+        return
+
+    # SOMEBODY SPOKE TO THE BOT AND IT WILL SAY NOTHING
+    # BACK. Recorded here and nowhere else, because this
+    # is the one point where everything is known: the
+    # message is private (a channel line is one the
+    # operator can already see), it is not a command, it
+    # is not a CTCP - which is a client talking to a
+    # client, not a person typing - and the sender has
+    # already passed the ban check above.
+    #
+    # Deliberately AFTER is_flooding() so a flood cannot
+    # fill the panel, and it still does not answer: see
+    # announce.record_private_message() for why silence
+    # stays the behaviour and only the record changes.
+    if (not is_bot_command
+            and target_chan.lower() == config.NICKNAME.lower()
+            and not msg.startswith("\x01")):
+        # ONE OR THE OTHER, never both. Recording it and
+        # replying are two different contracts with the
+        # person who messaged: one keeps it for the
+        # operator and says nothing, the other keeps
+        # nothing and says where to go instead.
+        if getattr(config, "PRIVATE_MESSAGES_ENABLED", True):
+            announce.record_private_message(user, msg)
+        else:
+            announce.decline_private_message(user)
+        return 
+
+    try:
+        import commands
+        import db
+        rotate_the_day_without_stopping_the_bot()
+
+        if msg.startswith("\x01") and msg.endswith("\x01"):
+            ctcp_cmd = msg.strip("\x01").strip().upper()
+            # Admin console. Only ever from a private message -
+            # a DCC CHAT offer addressed to a channel is
+            # meaningless, and accepting one would mean acting
+            # on a line every user in that channel can send.
+            if (ctcp_cmd.startswith("DCC CHAT ")
+                    and target_chan.lower() == config.NICKNAME.lower()):
+                import adminchat
+                adminchat.handle_dcc_chat(
+                    sock, line, user, msg.strip("\x01").strip())
+                return
+            # Cross-bot file fetch: a DCC SEND offer answering
+            # a fetch WE requested (see dcc_fetch.py). Private
+            # only, same reasoning as DCC CHAT above - a DCC
+            # SEND offer addressed to a channel is meaningless
+            # and would mean acting on a line any channel
+            # member could send. Admission control lives
+            # entirely inside handle_incoming_offer(): it only
+            # proceeds if this matches a row we ourselves
+            # marked 'offered' a moment ago, so an unsolicited
+            # offer from anyone is dropped there, not here.
+            if (ctcp_cmd.startswith("DCC SEND ")
+                    and target_chan.lower() == config.NICKNAME.lower()):
+                import dcc_fetch
+                threading.Thread(
+                    target=dcc_fetch.handle_incoming_offer,
+                    args=(sock, user, msg.strip("\x01").strip()),
+                    daemon=True).start()
+                return
+            # A receiver telling us it already holds part
+            # of the file we just offered, and asking us
+            # to send from there. It will not connect
+            # until we answer with a DCC ACCEPT - which
+            # is what "Requesting resume" sitting still
+            # in mIRC forever meant: the client keeping
+            # its side of a bargain we had never been
+            # able to answer.
+            #
+            # Private only, like the two branches above.
+            # The lookup is answered INLINE - it is one dict
+            # read and it must settle the resume position
+            # before the receiver can connect - but the
+            # ACCEPT itself is paced and waits up to
+            # MSG_DELAY for a slot, which on this thread
+            # stalled every PING and every other line
+            # (#577, #602). handle_resume_request(
+            # background=True) sends it from a short
+            # thread. Admission control is entirely
+            # inside handle_resume_request() - it matches
+            # on a port WE are listening on for this exact
+            # nick, so a stray or forged line finds
+            # nothing and is dropped there.
+            if (ctcp_cmd.startswith("DCC RESUME ")
+                    and target_chan.lower() == config.NICKNAME.lower()):
+                dcc.handle_resume_request(
+                    sock, user, msg.strip("\x01").strip(),
+                    background=True)
+                return
+            if ctcp_cmd == "VERSION":
+                # Answered inline rather than on a thread:
+                # one send, nothing read from disk. Not
+                # answered DIRECTLY to the socket any more
+                # though (see the RAM-CHECK reply below
+                # for why that changed) - queued VIP so it
+                # still jumps ahead of an ordinary
+                # per-user backlog, and paced through
+                # runtime.outbound_pacer like every other
+                # outbound line (#406).
+                #
+                # VERSION is in the is_bot_command list
+                # above, so a flooding user's own query is
+                # dropped before reaching here - but many
+                # ordinary clients send exactly one CTCP
+                # VERSION unasked, on sight, the moment
+                # they see a new nick. A bot that just
+                # joined 14 channels can collect a dozen
+                # of those within a second or two, and an
+                # unpaced responder answering each the
+                # instant it arrived was a second way to
+                # flood the bot off - ordinary politeness
+                # from a dozen strangers, nobody
+                # misbehaving, and no per-user gate to
+                # catch it because it is a dozen different
+                # users asking once each.
+                version_reply = ctcp_version_reply(user)
+                if version_reply and oserve:
+                    oserve.queue_message(user, version_reply, is_vip=True)
+                return
+            if ctcp_cmd == "QUE":
+                threading.Thread(target=commands.handle_queue_check, args=(sock, user, target_chan), daemon=True).start()
+                return
+            elif ctcp_cmd == "REMOVE":
+                threading.Thread(target=commands.handle_queue_remove, args=(sock, user, target_chan), daemon=True).start()
+                return
+            elif ctcp_cmd.startswith("REMOVE "):
+                threading.Thread(target=commands.handle_queue_remove_file,
+                                 args=(sock, user, target_chan, msg.strip("\x01").strip()[7:].strip()),
+                                 daemon=True).start()
+                return
+        elif is_list_request(msg, msg_lower):
+            threading.Thread(target=list.send_file_list, args=(sock, user, target_chan),
+                             daemon=True).start()
+        elif msg_lower == f"@{config.NICKNAME.lower()}-help":
+            threading.Thread(target=commands.handle_help_request, args=(sock, user, target_chan), daemon=True).start()
+            return
+        elif msg_lower == f"@{config.NICKNAME.lower()}-stats":
+            threading.Thread(target=commands.handle_stats_request, args=(sock, user, target_chan), daemon=True).start()
+            return
+        elif msg_lower == f"@{config.NICKNAME.lower()}-top":
+            threading.Thread(target=commands.handle_top_request, args=(sock, user, target_chan), daemon=True).start()
+            return
+        elif msg_lower == f"@{config.NICKNAME.lower()}-que":
+            threading.Thread(target=commands.handle_queue_check, args=(sock, user, target_chan), daemon=True).start()
+            return
+        elif msg_lower == f"@{config.NICKNAME.lower()}-remove":
+            threading.Thread(target=commands.handle_queue_remove, args=(sock, user, target_chan), daemon=True).start()
+            return
+        elif msg_lower.startswith(f"@{config.NICKNAME.lower()}-remove ") and msg[len(config.NICKNAME) + 9:].strip():
+            threading.Thread(target=commands.handle_queue_remove_file,
+                             args=(sock, user, target_chan, msg[len(config.NICKNAME) + 9:].strip()),
+                             daemon=True).start()
+            return
+        elif msg.startswith("@find ") or msg.startswith("@locator "):
+            parts = msg.split(" ", 1)
+            if len(parts) > 1:
+                # Formatting and control characters come
+                # off here, before the text is printed,
+                # logged or fed to the console (#670).
+                search_term = list.printable_text(parts[1]).strip()
+                if search_term:
+                    threading.Thread(target=list.execute_search, args=(sock, user, search_term, target_chan), daemon=True).start()
+        elif msg_lower == "!list":
+            list.send_list_trigger_info(sock, user)
+        elif msg.lower() == "!debugnames":
+            # The operator's diagnostic, not a public command
+            # - see commands.diagnostics_are_for_the_admin().
+            # Silently: an answer or a log line per stranger
+            # is the noise this removes.
+            if not commands.diagnostics_are_for_the_admin(user, user_host):
+                return
+            with runtime.channel_users_lock():
+                have_count = hasattr(config, 'channel_users') and channel_key(target_chan) in config.channel_users
+                if have_count:
+                    current_qty = len(config.channel_users[channel_key(target_chan)])
+            # Queued VIP and paced, not sent straight to the
+            # socket - same reasoning as the CTCP VERSION
+            # reply above (#406): a direct send here shares
+            # nothing with queue_mgr.py's or announce.py's
+            # own pacing, so however unlikely a flood of
+            # !debugnames is, this is one more line that
+            # could add to one without the shared clock
+            # knowing it happened.
+            if have_count:
+                ram_check = f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n"
+            else:
+                ram_check = f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n"
+            if oserve:
+                oserve.queue_message(user, ram_check, is_vip=True)
+        elif msg.lower() == "!ping":
+            # Same rule as !debugnames above: a stranger's
+            # !ping used to make every DCCore in the channel
+            # spend a paced line and report to its own admin.
+            if not commands.diagnostics_are_for_the_admin(user, user_host):
+                return
+            threading.Thread(target=commands.handle_ping_request, args=(sock, user, target_chan), daemon=True).start()
+        # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these
+        # once the DCC console is trusted; the console reaches the same
+        # handlers with authorised=True. User commands are unaffected.
+        #
+        # #437: !ban/!unban used to be matched on the raw, case-sensitive
+        # `msg` while !rehash/!update/!clearqueue beside them already used
+        # msg_lower - so "!Ban" or "!BAN" failed this gate entirely. Admin
+        # commands are deliberately excluded from is_bot_command's metering,
+        # so a mistyped ban was not just refused: nothing ran, nothing was
+        # written to hard_bans.txt, and nothing was logged either - in
+        # channel it looked identical to an applied ban.
+        elif (getattr(config, 'ADMIN_CHANNEL_COMMANDS', True)
+              and (msg.lower() in ('!rehash', '!update')
+                   or msg_lower.startswith('!ban ') or msg_lower.startswith('!unban ')
+                   or msg_lower == '!clearqueue'
+                   or msg_lower.startswith('!clearqueue '))):
+            if msg.lower() == "!rehash":
+                threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
+            elif msg_lower.startswith("!ban "):
+                threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
+            elif msg_lower.startswith("!unban "):
+                threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
+            elif msg.lower() == "!update":
+                threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
+            elif msg_lower == "!clearqueue" or msg_lower.startswith("!clearqueue "):
+                # commands.handle_admin_clear_queue was added in #16 but never
+                # wired into this dispatch chain, so the command had no caller
+                # anywhere and typing it did nothing at all. The handler does
+                # its own admin check.
+                threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
+        elif any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases):
+            # Split on the first space only, so "!DCCore !rar Artist/Album"
+            # still hands "!rar Artist/Album" to the download handler.
+            parts = msg.split(" ", 1)
+            if len(parts) > 1:
+                # As for a search (#670): what reaches the
+                # handler is what the terminal, the debug
+                # channel and the admin chat will show.
+                requested_file = list.printable_text(parts[1]).strip()
+                threading.Thread(target=dcc.handle_download_request,
+                                args=(sock, user, requested_file, target_chan),
+                                daemon=True).start()
+
+    except Exception as cmd_err:
+        print(f"[ERROR] Error handling a bot command from {user}: {cmd_err}")
+
+
 def irc_loop():
     """The connection, PING/PONG, and every incoming PRIVMSG from Undernet."""
     global bot_joined_channel
@@ -4431,396 +4834,8 @@ def irc_loop():
                     # matching, a few lines below).
                     privmsg_parsed = parse_privmsg(line)
                     if privmsg_parsed:
-                        user, user_host, target_chan, msg = privmsg_parsed
-                        # One of our channels under the server's spelling
-                        # ("#music{1}" for a configured "#music[1]") is
-                        # carried on in the configured one (#1271): the
-                        # queue rows, the per-channel lists and the replies
-                        # all look the channel up by what CHANNEL says.
-                        target_chan = configured_spelling(target_chan) or target_chan
-                        msg = msg.strip()
-                        if user.lower() == config.NICKNAME.lower():
-                            continue
-
-                        # Cross-bot search broadcast capture, PRIVMSG half (see
-                        # the NOTICE branch above and _capture_broadcast_search_reply()'s
-                        # own docstring). Placed before the ban check on
-                        # purpose: a foreign bot answering a broadcast we asked
-                        # for is not subject to OUR channel's ban list, and
-                        # this never dispatches anything of its own for a ban
-                        # to meaningfully gate.
-                        _capture_broadcast_search_reply(user, target_chan, msg)
-
-                        # Bot registry, same placement and the same reasoning:
-                        # observational, dispatches nothing, and a foreign bot
-                        # advertising in a channel we sit in is not subject to
-                        # our ban list.
-                        _capture_channel_advert(user, target_chan, msg)
-                        # #376: a known bot's ident, memory only.
-                        _capture_bot_ident(user, user_host)
-
-                        # Someone else asking a bot for its list (#926): the
-                        # automatic grab leaves that bot alone for a while.
-                        _capture_list_ask(user, msg)
-
-                        # DCCore Chat (#371): a tagged message from another
-                        # DCCore bot, relayed to the operator's console.
-                        _capture_chat_message(user, target_chan, msg, user_host)
-
-                        # A private message from a bot we asked for a file
-                        # (#926): some servers answer a request that way
-                        # rather than by NOTICE (SDFind's queue position,
-                        # BWI's "not found"). Not a CTCP - DCC SEND is those,
-                        # and has its own path. Same placement and reasoning
-                        # as the two above: observational, and only ever
-                        # moves a request we sent to this sender.
-                        if (target_chan.lower() == config.NICKNAME.lower()
-                                and not msg.startswith("\x01")):
-                            try:
-                                import dcc_fetch
-                                dcc_fetch.handle_bot_reply(user, msg)
-                            except Exception as reply_err:
-                                print(f"[FETCH] Could not read {user}'s reply: {reply_err}")
-
-                        if not security.check_user_status(user, hostmask=user_host):
-                            continue
-                            
-                        msg_lower = msg.lower()
-                        bot_aliases = get_bot_aliases()
-                        # FIXED (issue #35): the gate previously covered only 4 of the ~11
-                        # dispatch paths below, so -que, -remove, both CTCP variants, !list,
-                        # !debugnames and !ping could each spawn a thread or send a NOTICE
-                        # for ANY user with no rate limit at all. Admin commands (!ban,
-                        # !unban, !rehash, !update, !clearqueue) are deliberately left out:
-                        # each self-checks against ADMIN_NICK in its own handler already, so
-                        # gating them here would only meter the operator against themselves.
-                        #
-                        # FIXED (#219): a private CTCP DCC SEND - the cross-bot fetch reply
-                        # path below - was not in this set either. Its own admission control
-                        # only decides whether an OFFER is one we solicited; deciding that
-                        # costs a thread and a fetch-queue scan per message regardless, and
-                        # nothing bounded how many any single, non-banned user could send.
-                        # Self-contained, like the QUE/REMOVE clause above it: this whole
-                        # expression is lifted out of this file's source text and evaluated
-                        # by tests/test_irc_dispatch.py, so a local computed outside it (a
-                        # `ctcp_upper = ...` line before this block, tried first) is invisible
-                        # to that harness and breaks it with a NameError.
-                        is_bot_command = (
-                            is_list_request(msg, msg_lower)
-                            or msg_lower == f"@{config.NICKNAME.lower()}-help"
-                            or msg_lower == f"@{config.NICKNAME.lower()}-stats"
-                            or msg_lower == f"@{config.NICKNAME.lower()}-top"
-                            or msg_lower == f"@{config.NICKNAME.lower()}-que"
-                            or msg_lower == f"@{config.NICKNAME.lower()}-remove"
-                            or msg_lower.startswith(f"@{config.NICKNAME.lower()}-remove ")
-                            or msg.startswith("@find ")
-                            or msg.startswith("@locator ")
-                            or any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
-                            or msg_lower in ("!list", "!debugnames", "!ping")
-                            or (msg.startswith("\x01") and (msg.strip("\x01").strip().upper() in ("QUE", "REMOVE", "VERSION")
-                                                                or msg.strip("\x01").strip().upper().startswith("REMOVE ")))
-                            or (msg.startswith("\x01")
-                                and msg.strip("\x01").strip().upper().startswith("DCC SEND ")
-                                and target_chan.lower() == config.NICKNAME.lower())
-                            # DCC RESUME, for the same reason #219 gives just
-                            # above. It is cheaper than an offer - a dict
-                            # lookup, no thread, no disk - but it answers with
-                            # an outbound PRIVMSG, and an unthrottled
-                            # responder is a standard way to make a bot flood
-                            # ITSELF off the network. Being unmatched costs
-                            # nothing, so being unthrottled costs everything.
-                            or (msg.startswith("\x01")
-                                and msg.strip("\x01").strip().upper().startswith("DCC RESUME ")
-                                and target_chan.lower() == config.NICKNAME.lower())
-                        )
-                        # ASKING FOR FILES IS NOT FLOODING (#888). Its own
-                        # expression, self-contained for the same reason the
-                        # one above is - tests/test_irc_dispatch.py lifts
-                        # each of them out of this file's source text and
-                        # evaluates it, so neither may lean on a local
-                        # computed outside itself.
-                        #
-                        # A user pasting fifteen rows from the list - one
-                        # album, the ordinary way these lists are used - sent
-                        # ten requests, was muted on the eleventh and BANNED
-                        # FOR AN HOUR on the twelfth. Undernet's own paste
-                        # pacing is the only reason that was rare rather than
-                        # routine; any client or bouncer that sends faster
-                        # turned asking for an album into a ban.
-                        #
-                        # So a file request never meters, never mutes, never
-                        # escalates a mute into a ban, and is served during a
-                        # mute earned by other commands. The operator's
-                        # decision (#888): "i dont care if they paste a lot
-                        # of lines at channel at once as long as the channel
-                        # accepts it. bot should just add them to queue one
-                        # by one as he requests."
-                        #
-                        # WHAT STILL BOUNDS IT, none of it the flood gate:
-                        # the queue caps (MAX_USER_QUEUE per person,
-                        # MAX_GLOBAL_QUEUE overall) are the real limit and
-                        # refuse past it; the library lookup each request
-                        # costs is bounded by #580/#886 (a few scans at a
-                        # time, and three memories so a pasted album is one
-                        # scan); packing is one at a time by the packer's own
-                        # interlock; and the server's own flood control
-                        # decides how fast the lines may arrive in the first
-                        # place, which is what the operator is relying on.
-                        #
-                        # Bans are untouched: check_user_status() runs above
-                        # and still refuses a banned user's requests. Every
-                        # other trigger in is_bot_command - searches, -que,
-                        # -remove, list requests, the CTCPs - is metered
-                        # exactly as before.
-                        is_file_request = (
-                            names_a_file_request(msg_lower, bot_aliases)
-                        )
-                        if is_bot_command and not is_file_request and security.is_flooding(user):
-                            continue
-
-                        # SOMEBODY SPOKE TO THE BOT AND IT WILL SAY NOTHING
-                        # BACK. Recorded here and nowhere else, because this
-                        # is the one point where everything is known: the
-                        # message is private (a channel line is one the
-                        # operator can already see), it is not a command, it
-                        # is not a CTCP - which is a client talking to a
-                        # client, not a person typing - and the sender has
-                        # already passed the ban check above.
-                        #
-                        # Deliberately AFTER is_flooding() so a flood cannot
-                        # fill the panel, and it still does not answer: see
-                        # announce.record_private_message() for why silence
-                        # stays the behaviour and only the record changes.
-                        if (not is_bot_command
-                                and target_chan.lower() == config.NICKNAME.lower()
-                                and not msg.startswith("\x01")):
-                            # ONE OR THE OTHER, never both. Recording it and
-                            # replying are two different contracts with the
-                            # person who messaged: one keeps it for the
-                            # operator and says nothing, the other keeps
-                            # nothing and says where to go instead.
-                            if getattr(config, "PRIVATE_MESSAGES_ENABLED", True):
-                                announce.record_private_message(user, msg)
-                            else:
-                                announce.decline_private_message(user)
-                            continue 
-                            
-                        try:
-                            import commands
-                            import db
-                            rotate_the_day_without_stopping_the_bot()
-                            
-                            if msg.startswith("\x01") and msg.endswith("\x01"):
-                                ctcp_cmd = msg.strip("\x01").strip().upper()
-                                # Admin console. Only ever from a private message -
-                                # a DCC CHAT offer addressed to a channel is
-                                # meaningless, and accepting one would mean acting
-                                # on a line every user in that channel can send.
-                                if (ctcp_cmd.startswith("DCC CHAT ")
-                                        and target_chan.lower() == config.NICKNAME.lower()):
-                                    import adminchat
-                                    adminchat.handle_dcc_chat(
-                                        s, line, user, msg.strip("\x01").strip())
-                                    continue
-                                # Cross-bot file fetch: a DCC SEND offer answering
-                                # a fetch WE requested (see dcc_fetch.py). Private
-                                # only, same reasoning as DCC CHAT above - a DCC
-                                # SEND offer addressed to a channel is meaningless
-                                # and would mean acting on a line any channel
-                                # member could send. Admission control lives
-                                # entirely inside handle_incoming_offer(): it only
-                                # proceeds if this matches a row we ourselves
-                                # marked 'offered' a moment ago, so an unsolicited
-                                # offer from anyone is dropped there, not here.
-                                if (ctcp_cmd.startswith("DCC SEND ")
-                                        and target_chan.lower() == config.NICKNAME.lower()):
-                                    import dcc_fetch
-                                    threading.Thread(
-                                        target=dcc_fetch.handle_incoming_offer,
-                                        args=(s, user, msg.strip("\x01").strip()),
-                                        daemon=True).start()
-                                    continue
-                                # A receiver telling us it already holds part
-                                # of the file we just offered, and asking us
-                                # to send from there. It will not connect
-                                # until we answer with a DCC ACCEPT - which
-                                # is what "Requesting resume" sitting still
-                                # in mIRC forever meant: the client keeping
-                                # its side of a bargain we had never been
-                                # able to answer.
-                                #
-                                # Private only, like the two branches above.
-                                # The lookup is answered INLINE - it is one dict
-                                # read and it must settle the resume position
-                                # before the receiver can connect - but the
-                                # ACCEPT itself is paced and waits up to
-                                # MSG_DELAY for a slot, which on this thread
-                                # stalled every PING and every other line
-                                # (#577, #602). handle_resume_request(
-                                # background=True) sends it from a short
-                                # thread. Admission control is entirely
-                                # inside handle_resume_request() - it matches
-                                # on a port WE are listening on for this exact
-                                # nick, so a stray or forged line finds
-                                # nothing and is dropped there.
-                                if (ctcp_cmd.startswith("DCC RESUME ")
-                                        and target_chan.lower() == config.NICKNAME.lower()):
-                                    dcc.handle_resume_request(
-                                        s, user, msg.strip("\x01").strip(),
-                                        background=True)
-                                    continue
-                                if ctcp_cmd == "VERSION":
-                                    # Answered inline rather than on a thread:
-                                    # one send, nothing read from disk. Not
-                                    # answered DIRECTLY to the socket any more
-                                    # though (see the RAM-CHECK reply below
-                                    # for why that changed) - queued VIP so it
-                                    # still jumps ahead of an ordinary
-                                    # per-user backlog, and paced through
-                                    # runtime.outbound_pacer like every other
-                                    # outbound line (#406).
-                                    #
-                                    # VERSION is in the is_bot_command list
-                                    # above, so a flooding user's own query is
-                                    # dropped before reaching here - but many
-                                    # ordinary clients send exactly one CTCP
-                                    # VERSION unasked, on sight, the moment
-                                    # they see a new nick. A bot that just
-                                    # joined 14 channels can collect a dozen
-                                    # of those within a second or two, and an
-                                    # unpaced responder answering each the
-                                    # instant it arrived was a second way to
-                                    # flood the bot off - ordinary politeness
-                                    # from a dozen strangers, nobody
-                                    # misbehaving, and no per-user gate to
-                                    # catch it because it is a dozen different
-                                    # users asking once each.
-                                    version_reply = ctcp_version_reply(user)
-                                    if version_reply and oserve:
-                                        oserve.queue_message(user, version_reply, is_vip=True)
-                                    continue
-                                if ctcp_cmd == "QUE":
-                                    threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()
-                                    continue
-                                elif ctcp_cmd == "REMOVE":
-                                    threading.Thread(target=commands.handle_queue_remove, args=(s, user, target_chan), daemon=True).start()
-                                    continue
-                                elif ctcp_cmd.startswith("REMOVE "):
-                                    threading.Thread(target=commands.handle_queue_remove_file,
-                                                     args=(s, user, target_chan, msg.strip("\x01").strip()[7:].strip()),
-                                                     daemon=True).start()
-                                    continue
-                            elif is_list_request(msg, msg_lower):
-                                threading.Thread(target=list.send_file_list, args=(s, user, target_chan),
-                                                 daemon=True).start()
-                            elif msg_lower == f"@{config.NICKNAME.lower()}-help":
-                                threading.Thread(target=commands.handle_help_request, args=(s, user, target_chan), daemon=True).start()
-                                continue
-                            elif msg_lower == f"@{config.NICKNAME.lower()}-stats":
-                                threading.Thread(target=commands.handle_stats_request, args=(s, user, target_chan), daemon=True).start()
-                                continue
-                            elif msg_lower == f"@{config.NICKNAME.lower()}-top":
-                                threading.Thread(target=commands.handle_top_request, args=(s, user, target_chan), daemon=True).start()
-                                continue
-                            elif msg_lower == f"@{config.NICKNAME.lower()}-que":
-                                threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()
-                                continue
-                            elif msg_lower == f"@{config.NICKNAME.lower()}-remove":
-                                threading.Thread(target=commands.handle_queue_remove, args=(s, user, target_chan), daemon=True).start()
-                                continue
-                            elif msg_lower.startswith(f"@{config.NICKNAME.lower()}-remove ") and msg[len(config.NICKNAME) + 9:].strip():
-                                threading.Thread(target=commands.handle_queue_remove_file,
-                                                 args=(s, user, target_chan, msg[len(config.NICKNAME) + 9:].strip()),
-                                                 daemon=True).start()
-                                continue
-                            elif msg.startswith("@find ") or msg.startswith("@locator "):
-                                parts = msg.split(" ", 1)
-                                if len(parts) > 1:
-                                    # Formatting and control characters come
-                                    # off here, before the text is printed,
-                                    # logged or fed to the console (#670).
-                                    search_term = list.printable_text(parts[1]).strip()
-                                    if search_term:
-                                        threading.Thread(target=list.execute_search, args=(s, user, search_term, target_chan), daemon=True).start()
-                            elif msg_lower == "!list":
-                                list.send_list_trigger_info(s, user)
-                            elif msg.lower() == "!debugnames":
-                                # The operator's diagnostic, not a public command
-                                # - see commands.diagnostics_are_for_the_admin().
-                                # Silently: an answer or a log line per stranger
-                                # is the noise this removes.
-                                if not commands.diagnostics_are_for_the_admin(user, user_host):
-                                    continue
-                                with runtime.channel_users_lock():
-                                    have_count = hasattr(config, 'channel_users') and channel_key(target_chan) in config.channel_users
-                                    if have_count:
-                                        current_qty = len(config.channel_users[channel_key(target_chan)])
-                                # Queued VIP and paced, not sent straight to the
-                                # socket - same reasoning as the CTCP VERSION
-                                # reply above (#406): a direct send here shares
-                                # nothing with queue_mgr.py's or announce.py's
-                                # own pacing, so however unlikely a flood of
-                                # !debugnames is, this is one more line that
-                                # could add to one without the shared clock
-                                # knowing it happened.
-                                if have_count:
-                                    ram_check = f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n"
-                                else:
-                                    ram_check = f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n"
-                                if oserve:
-                                    oserve.queue_message(user, ram_check, is_vip=True)
-                            elif msg.lower() == "!ping":
-                                # Same rule as !debugnames above: a stranger's
-                                # !ping used to make every DCCore in the channel
-                                # spend a paced line and report to its own admin.
-                                if not commands.diagnostics_are_for_the_admin(user, user_host):
-                                    continue
-                                threading.Thread(target=commands.handle_ping_request, args=(s, user, target_chan), daemon=True).start()
-                            # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these
-                            # once the DCC console is trusted; the console reaches the same
-                            # handlers with authorised=True. User commands are unaffected.
-                            #
-                            # #437: !ban/!unban used to be matched on the raw, case-sensitive
-                            # `msg` while !rehash/!update/!clearqueue beside them already used
-                            # msg_lower - so "!Ban" or "!BAN" failed this gate entirely. Admin
-                            # commands are deliberately excluded from is_bot_command's metering,
-                            # so a mistyped ban was not just refused: nothing ran, nothing was
-                            # written to hard_bans.txt, and nothing was logged either - in
-                            # channel it looked identical to an applied ban.
-                            elif (getattr(config, 'ADMIN_CHANNEL_COMMANDS', True)
-                                  and (msg.lower() in ('!rehash', '!update')
-                                       or msg_lower.startswith('!ban ') or msg_lower.startswith('!unban ')
-                                       or msg_lower == '!clearqueue'
-                                       or msg_lower.startswith('!clearqueue '))):
-                                if msg.lower() == "!rehash":
-                                    threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
-                                elif msg_lower.startswith("!ban "):
-                                    threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
-                                elif msg_lower.startswith("!unban "):
-                                    threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
-                                elif msg.lower() == "!update":
-                                    threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
-                                elif msg_lower == "!clearqueue" or msg_lower.startswith("!clearqueue "):
-                                    # commands.handle_admin_clear_queue was added in #16 but never
-                                    # wired into this dispatch chain, so the command had no caller
-                                    # anywhere and typing it did nothing at all. The handler does
-                                    # its own admin check.
-                                    threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
-                            elif any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases):
-                                # Split on the first space only, so "!DCCore !rar Artist/Album"
-                                # still hands "!rar Artist/Album" to the download handler.
-                                parts = msg.split(" ", 1)
-                                if len(parts) > 1:
-                                    # As for a search (#670): what reaches the
-                                    # handler is what the terminal, the debug
-                                    # channel and the admin chat will show.
-                                    requested_file = list.printable_text(parts[1]).strip()
-                                    threading.Thread(target=dcc.handle_download_request,
-                                                    args=(s, user, requested_file, target_chan),
-                                                    daemon=True).start()
-                                    
-                        except Exception as cmd_err:
-                            print(f"[ERROR] Error handling a bot command from {user}: {cmd_err}")
+                        # answer_privmsg() since #1334.
+                        answer_privmsg(line, privmsg_parsed, s, oserve)
 
             except Exception as inner_loop_err:
                 print(f"[IRC INTERNAL ERROR] Unexpected error inside the message loop: {inner_loop_err}")
