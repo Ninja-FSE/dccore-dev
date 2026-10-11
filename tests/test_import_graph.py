@@ -49,10 +49,13 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #                            out of webserver.py (#1311); stdlib only at import
 #   web_search             - the search broadcast, split out (#1313); stdlib,
 #                            config and web_common at import
+#   web_lists              - other bots' lists, split out (#1315); stdlib,
+#                            config, runtime and web_common at import
 ALLOWED = {
     "webserver",
     "web_common",
     "web_search",
+    "web_lists",
     "defaults",
     "runtime",
     "settings_file",
