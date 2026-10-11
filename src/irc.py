@@ -413,6 +413,33 @@ def answer_nick_refusal(line, sock, registered, refusals):
     return refusals
 
 
+def reclaim_main_nick(line, sock):
+    """Somebody quit or parted (irc_loop() guards on the QUIT/PART event).
+    If it was the client holding the bot's main nick, and the bot is not on
+    its main nick, ask for the main nick back. Returns True if it asked.
+
+    Was a block inside irc_loop() until #1291, step 2 of splitting that loop
+    (docs/FUTURE.md). Moved unchanged.
+
+    The quitter is read from the line's prefix, never from the text: a QUIT
+    reason is free text, and searching the whole line for ":<mainnick>!"
+    let anybody forge a reclaim.
+    """
+    main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
+    if str(config.NICKNAME).lower() == main_nick.lower():
+        return False
+    if event_source_nick(line) != main_nick.lower():
+        return False
+    print(f"[NICK RECOVERY] The main nick {main_nick} logged out. Reclaiming it now...")
+    try:
+        # Asked for, not yet held: config.NICKNAME follows the server's NICK
+        # event (#635).
+        sock.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
+    except Exception as recovery_err:
+        print(f"[NICK RECOVERY ERROR] Could not reclaim the nick: {recovery_err}")
+    return True
+
+
 def numeric_target(line):
     """The nick a server numeric is addressed to, or None.
 
@@ -3741,17 +3768,9 @@ def irc_loop():
                     # text. Together with the 433 handler above that was a two-line flood:
                     # forge a 433 to push the bot onto its alt nick, forge a QUIT to pull it
                     # back, repeat. Two unpaced NICK commands per round, from channel text.
+                    # reclaim_main_nick() does the rest (#1291).
                     if is_user_event(line, "QUIT") or is_user_event(line, "PART"):
-                        main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
-                        if str(config.NICKNAME).lower() != main_nick.lower():
-                            if event_source_nick(line) == main_nick.lower():
-                                print(f"[NICK RECOVERY] The main nick {main_nick} logged out. Reclaiming it now...")
-                                try:
-                                    # Asked for, not yet held: config.NICKNAME
-                                    # follows the server's NICK event (#635).
-                                    s.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
-                                except Exception as recovery_err:
-                                    print(f"[NICK RECOVERY ERROR] Could not reclaim the nick: {recovery_err}")
+                        reclaim_main_nick(line, s)
 
 
                     # Anchored: "001" in line matched any message containing those three
