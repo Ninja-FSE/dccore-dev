@@ -813,7 +813,11 @@ def _served_commit(session, txn):
              "Nothing was saved: some lines were refused.")
         return
     current = webserver.build_lists_payload()
-    if txn.lists == current.get("lists"):
+    # The transaction carries no exclusions (#1295) - apply_list_changes()
+    # keeps each list's - so they are left out of "did anything change".
+    unchanged = [{k: v for k, v in row.items() if k != "exclude"}
+                 for row in current.get("lists") or []]
+    if txn.lists == unchanged:
         _say(session, "SRVDONE unchanged Nothing changed; nothing was saved.",
              "Nothing changed; nothing was saved.")
         return
@@ -847,6 +851,8 @@ def cmd_served(session, args):
                 out.append(f"       {channel}  {_mode_of(row, channel)}")
             for folder in row.get("folders") or []:
                 out.append(f"       {folder.get('name')} = {folder.get('path')}")
+            if row.get("exclude"):
+                out.append(f"       leaves out: {', '.join(row.get('exclude'))}")
         _send_lines(session, out)
         return
     if sub not in ("begin", "list", "chan", "folder", "commit", "abort"):

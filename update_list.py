@@ -87,9 +87,13 @@ def _extension_set(setting_name):
     return tuple(dict.fromkeys(cleaned))
 
 
-def ignored_extensions():
-    """Extensions left out of every list."""
-    return _extension_set("LIST_IGNORED_EXTENSIONS")
+def ignored_extensions(list_name=None):
+    """Extensions left out of a list: LIST_IGNORED_EXTENSIONS, which applies
+    to every list, then the list's own exclusions (#1295) - the list called
+    `list_name`, or the primary without one."""
+    import library
+    every = _extension_set("LIST_IGNORED_EXTENSIONS")
+    return tuple(dict.fromkeys(every + library.list_exclusions(list_name)))
 
 
 def video_extensions():
@@ -1769,7 +1773,7 @@ def generate_master_list(list_name=None, reading_jobs=None):
     # Once, here - see is_listed_file()'s note. Resolving these inside the
     # walk asked the question per file rather than per scan, and a 719k-file
     # library would have rebuilt each tuple 719,000 times.
-    ignored = ignored_extensions()
+    ignored = ignored_extensions(list_name)
     video_exts = video_extensions()
     companion_exts = video_companion_extensions()
     packable_exts = rar_extensions()
