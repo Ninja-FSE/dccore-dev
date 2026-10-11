@@ -2,6 +2,23 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🧪 The script-version changelog test survives the next section (#1285)
+
+`test_the_public_changelog_names_one_script_version` (from the #1264 settings window) demanded that the topmost
+section of `docs/UPDATES-PUBLIC.md` ask for `dccore.mrc` 1.19.4. The v1.16.2 roll pointed it at the topmost
+section, which is right until the first change after the release opens `## Unreleased` above v1.16.2 - most
+changes don't touch the script, the new section names no version, and the test would fail on that PR.
+
+- **Now:** the topmost section names at most one script version, and the newest version the changelog asks for
+  anywhere equals the script's own `dccore.ver`. The second half also catches a script bump that ships without a
+  changelog bullet, which the old pinned `1.19.4` could not.
+- **Tests:** two more in `tests/test_the_mirc_settings_window.py` feed the helper a new `## Unreleased` with no
+  script bullet (must pass and find the version below it) and a section naming two versions (both seen). 5/5
+  mutations caught: script bumped without a bullet, two versions in the top section, newest looked for only in the
+  top section, top section run to the end of the file, the second section read as the top one.
+
 ## 🟩 v1.16.2 (2026-10-11) - "The Hardened Release"
 
 ### 🛡️ Admin access: the script's pairing token, the console's listener and logins, and what a rehash keeps
