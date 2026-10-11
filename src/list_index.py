@@ -127,6 +127,22 @@ _SCHEMA_VERSION = 3
 # nothing here uses: search() has no ORDER BY. About 5% of the file.
 _FTS_OPTIONS = "tokenize='unicode61', prefix='1 2 3 4', columnsize=0"
 
+# HOW MUCH THE INDEX REWRITES ITSELF WHILE IT IS FILLED (#1345). FTS5 keeps
+# the rows being inserted in an in-memory hash and writes it out as a new
+# segment each time it reaches `hashsize`, 1 MB by default; with five prefix
+# entries per word that is every few thousand rows, and every few segments
+# are merged into a bigger one, and those again. A Windows bot re-indexing
+# its 97 held lists wrote about 36 GB for a 5.2 GB index. Measured on the 8
+# largest of them (6.78M rows): 13.1 GB written and 272 s with the defaults;
+# 8.0 GB and 195 s with a 16 MB hash and merges every 8 segments instead of
+# 4, the index about the same size and every filter query as fast; on the 25
+# largest (13.0M rows) 26.6 GB and 573 s became 16.6 GB and 371 s. A 64 MB hash
+# saved little more and costs memory a small host may not have. Kept in the
+# table's own config, and set on every open so an index made before is
+# tuned too.
+_FTS_HASHSIZE = 16 * 1024 * 1024
+_FTS_AUTOMERGE = 8
+
 # One connection, reused. Opening a database per keystroke would be the
 # cheapest thing here to get wrong.
 _connection = None
@@ -346,6 +362,10 @@ def _open(path):
                      "(key TEXT PRIMARY KEY, value TEXT)")
         conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                      (str(_SCHEMA_VERSION),))
+        conn.execute("INSERT INTO entries (entries, rank) VALUES ('hashsize', ?)",
+                     (_FTS_HASHSIZE,))
+        conn.execute("INSERT INTO entries (entries, rank) VALUES ('automerge', ?)",
+                     (_FTS_AUTOMERGE,))
         conn.commit()
     except Exception:
         if conn is not None:
@@ -729,7 +749,7 @@ def index_bot_list(bot, rows):
             # that replaced a list must not leave the old rows searchable
             # beside the new ones, and a crash between the two must not leave
             # the bot indexed twice.
-            conn.execute("DELETE FROM entries WHERE bot = ?", (name,))
+            _delete_rows_of(conn, name)
             # And its folders, or every refetch under a new set of headings
             # would leave the old ones behind for good (#1135).
             conn.execute("DELETE FROM folders WHERE bot = ?", (name,))
@@ -771,6 +791,27 @@ def index_bot_list(bot, rows):
             return 0
 
 
+def _delete_rows_of(conn, name):
+    """Delete one list's rows, found through the index. Caller holds _conn_lock
+    and owns the transaction.
+
+    `DELETE ... WHERE bot = ?` was a scan of the whole table (#1345): FTS5
+    answers nothing but MATCH and rowid from its index, so every refresh read
+    every row of every list to find its own - 2.3 s at 6.8M rows, even for a
+    list with no rows yet, and a rebuild re-indexing ninety lists into a
+    growing table paid it ninety times. The MATCH finds the candidates and
+    `bot = ?` keeps the delete exact, as in bots_with_a_match(): `bot:"name"`
+    is a tokenised phrase, and some_bot and some-bot are the same one. A
+    name with no tokens at all (#1091) has no phrase, and is found the old
+    way.
+    """
+    if _has_tokens(name):
+        conn.execute("DELETE FROM entries WHERE rowid IN (SELECT rowid FROM entries "
+                     "WHERE entries MATCH ? AND bot = ?)", ("bot:" + _quote(name), name))
+    else:
+        conn.execute("DELETE FROM entries WHERE bot = ?", (name,))
+
+
 def _counted_values(name, rows, indexed, folder_ids, next_id):
     """index_bot_list()'s INSERT parameters, counting each into indexed[0].
 
@@ -806,7 +847,7 @@ def drop_bot(bot):
         if conn is None:
             return False
         try:
-            conn.execute("DELETE FROM entries WHERE bot = ?", (name,))
+            _delete_rows_of(conn, name)
             # Its folders too (#1135): forget_bot() and a purge come through
             # here, and a folder whose rows are gone is a leak, not a cache.
             conn.execute("DELETE FROM folders WHERE bot = ?", (name,))
