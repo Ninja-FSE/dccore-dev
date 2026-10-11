@@ -1823,7 +1823,10 @@ def check_fetch_queue():
             # the same way: a DCC SEND of their own list zip, filename
             # unknown to us ahead of time (see _claim_matching_offer_locked()
             # for how admission control handles that).
-            message = f"PRIVMSG {channel} :@{trigger}\r\n"
+            #
+            # LIST_REQUEST_TAG (#1293) follows, two spaces after, only for a
+            # bot known to be DCCore - see list_request_lines().
+            message, other_forms = list_request_lines(channel, bot, trigger)
             log_desc = f"{bot}'s file list"
         elif request_type == "folder":
             # filename is already the literal string "!rar <folder path>" at
@@ -1861,6 +1864,11 @@ def check_fetch_queue():
                     print(f"[FETCH] Not requesting {log_desc}: request {rid} is no longer waiting.")
                     continue
                 _take_back_unsent_line(message)
+                if request_type == "list":
+                    # The same request with or without the tag (#1293): a bot
+                    # can become a known peer between two asks for its list.
+                    for other in other_forms:
+                        _take_back_unsent_line(other)
                 row["request_line"] = message
                 # Remembered on the row so a retry of THIS request keeps
                 # asking in the same channel rather than drifting tick to
@@ -1872,6 +1880,40 @@ def check_fetch_queue():
                 # one behind the advert, and either way for minutes.
                 oserve.queue_message(bot, message, is_vip=getattr(oserve, "FETCH_LANE", True))
         print(f"[FETCH] Requested {log_desc} (request {rid}).")
+
+
+def list_request_tag(bot):
+    """What follows "@<trigger>  " on a list request to `bot`, or "" (#1293).
+
+    LIST_REQUEST_TAG, sent only to a bot known to be DCCore
+    (serverschat.is_known_peer()). Every DCCore that can be recognised as a
+    peer answers "@<nick>" followed by anything (irc.is_list_request()); many
+    other server scripts answer only the exact "@<nick>" and would silently
+    never send the list. Checked again here, not only on save, since a value
+    in settings.conf that the check refuses is still read in as text."""
+    import settings_file
+    tag = str(getattr(config, "LIST_REQUEST_TAG", "") or "").strip()
+    if not tag or settings_file.request_tag_problem(tag):
+        return ""
+    import serverschat
+    if not serverschat.is_known_peer(bot):
+        return ""
+    return tag
+
+
+def list_request_lines(channel, bot, trigger):
+    """(the line that asks `bot` for its list, [the other form of the same
+    request]). The other form is the line with the tag if this one has
+    none, or without it if it has one - for taking back an unsent earlier
+    ask either way."""
+    bare = f"PRIVMSG {channel} :@{trigger}\r\n"
+    tag = list_request_tag(bot)
+    if tag:
+        return f"PRIVMSG {channel} :@{trigger}  {tag}\r\n", [bare]
+    configured = str(getattr(config, "LIST_REQUEST_TAG", "") or "").strip()
+    if configured:
+        return bare, [f"PRIVMSG {channel} :@{trigger}  {configured}\r\n"]
+    return bare, []
 
 
 def _take_back_unsent_line(line):

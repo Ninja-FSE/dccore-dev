@@ -564,6 +564,7 @@
   "settings.field.MAX_FETCH_SLOTS": "Max fetch slots",
   "settings.field.FETCH_HISTORY_DAYS": "Keep finished downloads for (days)",
   "settings.field.FETCH_HISTORY_MAX_ROWS": "Maximum finished downloads kept",
+  "settings.field.LIST_REQUEST_TAG": "Tag on your list requests",
   "settings.field.MAX_FETCH_FILE_SIZE": "Max fetch file size",
   "settings.field.MAX_LIST_TEXT_SIZE": "Largest list text accepted from a peer",
   "settings.field.DCC_BLOCK_SIZE": "Packet size",
