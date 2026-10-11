@@ -370,6 +370,49 @@ def fallback_nick(main_nick, attempt):
     return None
 
 
+def answer_nick_refusal(line, sock, registered, refusals):
+    """The server refused a NICK (432, 433 or 437 - irc_loop() guards on
+    the numerics). Returns the count of refusals on this connection, which
+    the loop keeps: it starts at 0 for every connection on purpose, since a
+    reconnect starts again from the configured name and the ghosts may be
+    gone by then.
+
+    Was a block inside irc_loop() until #1287, the first step of splitting
+    that loop (docs/FUTURE.md). Moved unchanged: `registered` is the loop's
+    `joined`, `sock` its socket.
+
+    parse_nick_refusal() reads WHICH name was refused and steps aside for a
+    437 that names a channel.
+    """
+    refused_nick = parse_nick_refusal(line)
+    main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
+    if refused_nick is None:
+        return refusals
+    if not registered:
+        # STILL REGISTERING (#633): every refusal moves on to the next name,
+        # not just the first. With both configured names held by ghosts the
+        # bot used to go quiet here until the server closed the link, and do
+        # the same again ten seconds later. 437 lands here too - a nick delay
+        # is a ghost by another number.
+        refusals += 1
+        next_nick = fallback_nick(main_nick, refusals)
+        if next_nick is None:
+            print(f"[NICK LADDER] {refused_nick} was refused too, and there are no more names to try. Waiting for the server.")
+        else:
+            print(f"[NICK LADDER] The server refused {refused_nick}. Trying: {next_nick}")
+            sock.sendall(f"NICK {next_nick}\r\n".encode("utf-8", errors="ignore"))
+            config.NICKNAME = next_nick
+        return refusals
+    # Registered, and a NICK the bot sent - the reclaim of its main nick, a
+    # rehash rename - was refused: taken (433), too soon (438), held back
+    # after a split (437). The bot still has the name it had, and
+    # config.NICKNAME still says so because nothing assigned it at the send
+    # (#635). Nothing to resend: the old reply here re-sent NICK <alt> to a
+    # server that already called us that.
+    print(f"[LIVE NICK COLLISION] The server refused {refused_nick}; the bot keeps {config.NICKNAME}.")
+    return refusals
+
+
 def numeric_target(line):
     """The nick a server numeric is addressed to, or None.
 
@@ -3688,40 +3731,9 @@ def irc_loop():
                     # the word PRIVMSG would have been discarded.
                     # The guard names the numerics so a forged line can be
                     # tested against it (tests/test_membership_events.py);
-                    # parse_nick_refusal() then reads WHICH name was refused
-                    # and steps aside for a 437 that names a channel.
+                    # answer_nick_refusal() does the rest (#1287).
                     if is_server_numeric(line, "433") or is_server_numeric(line, "432") or is_server_numeric(line, "437"):
-                        refused_nick = parse_nick_refusal(line)
-                        main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
-                        if refused_nick is None:
-                            pass
-                        elif not joined:
-                            # STILL REGISTERING (#633): every refusal moves
-                            # on to the next name, not just the first. With
-                            # both configured names held by ghosts the bot
-                            # used to go quiet here until the server closed
-                            # the link, and do the same again ten seconds
-                            # later. 437 lands here too - a nick delay is a
-                            # ghost by another number.
-                            nick_refusals += 1
-                            next_nick = fallback_nick(main_nick, nick_refusals)
-                            if next_nick is None:
-                                print(f"[NICK LADDER] {refused_nick} was refused too, and there are no more names to try. Waiting for the server.")
-                            else:
-                                print(f"[NICK LADDER] The server refused {refused_nick}. Trying: {next_nick}")
-                                s.sendall(f"NICK {next_nick}\r\n".encode("utf-8", errors="ignore"))
-                                config.NICKNAME = next_nick
-                        else:
-                            # Registered, and a NICK the bot sent - the
-                            # reclaim of its main nick, a rehash rename - was
-                            # refused: taken (433), too soon (438), held
-                            # back after a split (437). The bot still has the
-                            # name it had, and config.NICKNAME still says so
-                            # because nothing assigned it at the send (#635).
-                            # Nothing to resend: the old reply here re-sent
-                            # NICK <alt> to a server that already called us
-                            # that.
-                            print(f"[LIVE NICK COLLISION] The server refused {refused_nick}; the bot keeps {config.NICKNAME}.")
+                        nick_refusals = answer_nick_refusal(line, s, joined, nick_refusals)
 
                     # Reclaim the main nick the moment the other client releases it
                     # Anchored twice over. The old test matched " QUIT "/" PART " anywhere,
