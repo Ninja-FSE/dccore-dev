@@ -2477,7 +2477,7 @@ alias dccore.sw.dcxcb {
   if ($3 != $gettok($dccore.sw.m(dcxpages),1,32)) || (!$istok(sclick selected,$2,32)) || ($4 !isnum) { return }
   var %p = $gettok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$4,32)
   if (%p == $null) || (%p == $dccore.sw.s(page)) { return }
-  dccore.sw.page %p
+  dccore.sw.go page %p
 }
 
 ; ---- the tables ------------------------------------------------------
@@ -2791,9 +2791,9 @@ alias dccore.sw.line {
     hdel dccore.sws srv.errs
     ; only a save that went through clears the edits: a refused one keeps
     ; them, so OK still says they are not saved
-    if ($2 == ok) { hdel dccore.sws srv.dirty | dccore.sw.status $4- | dccore.sw.reask served | return }
-    if ($2 == unchanged) { hdel dccore.sws srv.dirty | dccore.sw.status $3- | return }
-    if ($2 == error) { dccore.sw.status Not saved: %errs $3- Your changes are still here: correct them and Save lists again. | return }
+    if ($2 == ok) { hdel dccore.sws srv.dirty | dccore.sw.status $4- | dccore.sw.reask served | dccore.sw.maybeclose | return }
+    if ($2 == unchanged) { hdel dccore.sws srv.dirty | dccore.sw.status $3- | dccore.sw.maybeclose | return }
+    if ($2 == error) { hdel dccore.sws close | dccore.sw.status Not saved: %errs $3- Your changes are still here: correct them and Apply again. | return }
     return
   }
   ; the folders of a bot with no lists.json: FLDBEGIN <n> <source>,
@@ -2841,9 +2841,9 @@ alias dccore.sw.line {
     hdel dccore.sws saving.oc
     var %errs = $dccore.sw.s(oc.errs)
     hdel dccore.sws oc.errs
-    if ($2 == ok) { dccore.sw.status $4- | dccore.sw.reask onconnect | return }
-    if ($2 == unchanged) { dccore.sw.status $3- | return }
-    if ($2 == error) { dccore.sw.status Not saved: %errs $3- | return }
+    if ($2 == ok) { dccore.sw.status $4- | dccore.sw.reask onconnect | dccore.sw.maybeclose | return }
+    if ($2 == unchanged) { dccore.sw.status $3- | dccore.sw.maybeclose | return }
+    if ($2 == error) { hdel dccore.sws close | dccore.sw.status Not saved: %errs $3- | return }
     return
   }
   if (%t == OCRESEND) {
@@ -2911,7 +2911,7 @@ alias dccore.sw.done {
     ; ok <written> <unchanged> <restart> <message>
     var %said = Saved $2 setting(s) $+ $iif($3 > 0,$chr(32) $+ $chr(40) $+ $3 unchanged $+ $chr(41)) $+ .
     if ($4 != -) { %said = %said Restart the bot to apply $replace($4,$chr(44),$chr(44) $+ $chr(32)) $+ . }
-    if ($dccore.sw.s(close)) { dccore.sys Settings: %said | dialog -x dccore.set | return }
+    if ($dccore.sw.s(close)) { dccore.sys Settings: %said | dccore.sw.maybeclose | return }
     ; something written: the bot applies it with a rehash, which may first
     ; wait for transfers, and says SETAPPLIED when it has. Until then the
     ; values just sent are the baseline (a reload now would show the old
@@ -2934,6 +2934,7 @@ alias dccore.sw.done {
     return
   }
   ; aborted
+  hdel dccore.sws close
   if (%phase != preview) && ($dccore.sw.s(lockednote) == $null) { dccore.sw.status Nothing was saved. }
   hdel dccore.sws lockednote
 }
@@ -3228,16 +3229,23 @@ alias dccore.sw.label {
 
 ; ---- Apply, OK, Cancel ------------------------------------------------
 
-; Apply ($1 = apply), or OK ($1 = close): the window closes once the bot has
-; saved (at once when nothing changed). One transaction for every setting
-; that changed: setbegin, a set for each, setcommit - one save, one rehash.
-; $2 = asked: the File locations question has been answered yes.
+; Apply ($1 = apply), or OK ($1 = close): everything that changed, each kind
+; in a transaction of its own - the on-connect commands (onconnect), the
+; lists and bindings (served), this mIRC's own switches (dccore.ini, at
+; once) and the settings as one setbegin, a set for each, setcommit: one
+; save, one rehash. There are no Save buttons on the pages: Apply is the
+; one that saves, and OK closes once every reply has come back ok, at once
+; when nothing changed. $2 = asked: the File locations question has been
+; answered yes.
 alias dccore.sw.apply {
   if ($istok(apply confirm aborting preview locked,$dccore.sw.s(phase),32)) { dccore.sw.status Still waiting for the bot... | return }
-  if ($1 == close) && ($dccore.sw.unsaved) { dccore.sw.status $dccore.sw.unsaved has changes of its own not saved yet: save them there first, or Cancel to drop them. | return }
-  var %local = $dccore.sw.savelocal
+  hadd dccore.sws close $iif($1 == close,1,0)
+  var %local = $dccore.sw.savelocal, %sent = 0
+  if ($dccore.sw.ocdirty) && (!$dccore.sw.s(saving.oc)) { dccore.sw.oc.save | inc %sent }
+  if ($dccore.sw.s(srv.dirty)) && (!$dccore.sw.s(saving.srv)) { dccore.sw.srv.save | inc %sent }
   var %keys = $iif($dccore.sw.s(loaded),$dccore.sw.changed)
   if (%keys == $null) {
+    if (%sent) { dccore.sw.maybeclose | return }
     if ($1 == close) { dialog -x dccore.set | return }
     dccore.sw.status $iif(%local,Saved this mIRC's own switches.,Nothing has changed.)
     return
@@ -3254,7 +3262,6 @@ alias dccore.sw.apply {
   dccore.sw.wait settings
   hadd dccore.sws sent %keys
   hadd dccore.sws lastcommit setcommit
-  hadd dccore.sws close $iif($1 == close,1,0)
   hdel dccore.sws errs
   hdel dccore.sws errkey
   dccore.send setbegin
@@ -3271,7 +3278,64 @@ alias dccore.sw.riskyask {
   var %how = $dccore.sw.s(asking)
   hdel dccore.sws asking
   if ($input(Change where the bot keeps its files? A wrong path there can lose a queue or a statistics file.,yq,DCCore - Settings)) { dccore.sw.apply %how asked | return }
-  dccore.sw.status Nothing was sent.
+  hdel dccore.sws close
+  dccore.sw.status The settings were not sent.
+}
+; OK: the window closes once nothing is still being saved - the settings
+; (phase), the lists, the on-connect commands - and every reply was ok.
+alias dccore.sw.maybeclose {
+  if (!$dccore.sw.s(close)) { return }
+  if ($dccore.sw.s(saving.srv)) || ($dccore.sw.s(saving.oc)) || ($istok(apply confirm aborting,$dccore.sw.s(phase),32)) { return }
+  dialog -x dccore.set
+}
+
+; ---- leaving a page with changes not saved ---------------------------
+;  A click on a tab or a page while something is not saved asks first:
+;  Apply saves everything, so the question is only whether to save now.
+;  $input waits for an answer, which a dialog event may not do, so it is
+;  asked from a timer, and the window stays on its page until then.
+
+; $1 tab or page, $2 which: as the click meant
+alias dccore.sw.go {
+  if ($1 == tab) && ($2 == $dccore.sw.s(tab)) { return }
+  if ($1 == page) && ($2 == $dccore.sw.s(page)) { return }
+  if (!$dccore.sw.anydirty) { dccore.sw.goon $1 $2 | return }
+  hadd dccore.sws going $1 $2
+  dccore.sw.stay
+  .timerdccoreSwAsk -m 1 0 dccore.sw.leaveask
+}
+alias dccore.sw.goon {
+  if ($1 == tab) { dccore.sw.tab $2 }
+  else { dccore.sw.page $2 }
+}
+; The tab and the page shown selected again, after the click elsewhere
+alias dccore.sw.stay {
+  did -f dccore.set $calc(1000 + $dccore.sw.s(tab))
+  if ($dccore.sw.s(dcx)) { dccore.sw.dcxshow $dccore.sw.s(page) | return }
+  var %at = $findtok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$dccore.sw.s(page),1,32)
+  if (%at) { did -c dccore.set $calc(1019 + %at) }
+}
+alias dccore.sw.leaveask {
+  if (!$dialog(dccore.set)) || ($dccore.sw.s(going) == $null) { return }
+  var %go = $dccore.sw.s(going)
+  hdel dccore.sws going
+  if ($input(You have changes that are not saved. Save them before leaving this page? Yes saves them and goes on; No stays here.,yq,DCCore - Settings)) { dccore.sw.apply apply | dccore.sw.goon %go }
+}
+; Whether anything in the window is not saved: a setting, one of this
+; mIRC's switches, the lists and bindings, the on-connect commands.
+alias dccore.sw.anydirty {
+  if ($dccore.sw.s(srv.dirty)) || ($dccore.sw.ocdirty) { return $true }
+  if ($dccore.sw.s(loaded)) && ($dccore.sw.changed != $null) { return $true }
+  return $dccore.sw.localdirty
+}
+alias dccore.sw.localdirty {
+  var %all = $dccore.sw.m(locals), %i = 1
+  while (%i <= $numtok(%all,32)) {
+    var %o = $gettok(%all,%i,32)
+    if ($did(dccore.set,$dccore.sw.m(lo. $+ %o)).state != $iif($dccore.opt(%o),1,0)) { return $true }
+    inc %i
+  }
+  return $false
 }
 ; What Apply sent is the baseline now (SETDONE ok, before SETAPPLIED).
 alias dccore.sw.rebase {
@@ -3339,11 +3403,11 @@ alias dccore.sw.closed {
 
 alias dccore.sw.click {
   var %id = $1
-  if (%id isnum 1001-1006) { dccore.sw.tab $calc(%id - 1000) | return }
+  if (%id isnum 1001-1006) { dccore.sw.go tab $calc(%id - 1000) | return }
   ; a page button: slot N of the tab shown is its Nth page
   if (%id >= 1020) && (%id < $calc(1020 + $dccore.sw.m(slots))) {
     var %p = $gettok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$calc(%id - 1019),32)
-    if (%p) { dccore.sw.page %p }
+    if (%p) { dccore.sw.go page %p }
     return
   }
   if (%id == 1014) { dccore.sw.apply apply | return }
@@ -3353,15 +3417,13 @@ alias dccore.sw.click {
   ; Channels
   if (%id == 1522) { dccore.sw.chanadd | return }
   if (%id == 1523) { dccore.sw.chandel | return }
-  ; IRC Server: the on-connect commands
-  if (%id == 1504) { dccore.sw.oc.save | return }
+  ; IRC Server: the on-connect commands (Apply saves them)
   if (%id == 1505) { if ($dccore.sw.can(onconnect)) { hadd dccore.sws resending.oc 1 | dccore.sw.status Sending the on-connect commands again... | dccore.send onconnect resend } | return }
   if (%id == 1506) { dccore.sw.unlockbutton | return }
   ; Lists (the table 1540 and its buttons) and Channel bindings (rows 1700 up)
   if (%id == 1551) { dccore.sw.srv.open new | return }
   if (%id == 1554) { if ($dccore.sw.srv.selected != $null) { dccore.sw.srv.open $v1 } | else { dccore.sw.status Select the list to edit first. } | return }
   if (%id == 1555) { dccore.sw.srv.delete | return }
-  if (%id == 1556) || (%id == 1566) { dccore.sw.srv.save | return }
   if (%id == 1557) || (%id == 1567) { dccore.sw.reask served | return }
   if (%id == 1773) { dccore.sw.srv.newchan | return }
   if (%id isnum 1700-1759) { dccore.sw.srv.rowclick %id | return }
@@ -3734,7 +3796,7 @@ alias dccore.sw.srv.rowclick {
     var %row = $dccore.sw.s(srv.c. $+ %n)
     hadd dccore.sws srv.c. $+ %n $dccore.sw.srv.chosen($calc(%base + 1)) $gettok(%row,2,32) $dccore.sw.srv.mode($calc(%base + 2))
     hadd dccore.sws srv.dirty 1
-    dccore.sw.status $dccore.sw.untok($gettok(%row,2,32)) changed - Save lists sends the lists and bindings to the bot.
+    dccore.sw.status $dccore.sw.untok($gettok(%row,2,32)) changed - Apply or OK sends the lists and bindings to the bot.
   }
 }
 ; The row that adds one: the channel typed, the list and mode chosen.
@@ -3751,7 +3813,7 @@ alias dccore.sw.srv.newchan {
 alias dccore.sw.srv.edited {
   hadd dccore.sws srv.dirty 1
   dccore.sw.srv.draw
-  dccore.sw.status Lists or bindings changed - Save lists sends the whole set to the bot.
+  dccore.sw.status Lists or bindings changed - Apply or OK sends the whole set to the bot.
 }
 ; The whole set back to the bot. With no lists.json and only the folders
 ; changed, through the folders command, which does not make the implied
@@ -4037,8 +4099,7 @@ dialog dccore.set {
   text "Seconds between commands", 1502, 112 279 92 8
   edit "", 1503, 206 277 24 11, autohs
   button "Unlock", 1506, 234 276 44 13
-  button "Save on-connect commands", 1504, 282 276 100 13
-  button "Resend now", 1505, 386 276 48 13
+  button "Resend now", 1505, 282 276 52 13
   text "The on/off switches used most, here from their own pages so there is one place to check.", 1103, 106 32 370 8
   box "Open when mIRC starts (minimised)", 1104, 106 47 370 47
   check "DCCore window", 2025, 112 57 358 10
@@ -4107,15 +4168,14 @@ dialog dccore.set {
   edit "", 2113, 112 156 358 11, autohs
   text "Debug message delay (seconds)", 2116, 112 170 358 8
   edit "", 2117, 112 179 358 11, autohs
-  text "What each list shares: a name, its folders, and whether it is primary (it answers a private message, and any channel bound to none). Add list and Edit open a window for one list; Save lists sends the whole set to the bot.", 1121, 106 32 370 16
+  text "What each list shares: a name, its folders, and whether it is primary (it answers a private message, and any channel bound to none). Add list and Edit open a window for one list; Apply sends the whole set to the bot.", 1121, 106 32 370 16
   box "Lists", 1122, 106 55 370 99
   list 1540, 112 65 358 64, hsbar vsbar
   button "Add list", 1551, 112 133 50 13
   button "Edit", 1554, 165 133 46 13
   button "Delete", 1555, 214 133 46 13
   button "Refresh", 1557, 263 133 46 13
-  button "Save lists", 1556, 106 158 56 13
-  text "Which list answers in each channel, and that channel's mode. A change in a menu is kept at once; Save lists sends the set to the bot.", 1123, 106 32 370 16
+  text "Which list answers in each channel, and that channel's mode. A change in a menu is kept at once; Apply sends the set to the bot.", 1123, 106 32 370 16
   box "Channel bindings", 1124, 106 55 370 229
   text "", 1700, 112 67 98 8
   combo 1701, 214 65 84 80, drop
@@ -4182,9 +4242,8 @@ dialog dccore.set {
   combo 1771, 214 264 84 80, drop
   combo 1772, 302 264 84 60, drop
   button "Add", 1773, 396 263 56 13
-  button "Save lists", 1566, 106 288 56 13
-  button "Refresh", 1567, 165 288 46 13
-  text "", 1568, 226 290 160 8
+  button "Refresh", 1567, 106 288 46 13
+  text "", 1568, 158 290 200 8
   box "Library", 1125, 106 32 181 106
   text "Music directory (used only when no folders are set)", 2120, 112 42 169 8
   edit "", 2121, 112 51 153 11, autohs
@@ -4523,7 +4582,7 @@ alias dccore.sw.data {
   hadd dccore.swm p.1 IRC Server
   hadd dccore.swm p.1.layout roomy 1
   hadd dccore.swm p.1.n 1
-  hadd dccore.swm p.1.1 1100,2000,2001,2004,2005,2008,2009,2012,2013,1101,2016,2017,2020,2021,1102,1500,1501,1502,1503,1506,1504,1505
+  hadd dccore.swm p.1.1 1100,2000,2001,2004,2005,2008,2009,2012,2013,1101,2016,2017,2020,2021,1102,1500,1501,1502,1503,1506,1505
   hadd dccore.swm p.1.w onconnect
   hadd dccore.swm p.1.ask onconnect
   hadd dccore.swm p.2 General Settings
@@ -4552,15 +4611,15 @@ alias dccore.sw.data {
   hadd dccore.swm p.7 Lists
   hadd dccore.swm p.7.layout roomy 1
   hadd dccore.swm p.7.n 1
-  hadd dccore.swm p.7.1 1121,1122,1540,1551,1554,1555,1557,1556
+  hadd dccore.swm p.7.1 1121,1122,1540,1551,1554,1555,1557
   hadd dccore.swm p.7.lv 1540
-  hadd dccore.swm p.7.w srvlists srvsave
+  hadd dccore.swm p.7.w srvlists
   hadd dccore.swm p.7.ask served
   hadd dccore.swm p.8 Channel bindings
   hadd dccore.swm p.8.layout roomy 1
   hadd dccore.swm p.8.n 2
   hadd dccore.swm p.8.1 1123,1124,1700,1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747
-  hadd dccore.swm p.8.2 1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1566,1567,1568
+  hadd dccore.swm p.8.2 1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1567,1568
   hadd dccore.swm p.8.w srvchans srvsaveb
   hadd dccore.swm p.8.ask served
   hadd dccore.swm p.9 List settings
@@ -5593,12 +5652,12 @@ alias dccore.sw.data {
   hadd dccore.swm br.2594 file PRIVATE_MESSAGES_FILE
   hadd dccore.swm br.2598 file DCC_QUEUE_FILE
   hadd dccore.swm bot.n 6
-  hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1506,1504,1505,2041,2045,2049,2053,2057,2061,2065,1520,1521,1522,1523,2069,2073,1610,1611,2077,2078,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2105,2109,2113,2117,1540,1551,1554,1555,1557
-  hadd dccore.swm bot.2 1556,1700,1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747,1748
-  hadd dccore.swm bot.3 1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1566,1567,1568,2121,2122,2125,2129,2133,2137,2141,2145,2149,2153,2157,2158,2161,2165,2169,2170,2173,2177,2181,2185,2189,2193,2197,2201,2205,2209,2213,2217,2221,2225,2229
-  hadd dccore.swm bot.4 2233,2237,2241,2245,2249,2253,2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,1580,1583,1584,1585,1586,1587,1581,1582,1595,1597,1598,1596
-  hadd dccore.swm bot.5 2385,2389,2393,2397,2401,2405,2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2473,2477,2481,2485,2489,2490,2493,2497,2501,2505,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545
-  hadd dccore.swm bot.6 2546,2549,2550,2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598
+  hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1506,1505,2041,2045,2049,2053,2057,2061,2065,1520,1521,1522,1523,2069,2073,1610,1611,2077,2078,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2105,2109,2113,2117,1540,1551,1554,1555,1557,1700
+  hadd dccore.swm bot.2 1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747,1748,1749,1750
+  hadd dccore.swm bot.3 1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1567,1568,2121,2122,2125,2129,2133,2137,2141,2145,2149,2153,2157,2158,2161,2165,2169,2170,2173,2177,2181,2185,2189,2193,2197,2201,2205,2209,2213,2217,2221,2225,2229,2233,2237,2241
+  hadd dccore.swm bot.4 2245,2249,2253,2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,1580,1583,1584,1585,1586,1587,1581,1582,1595,1597,1598,1596,2385,2389,2393
+  hadd dccore.swm bot.5 2397,2401,2405,2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2473,2477,2481,2485,2489,2490,2493,2497,2501,2505,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545,2546,2549,2550
+  hadd dccore.swm bot.6 2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598
   hadd dccore.swm confirm TMP_ZIP_DIR LOCAL_LIST_DIR FETCHED_FILES_DIR LIBRARY_FOLDERS_FILE LISTS_FILE BANS_FILE HARD_BANS_FILE STATS_FILE KNOWN_BOTS_FILE FETCHED_BOT_LISTS_FILE LIST_INDEX_FILE LIST_AUDIO_INFO_CACHE FETCH_HISTORY_FILE DOWNLOAD_COUNTS_FILE TRANSFER_LOG_FILE LIST_SIZE_FILE LIST_RAWBYTES_FILE LIST_PROGRESS_FILE ADMIN_TOKENS_FILE ON_CONNECT_FILE NOTICES_FILE PRIVATE_MESSAGES_FILE DCC_QUEUE_FILE
   hadd dccore.swm t.1500 Sent once the server has registered the bot~2C before it joins: one command per line~2C exactly as typed into a client. ~25nick~25 is the nickname the server gave it.
   hadd dccore.swm t.2388 That reply's wording (~25admin becomes the admin nick)

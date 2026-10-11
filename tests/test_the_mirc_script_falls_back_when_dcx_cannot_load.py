@@ -235,7 +235,8 @@ class ThePageList(unittest.TestCase):
                       "($4 !isnum) { return }", lines)
         self.assertIn("var %p = $gettok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$4,32)", lines)
         self.assertIn("if (%p == $null) || (%p == $dccore.sw.s(page)) { return }", lines)
-        self.assertEqual(lines[-1], "dccore.sw.page %p")
+        # through dccore.sw.go, which asks first when something is not saved
+        self.assertEqual(lines[-1], "dccore.sw.go page %p")
 
 
 TABLES = (1520, 1540, 1580, 1595)
@@ -403,7 +404,7 @@ class TheMockupLayout(unittest.TestCase):
         sharing = dict(dict(layout.GROUPS)["Sharing"])
         widgets_of = lambda page: [(h, [i["widget"] for i in items if isinstance(i, dict) and "widget" in i])
                                    for h, items in page]
-        self.assertEqual(widgets_of(sharing["Lists"]), [("", []), ("Lists", ["srvlists"]), ("", ["srvsave"])])
+        self.assertEqual(widgets_of(sharing["Lists"]), [("", []), ("Lists", ["srvlists"])])
         self.assertEqual(widgets_of(sharing["Channel bindings"]),
                          [("", []), ("Channel bindings", ["srvchans"]), ("", ["srvsaveb"])])
         # the lists table: a row per list, Edit and Add list opening the list window
@@ -416,8 +417,10 @@ class TheMockupLayout(unittest.TestCase):
         click = alias("dccore.sw.click")
         self.assertIn("if (%id == 1551) { dccore.sw.srv.open new | return }", click)
         self.assertIn("if (%id == 1555) { dccore.sw.srv.delete | return }", click)
-        self.assertIn("if (%id == 1556) || (%id == 1566) { dccore.sw.srv.save | return }", click)
         self.assertIn("if (%id == 1557) || (%id == 1567) { dccore.sw.reask served | return }", click)
+        # no Save button of its own: Apply saves the lists with everything else
+        self.assertFalse([c for c in self.controls if c[0] == "button" and c[1].startswith("Save")])
+        self.assertNotIn("dccore.sw.srv.save", click)
         for name in ("pickl", "pickc", "sellist", "newfolder", "changel", "changec", "removel", "removec", "addlist"):
             self.assertNotIn("alias dccore.sw.srv.%s " % name, code(), name)
         # the list window: its own dialog, its folders typed there
@@ -429,7 +432,7 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("hadd dccore.sws srv.l. $+ %id $did(dccore.setl,3).state $dccore.sw.enc($did(dccore.setl,2).text)", lok)
         self.assertIn("dccore.sw.srv.addfolder %id $hget(dccore.swl,f. $+ $gettok(%w,%i,32))", lok)
         self.assertEqual(statements(lok)[-1], "dccore.sw.srv.edited")
-        # and nothing reaches the bot but through Save lists
+        # and nothing reaches the bot but through Apply
         self.assertNotIn("dccore.send", alias("dccore.sw.srv.lok"))
         self.assertNotIn("dccore.send", alias("dccore.sw.srv.rowclick"))
 
@@ -448,7 +451,8 @@ class TheMockupLayout(unittest.TestCase):
         add = builder.BIND_ADD_ID
         self.assertEqual([self.where[add + k][0] for k in range(4)], ["edit", "combo", "combo", "button"])
         self.assertEqual(self.where[add + 3][1], "Add")
-        self.assertEqual([self.where[i][1] for i in (1566, 1567)], ["Save lists", "Refresh"])
+        self.assertEqual(self.where[1567][1], "Refresh")
+        self.assertNotIn(1566, self.where)
         self.assertEqual(statements(alias("dccore.sw.srv.rowbase")), ["return $calc(1700 + 4 * ($1 - 1))"])
         self.assertEqual(builder.BIND_FIRST_ID, 1700)
         # a scrollbar beside the rows, not pages: every channel is reached by
@@ -505,6 +509,76 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("$dccore.sw.retok($gettok(%l,2-,32))", draw)
         self.assertIn("$dccore.sw.tok(%folders)", draw)
         self.assertEqual(statements(alias("dccore.sw.retok")), ["return $replace($1-,$chr(32),$chr(37) $+ 20)"])
+
+
+class ApplySavesEverything(unittest.TestCase):
+    """The operator: a Save button beside Apply is easy to miss, and easy to
+    take for the one that saves. So the pages have none, Apply sends every
+    kind of change, and leaving a page with changes not saved asks first."""
+
+    def test_the_pages_have_no_save_buttons(self):
+        controls = dialog("dccore.set")
+        self.assertEqual([c[1] for c in controls if c[0] == "button" and c[1].lower().startswith("save")], [])
+        click = alias("dccore.sw.click")
+        self.assertNotIn("dccore.sw.srv.save", click)
+        self.assertNotIn("dccore.sw.oc.save", click)
+
+    def test_apply_sends_the_lists_and_the_on_connect_commands_too(self):
+        lines = statements(alias("dccore.sw.apply"))
+        oc = lines.index("if ($dccore.sw.ocdirty) && (!$dccore.sw.s(saving.oc)) { dccore.sw.oc.save | inc %sent }")
+        srv = lines.index("if ($dccore.sw.s(srv.dirty)) && (!$dccore.sw.s(saving.srv)) { dccore.sw.srv.save | inc %sent }")
+        keys = lines.index("var %keys = $iif($dccore.sw.s(loaded),$dccore.sw.changed)")
+        self.assertLess(oc, keys)
+        self.assertLess(srv, keys)
+        # with nothing else to send, OK waits for those replies instead of closing at once
+        self.assertIn("if (%sent) { dccore.sw.maybeclose | return }", lines)
+        self.assertLess(lines.index("if (%sent) { dccore.sw.maybeclose | return }"),
+                        lines.index("if ($1 == close) { dialog -x dccore.set | return }"))
+        self.assertNotIn("has changes of its own not saved yet", alias("dccore.sw.apply"))
+
+    def test_every_reply_closes_or_keeps_the_window(self):
+        body = alias("dccore.sw.line")
+        srv = body[body.index("if (%t == SRVDONE) || (%t == FLDDONE) {"):body.index("if (%t == FLDBEGIN)")]
+        self.assertIn("if ($2 == ok) { hdel dccore.sws srv.dirty | dccore.sw.status $4- | dccore.sw.reask served | "
+                      "dccore.sw.maybeclose | return }", srv)
+        self.assertIn("if ($2 == unchanged) { hdel dccore.sws srv.dirty | dccore.sw.status $3- | dccore.sw.maybeclose | return }", srv)
+        self.assertIn("if ($2 == error) { hdel dccore.sws close | dccore.sw.status Not saved:", srv)
+        oc = body[body.index("if (%t == OCDONE) {"):body.index("if (%t == OCRESEND) {")]
+        self.assertIn("if ($2 == ok) { dccore.sw.status $4- | dccore.sw.reask onconnect | dccore.sw.maybeclose | return }", oc)
+        self.assertIn("if ($2 == unchanged) { dccore.sw.status $3- | dccore.sw.maybeclose | return }", oc)
+        self.assertIn("if ($2 == error) { hdel dccore.sws close | dccore.sw.status Not saved:", oc)
+        self.assertIn("hdel dccore.sws close", alias("dccore.sw.riskyask"))
+
+    def test_leaving_a_page_with_changes_asks_first(self):
+        click = alias("dccore.sw.click")
+        self.assertIn("if (%id isnum 1001-1006) { dccore.sw.go tab $calc(%id - 1000) | return }", click)
+        self.assertIn("if (%p) { dccore.sw.go page %p }", click)
+        self.assertEqual(statements(alias("dccore.sw.dcxcb"))[-1], "dccore.sw.go page %p")
+        go = statements(alias("dccore.sw.go"))
+        self.assertIn("if (!$dccore.sw.anydirty) { dccore.sw.goon $1 $2 | return }", go)
+        self.assertEqual(go[-3:], ["hadd dccore.sws going $1 $2", "dccore.sw.stay",
+                                   ".timerdccoreSwAsk -m 1 0 dccore.sw.leaveask"])
+        ask = alias("dccore.sw.leaveask")
+        self.assertIn("if ($input(You have changes that are not saved. Save them before leaving this page? "
+                      "Yes saves them and goes on; No stays here.,yq,DCCore - Settings)) "
+                      "{ dccore.sw.apply apply | dccore.sw.goon %go }", ask)
+        # the page the bot refused a setting on is shown without asking
+        self.assertIn("dccore.sw.tab %g", alias("dccore.sw.goto"))
+        self.assertNotIn("dccore.sw.go ", alias("dccore.sw.goto"))
+
+    def test_what_counts_as_not_saved(self):
+        lines = statements(alias("dccore.sw.anydirty"))
+        self.assertEqual(lines, ["if ($dccore.sw.s(srv.dirty)) || ($dccore.sw.ocdirty) { return $true }",
+                                 "if ($dccore.sw.s(loaded)) && ($dccore.sw.changed != $null) { return $true }",
+                                 "return $dccore.sw.localdirty"])
+        local = alias("dccore.sw.localdirty")
+        self.assertIn("if ($did(dccore.set,$dccore.sw.m(lo. $+ %o)).state != $iif($dccore.opt(%o),1,0)) { return $true }",
+                      local)
+        # staying puts the tab and the page shown back, in either form
+        stay = statements(alias("dccore.sw.stay"))
+        self.assertEqual(stay[0], "did -f dccore.set $calc(1000 + $dccore.sw.s(tab))")
+        self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.dcxshow $dccore.sw.s(page) | return }", stay)
+        self.assertIn("if (%at) { did -c dccore.set $calc(1019 + %at) }", stay)
 
 
 if __name__ == "__main__":

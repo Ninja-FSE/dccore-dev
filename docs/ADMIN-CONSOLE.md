@@ -982,13 +982,18 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
 - **General Settings** gathers the switches used most, including four of this
   mIRC's own: open @DCCore, Chat and Downloads when mIRC starts, and reconnect
   to the bot by itself. Those are saved here, in `dccore.ini`, by Apply or OK.
-- **Apply** sends what changed - only that - as one transaction (`setbegin`, a
-  `set` for each, `setcommit`), so the bot saves it in one go and rehashes once.
-  A value the bot refuses comes back with the dashboard's reason in the status
-  line, the window shows the page it is on, and nothing is saved; your edits
-  stay. Clearing the debug channel asks first, as the dashboard does. A change
-  on **File locations** asks before it is sent. **OK** is Apply, then closes once
-  the bot has saved; **Cancel** closes and sends nothing.
+- **Apply saves everything that changed**, and nothing else saves: the pages
+  have no Save buttons of their own. The settings go as one transaction
+  (`setbegin`, a `set` for each, `setcommit`), so the bot saves them in one go
+  and rehashes once; the on-connect commands and the lists with their bindings
+  go as transactions of their own; this mIRC's own switches go to `dccore.ini`
+  at once. A value the bot refuses comes back with the dashboard's reason in
+  the status line, the window shows the page it is on, and nothing is saved;
+  your edits stay. Clearing the debug channel asks first, as the dashboard
+  does. A change on **File locations** asks before it is sent. **OK** is Apply,
+  then closes once every reply has come back ok; **Cancel** closes and sends
+  nothing. **Leaving a page with changes not saved asks first**: Yes saves
+  them and goes on, No stays on the page.
 - **The admin password, once per connection.** The script logs in with its
   paired token, which may read the settings but not change them. The first
   time a save needs it, the window asks for the admin password (masked), sends
@@ -1000,17 +1005,17 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
   reloaded (it may first wait for transfers to finish), then *Saved and
   applied*, and the page shows the bot's values. If the console reconnects
   while you have changes not saved, they are kept: **Reload** discards them.
-- **Structured pages** save with buttons of their own: the on-connect commands
-  on **IRC Server** (and **Resend now**); **Lists**, a table with a row per
-  list, where **Add list** and **Edit** open a window for one list's name,
+- **Structured pages**: the on-connect commands on **IRC Server** (**Resend
+  now** sends them again, **Unlock** shows them); **Lists**, a table with a row
+  per list, where **Add list** and **Edit** open a window for one list's name,
   primary flag and folders (a label and a path each) and **Delete** takes a
   list with its channels and folders; **Channel bindings**, a row per
   channel with its own List and Mode menus - a change in a menu is kept at
   once - and a **Remove**, a scrollbar beside the fifteen rows shown for the
-  channels beyond them, and a row to add one under them; **Save lists**, on
-  both pages, sends the whole set; and **Bans &
-  ignores** (lift a timed ban, ignore a nick for some minutes, add or remove
-  a permanent pattern). **Channels** edits `CHANNEL` as a list and is
+  channels beyond them, and a row to add one under them. Apply sends the
+  lot. **Bans & ignores** acts at once (lift a timed ban, ignore a nick for
+  some minutes, add or remove a permanent pattern): those are commands, not
+  settings. **Channels** edits `CHANNEL` as a list and is
   saved by Apply. A save the bot refuses keeps your edits there. A row or a
   command you did not touch goes back exactly as the bot sent it.
 - **Appearance**: the theme and the six custom colours as menus of mIRC's

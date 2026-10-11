@@ -171,10 +171,10 @@ WIDGETS = {
         (1501, "edit", "", 0, 18, 358, 40, "multi return autohs autovs hsbar vsbar"),
         (1502, "text", "Seconds between commands", 0, 63, 92, 8, ""),
         (1503, "edit", "", 94, 61, 24, 11, "autohs"),
-        # the on-connect commands need the admin password on a token login (#1264)
+        # the on-connect commands need the admin password on a token login
+        # (#1264); Apply saves them, with everything else
         (1506, "button", "Unlock", 122, 60, 44, 13, ""),
-        (1504, "button", "Save on-connect commands", 170, 60, 100, 13, ""),
-        (1505, "button", "Resend now", 274, 60, 48, 13, ""),
+        (1505, "button", "Resend now", 170, 60, 52, 13, ""),
     ),
     # The tables (the "list" controls) are each a native list, and with DCX a
     # listview with the columns LISTVIEWS gives it, over the same rectangle.
@@ -194,15 +194,12 @@ WIDGETS = {
         (1555, "button", "Delete", 102, 68, 46, 13, ""),
         (1557, "button", "Refresh", 151, 68, 46, 13, ""),
     ),
-    "srvsave": (
-        (1556, "button", "Save lists", 0, 0, 56, 13, ""),
-    ),
-    # Channel bindings: the mockup's rows, below.
+    # Channel bindings: the mockup's rows, below; Refresh and the count under
+    # them. Apply saves the lists and the bindings, with everything else.
     "srvchans": None,
     "srvsaveb": (
-        (1566, "button", "Save lists", 0, 0, 56, 13, ""),
-        (1567, "button", "Refresh", 59, 0, 46, 13, ""),
-        (1568, "text", "", 120, 2, 160, 8, ""),
+        (1567, "button", "Refresh", 0, 0, 46, 13, ""),
+        (1568, "text", "", 52, 2, 200, 8, ""),
     ),
     "bantimed": (
         (1580, "list", "", 0, 0, 358, 60, "vsbar"),
@@ -270,8 +267,8 @@ WIDGET_H = {name: max(y + (12 if kind == "combo" else h) for _i, kind, _t, _x, y
 # cannot be edited); "mircwin" is this mIRC's own.
 LOCAL_WIDGETS = ("mircwin",)
 # The command each structured page asks with, the first time it is shown.
-WIDGET_ASKS = {"onconnect": "onconnect", "srvlists": "served", "srvsave": "served", "srvchans": "served",
-               "srvsaveb": "served", "bantimed": "banlist", "banperm": "banlist"}
+WIDGET_ASKS = {"onconnect": "onconnect", "srvlists": "served", "srvchans": "served", "srvsaveb": "served",
+               "bantimed": "banlist", "banperm": "banlist"}
 
 # The tables' columns, for DCX (#1288): each native list above, by id, gets a
 # listview over its rectangle with these columns - (width in dialog units,

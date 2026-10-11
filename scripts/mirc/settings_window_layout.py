@@ -101,15 +101,14 @@ GROUPS = (
             ("", (
                 {"note": "What each list shares: a name, its folders, and whether it is primary (it "
                          "answers a private message, and any channel bound to none). Add list and Edit "
-                         "open a window for one list; Save lists sends the whole set to the bot."},
+                         "open a window for one list; Apply sends the whole set to the bot."},
             )),
             ("Lists", ({"widget": "srvlists"},)),
-            ("", ({"widget": "srvsave"},)),
         )),
         ("Channel bindings", (
             ("", (
                 {"note": "Which list answers in each channel, and that channel's mode. A change in a "
-                         "menu is kept at once; Save lists sends the set to the bot."},
+                         "menu is kept at once; Apply sends the set to the bot."},
             )),
             ("Channel bindings", ({"widget": "srvchans"},)),
             ("", ({"widget": "srvsaveb"},)),

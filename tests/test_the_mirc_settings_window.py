@@ -407,7 +407,14 @@ class ApplyIsOneTransaction(unittest.TestCase):
         ok_at = done.index("if ($1 == ok) {")
         error_at = done.index("if ($1 == error) {", ok_at)
         ok = done[ok_at:error_at]
-        self.assertIn("if ($dccore.sw.s(close)) { dccore.sys Settings: %said | dialog -x dccore.set | return }", ok)
+        # through maybeclose: the lists or the on-connect commands may still
+        # be saving (Apply sends them too, as transactions of their own)
+        self.assertIn("if ($dccore.sw.s(close)) { dccore.sys Settings: %said | dccore.sw.maybeclose | return }", ok)
+        self.assertEqual(statements(alias("dccore.sw.maybeclose")),
+                         ["if (!$dccore.sw.s(close)) { return }",
+                          "if ($dccore.sw.s(saving.srv)) || ($dccore.sw.s(saving.oc)) || "
+                          "($istok(apply confirm aborting,$dccore.sw.s(phase),32)) { return }",
+                          "dialog -x dccore.set"])
         error = done[error_at:]
         self.assertNotIn("dialog -x", error)
         self.assertIn("hdel dccore.sws close", error)
@@ -938,7 +945,7 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
     def test_every_question_is_asked_from_a_timer(self):
         section = handwritten()
         asking = sorted(name for name in re.findall(r"\nalias (\S+) \{", section) if "$input(" in alias(name))
-        self.assertEqual(asking, ["dccore.sw.confirm", "dccore.sw.riskyask", "dccore.sw.unlockask"])
+        self.assertEqual(asking, ["dccore.sw.confirm", "dccore.sw.leaveask", "dccore.sw.riskyask", "dccore.sw.unlockask"])
         for name in asking:
             timers = re.findall(r"\.timerdccoreSw(?:Ask|Unlock) -m 1 0 %s\b" % re.escape(name), section)
             self.assertTrue(timers, name)
@@ -1018,7 +1025,7 @@ class ThePageButtons(unittest.TestCase):
         self.assertIn("if (%id >= 1020) && (%id < $calc(1020 + $dccore.sw.m(slots))) {", click)
         self.assertIn("var %p = $gettok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$calc(%id - 1019),32)",
                       click)
-        self.assertIn("if (%p) { dccore.sw.page %p }", click)
+        self.assertIn("if (%p) { dccore.sw.go page %p }", click)
 
     def test_a_tab_names_its_buttons_and_hides_the_spare_ones(self):
         body = statements(alias("dccore.sw.tab"))
