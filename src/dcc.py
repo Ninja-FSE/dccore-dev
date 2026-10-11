@@ -4475,15 +4475,34 @@ def _find_transfer_row(user, file_name):
     return rows[-1] if len(rows) == 1 else None
 
 
+def _is_this_send(tx, row, user):
+    """Whether an active_transfers entry is this send's: the row itself when
+    the send found one, else any entry under the send's nick."""
+    if row is not None:
+        return tx is row
+    return str(tx.get('user', '')).lower() == user.lower()
+
+
+def _send_nick(row, user):
+    """Whatever name the transfer is filed under NOW - the lock moved with it."""
+    return str((row or {}).get('user') or user).lower()
+
+
 SentFile = collections.namedtuple("SentFile", (
     "row", "user", "next_file", "file_path", "file_name", "file_size", "resume_offset", "bytes_sent",
-    "transfer_completed", "already_held", "offered_at", "start_time", "transfer_finished_at"))
+    "transfer_completed", "already_held", "offered_at", "start_time", "transfer_finished_at",
+    "channel", "irc_sock", "owns_packer", "outcome_identity", "outcome_status", "acked",
+    "never_connected", "assigned_port", "conn", "dcc_sock"),
+    defaults=(None, None, False, None, None, 0, False, None, None, None))
 SentFile.__doc__ = """What start_dcc_send() knows about a send once it has ended (#1328): the
 transfer row, the nick, the queue row, the file and its size, where it
 resumed, the bytes sent, whether the receiver acknowledged the whole file or
-already held it, and when it was offered, started and finished. The first
-piece of the send's state as one object, which the rest of the function's
-split needs."""
+already held it, and when it was offered, started and finished.
+
+Since #1336 also what finish_send() needs to wind it up: the channel and the
+IRC socket, whether it owns the packer, the outcome's identity and status,
+the bytes the receiver acknowledged, whether it never connected, the port,
+and the two sockets. record_completed_send() leaves those at their defaults."""
 
 
 def record_completed_send(sent):
@@ -4573,6 +4592,223 @@ def record_completed_send(sent):
         print(f"[DB ERROR] Could not increment the sharing statistics through the db module: {db_err}")
 
 
+def finish_send(sent):
+    """Everything a send does on its way out, whatever ended it, from a
+    SentFile: drop the offer, speed and record the send, free the slot,
+    announce a completed send, close the sockets, settle the queue row,
+    remove a spent archive, release the packer and the nick, and wake the
+    queue.
+
+    start_dcc_send()'s `finally` block until #1336, step 2 of splitting it
+    (docs/FUTURE.md). Moved unchanged; it reads the send through `sent`, and
+    the three values the block read through `locals()` - unset on the early
+    exits - arrive with the fallbacks it used.
+    """
+    import time
+    import os
+    import sys
+    import threading
+
+    # Never leave an offer standing. The success path already dropped it
+    # the moment the receiver connected; this covers every other exit -
+    # the port-refusal return above, a listen() that raised, an accept()
+    # that timed out because nobody ever came. A stale entry is not
+    # harmless: the ports it is keyed by are reused, so the next offer on
+    # the same port to the same nick could read an offset agreed for a
+    # different file and send it from the middle.
+    try:
+        clear_send_offer(sent.user, sent.assigned_port)
+    except Exception:
+        pass
+
+    # There used to be a 0.5 s sleep here "to give the network buffer time
+    # to flush the final acknowledgement" - a pause standing in for the ack
+    # that nothing read. The ack is read now, and a completed transfer
+    # only reaches this point once it has arrived; a failed one has
+    # nothing to wait for. Sleeping here only held the DCC slot half a
+    # second longer on every exit path.
+
+    # The real-time speed counter
+    # transfer_finished_at is the moment of the receiver's final
+    # acknowledgement (#526) - or, for a send that fell short, the moment
+    # the wait for it gave up. It only exists on the path that reached
+    # the completion check, so the fallbacks below cover the abort paths
+    # that arrive here without one.
+    _ended = (sent.transfer_finished_at if sent.transfer_finished_at is not None
+              else time.time())
+    acute_duration = _ended - sent.start_time
+    if acute_duration <= 0:
+        acute_duration = 0.1
+
+    # Minus whatever the receiver already had. Counting a resumed send's
+    # skipped bytes as though this transfer moved them would post a speed
+    # record that never happened - and that number feeds the channel
+    # advert, which is the same mistake the timing comment above describes.
+    _skipped = sent.resume_offset
+    acute_bytes = max(0, sent.bytes_sent - _skipped)
+    final_calc_speed = int(acute_bytes / acute_duration)
+
+    # WHAT WE ARE WILLING TO SAY IT WAS. The figure above divides bytes by
+    # the time it took to hand them to the kernel, which is the same thing
+    # as the transfer only for a file bigger than the socket send buffer.
+    # A smaller one is copied into the buffer in one go and the clock
+    # measures memory - a list zip was reported at 138 MB/s that way.
+    #
+    # None rather than a number when it cannot be measured, so the two
+    # places that display it say so instead of stating a figure nobody
+    # should act on. The RECORD has always refused these samples; this is
+    # the same judgement applied to what is shown.
+    stats_mgr_speed = sys.modules.get("stats_mgr")
+    if stats_mgr_speed is None:
+        import stats_mgr as stats_mgr_speed
+    reported_speed = (final_calc_speed
+                      if stats_mgr_speed.speed_is_measurable(acute_duration, sent.file_size)
+                      else None)
+
+    # The record the channel advert publishes. db has had
+    # save_speed_record() from the start and announce.py has read it into
+    # every advert since, but nothing ever sat between the two - the only
+    # callers of the writer were tests. So the advert has shown
+    # "Record: 0k/s" for the life of the feature, on every install.
+    #
+    # Only a transfer that actually completed counts: a send that failed
+    # part-way has moved real bytes in real time, so its rate looks like a
+    # legitimate sample and is not one.
+    if sent.transfer_completed:
+        # Not a sample at all when nothing moved (a resume at the end).
+        if not sent.already_held:
+            try:
+                import stats_mgr as stats_mgr_mod
+                stats_mgr_mod.update_speed_record(final_calc_speed, acute_duration)
+            except Exception as record_err:
+                print(f"[STATS ERROR] Could not update the speed record: {record_err}")
+    else:
+        # How it ended, in the record (#1203), while the row is still in
+        # active_transfers: a stop cutting it off now finds it claimed.
+        # What reached the receiver is what it acknowledged, less what it
+        # already held before a resume.
+        _acked = sent.acked
+        _record_send_outcome(sent.row, sent.outcome_status, sent.outcome_identity, sent.file_size,
+                             max(0, _acked - _skipped), sent.user)
+
+    # 1. Clean up the transfer and the slot immediately
+    try:
+        with queue_lock:
+            config.active_transfers[:] = [tx for tx in config.active_transfers if not _is_this_send(tx, sent.row, sent.user)]
+            oserve = sys.modules.get('oserve')
+            if oserve: oserve.active_downloads = len(config.active_transfers)
+    except Exception as trans_clean_err:
+        print(f"[DCC CLEANUP ERROR] Could not clear active_transfers in memory: {trans_clean_err}")
+
+
+    # 2. Get the channel notice out first of all
+    try:
+        import announce as announce_mod
+        # Only announce a transfer that actually completed. A failed attempt now keeps
+        # its queue row for retry, so announcing here would tell the channel "Sent" and
+        # re-offer the same file on every attempt.
+        # A private request is not announced (#1242): the operator's
+        # decision, though the channel it belongs to is known by now.
+        # Nor is a resume at the end: nothing was sent.
+        if sent.transfer_completed and not sent.already_held:
+            announce_mod.send_transfer_complete(sent.channel, sent.user, sent.file_name, sent.file_size, sent.start_time, reported_speed,
+                                                duration=acute_duration,
+                                                private=is_private_row(sent.next_file))
+    except Exception as ann_chan_err:
+        print(f"[ANNOUNCE CHANNEL ERROR] Could not send the channel notice: {ann_chan_err}")
+
+    # 3. Close the network socket safely
+    try: sent.conn.close()
+    except: pass
+    try: sent.dcc_sock.close()
+    except: pass
+    # 4. SETTLE THE QUEUE ROW - by identity, with a retry budget. This replaces an
+    #    unconditional pop(0), which removed whatever was first at that instant rather
+    #    than the entry actually sent. See release_queue_entry.
+    #
+    #    BEFORE the disk cleanup, since #657: the cleanup used to run first and
+    #    delete a packed archive whose send had just failed, and the settle then
+    #    found the archive gone and dropped the row - one 30-second accept window
+    #    for a pack that took up to RAR_TIMEOUT to build. Settled first, a failed
+    #    pack keeps its row for MAX_SEND_FAILS like a plain file, and the cleanup
+    #    below keeps the archive for a row that was kept.
+    row_retained = False
+    try:
+        if sent.transfer_completed:
+            settled_reason = "transfer complete"
+        elif sent.never_connected:
+            settled_reason = never_connected_advice()
+        else:
+            settled_reason = "transfer did not complete"
+        row_retained = release_queue_entry(
+            sent.user, sent.next_file, delivered=sent.transfer_completed,
+            reason=settled_reason)
+    except Exception as pop_err:
+        print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
+
+    # 5. The RAR cache and the send lock
+    try:
+        # A row kept for retry needs its archive (#657).
+        file_still_needed = bool(row_retained)
+        safe_path = str(sent.file_path)
+
+        if _is_temp_zip_cache_file(safe_path):
+            # Still queued for anybody, being sent in another slot, or
+            # being packed: asked BY PATH (#1268). The offered name is
+            # the leaf alone, and another nick's different album with the
+            # same leaf name kept this one on disk for good. Removed under
+            # the lock that answered, so a pack of the same folder cannot
+            # start writing it in between.
+            with queue_lock:
+                if not file_still_needed and not temp_archive_in_use(sent.file_path):
+                    if os.path.exists(platform_compat.long_path(sent.file_path)):
+                        os.remove(sent.file_path)
+                        print(f"[DCC CLEANUP] Safely deleted the temporary archive from disk: {sent.file_name}")
+    except Exception as file_rm_err:
+        print(f"[DCC CLEANUP ERROR] Could not run the disk cleanup: {file_rm_err}")
+
+    # 6. Release the memory lock and rule out duplicate threads.
+    # #162 finding #6: a plain audio file never owned rar_inprogress - this ran
+    # unconditionally on EVERY transfer's completion, so bob's ordinary MP3
+    # finishing could clear the flag while alice's pack (queued as a separate
+    # slot, holding the interlock for the whole duration of its own pack) was
+    # still running, losing packer serialisation. Same guard as the critical-
+    # abort and port-exhaustion branches above.
+    if sent.owns_packer:
+        config.rar_inprogress = False
+        # #215: this release is the only moment another user's held pack can
+        # start. Nothing else revisits them - every check_queue_and_send()
+        # caller passes the user who just finished, never the one turned
+        # away at [RAR-HOLD].
+        try:
+            redispatch_waiting_pack(sent.irc_sock, just_finished=sent.user)
+        except Exception as wake_err:
+            # Guarded like every other step of this finally (#606): an
+            # exception here skipped the lock release and the fallback
+            # trigger below, and the finishing user stayed "already
+            # claimed elsewhere" until a rehash.
+            print("[DCC CLEANUP ERROR] Could not wake a waiting pack: " + str(wake_err))
+    # A list was not the nick's turn (#1205): files it was already waiting
+    # for keep their place in the line, here and at every exit above.
+    if hasattr(config, 'user_processing_lock'):
+        config.user_processing_lock.discard(_send_nick(sent.row, sent.user))
+        go_to_the_back(_send_nick(sent.row, sent.user), keep_place=is_a_list_row(sent.next_file))
+
+    # 7. Wake the queue automatically after three seconds, thread-safely
+    # A retained row means the attempt FAILED and will be retried. Reusing the flat
+    # 3-second completion timer as the retry timer would hammer a broken entry three
+    # times in nine seconds, each pass emitting a NOTICE and a VIP notice while the VIP
+    # queue drains slower than that. Back off instead.
+    retry_delay = 3
+    if row_retained and isinstance(sent.next_file, dict):
+        retry_delay = 15 * max(1, int(sent.next_file.get('send_fails', 1)))
+
+    def delayed_queue_trigger_fallback():
+        time.sleep(retry_delay)
+        check_queue_and_send(sent.irc_sock, sent.user)
+    threading.Thread(target=delayed_queue_trigger_fallback, daemon=True).start()
+
+
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, owns_packer=False):
     """Handle the network ports and the CTCP, and stream the bytes with accurate timing.
 
@@ -4625,14 +4861,12 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
     # identity instead; the nick is only what to look it up by once, here.
     _row = _find_transfer_row(user, file_name)
 
+    # Module functions since #1336, which finish_send() uses too.
     def _mine(tx):
-        if _row is not None:
-            return tx is _row
-        return str(tx.get('user', '')).lower() == user.lower()
+        return _is_this_send(tx, _row, user)
 
     def _my_nick():
-        # Whatever name the transfer is filed under NOW - the lock moved with it.
-        return str((_row or {}).get('user') or user).lower()
+        return _send_nick(_row, user)
 
     # What this send is, for the row its ending writes (#1203). Worked out
     # once, here, and kept on the transfer's row too, so a stop that cuts
@@ -5192,201 +5426,15 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     finally:
-        # Never leave an offer standing. The success path already dropped it
-        # the moment the receiver connected; this covers every other exit -
-        # the port-refusal return above, a listen() that raised, an accept()
-        # that timed out because nobody ever came. A stale entry is not
-        # harmless: the ports it is keyed by are reused, so the next offer on
-        # the same port to the same nick could read an offset agreed for a
-        # different file and send it from the middle.
-        try:
-            clear_send_offer(user, assigned_port)
-        except Exception:
-            pass
-
-        # There used to be a 0.5 s sleep here "to give the network buffer time
-        # to flush the final acknowledgement" - a pause standing in for the ack
-        # that nothing read. The ack is read now, and a completed transfer
-        # only reaches this point once it has arrived; a failed one has
-        # nothing to wait for. Sleeping here only held the DCC slot half a
-        # second longer on every exit path.
-
-        # The real-time speed counter
-        # transfer_finished_at is the moment of the receiver's final
-        # acknowledgement (#526) - or, for a send that fell short, the moment
-        # the wait for it gave up. It only exists on the path that reached
-        # the completion check, so the fallbacks below cover the abort paths
-        # that arrive here without one.
-        _ended = (transfer_finished_at if 'transfer_finished_at' in locals()
-                  else time.time())
-        acute_duration = _ended - (start_time if 'start_time' in locals() else _ended)
-        if acute_duration <= 0:
-            acute_duration = 0.1
-            
-        # Minus whatever the receiver already had. Counting a resumed send's
-        # skipped bytes as though this transfer moved them would post a speed
-        # record that never happened - and that number feeds the channel
-        # advert, which is the same mistake the timing comment above describes.
-        _skipped = resume_offset if 'resume_offset' in locals() else 0
-        acute_bytes = max(0, (bytes_sent if 'bytes_sent' in locals() else 0) - _skipped)
-        final_calc_speed = int(acute_bytes / acute_duration)
-
-        # WHAT WE ARE WILLING TO SAY IT WAS. The figure above divides bytes by
-        # the time it took to hand them to the kernel, which is the same thing
-        # as the transfer only for a file bigger than the socket send buffer.
-        # A smaller one is copied into the buffer in one go and the clock
-        # measures memory - a list zip was reported at 138 MB/s that way.
-        #
-        # None rather than a number when it cannot be measured, so the two
-        # places that display it say so instead of stating a figure nobody
-        # should act on. The RECORD has always refused these samples; this is
-        # the same judgement applied to what is shown.
-        stats_mgr_speed = sys.modules.get("stats_mgr")
-        if stats_mgr_speed is None:
-            import stats_mgr as stats_mgr_speed
-        reported_speed = (final_calc_speed
-                          if stats_mgr_speed.speed_is_measurable(acute_duration, file_size)
-                          else None)
-
-        # The record the channel advert publishes. db has had
-        # save_speed_record() from the start and announce.py has read it into
-        # every advert since, but nothing ever sat between the two - the only
-        # callers of the writer were tests. So the advert has shown
-        # "Record: 0k/s" for the life of the feature, on every install.
-        #
-        # Only a transfer that actually completed counts: a send that failed
-        # part-way has moved real bytes in real time, so its rate looks like a
-        # legitimate sample and is not one.
-        if transfer_completed:
-            # Not a sample at all when nothing moved (a resume at the end).
-            if not already_held:
-                try:
-                    import stats_mgr as stats_mgr_mod
-                    stats_mgr_mod.update_speed_record(final_calc_speed, acute_duration)
-                except Exception as record_err:
-                    print(f"[STATS ERROR] Could not update the speed record: {record_err}")
-        else:
-            # How it ended, in the record (#1203), while the row is still in
-            # active_transfers: a stop cutting it off now finds it claimed.
-            # What reached the receiver is what it acknowledged, less what it
-            # already held before a resume.
-            _acked = acks.acked if 'acks' in locals() else 0
-            _record_send_outcome(_row, outcome_status, outcome_identity, file_size,
-                                 max(0, _acked - _skipped), user)
-
-        # 1. Clean up the transfer and the slot immediately
-        try:
-            with queue_lock:
-                config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
-                oserve = sys.modules.get('oserve')
-                if oserve: oserve.active_downloads = len(config.active_transfers)
-        except Exception as trans_clean_err:
-            print(f"[DCC CLEANUP ERROR] Could not clear active_transfers in memory: {trans_clean_err}")
-
-
-        # 2. Get the channel notice out first of all
-        try:
-            import announce as announce_mod
-            # Only announce a transfer that actually completed. A failed attempt now keeps
-            # its queue row for retry, so announcing here would tell the channel "Sent" and
-            # re-offer the same file on every attempt.
-            # A private request is not announced (#1242): the operator's
-            # decision, though the channel it belongs to is known by now.
-            # Nor is a resume at the end: nothing was sent.
-            if transfer_completed and not already_held:
-                announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, reported_speed,
-                                                    duration=acute_duration,
-                                                    private=is_private_row(next_file))
-        except Exception as ann_chan_err:
-            print(f"[ANNOUNCE CHANNEL ERROR] Could not send the channel notice: {ann_chan_err}")
-
-        # 3. Close the network socket safely
-        try: conn.close()
-        except: pass
-        try: dcc_sock.close()
-        except: pass
-        # 4. SETTLE THE QUEUE ROW - by identity, with a retry budget. This replaces an
-        #    unconditional pop(0), which removed whatever was first at that instant rather
-        #    than the entry actually sent. See release_queue_entry.
-        #
-        #    BEFORE the disk cleanup, since #657: the cleanup used to run first and
-        #    delete a packed archive whose send had just failed, and the settle then
-        #    found the archive gone and dropped the row - one 30-second accept window
-        #    for a pack that took up to RAR_TIMEOUT to build. Settled first, a failed
-        #    pack keeps its row for MAX_SEND_FAILS like a plain file, and the cleanup
-        #    below keeps the archive for a row that was kept.
-        row_retained = False
-        try:
-            if transfer_completed:
-                settled_reason = "transfer complete"
-            elif never_connected:
-                settled_reason = never_connected_advice()
-            else:
-                settled_reason = "transfer did not complete"
-            row_retained = release_queue_entry(
-                user, next_file, delivered=transfer_completed,
-                reason=settled_reason)
-        except Exception as pop_err:
-            print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
-
-        # 5. The RAR cache and the send lock
-        try:
-            # A row kept for retry needs its archive (#657).
-            file_still_needed = bool(row_retained)
-            safe_path = str(file_path)
-
-            if _is_temp_zip_cache_file(safe_path):
-                # Still queued for anybody, being sent in another slot, or
-                # being packed: asked BY PATH (#1268). The offered name is
-                # the leaf alone, and another nick's different album with the
-                # same leaf name kept this one on disk for good. Removed under
-                # the lock that answered, so a pack of the same folder cannot
-                # start writing it in between.
-                with queue_lock:
-                    if not file_still_needed and not temp_archive_in_use(file_path):
-                        if os.path.exists(platform_compat.long_path(file_path)):
-                            os.remove(file_path)
-                            print(f"[DCC CLEANUP] Safely deleted the temporary archive from disk: {file_name}")
-        except Exception as file_rm_err:
-            print(f"[DCC CLEANUP ERROR] Could not run the disk cleanup: {file_rm_err}")
-        
-        # 6. Release the memory lock and rule out duplicate threads.
-        # #162 finding #6: a plain audio file never owned rar_inprogress - this ran
-        # unconditionally on EVERY transfer's completion, so bob's ordinary MP3
-        # finishing could clear the flag while alice's pack (queued as a separate
-        # slot, holding the interlock for the whole duration of its own pack) was
-        # still running, losing packer serialisation. Same guard as the critical-
-        # abort and port-exhaustion branches above.
-        if owns_packer:
-            config.rar_inprogress = False
-            # #215: this release is the only moment another user's held pack can
-            # start. Nothing else revisits them - every check_queue_and_send()
-            # caller passes the user who just finished, never the one turned
-            # away at [RAR-HOLD].
-            try:
-                redispatch_waiting_pack(irc_sock, just_finished=user)
-            except Exception as wake_err:
-                # Guarded like every other step of this finally (#606): an
-                # exception here skipped the lock release and the fallback
-                # trigger below, and the finishing user stayed "already
-                # claimed elsewhere" until a rehash.
-                print("[DCC CLEANUP ERROR] Could not wake a waiting pack: " + str(wake_err))
-        # A list was not the nick's turn (#1205): files it was already waiting
-        # for keep their place in the line, here and at every exit above.
-        if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(_my_nick())
-            go_to_the_back(_my_nick(), keep_place=is_a_list_row(next_file))
-
-        # 7. Wake the queue automatically after three seconds, thread-safely
-        # A retained row means the attempt FAILED and will be retried. Reusing the flat
-        # 3-second completion timer as the retry timer would hammer a broken entry three
-        # times in nine seconds, each pass emitting a NOTICE and a VIP notice while the VIP
-        # queue drains slower than that. Back off instead.
-        retry_delay = 3
-        if row_retained and isinstance(next_file, dict):
-            retry_delay = 15 * max(1, int(next_file.get('send_fails', 1)))
-
-        def delayed_queue_trigger_fallback():
-            time.sleep(retry_delay)
-            check_queue_and_send(irc_sock, user)
-        threading.Thread(target=delayed_queue_trigger_fallback, daemon=True).start()
+        # finish_send() since #1336. resume_offset, acks and
+        # transfer_finished_at are unset on the exits before the transfer.
+        _here = locals()
+        finish_send(SentFile(
+            _row, user, next_file, file_path, file_name, file_size,
+            _here.get('resume_offset', 0), bytes_sent, transfer_completed, already_held,
+            offered_at, start_time, _here.get('transfer_finished_at'),
+            channel=channel, irc_sock=irc_sock, owns_packer=owns_packer,
+            outcome_identity=outcome_identity, outcome_status=outcome_status,
+            acked=_here['acks'].acked if 'acks' in _here else 0,
+            never_connected=never_connected, assigned_port=assigned_port,
+            conn=conn, dcc_sock=dcc_sock))
