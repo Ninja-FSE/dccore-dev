@@ -57,6 +57,10 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #   web_library, web_stats - the own library, the Stats page and the Queue
 #   web_queue                page, split out (#1318); stdlib, config,
 #                            adminchat (already allowed) and each other
+#   web_settings,          - the Settings page, served folders and lists,
+#   web_served,              on-connect commands and messages, split out
+#   web_on_connect,          (#1320); stdlib, config, runtime,
+#   web_messages             platform_compat, adminchat and web_common
 ALLOWED = {
     "webserver",
     "web_common",
@@ -67,6 +71,10 @@ ALLOWED = {
     "web_library",
     "web_stats",
     "web_queue",
+    "web_settings",
+    "web_served",
+    "web_on_connect",
+    "web_messages",
     "defaults",
     "runtime",
     "settings_file",
