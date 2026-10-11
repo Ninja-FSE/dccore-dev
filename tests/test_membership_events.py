@@ -228,7 +228,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
     # --- the three membership handlers -----------------------------------
 
     def test_the_quit_handler_is_gated_on_quit(self):
-        condition = _guard_condition_for("q_user = quit_match.group(1).lower()")
+        condition = _guard_condition_for("    answer_quit(line)")
         self.assertTrue(_evaluate(condition, GENUINE["QUIT"]), condition)
         self.assertFalse(
             _evaluate(condition, ":dave!u@h PRIVMSG #dccore-test :@find QUIT PLAYING GAMES"),
@@ -236,18 +236,18 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
 
     def test_the_quit_handler_does_not_fire_on_a_part(self):
         """Catches the QUIT and PART guards being swapped."""
-        condition = _guard_condition_for("q_user = quit_match.group(1).lower()")
+        condition = _guard_condition_for("    answer_quit(line)")
         self.assertFalse(_evaluate(condition, GENUINE["PART"]), condition)
 
     def test_the_part_handler_is_gated_on_part(self):
-        condition = _guard_condition_for("p_user = part_match[0].lower()")
+        condition = _guard_condition_for("    answer_part(line)")
         self.assertTrue(_evaluate(condition, GENUINE["PART"]), condition)
         self.assertFalse(_evaluate(condition, GENUINE["QUIT"]), condition)
         self.assertFalse(
             _evaluate(condition, ":attacker!u@h PRIVMSG #c :should i PART #c ?"), condition)
 
     def test_the_join_handler_is_gated_on_join(self):
-        condition = _guard_condition_for("joined_user = join_match[0]")
+        condition = _guard_condition_for("    answer_join(line, s)")
         self.assertTrue(_evaluate(condition, GENUINE["JOIN"]), condition)
         self.assertTrue(_evaluate(condition, GENUINE["JOIN_COLON"]), condition)
         self.assertFalse(_evaluate(condition, GENUINE["PART"]), condition)
@@ -257,7 +257,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
     def test_the_join_handler_still_ignores_the_bots_own_join(self):
         """Losing that half would make the bot thaw queues off its own JOIN."""
         import defaults as config
-        condition = _guard_condition_for("joined_user = join_match[0]")
+        condition = _guard_condition_for("    answer_join(line, s)")
         own = f":{config.NICKNAME}!bot@host JOIN #dccore-test"
         self.assertFalse(_evaluate(condition, own), condition)
 
@@ -268,7 +268,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
         # checks is unchanged, and so is what this asserts about it. Anchored
         # on the CALL rather than on the function name, which also appears at
         # the definition and would match two lines.
-        condition = _guard_condition_for("note_nick_change(nick_match.group(1)")
+        condition = _guard_condition_for("    answer_nick_change(line)")
         self.assertTrue(_evaluate(condition, GENUINE["NICK"]), condition)
         self.assertTrue(_evaluate(condition, GENUINE["NICK_BARE"]), condition)
         self.assertFalse(
@@ -344,7 +344,7 @@ class ListTriggerIsCaseInsensitive(unittest.TestCase):
     """
 
     def test_the_list_trigger_accepts_any_casing(self):
-        condition = _guard_condition_for("list.send_list_trigger_info(s, user)",
+        condition = _guard_condition_for("list.send_list_trigger_info(sock, user)",
                                          helper=("msg_lower", "msg =="))
         for typed in ("!list", "!LIST", "!List"):
             with self.subTest(typed=typed):
@@ -353,7 +353,7 @@ class ListTriggerIsCaseInsensitive(unittest.TestCase):
 
     def test_the_dispatch_compares_the_lowercased_message(self):
         """The gate itself is already asserted by tests/test_irc_dispatch.py."""
-        condition = _guard_condition_for("list.send_list_trigger_info(s, user)",
+        condition = _guard_condition_for("list.send_list_trigger_info(sock, user)",
                                          helper=("msg_lower", "msg =="))
         self.assertNotIn("msg ==", condition,
                          "!list must compare msg_lower, like !ping and !debugnames")

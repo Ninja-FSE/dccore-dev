@@ -226,7 +226,7 @@ def _connect():
         if not (_is_damage(err) and os.path.isfile(path)):
             print(f"[LIST-INDEX] Unavailable ({err}); the cross-list filter "
                   f"is off until it can be opened. Browsing and @find are "
-                  f"unaffected.")
+                  f"unaffected.{_disk_note(path, err)}")
             return None
         aside = _move_aside(path)
         if aside is None:
@@ -247,6 +247,25 @@ def _connect():
     _connection = conn
     _connection_path = path
     return conn
+
+
+def _without_secure_delete(conn):
+    """Turn SQLite's secure delete off on one of the index's connections.
+
+    NOTHING HERE NEEDS SCRUBBING (#1296). Debian and Ubuntu build SQLite with
+    SQLITE_SECURE_DELETE, so every page a DROP or a DELETE frees is
+    overwritten with zeros, and in WAL mode each of those pages goes through
+    the WAL first. A schema rebuild's drop needed the index's own size again
+    in free disk - an 8.8 GB WAL for an 8.8 GB index, and "database or disk
+    is full" on a host with several GB free - and every list refresh, which
+    deletes the old list's rows before inserting, wrote the list twice. The
+    index is a cache of lists already on disk in plain text. Measured on a
+    118 MB index: the drop wrote a 116 MB WAL with it on and 0.2 MB with it
+    off. transfers.db keeps it on: forget_nick() relies on it (#1082).
+
+    A per-connection setting, so the writer and the reader both set it.
+    """
+    conn.execute("PRAGMA secure_delete = OFF")
 
 
 def _open(path):
@@ -290,6 +309,7 @@ def _open(path):
         # transfer thread and the startup backfill from its own, and every
         # caller here holds _conn_lock for the whole operation anyway.
         conn = sqlite3.connect(path, check_same_thread=False)
+        _without_secure_delete(conn)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("BEGIN")
         stored = conn.execute(
@@ -339,12 +359,14 @@ def _open(path):
               "short prefixes in the dashboard's filter fast: the lists you "
               "hold are indexed again from disk, up to about a minute per "
               "million files, and the file comes out about half as big again "
-              "as before. Browsing and @find are unaffected.")
+              "as before. The bot connects meanwhile, and the filter waits "
+              "for it. Browsing and @find are unaffected.")
     elif rebuilt:
         print("[LIST-INDEX] Rebuilding the search index once, so the "
               "dashboard's filter finds a name whichever Unicode form a list "
               "writes it in: the lists you hold are indexed again from disk, "
-              "up to about a minute per million files. Browsing and @find "
+              "up to about a minute per million files. The bot connects "
+              "meanwhile, and the filter waits for it. Browsing and @find "
               "are unaffected.")
     if rebuilt:
         # The same flag a repaired file sets: the readers run the backfill
@@ -352,6 +374,25 @@ def _open(path):
         # holding no match even when no startup backfill ran first.
         _rebuild_pending = True
     return conn
+
+
+def _disk_note(path, err):
+    """What to add to an open failure that says the disk is full (#1296):
+    how much room the index's disk has and how big the index is, so the
+    operator knows what to free. Empty for any other failure, and when the
+    figures cannot be read."""
+    if "full" not in str(err).lower():
+        return ""
+    try:
+        import shutil
+        folder = os.path.dirname(os.path.abspath(path)) or "."
+        free = shutil.disk_usage(folder).free
+        size = sum(os.path.getsize(path + suffix) for suffix in ("", "-wal")
+                   if os.path.exists(path + suffix))
+    except OSError:
+        return ""
+    return (f" The disk holding it has {free / 2**30:.1f} GB free, and the "
+            f"index and its write-ahead log take {size / 2**30:.1f} GB.")
 
 
 def _is_damage(err):
@@ -428,6 +469,8 @@ def _prepare_to_read():
     closes that, so the flag can only be set when this goes the slow way.
     """
     global _rebuild_pending
+    # A startup backfill still running (#1296): its rows are not all in yet.
+    runtime.list_index_backfill_done.wait()
     available = _open_reader()
     pending = False
     if _rebuild_pending:
@@ -475,6 +518,7 @@ def _open_reader_locked():
     conn = None
     try:
         conn = sqlite3.connect(path, check_same_thread=False)
+        _without_secure_delete(conn)
         conn.execute("PRAGMA query_only = ON")
     except Exception as err:
         # Closed before the error leaves, for the reason _open() gives.
@@ -1171,6 +1215,40 @@ def backfill_missing(held, log=print):
         log(f"[LIST-INDEX] Indexed {done} held list(s) the search index did "
             f"not have.")
     return done
+
+
+def backfill_in_background(held, log=print):
+    """Run backfill_missing() on a thread of its own and return the thread.
+
+    THE BOT CONNECTS WITHOUT WAITING FOR IT (#1296). oserve called the
+    backfill inline at startup, before the IRC connection, so the first start
+    after an upgrade that rebuilt the index kept the bot off IRC for as long
+    as re-indexing every held list took: about ten minutes for 12.86M rows.
+    Nothing on IRC reads the index - @find and browsing never did - so only
+    the dashboard's filter has to wait, and it does:
+    runtime.list_index_backfill_done is clear while this runs, and
+    _prepare_to_read() waits for it, as it waits for a repair's backfill.
+
+    `held` is copied first: it is the live config.fetched_bot_lists, and a
+    fetch completing would change it under the loop.
+    """
+    held = dict(held or {})
+    done = runtime.list_index_backfill_done
+    done.clear()
+
+    def run():
+        try:
+            backfill_missing(held, log=log)
+        except Exception as err:
+            log(f"[STARTUP] Could not check the search index ({err}); the "
+                f"dashboard's cross-list filter may be incomplete until the "
+                f"next fetch.")
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=run, name="list-index-backfill", daemon=True)
+    thread.start()
+    return thread
 
 
 def reset_for_tests():

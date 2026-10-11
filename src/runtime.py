@@ -271,6 +271,15 @@ list_index_lock = threading.Lock()
 # reader opening one would wait on each other for ever.
 list_index_read_lock = threading.Lock()
 
+# Set while no startup backfill of the index is running (#1296). The
+# backfill runs on a thread of its own so the bot connects without waiting
+# for it, and the dashboard's readers wait on this before they answer: an
+# index still being filled would report every list it has not reached yet as
+# holding no match. Set from the start, so a process that never runs one
+# never waits.
+list_index_backfill_done = threading.Event()
+list_index_backfill_done.set()
+
 # transfer_log.py's database (#1068). One writer at a time, so two transfers
 # ending together never meet a locked file; here, not in that module, for the
 # reason every other lock in this file is.

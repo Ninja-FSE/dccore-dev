@@ -332,7 +332,8 @@ class TheDashboardReadsUnderTheLock(unittest.TestCase):
     machine."""
 
     def test_build_settings_payload_takes_the_reload_lock(self):
-        with io.open(os.path.join(REPO_ROOT, "src", "webserver.py"),
+        # web_settings.py since #1320, step 5 of splitting webserver.py.
+        with io.open(os.path.join(REPO_ROOT, "src", "web_settings.py"),
                      encoding="utf-8") as handle:
             source = handle.read()
 

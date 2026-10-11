@@ -297,6 +297,44 @@ class ARealReceiver(DCCoreTestCase):
         self.assertEqual(len(self.sent_lines()), 1, self.debug_lines)
         self.assertEqual(self.failed_lines(), [])
 
+    def test_the_ending_is_handed_what_the_send_knew(self):
+        """start_dcc_send()'s finally builds the SentFile finish_send() reads
+        (#1336). Three of its values were unset on the early exits and are
+        read through locals(): a resumed, completed send must hand over its
+        offset, the receiver's last ack and its finish time, not the
+        fallbacks."""
+        handed = []
+        real = dcc.finish_send
+
+        def spy(sent):
+            handed.append(sent)
+            return real(sent)
+        dcc.finish_send = spy
+        self.addCleanup(setattr, dcc, "finish_send", real)
+
+        irc, sender = self.start_send()
+        port = irc.port()
+        offered = dcc.offered_name_from_handshake(irc.handshake)
+        resume_at = 50_000
+        self.assertTrue(dcc.handle_resume_request(irc, USER, f"DCC RESUME {offered} {port} {resume_at}"))
+        client = self.connect(port)
+        held = resume_at
+        while held < len(CONTENT):
+            chunk = client.recv(65536)
+            if not chunk:
+                break
+            held += len(chunk)
+            client.sendall(struct.pack("!I", held & 0xFFFFFFFF))
+        sender.join(30)
+
+        self.assertEqual(len(handed), 1)
+        sent = handed[0]
+        self.assertTrue(sent.transfer_completed)
+        self.assertEqual(sent.resume_offset, resume_at)
+        self.assertEqual(sent.acked, len(CONTENT))
+        self.assertIsNotNone(sent.transfer_finished_at)
+        self.assertEqual(sent.assigned_port, port)
+
     def test_a_receiver_that_hangs_up_early_is_a_failure(self):
         irc, sender = self.start_send()
         client = self.connect(irc.port())
