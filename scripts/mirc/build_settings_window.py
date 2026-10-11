@@ -108,27 +108,27 @@ def wrapped_lines(text, width_dbu):
 # Geometry, in dialog units (option dbu)
 # ---------------------------------------------------------------------------
 
-DIALOG_W, DIALOG_H = 480, 340
+DIALOG_W, DIALOG_H = 480, 354
 TABS = (4, 2, 472, 14)
 # The pages of the chosen tab: a column of push-style radio buttons, one per
 # slot, as many slots as the tab with the most pages has. Not a listbox: a
 # listbox's row height cannot be set from a script, and at a display scale
 # above 100% its highlight was shorter than the text, which looked cut.
-PAGE_SLOT_X, PAGE_SLOT_Y, PAGE_SLOT_W, PAGE_SLOT_H, PAGE_SLOT_GAP = 4, 18, 96, 15, 2
-CONTENT_X, CONTENT_Y, CONTENT_W, CONTENT_H = 106, 18, 370, 274
-HELP = (106, 294, 370, 24)                  # three lines of the hovered setting's help
-CONNECTED = (4, 320, 310, 8)
-STATUS = (4, 329, 310, 10)
+PAGE_SLOT_X, PAGE_SLOT_Y, PAGE_SLOT_W, PAGE_SLOT_H, PAGE_SLOT_GAP = 4, 20, 96, 15, 2
+CONTENT_X, CONTENT_Y, CONTENT_W, CONTENT_H = 106, 32, 370, 274
+HELP = (106, 308, 370, 24)                  # three lines of the hovered setting's help
+CONNECTED = (4, 334, 310, 8)
+STATUS = (4, 343, 310, 10)
 BUTTONS = (("Reload", 1017, 319), ("Apply", 1014, 358), ("OK", 1015, 397), ("Cancel", 1016, 436))
-BUTTON_Y, BUTTON_W, BUTTON_H = 324, 36, 13
-# With DCX (#1288) a tree takes the left column, over where the tab strip and
-# the page buttons are, clear of the page and of the connection line below;
-# and the page's name goes, in bold, into the strip the hidden tabs leave
-# above the page. The script turns both into pixels with the scale
-# $dialog().cw / DIALOG_W gives.
-DCX_TREE = (4, 4, 96, 266)
-DCX_TREE_ID = 900
-DCX_TITLE = (106, 4, 370, 12)
+BUTTON_Y, BUTTON_W, BUTTON_H = 338, 36, 13
+# With DCX (#1288) the mockup's navigation: the tab strip stays, and a list
+# of the chosen tab's pages takes the left column where the page buttons
+# are, clear of the page and of the connection line below; the page's name
+# goes, in bold, into the row between the tabs and the page. The script
+# turns both into pixels with the scale $dialog().cw / DIALOG_W gives.
+DCX_PAGES = (4, 20, 96, 288)
+DCX_PAGES_ID = 900
+DCX_TITLE = (106, 20, 370, 10)
 DCX_TITLE_ID = 901
 
 # A page is its sections, each in a titled frame (a section with no title is
@@ -702,14 +702,17 @@ def render(builder):
             raise LayoutError("%d pages in one tab do not fit in the column of page buttons" % slots)
         out.append('  radio "", %d, %d %d %d %d, push%s' % (FIRST_SLOT_ID + number, PAGE_SLOT_X, y, PAGE_SLOT_W,
                                                          PAGE_SLOT_H, " group" if number == 0 else ""))
-    tree_x, tree_y, tree_w, tree_h = DCX_TREE
-    if tree_x + tree_w > CONTENT_X - 2 or tree_y + tree_h > CONNECTED[1] - 2 or DCX_TREE_ID >= min(TAB_IDS):
-        raise LayoutError("the DCX tree %r (id %d) overlaps the page or another control" % (DCX_TREE, DCX_TREE_ID))
+    pages_x, pages_y, pages_w, pages_h = DCX_PAGES
+    if (pages_x + pages_w > CONTENT_X - 2 or pages_y < TABS[1] + TABS[3] or pages_y + pages_h > CONNECTED[1] - 2
+            or DCX_PAGES_ID >= min(TAB_IDS)):
+        raise LayoutError("the DCX page list %r (id %d) overlaps the tabs, the page or another control"
+                          % (DCX_PAGES, DCX_PAGES_ID))
     title_x, title_y, title_w, title_h = DCX_TITLE
-    if title_x < CONTENT_X or title_x + title_w > CONTENT_X + CONTENT_W or title_y + title_h > CONTENT_Y:
-        raise LayoutError("the DCX title %r is not in the strip above the page" % (DCX_TITLE,))
-    if not DCX_TREE_ID < DCX_TITLE_ID < min(LISTVIEWS[n][0] for n in LISTVIEWS):
-        raise LayoutError("the DCX ids collide: tree %d, title %d" % (DCX_TREE_ID, DCX_TITLE_ID))
+    if (title_x < CONTENT_X or title_x + title_w > CONTENT_X + CONTENT_W or title_y < TABS[1] + TABS[3]
+            or title_y + title_h > CONTENT_Y):
+        raise LayoutError("the DCX title %r is not between the tabs and the page" % (DCX_TITLE,))
+    if not DCX_PAGES_ID < DCX_TITLE_ID < min(LISTVIEWS[n][0] for n in LISTVIEWS):
+        raise LayoutError("the DCX ids collide: page list %d, title %d" % (DCX_PAGES_ID, DCX_TITLE_ID))
     # every table has its columns, and every set of columns its table
     lists = [c for c in builder.controls if c["kind"] == "list"]
     if sorted(c["id"] for c in lists) != sorted(LISTVIEWS):
@@ -744,7 +747,7 @@ def render(builder):
     data.insert(0, ("groups", str(len(groups))))
     data.insert(1, ("slots", str(max(len(pages) for _group, pages in layout.GROUPS))))
     data.insert(2, ("size", "%d %d" % (DIALOG_W, DIALOG_H)))
-    data.insert(3, ("dcxtree", "%d %d %d %d %d" % ((DCX_TREE_ID,) + DCX_TREE)))
+    data.insert(3, ("dcxpages", "%d %d %d %d %d" % ((DCX_PAGES_ID,) + DCX_PAGES)))
     data.insert(4, ("dcxtitle", "%d %d %d %d %d" % ((DCX_TITLE_ID,) + DCX_TITLE)))
     # the tables: each native list, the DCX listview over its rectangle, and
     # that listview's columns and extra styles

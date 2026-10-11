@@ -962,15 +962,16 @@ exactly as before:
   is 32-bit;
 - `dcx\dcx.dll` is not beside the script, is not that release, or will not load.
 
-With DCX, the six tabs and the column of page buttons give way to a **tree**
-on the left - each group in bold with its pages under it, the page shown
-selected - with the page's name in bold above the page, and every table is a
-**listview with columns**: the channels; the lists (Name | Primary | Folder
-path) and the channel bindings (Channel | List | Mode) on **Lists & channels**;
-the timed bans (Nick | Time left) and the permanent patterns on **Bans &
-ignores**. Select a row and use the buttons under its table. Without DCX the
-tabs, the page buttons and plain lists draw the same pages: the settings,
-Apply, OK and Cancel are the same window either way.
+With DCX the window has the mockup's navigation: the six tabs stay, and the
+column of page buttons gives way to a **list of the chosen tab's pages** on
+the left, the page shown highlighted, with the page's name in bold between
+the tabs and the page. Every table is a **listview with columns**: the
+channels; the lists (Name | Primary | Folder path) and the channel bindings
+(Channel | List | Mode) on **Lists & channels**; the timed bans (Nick | Time
+left) and the permanent patterns on **Bans & ignores**. Select a row and use
+the buttons under its table. Without DCX the tabs, the page buttons and plain
+lists draw the same pages: the settings, Apply, OK and Cancel are the same
+window either way.
 
 `/dccore dcx` says which applies. `/dccore dcx check` opens a small window that
 tests DCX in this mIRC and writes what it found in `@DCCore`.

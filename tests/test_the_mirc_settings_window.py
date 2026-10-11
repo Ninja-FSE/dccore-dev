@@ -531,10 +531,10 @@ class TheDialog(unittest.TestCase):
         return rows
 
     def test_the_size_is_the_mockups(self):
-        # 480 x 340 dialog units: the mockup's proportions at a size that
-        # fits a 1080p screen with room for the frames and the labels above
-        # their fields (#1288, phase 3)
-        self.assertEqual(self.size, (480, 340))
+        # 480 x 354 dialog units: the mockup's proportions at a size that
+        # fits a 1080p screen, with room for the frames, the labels above
+        # their fields and the page's name under the tabs (#1288, phase 3)
+        self.assertEqual(self.size, (480, 354))
 
     def test_ids_are_unique_and_clear_of_the_other_dialogs(self):
         ids = [c[2] for c in self.controls]
