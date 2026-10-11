@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 A stranger's-message save test waits for both rows, not the first write (#1302)
+
+`test_the_timer_writes_them_from_its_own_thread` failed once on ubuntu-latest / Python 3.14 (#1299's first run) with
+`['alfa'] != ['alfa', 'bravo']`. The save timer fires 0.05 s after the first message. On a slow runner it wrote
+`alfa` before `bravo` was recorded, and the test stopped at that first write and read the file. Now it waits for
+both rows on disk, then checks that every write ran off the recording thread and that nothing is left pending. The
+once-only save of a burst stays tested by `test_a_burst_of_strangers_writes_nothing_here_and_once_later`.
+Reproduced: with a 0.3 s pause forced between the two records, the old test fails and the new one passes.
+
 ### 🧱 Splitting `dcc.py`, step 2: the inline RAR packer is its own function (#1300)
 
 Step 2 of splitting `dcc.py` (`docs/FUTURE.md`; step 1 is #1298). The packer was `_inline_rar_packer_body()`, a
