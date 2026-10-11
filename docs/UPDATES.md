@@ -31,6 +31,7 @@ use no names other than their parameters and module globals.
   - no poisoned-row check;
   - a failed rar leaves its archive;
   - the row is not pointed at the archive.
+
 ### 🧱 Splitting `dcc.py`, step 1: the published-list lookup is its own function (#1298)
 
 The first `dcc.py` step of "Splitting the largest functions" in `docs/FUTURE.md` (was #1150): *pull out the path
