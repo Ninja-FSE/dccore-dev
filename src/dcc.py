@@ -4809,6 +4809,183 @@ def finish_send(sent):
     threading.Thread(target=delayed_queue_trigger_fallback, daemon=True).start()
 
 
+def refuse_an_unsendable_file(irc_sock, user, row, next_file, file_path, file_size, ip_long, owns_packer,
+                              outcome_identity):
+    """A send that cannot be offered: no public address to offer from, a bot
+    not offerable to strangers, or an empty or vanished file. Tells the user,
+    and releases the packer, the nick and the transfer row. Without an address
+    the queue is left untouched, since nothing can be retried until one is
+    set; a bad file is charged to its queue row, recorded, and the queue is
+    woken three seconds later.
+
+    A refusal in start_dcc_send() until #1340, step 3 of splitting it
+    (docs/FUTURE.md). Moved unchanged; `row` is the transfer row the send
+    found, and the guard returns once this has.
+    """
+    import time
+    # Two very different failures used to share one message. "File access
+    # issue or empty payload. Please try again." is actively misleading for
+    # the address case: there is nothing wrong with the file, retrying
+    # cannot help, and only the operator can fix it.
+    if ip_long == 0 or not is_offerable_to_strangers():
+        reason = ("this bot has no usable public address configured, so it "
+                  "cannot offer a transfer")
+        print(f"[DCC CRITICAL ABORT] No usable public address "
+              f"({dcc_address()!r}); refused "
+              f"the send for {user} rather than offering one nobody can dial. "
+              f"Set MY_IP_OR_DOCK in admin_config.py. Not settings.conf "
+              f"(#465): this address is detected when the bot connects rather than "
+              f"read from a file, so it is not a setting that file carries.")
+    else:
+        reason = "file access issue or empty payload. Please try again"
+        print(f"[DCC CRITICAL ABORT] Aborted the send for {user}. "
+              f"Path: {file_path} (Size: {file_size})")
+    try: 
+        msg = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {reason}.\r\n"
+        irc_sock.sendall(msg.encode('utf-8', errors='ignore'))
+    except: 
+        pass
+
+    # Clear the locks and wait three seconds, to stay well clear of Excess Flood.
+    # Only clear rar_inprogress if THIS send owns it - a plain audio file never
+    # did, and clearing a flag another user's pack is holding is how the
+    # interlock leaks (see the identical guard a few lines down, at the port-
+    # exhaustion branch, which already got this right).
+    if owns_packer:
+        config.rar_inprogress = False
+        # #215: this release is the only moment another user's held pack can
+        # start. Nothing else revisits them - every check_queue_and_send()
+        # caller passes the user who just finished, never the one turned
+        # away at [RAR-HOLD].
+        redispatch_waiting_pack(irc_sock, just_finished=user)
+    if hasattr(config, 'user_processing_lock'):
+        config.user_processing_lock.discard(_send_nick(row, user))
+        go_to_the_back(_send_nick(row, user), keep_place=is_a_list_row(next_file))
+
+    with queue_lock:
+        config.active_transfers[:] = [tx for tx in config.active_transfers if not _is_this_send(tx, row, user)]
+
+    # This abort returns BEFORE the try/finally that settles the queue row, so without
+    # this call the same unreadable entry was re-selected every ~3 seconds forever,
+    # with no counter and no way out - a permanent hot loop injecting a NOTICE and a
+    # VIP notice on every pass. Charging it to the retry budget bounds it.
+    # WHOSE FAULT IT IS DECIDES WHETHER IT COSTS THE USER A RETRY.
+    #
+    # This branch covers two unrelated things. A file that is missing or
+    # empty is a dead row: the library moved on, no amount of retrying
+    # brings it back, and charging the budget is what stops it being
+    # re-selected every three seconds forever - the reason this call was
+    # added.
+    #
+    # "No usable public address" is not that. It is the BOT's own
+    # configuration, it affects every queued user identically, and it is
+    # fixed by the operator setting MY_IP_OR_DOCK - not by the user
+    # waiting. Charging it meant three attempts silently discarded a
+    # perfectly good queue, and the fastest way to make three attempts
+    # happen is three !rehash runs: each one wakes the queue, each wake
+    # fails the same way, and the third deletes the row. Reported from a
+    # live install - "if the bot had some queues from a user, and admin made a
+    # rehash, it cancels the queue".
+    #
+    # The hot loop this call exists to bound is still bounded: with no
+    # public address there is nothing to select and check_queue_and_send()
+    # below is not called again, so the row simply waits.
+    if ip_long == 0 or not is_offerable_to_strangers():
+        print(f"[DCC QUEUE] {user}'s queue is untouched - the address, not "
+              f"the file, is what is missing. Nothing is retried until "
+              f"MY_IP_OR_DOCK is set.")
+        if hasattr(config, 'user_processing_lock'):
+            config.user_processing_lock.discard(_send_nick(row, user))
+            go_to_the_back(_send_nick(row, user), keep_place=is_a_list_row(next_file))
+        return
+
+    release_queue_entry(user, next_file, delivered=False,
+                        reason="file missing or empty")
+    # A list that is gone was replaced by a rebuild while it waited
+    # (#1203): the bot's doing, so cancelled. A file that is gone failed.
+    _record_send_outcome(
+        row, transfer_log.STATUS_CANCELLED if outcome_identity[2] == transfer_log.KIND_LIST
+        else transfer_log.STATUS_FAILED, outcome_identity, file_size, 0, user)
+
+    time.sleep(3.0)
+    check_queue_and_send(irc_sock, user)
+    return
+
+
+def refuse_without_a_port(irc_sock, user, row, next_file, dcc_sock, listener_error, owns_packer):
+    """No DCC port or listener could be had: says so, releases what the send held
+    without charging the row, schedules one delayed retry, and closes the
+    listener.
+
+    A refusal in start_dcc_send() until #1340, step 3 of splitting it
+    (docs/FUTURE.md). Moved unchanged; `row` is the transfer row the send
+    found, and the guard returns once this has.
+    """
+    import time
+    import threading
+    if listener_error is not None:
+        print(f"[DCC PORTS] Could not open a listener for {user}: {listener_error}")
+        refusal = "Could not open a DCC port right now. Your file stays queued."
+    else:
+        refusal = "No available DCC ports."
+    try: irc_sock.sendall(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {refusal}\r\n".encode("utf-8", errors="ignore"))
+    except: pass
+    with queue_lock:
+        config.active_transfers[:] = [tx for tx in config.active_transfers if not _is_this_send(tx, row, user)]
+
+    # Port exhaustion is TRANSIENT and is not this entry's fault, so it is deliberately
+    # NOT charged to the retry budget - a busy spell must not discard good queued files.
+    # The interlocks are released so the user is not left wedged, and the row stays
+    # queued for the next completion trigger. Re-triggering here would spin: the ports
+    # are still full one instruction later.
+    # Only clear rar_inprogress if THIS send owns it - a plain audio file never did, and
+    # clearing a flag another user's pack is holding is how the interlock leaks.
+    if owns_packer:
+        config.rar_inprogress = False
+        # #215: this release is the only moment another user's held pack can
+        # start. Nothing else revisits them - every check_queue_and_send()
+        # caller passes the user who just finished, never the one turned
+        # away at [RAR-HOLD].
+        redispatch_waiting_pack(irc_sock, just_finished=user)
+    if hasattr(config, 'user_processing_lock'):
+        config.user_processing_lock.discard(_send_nick(row, user))
+        go_to_the_back(_send_nick(row, user), keep_place=is_a_list_row(next_file))
+    # #162 finding #8: this branch's own comment above says the row
+    # stays queued for the next completion trigger - deleting the
+    # archive it still points at contradicted that in the same breath.
+    # A second user's row pointing at the SAME shared archive (see
+    # discard_orphaned_temp_archives()'s own comment on why two users
+    # requesting the same real album share one file) was left dangling,
+    # and the retry 45s later hit the file_size == 0 critical abort,
+    # which classifies a consumed temporary archive as non-retryable
+    # and drops the row - the album was lost by the one branch whose
+    # stated purpose was not to lose it. Nothing is removed here now;
+    # if the artifact is being preserved, the file backing it must be
+    # too.
+
+    # The row stays queued and is not charged a failure, but on an otherwise idle bot
+    # nothing else would ever wake it. One bounded delayed retry, no tight spin.
+    def delayed_port_retry():
+        time.sleep(45)
+        check_queue_and_send(irc_sock, user)
+    threading.Thread(target=delayed_port_retry, daemon=True).start()
+
+    print("[DCC PORTS] No free DCC port for " + str(user) + "; entry stays queued, retrying in 45s.")
+    # The listener is closed HERE and not anywhere else. Every path from the
+    # try: below runs through a finally: that closes it, but this branch
+    # returns before reaching that try - so the socket created a few lines
+    # above was leaked, once per refused request, on a path that retries
+    # every 45 seconds. On a bot whose ports are genuinely exhausted that is
+    # a steady file-descriptor leak for as long as the condition lasts,
+    # which is exactly when the daemon can least afford one.
+    if dcc_sock is not None:
+        try:
+            dcc_sock.close()
+        except Exception:
+            pass
+    return
+
+
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, owns_packer=False):
     """Handle the network ports and the CTCP, and stream the bytes with accurate timing.
 
@@ -4928,92 +5105,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
     # a blank or malformed value, and a loopback address passes it (127.0.0.1 is
     # 2130706433). See that function for what went wrong without it.
     if ip_long == 0 or file_size == 0 or not is_offerable_to_strangers():
-        # Two very different failures used to share one message. "File access
-        # issue or empty payload. Please try again." is actively misleading for
-        # the address case: there is nothing wrong with the file, retrying
-        # cannot help, and only the operator can fix it.
-        if ip_long == 0 or not is_offerable_to_strangers():
-            reason = ("this bot has no usable public address configured, so it "
-                      "cannot offer a transfer")
-            print(f"[DCC CRITICAL ABORT] No usable public address "
-                  f"({dcc_address()!r}); refused "
-                  f"the send for {user} rather than offering one nobody can dial. "
-                  f"Set MY_IP_OR_DOCK in admin_config.py. Not settings.conf "
-                  f"(#465): this address is detected when the bot connects rather than "
-                  f"read from a file, so it is not a setting that file carries.")
-        else:
-            reason = "file access issue or empty payload. Please try again"
-            print(f"[DCC CRITICAL ABORT] Aborted the send for {user}. "
-                  f"Path: {file_path} (Size: {file_size})")
-        try: 
-            msg = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {reason}.\r\n"
-            irc_sock.sendall(msg.encode('utf-8', errors='ignore'))
-        except: 
-            pass
-            
-        # Clear the locks and wait three seconds, to stay well clear of Excess Flood.
-        # Only clear rar_inprogress if THIS send owns it - a plain audio file never
-        # did, and clearing a flag another user's pack is holding is how the
-        # interlock leaks (see the identical guard a few lines down, at the port-
-        # exhaustion branch, which already got this right).
-        if owns_packer:
-            config.rar_inprogress = False
-            # #215: this release is the only moment another user's held pack can
-            # start. Nothing else revisits them - every check_queue_and_send()
-            # caller passes the user who just finished, never the one turned
-            # away at [RAR-HOLD].
-            redispatch_waiting_pack(irc_sock, just_finished=user)
-        if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(_my_nick())
-            go_to_the_back(_my_nick(), keep_place=is_a_list_row(next_file))
-            
-        with queue_lock:
-            config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
-            
-        # This abort returns BEFORE the try/finally that settles the queue row, so without
-        # this call the same unreadable entry was re-selected every ~3 seconds forever,
-        # with no counter and no way out - a permanent hot loop injecting a NOTICE and a
-        # VIP notice on every pass. Charging it to the retry budget bounds it.
-        # WHOSE FAULT IT IS DECIDES WHETHER IT COSTS THE USER A RETRY.
-        #
-        # This branch covers two unrelated things. A file that is missing or
-        # empty is a dead row: the library moved on, no amount of retrying
-        # brings it back, and charging the budget is what stops it being
-        # re-selected every three seconds forever - the reason this call was
-        # added.
-        #
-        # "No usable public address" is not that. It is the BOT's own
-        # configuration, it affects every queued user identically, and it is
-        # fixed by the operator setting MY_IP_OR_DOCK - not by the user
-        # waiting. Charging it meant three attempts silently discarded a
-        # perfectly good queue, and the fastest way to make three attempts
-        # happen is three !rehash runs: each one wakes the queue, each wake
-        # fails the same way, and the third deletes the row. Reported from a
-        # live install - "if the bot had some queues from a user, and admin made a
-        # rehash, it cancels the queue".
-        #
-        # The hot loop this call exists to bound is still bounded: with no
-        # public address there is nothing to select and check_queue_and_send()
-        # below is not called again, so the row simply waits.
-        if ip_long == 0 or not is_offerable_to_strangers():
-            print(f"[DCC QUEUE] {user}'s queue is untouched - the address, not "
-                  f"the file, is what is missing. Nothing is retried until "
-                  f"MY_IP_OR_DOCK is set.")
-            if hasattr(config, 'user_processing_lock'):
-                config.user_processing_lock.discard(_my_nick())
-                go_to_the_back(_my_nick(), keep_place=is_a_list_row(next_file))
-            return
-
-        release_queue_entry(user, next_file, delivered=False,
-                            reason="file missing or empty")
-        # A list that is gone was replaced by a rebuild while it waited
-        # (#1203): the bot's doing, so cancelled. A file that is gone failed.
-        _record_send_outcome(
-            _row, transfer_log.STATUS_CANCELLED if outcome_identity[2] == transfer_log.KIND_LIST
-            else transfer_log.STATUS_FAILED, outcome_identity, file_size, 0, user)
-
-        time.sleep(3.0)
-        check_queue_and_send(irc_sock, user)
+        # refuse_an_unsendable_file() since #1340.
+        refuse_an_unsendable_file(irc_sock, user, _row, next_file, file_path, file_size, ip_long, owns_packer,
+                                  outcome_identity)
         return
 
 
@@ -5046,66 +5140,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         listener_error = sock_err
 
     if assigned_port is None:
-        if listener_error is not None:
-            print(f"[DCC PORTS] Could not open a listener for {user}: {listener_error}")
-            refusal = "Could not open a DCC port right now. Your file stays queued."
-        else:
-            refusal = "No available DCC ports."
-        try: irc_sock.sendall(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {refusal}\r\n".encode("utf-8", errors="ignore"))
-        except: pass
-        with queue_lock:
-            config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
-
-        # Port exhaustion is TRANSIENT and is not this entry's fault, so it is deliberately
-        # NOT charged to the retry budget - a busy spell must not discard good queued files.
-        # The interlocks are released so the user is not left wedged, and the row stays
-        # queued for the next completion trigger. Re-triggering here would spin: the ports
-        # are still full one instruction later.
-        # Only clear rar_inprogress if THIS send owns it - a plain audio file never did, and
-        # clearing a flag another user's pack is holding is how the interlock leaks.
-        if owns_packer:
-            config.rar_inprogress = False
-            # #215: this release is the only moment another user's held pack can
-            # start. Nothing else revisits them - every check_queue_and_send()
-            # caller passes the user who just finished, never the one turned
-            # away at [RAR-HOLD].
-            redispatch_waiting_pack(irc_sock, just_finished=user)
-        if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(_my_nick())
-            go_to_the_back(_my_nick(), keep_place=is_a_list_row(next_file))
-        # #162 finding #8: this branch's own comment above says the row
-        # stays queued for the next completion trigger - deleting the
-        # archive it still points at contradicted that in the same breath.
-        # A second user's row pointing at the SAME shared archive (see
-        # discard_orphaned_temp_archives()'s own comment on why two users
-        # requesting the same real album share one file) was left dangling,
-        # and the retry 45s later hit the file_size == 0 critical abort,
-        # which classifies a consumed temporary archive as non-retryable
-        # and drops the row - the album was lost by the one branch whose
-        # stated purpose was not to lose it. Nothing is removed here now;
-        # if the artifact is being preserved, the file backing it must be
-        # too.
-
-        # The row stays queued and is not charged a failure, but on an otherwise idle bot
-        # nothing else would ever wake it. One bounded delayed retry, no tight spin.
-        def delayed_port_retry():
-            time.sleep(45)
-            check_queue_and_send(irc_sock, user)
-        threading.Thread(target=delayed_port_retry, daemon=True).start()
-
-        print("[DCC PORTS] No free DCC port for " + str(user) + "; entry stays queued, retrying in 45s.")
-        # The listener is closed HERE and not anywhere else. Every path from the
-        # try: below runs through a finally: that closes it, but this branch
-        # returns before reaching that try - so the socket created a few lines
-        # above was leaked, once per refused request, on a path that retries
-        # every 45 seconds. On a bot whose ports are genuinely exhausted that is
-        # a steady file-descriptor leak for as long as the condition lasts,
-        # which is exactly when the daemon can least afford one.
-        if dcc_sock is not None:
-            try:
-                dcc_sock.close()
-            except Exception:
-                pass
+        # refuse_without_a_port() since #1340.
+        refuse_without_a_port(irc_sock, user, _row, next_file, dcc_sock, listener_error, owns_packer)
         return
 
     conn = None
