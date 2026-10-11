@@ -119,10 +119,10 @@ class TheDashboardPassesItOn(unittest.TestCase):
     """webserver.py's half, which also already worked."""
 
     def test_both_payloads_carry_it(self):
-        # The own list's payload is still in webserver.py; the fetched list's
-        # is web_lists.py since #1315. Both files, so the two are compared.
+        # The own list's payload is web_library.py since #1318, the fetched
+        # list's web_lists.py since #1315. Both files, so the two are compared.
         code = ""
-        for name in ("webserver.py", "web_lists.py"):
+        for name in ("web_library.py", "web_lists.py"):
             with io.open(os.path.join(REPO_ROOT, "src", name), encoding="utf-8") as handle:
                 code += re.sub(chr(35) + "[^" + chr(10) + "]*", "", handle.read())
 

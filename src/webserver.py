@@ -112,1196 +112,152 @@ from web_common import (  # noqa: F401
 )
 
 
-# ==========================================================================
-# Pure data-building functions - no Flask, unit tested directly.
-# ==========================================================================
-
-def count_rar_album_folders(name=None):
-    """How many album folders the RAR list offers, or None if there is no list.
-
-    The file update_list.py writes opens with three lines of explanation and
-    then one "!<nick> !rar <path>" row per folder, so the rows are exactly the
-    lines starting with "!". Counting those rather than the file's length is
-    what keeps the header out of the total.
-
-    None rather than 0 when there is no list at all: a bot whose first list has
-    not been built yet has an unknown album count, and zero is a different
-    claim - it would read on the page as "this bot offers no albums".
-
-    `name` picks a served list (#952): a list's files live in its own
-    directory (list.list_dir()), and without a name this reads the primary's,
-    which is where every install's RAR list was before there were several.
-    """
-    import io
-
-    if name is None:
-        directory = getattr(config, "LOCAL_LIST_DIR", "./lists")
-    else:
-        import list as list_mod
-        directory = list_mod.list_dir(name)
-    prefix = f"{getattr(config, 'LIST_BASE_NAME', 'DCCore')}-RAR-"
-    try:
-        names = sorted(name for name in os.listdir(directory)
-                       if name.startswith(prefix) and name.endswith(".txt"))
-    except OSError:
-        return None
-    if not names:
-        return None
-
-    path = os.path.abspath(os.path.join(directory, names[-1]))
-    try:
-        st = os.stat(path)
-        key = (st.st_mtime_ns, st.st_size, st.st_ino)
-        cached = _rar_counts.get(path)
-        if cached is not None and cached[0] == key:
-            return cached[1]
-        with io.open(path, encoding="utf-8", errors="ignore") as handle:
-            count = sum(1 for line in handle if line.startswith("!"))
-    except OSError:
-        return None
-    _rar_counts[path] = (key, count)
-    return count
-
-
-# The RAR list's row count by its path (#1123): it changes only when the list is
-# rebuilt, and the Stats page counted every row of it on every poll - a quarter
-# of a second at 420k rows, per served list. Keyed per path, one entry each, so
-# a bot serving several lists keeps them all rather than recounting whichever
-# was not asked last. A rebuild publishes with os.replace, which changes the
-# key. webserver.py is not reloaded by !rehash.
-_rar_counts = {}
-
-
-def _format_library_size(raw_bytes):
-    """A byte total the way a list's own size file writes it - two decimals,
-    "1.85TB" - so a total summed from several lists reads like the figures it
-    is made of and not in a second style (#952)."""
-    size = float(raw_bytes)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024.0:
-            return f"{size:.2f}{unit}"
-        size /= 1024.0
-    return f"{size:.2f}PB"
-
-
-def build_library_payload():
-    """The Library block of the Stats page: totals across EVERY served list,
-    and one row per list (#952).
-
-    It used to read the primary list alone - no name given, so the primary's
-    files, its side files for the size, and LOCAL_LIST_DIR's RAR list - and on
-    a bot serving music and film lists the page showed the music list's
-    numbers as though they were the library. The channel adverts already ask
-    per list, so the page and the advert disagreed.
-
-    The top-level keys are the ones the page has always had (files, size,
-    raw_bytes, list_date, rar_folders) and are now the totals; a single-list
-    install therefore reads exactly as before. `lists` holds each list's own
-    figures, in the operator's order.
-
-    Every list is read in its own guard, the way every source in this module
-    is: one list whose side file is unreadable costs its own row and nothing
-    else. The primary is asked for with NO name, not its own - that is the
-    path the page has always taken, and a single-list install has no reason to
-    be routed differently.
-
-    A folder that belongs to two lists is counted in both, and the totals do
-    not de-duplicate; the rows are there so that can be seen.
-    """
-    import library
-    import list as list_mod
-
-    try:
-        entries = [(str(entry.name), bool(entry.primary)) for entry in library.lists()]
-    except Exception:
-        entries = []
-    if not entries:
-        entries = [("", True)]
-
-    rows = []
-    newest_row, newest_when = None, None
-    for name, primary in entries:
-        row = {"name": name, "primary": primary, "files": 0, "size": None,
-               "raw_bytes": 0, "list_date": None, "rar_folders": None}
-        asked = None if primary else name
-        try:
-            files, list_date, size, raw_bytes = list_mod.get_file_count_date_size_and_raw_bytes(asked)
-            row.update({"files": int(files or 0), "list_date": list_date or None,
-                        "size": size or None, "raw_bytes": int(raw_bytes or 0)})
-        except Exception:
-            pass
-        try:
-            row["rar_folders"] = count_rar_album_folders(asked)
-        except Exception:
-            pass
-        try:
-            latest = list_mod.find_latest_list(asked)
-            when = os.path.getmtime(latest) if latest else None
-        except Exception:
-            when = None
-        if when is not None and (newest_when is None or when > newest_when):
-            newest_row, newest_when = row, when
-        rows.append(row)
-
-    primary_row = next((row for row in rows if row["primary"]), rows[0])
-    total_bytes = sum(row["raw_bytes"] for row in rows)
-    albums = [row["rar_folders"] for row in rows if row["rar_folders"] is not None]
-
-    if len(rows) == 1:
-        size = primary_row["size"]
-    else:
-        size = _format_library_size(total_bytes) if total_bytes else primary_row["size"]
-
-    return {
-        "files": sum(row["files"] for row in rows),
-        "size": size,
-        "raw_bytes": total_bytes,
-        # The newest build among the lists; when none has been built at all,
-        # what the primary says (a bot with no list yet says so).
-        "list_date": (newest_row or primary_row)["list_date"],
-        # None only when NO list has a RAR list: a total of the ones that do
-        # is a true count of the albums on offer, while a list with no RAR list
-        # simply has none to add.
-        "rar_folders": sum(albums) if albums else None,
-        "lists": rows,
-    }
-
-
-# The ceilings the import refuses beyond. A stray digit from a hand-edited
-# text file is far likelier than a genuine value up here, and importing one
-# silently is worse than refusing it - the operator can retype a number, but
-# they cannot tell that a total is wrong once it looks plausible.
-#
-# 2^63 is where a 64-bit counter stops meaning anything; a byte total past a
-# petabyte and a speed record past 10 GB/s are both past any real DCC link by
-# orders of magnitude, and both are what a mis-parsed field looks like.
-MAX_IMPORT_FILES = 2 ** 63 - 1
-MAX_IMPORT_BYTES = 1 << 50           # 1 PiB
-MAX_IMPORT_SPEED = 10 * 1000 ** 3    # 10 GB/s
-
-_IMPORT_LIMITS = {
-    "total_files": (MAX_IMPORT_FILES, "files sent"),
-    "total_bytes": (MAX_IMPORT_BYTES, "bytes sent"),
-    "speed_record": (MAX_IMPORT_SPEED, "speed record"),
-    # KeepTrack's (#1062), into the transfer record's imported totals.
-    "received_files": (MAX_IMPORT_FILES, "files received"),
-    "received_bytes": (MAX_IMPORT_BYTES, "bytes received"),
-}
-_RECEIVED = ("received_files", "received_bytes")
-
-
-def current_importable_stats():
-    """What the three importable figures are right now.
-
-    Read through the same accessors the Stats page uses, so the "before" column
-    of the preview cannot disagree with the page the operator is looking at.
-    """
-    import db
-
-    row = db.load_advanced_stats() or [0] * 7
-    try:
-        total_files = int(row[0])
-    except (IndexError, TypeError, ValueError):
-        total_files = 0
-    try:
-        total_bytes = int(row[1])
-    except (IndexError, TypeError, ValueError):
-        total_bytes = 0
-    try:
-        record = int(db.get_speed_record() or 0)
-    except (TypeError, ValueError):
-        record = 0
-    # What an earlier KeepTrack import put in the record (#1062) - the figure
-    # a new one replaces, so before and after compare like with like.
-    received = {}
-    try:
-        import transfer_log
-        received = transfer_log.imported_totals("keeptrack").get(transfer_log.RECEIVED) or {}
-    except Exception as err:
-        print(f"[STATS IMPORT] The imported received totals are unavailable: {err}")
-    return {"total_files": total_files, "total_bytes": total_bytes,
-            "speed_record": record,
-            "received_files": int(received.get("files") or 0),
-            "received_bytes": int(received.get("bytes") or 0)}
-
-
-def validate_import_values(raw):
-    """(clean, errors) for the three figures an import may carry.
-
-    Every field optional - an operator missing an add-on imports what they
-    have - but a field that IS present must be a whole number in range.
-    Checked HERE and not only in the page: the page is convenience, this is
-    the boundary, and everything arriving is from a text file somebody may
-    have hand-edited.
-    """
-    clean = {}
-    errors = []
-    for name, (ceiling, label) in _IMPORT_LIMITS.items():
-        if name not in (raw or {}):
-            continue
-        value = raw[name]
-        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-            errors.append(f"{label}: expected a whole number.")
-            continue
-        try:
-            # str() first so "45902" works and 45902.0 does not silently
-            # truncate a fraction somebody meant to be there.
-            number = int(str(value).strip())
-        except (TypeError, ValueError):
-            errors.append(f"{label}: {value!r} is not a whole number.")
-            continue
-        if number < 0:
-            errors.append(f"{label}: cannot be negative.")
-            continue
-        if number > ceiling:
-            errors.append(f"{label}: {number:,} is beyond anything real "
-                          f"(the limit is {ceiling:,}). A stray digit in a "
-                          f"hand-edited file looks exactly like this.")
-            continue
-        clean[name] = number
-    # When KeepTrack began counting, as the import found it (#1062). A date
-    # or nothing: it is written into the record as it stands.
-    if (raw or {}).get("received_since") not in (None, ""):
-        since = str(raw["received_since"]).strip()
-        import datetime
-        try:
-            datetime.date.fromisoformat(since)
-            clean["received_since"] = since
-        except ValueError:
-            errors.append(f"received since: {since!r} is not a date (YYYY-MM-DD).")
-    # A date with no received figure is not a figure to write. Kept when the
-    # figure it dates was refused, it reached the apply on its own, nothing
-    # wrote it, and the import answered 500 "could not be written" although
-    # everything else had been (#1062 review).
-    if not any(name in clean for name in _RECEIVED):
-        clean.pop("received_since", None)
-    return clean, errors
-
-
-def build_stats_import_preview(text):
-    """POST /api/stats/import/preview: what a vars.ini would do, changing nothing.
-
-    Separate from the write for the reason the issue gives: on a fresh install
-    nobody reads the sentence about overwriting, and on a used one it is the
-    only thing that matters. The page shows before and after side by side and
-    the operator confirms.
-    """
-    import omenserve_import
-
-    found = omenserve_import.read_install(text)
-    clean, errors = validate_import_values(found.get("values") or {})
-    notes = list(found.get("notes", []))
-    if any(name in clean for name in _RECEIVED):
-        import transfer_log
-        if not transfer_log._path():
-            # Nowhere to put them: the record is turned off (#1068).
-            for name in _RECEIVED + ("received_since",):
-                clean.pop(name, None)
-            notes.append("The received totals are not imported: the transfer record is off "
-                         "(Settings > Advanced, TRANSFER_LOG_FILE is empty).")
-    # Every source offered as a choice is checked as the default one is (#1062
-    # review): only `values` was, so the other could show -5 in the preview and
-    # then have the whole import refused when picked, here or in configure.py.
-    # The default's faults are in `errors` already.
-    sources = []
-    for entry in found.get("sent_sources", []):
-        figures = {k: v for k, v in entry.items() if k not in ("name", "label")}
-        good, bad = validate_import_values(figures)
-        sources.append(dict(good, name=entry["name"], label=entry["label"]))
-        if entry["name"] != found.get("sent_source"):
-            errors.extend(f"{entry['label']}: {fault}" for fault in bad)
-    return {
-        "rows": found.get("rows", []),
-        "notes": notes + errors,
-        "current": current_importable_stats(),
-        "values": clean,
-        # Where the sent totals can come from (#1062); the page offers a
-        # choice when there are two, and posts back the one picked.
-        "sent_sources": sources,
-        "sent_source": found.get("sent_source"),
-        # OVERWRITTEN, NOT COMBINED, and said where the page can put it in
-        # front of the operator rather than buried in prose they will not read
-        # on a fresh install and cannot miss on a used one.
-        "replaces": {name: value for name, value in clean.items()
-                     if current_importable_stats().get(name)},
-    }
-
-
-def apply_stats_import(raw):
-    """(http_status, payload) for POST /api/stats/import.
-
-    Writes through db.set_lifetime_totals() and db.save_speed_record(),
-    which take the disk lock and write atomically - a caller, not a second
-    implementation of either.
-
-    Returns the before and after, so the page reports what actually happened
-    rather than what it asked for.
-    """
-    import db
-
-    clean, errors = validate_import_values(raw)
-    if errors:
-        return 400, {"error": errors[0], "errors": errors}
-    if not clean:
-        return 400, {"error": "Nothing to import - no recognised figure was "
-                              "supplied."}
-
-    before = current_importable_stats()
-
-    written = None
-    if "total_files" in clean or "total_bytes" in clean:
-        # The 7-column row read-modify-written as a whole, under one lock
-        # (#690): the day columns and the date belong to the daemon's own
-        # rotation and are not this feature's to touch, and a transfer that
-        # completes while this runs must not lose its count to a stale row.
-        written = db.set_lifetime_totals(total_files=clean.get("total_files"),
-                                         total_bytes=clean.get("total_bytes"))
-
-    if "speed_record" in clean:
-        db.save_speed_record(clean["speed_record"])
-
-    # KeepTrack's received totals (#1062): into the transfer record's imported
-    # totals, replacing an earlier KeepTrack import's. A half given keeps the
-    # other half as it is.
-    received_written = None
-    if any(name in clean for name in _RECEIVED):
-        import transfer_log
-        received_written = transfer_log.import_totals(
-            "keeptrack", transfer_log.RECEIVED,
-            clean.get("received_files", before["received_files"]),
-            clean.get("received_bytes", before["received_bytes"]),
-            since=clean.get("received_since"))
-
-    # WHAT ACTUALLY LANDED, compared against what was asked for. Both writers
-    # swallow their own errors and return None - correct for them, since a
-    # failed stats write must not take the daemon down - which meant this
-    # returned 200 and "imported: [...]" for figures that never reached the
-    # disk. The operator would have been told their history came across and
-    # found half of it, with nothing to say which half.
-    after = current_importable_stats()
-
-    def landed_as_asked(name):
-        # The totals are judged by the row the locked write produced, not by
-        # a later read (#690): a transfer completing right after the import
-        # legitimately moves them on, and that is not a failed write.
-        if name == "total_files":
-            return written is not None and written[0] == clean[name]
-        if name == "total_bytes":
-            return written is not None and written[1] == clean[name]
-        if name == "received_since":
-            return bool(received_written)
-        return after.get(name) == clean[name]
-
-    landed = [name for name in sorted(clean) if landed_as_asked(name)]
-    missing = [name for name in sorted(clean) if name not in landed]
-    if missing:
-        return 500, {
-            "error": "Some figures could not be written: "
-                     + ", ".join(missing)
-                     + ". Check the daemon log and the data directory.",
-            "before": before, "after": after, "imported": landed,
-            "failed": missing,
-        }
-
-    return 200, {"before": before, "after": after, "imported": landed}
-
-
-# KeepTrack's per-nick history (#1064). A KTData.txt of a long-running bot is
-# a few hundred KB. The app already refuses a body over 8 MB
-# (MAX_CONTENT_LENGTH); this says the same about the text itself.
-MAX_KTDATA_CHARS = 8 * 1024 * 1024
-
-
-def _read_ktdata_text(text):
-    """(parsed, error) for an uploaded KTData.txt's text."""
-    import omenserve_import
-    text = str(text or "")
-    if len(text) > MAX_KTDATA_CHARS:
-        return None, "That file is far larger than a KTData.txt; nothing was read."
-    # Not MAX_IMPORT_FILES (2**63-1): a nick's figure is summed with its
-    # recorded transfers in SQL, and at that size the sum overflows (#1064
-    # review). read_ktdata()'s own limits, which leave that room.
-    return omenserve_import.read_ktdata(text, max_bytes=MAX_IMPORT_BYTES), None
-
-
-def build_ktdata_preview(text):
-    """POST /api/stats/import-ktdata/preview: what a KTData.txt would add,
-    writing nothing - the nicks per direction, their totals, the top ten, the
-    lines skipped and why, and whether an earlier import would be replaced."""
-    import transfer_log
-    parsed, error = _read_ktdata_text(text)
-    if error:
-        return 400, {"error": error}
-    if not transfer_log._path():
-        return 409, {"error": "The transfer record is off (Settings > Advanced, TRANSFER_LOG_FILE "
-                              "is empty), so there is nowhere to put the per-nick history."}
-    rows = parsed["rows"]
-    figures = {}
-    for direction in (transfer_log.SENT, transfer_log.RECEIVED):
-        mine = [r for r in rows if r[0] == direction]
-        top = sorted(mine, key=lambda r: (-r[2], -r[3], r[1]))[:10]
-        figures[direction] = {
-            "nicks": len(mine),
-            "files": sum(r[2] for r in mine),
-            "bytes": sum(r[3] for r in mine),
-            "top": [{"nick": r[1], "files": r[2], "bytes": r[3]} for r in top],
-        }
-    return 200, {"lines": parsed["lines"], "skipped": parsed["skipped"], "figures": figures,
-                 "replaces": transfer_log.imported_nicks("keeptrack")}
-
-
-def apply_ktdata_import(text):
-    """POST /api/stats/import-ktdata: read the file again - the preview's
-    answer is not trusted back - and write its per-nick totals into the
-    transfer record, replacing an earlier KeepTrack per-nick import."""
-    import transfer_log
-    status, preview = build_ktdata_preview(text)
-    if status != 200:
-        return status, preview
-    parsed, _error = _read_ktdata_text(text)
-    if not parsed["rows"]:
-        return 400, {"error": "Nothing in that file could be imported."}
-    since = (transfer_log.imported_totals("keeptrack").get(transfer_log.RECEIVED) or {}).get("since")
-    written = transfer_log.import_nicks("keeptrack", parsed["rows"], since=since)
-    if written is None:
-        return 500, {"error": "The per-nick history could not be written. Check the daemon log."}
-    return 200, {"imported": written, "nicks": transfer_log.imported_nicks("keeptrack")}
-
-
-# THE TRANSFER RECORD ON THE STATS PAGE (#1102). The record (#1068) has been
-# written since #1069, but nothing read it. A period is one of these; "all"
-# is the only one the imported KeepTrack figures count in, as everywhere in
-# transfer_log.
-RECORD_PERIODS = {"day": 86400, "week": 7 * 86400, "month": 30 * 86400, "all": None}
-
-
-def _record_since(period):
-    """(since, error) for a period name: a Unix time, or None for all of it."""
-    if period not in RECORD_PERIODS:
-        return None, f"Unknown period {str(period)[:20]!r}: use day, week, month or all."
-    seconds = RECORD_PERIODS[period]
-    return (int(time.time()) - seconds if seconds else None), None
-
-
-def _record_off():
-    import transfer_log
-    if transfer_log._path():
-        return None
-    return {"enabled": False,
-            "error": "The transfer record is off (Settings > Advanced, TRANSFER_LOG_FILE is empty)."}
-
-
-def _wait_text(seconds):
-    """A queue wait as the page shows it: format_uptime() reads anything under
-    a minute as "0 Min", which for a wait is the wrong answer."""
-    if seconds is None:
-        return ""
-    import adminchat
-    return f"{int(seconds)} Sec" if seconds < 60 else adminchat.format_uptime(seconds)
-
-
-def _nick_rows(rows):
-    import stats_mgr
-    return [{"nick": nick, "files": files, "bytes": size, "bytes_text": stats_mgr.format_size_human(size)}
-            for nick, files, size in rows]
-
-
-def _lifetime_sent():
-    """(files, bytes) the bot has sent over its life, from stats.txt."""
-    import db
-    try:
-        row = db.load_advanced_stats_rolled()
-        return int(str(row[0]).strip()), int(str(row[1]).strip())
-    except Exception:
-        return 0, 0
-
-
-def _record_tops(since):
-    """The most-sent files and the most-sent album folders for a period, each as
-    [{name, count}]. A period comes from the record. All time comes from the
-    count file, which holds everything the bot has ever sent (the record only
-    began with #1069); the record answers only when that file has nothing."""
-    import db
-    import transfer_log
-    out = []
-    for kind in (transfer_log.KIND_FILE, transfer_log.KIND_ALBUM):
-        rows = []
-        if since is None:
-            try:
-                rows = [{"name": row["name"], "count": row["count"]} for row in db.top_downloads(limit=10, kind=kind)]
-            except Exception:
-                rows = []
-        if not rows:
-            rows = [{"name": name, "count": count} for name, count in transfer_log.top_files(10, since, kind)]
-        out.append(rows)
-    return out[0], out[1]
-
-
-def _record_outcomes(since):
-    """How the period's transfers ended (#1203), as the Stats page's outcomes
-    table shows them: sent files, albums and lists, and everything received.
-
-    `failed` includes the albums whose folder could not be packed, which
-    `pack_failed` also gives on its own. The success rate is completed out of
-    completed and failed: a cancelled transfer was stopped by the operator,
-    the user or the bot, not lost by the network, and counting it would
-    blame the network for it. Rounded down, so 100% means nothing failed.
-    "since" is set when the counting starts later than the period does,
-    because failures were not written before then."""
-    import transfer_log
-    found = transfer_log.outcomes(since)
-    lines = []
-    for direction, kind in ((transfer_log.SENT, transfer_log.KIND_FILE),
-                            (transfer_log.SENT, transfer_log.KIND_ALBUM),
-                            (transfer_log.SENT, transfer_log.KIND_LIST),
-                            (transfer_log.RECEIVED, None)):
-        counts = {}
-        for (row_direction, row_kind), by_status in found["rows"].items():
-            if row_direction == direction and (kind is None or row_kind == kind):
-                for status, count in by_status.items():
-                    counts[status] = counts.get(status, 0) + count
-        completed = counts.get(transfer_log.STATUS_COMPLETED, 0)
-        pack_failed = counts.get(transfer_log.STATUS_PACK_FAILED, 0)
-        failed = counts.get(transfer_log.STATUS_FAILED, 0) + pack_failed
-        cancelled = counts.get(transfer_log.STATUS_CANCELLED, 0)
-        decided = completed + failed
-        rate = (completed * 100) // decided if decided else None
-        lines.append({"direction": direction, "kind": kind or "all",
-                      "attempts": completed + failed + cancelled, "completed": completed,
-                      "failed": failed, "pack_failed": pack_failed, "cancelled": cancelled,
-                      "success_rate": rate, "success_text": f"{rate}%" if rate is not None else ""})
-    return {"since": found["since"], "rows": lines}
-
-
-def build_record_payload(period="all"):
-    """GET /api/stats/record?period=: the record's figures for a period - the
-    totals, the most-sent files, the nicks sent to and received from most, and
-    how the transfers ended (#1203). Every figure comes raw and as the page
-    shows it, as in build_stats_payload."""
-    import stats_mgr
-    import transfer_log
-    since, error = _record_since(period)
-    if error:
-        return 400, {"error": error}
-    off = _record_off()
-    if off:
-        return 200, dict(off, period=period)
-    figures = transfer_log.summary(since)
-    top_files, top_albums = _record_tops(since)
-    if since is None:
-        # All time is never less than the lifetime counter: the record only
-        # began with #1069, and what the bot sent before is in stats.txt only.
-        files, size = _lifetime_sent()
-        figures["files_sent"] = max(figures["files_sent"], files)
-        figures["bytes_sent"] = max(figures["bytes_sent"], size)
-    figures.update(
-        bytes_sent_text=stats_mgr.format_size_human(figures["bytes_sent"]),
-        bytes_received_text=stats_mgr.format_size_human(figures["bytes_received"]),
-        top_speed_text=stats_mgr.format_speed(figures["top_speed"]),
-        average_speed_text=stats_mgr.format_speed(figures["average_speed"]),
-        queue_wait_text=_wait_text(figures["queue_wait_seconds"]))
-    return 200, {
-        "enabled": True,
-        "period": period,
-        "since": since,
-        "summary": figures,
-        "top_files": top_files,
-        "top_albums": top_albums,
-        "albums_enabled": bool(getattr(config, "RAR_ENABLED", True)),
-        "top_sent": _nick_rows(transfer_log.top_nicks(transfer_log.SENT, 10, since)),
-        "top_received": _nick_rows(transfer_log.top_nicks(transfer_log.RECEIVED, 10, since)),
-        "outcomes": _record_outcomes(since),
-        # Said on the page: all time holds figures from before the record began -
-        # the bot's own totals, a nick's, or both (#1102 review: a per-nick import
-        # alone left the note hidden while the tables counted it).
-        "includes_imported": since is None and transfer_log.has_imported(),
-    }
-
-
-def build_record_nick_payload(nick, period="all"):
-    """GET /api/stats/record/nick?nick=&period=: what one nick has had from
-    this bot and what this bot has had from it."""
-    import stats_mgr
-    import transfer_log
-    since, error = _record_since(period)
-    if error:
-        return 400, {"error": error}
-    off = _record_off()
-    if off:
-        return 409, off
-    wanted = transfer_log._nick(nick)
-    if wanted is None:
-        return 400, {"error": "Type a nick to look up."}
-    figures = transfer_log.nick_summary(wanted, since)
-    figures.update(bytes_sent_text=stats_mgr.format_size_human(figures["bytes_sent"]),
-                   bytes_received_text=stats_mgr.format_size_human(figures["bytes_received"]))
-    return 200, {"nick": wanted, "period": period, "figures": figures,
-                 "found": any(figures[key] for key in ("files_sent", "lists_sent", "files_received"))}
-
-
-def apply_record_forget(body):
-    """POST /api/stats/record/forget: {"nick": "..."} takes one nick out of
-    the record, imported figures included; {"everyone": true} empties it.
-    Two separate words rather than an empty nick meaning everything, so a
-    blank box can never wipe the record."""
-    import transfer_log
-    off = _record_off()
-    if off:
-        return 409, off
-    try:
-        if body.get("everyone") is True:
-            removed = transfer_log.forget_all()
-            print(f"[TRANSFER-LOG] The record was emptied from the dashboard ({removed} row(s)).")
-            return 200, {"removed": removed, "everyone": True}
-        nick = transfer_log._nick(body.get("nick"))
-        if nick is None:
-            return 400, {"error": "Say which nick to forget."}
-        removed = transfer_log.forget_nick(nick)
-    except Exception as err:
-        return 500, {"error": f"The record could not be changed: {err}"}
-    # The nick is not printed: the log would keep what the record just let go.
-    print(f"[TRANSFER-LOG] A nick was forgotten from the dashboard ({removed} row(s)).")
-    return 200, {"removed": removed, "nick": nick}
-
-
-# A cell a spreadsheet would read as a formula. A nick or a file name is
-# somebody else's text, and "=HYPERLINK(...)" in one runs when the export is
-# opened; a leading apostrophe makes it text again.
-_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
-
-
-def _csv_cell(value):
-    if value is None:
-        return ""
-    text = str(value)
-    return "'" + text if text.startswith(_FORMULA_START) else text
-
-
-def record_csv_lines(since=None):
-    """The CSV export, one line at a time (#1102): a header, then every row
-    from `since` on. The time is local and readable; the rest as stored."""
-    import csv
-    import io
-    import transfer_log
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, lineterminator="\r\n")
-
-    def line(cells):
-        buffer.seek(0)
-        buffer.truncate()
-        writer.writerow(cells)
-        return buffer.getvalue()
-
-    yield line(("time",) + transfer_log.EXPORT_COLUMNS[1:])
-    for row in transfer_log.iter_rows(since):
-        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row[0]))
-        yield line([stamp] + [_csv_cell(value) for value in row[1:]])
-
-
-STATS_PARTS = ("transfer", "sent", "library", "top")
-
-
-def build_stats_payload(parts=None):
-    """Everything the Stats view shows, in one request - or, with `parts`,
-    only those (#1123): Live Transfers polls this every few seconds and shows
-    the transfer figures alone, while "top" and "library" read and rank whole
-    files. None is every part.
-
-    Every figure comes twice: the raw number, and the daemon's own rendering of
-    it. The raw one is for anything that is not this page - a script, a future
-    CTCP reply - which should not have to parse "1.21TB" back into an integer.
-    The rendered one uses stats_mgr.format_speed(), format_size_human() and
-    adminchat.format_uptime(), which are what the channel advert and the admin
-    console already print, so the dashboard cannot disagree with the advert
-    about how the same number reads.
-
-    Nothing here takes a lock, matching build_queue_payload(): a shallow copy of
-    the live containers is good enough for a status display and cannot deadlock
-    against the daemon's own queue processing.
-
-    Every source is guarded individually. This is a read-only status page and a
-    missing stats file, an unbuilt list or a permissions error on lists/ must
-    cost the tile that needs it and nothing else - a dashboard that 500s
-    because one counter is unreadable is worse than one showing a gap.
-    """
-    # Imported here, not at module scope. tests/test_import_graph.py pins that
-    # importing webserver.py pulls in none of the daemon, so that
-    # tests/test_webserver.py can exercise every route without one running -
-    # and db/list/stats_mgr are named in that test explicitly. Same reason the
-    # File Lists payload imports `list` inside its own function.
-    import db
-    import stats_mgr
-
-    wanted = set(STATS_PARTS if parts is None else parts)
-    active = list(getattr(config, "active_transfers", []))
-    queue = dict(getattr(config, "dcc_queue", {}))
-
-    try:
-        speed_now = int(stats_mgr.live_speed())
-    except Exception:
-        speed_now = 0
-
-    try:
-        record = int(db.get_speed_record())
-    except Exception:
-        record = 0
-
-    try:
-        uptime = int(stats_mgr.get_uptime_seconds())
-    except Exception:
-        uptime = 0
-
-    # When the first busy slot is likely to free up (#1207), from the same
-    # copy of active_transfers the Sending card counts, so the two cannot
-    # disagree about whether a slot is free. "now", whole minutes, or None.
-    try:
-        next_slot = stats_mgr.next_slot_estimate(transfers=active)
-    except Exception:
-        next_slot = None
-
-    # The 7-column row: total files, total bytes, yesterday's pair, today's
-    # pair, and the date the day last rolled over. Read through
-    # load_advanced_stats_rolled(), which rolls a COPY, so a bot that has sent
-    # nothing since midnight does not show yesterday's figures labelled Today -
-    # and so answering a GET does not write to disk.
-    sent = {"total_files": 0, "total_bytes": 0, "today_files": 0,
-            "today_bytes": 0, "yesterday_files": 0, "yesterday_bytes": 0}
-    try:
-        if "sent" not in wanted:
-            raise LookupError("not asked for")
-        row = db.load_advanced_stats_rolled()
-        names = ("total_files", "total_bytes", "yesterday_files",
-                 "yesterday_bytes", "today_files", "today_bytes")
-        for index, name in enumerate(names):
-            try:
-                sent[name] = int(str(row[index]).strip())
-            except (IndexError, TypeError, ValueError):
-                pass
-    except Exception:
-        pass
-
-    # Every served list, not the primary alone (#952) - see the function.
-    try:
-        if "library" not in wanted:
-            raise LookupError("not asked for")
-        library = build_library_payload()
-    except Exception:
-        library = {"files": 0, "size": None, "raw_bytes": 0, "list_date": None,
-                   "rar_folders": None, "lists": []}
-
-    for name in ("total", "today", "yesterday"):
-        sent[name + "_text"] = stats_mgr.format_size_human(sent[name + "_bytes"])
-
-    # Counted together, reported apart. A 700 MB album and a 4 MB track are not
-    # comparable, so one merged table would rank by whichever kind this bot
-    # happens to send more of - a fact about the library, not about demand.
-    #
-    # albums_enabled is config.RAR_ENABLED (#140). With folder packing off no
-    # album can ever be sent, so the page says that instead of showing a table
-    # that would stay empty for ever with no explanation. Any counts from
-    # before it was switched off are still returned - they are history, and
-    # deciding they never happened would be the wrong kind of tidy.
-    top = {"files": [], "albums": [],
-           "albums_enabled": bool(getattr(config, "RAR_ENABLED", True))}
-    if "top" in wanted:
-        try:
-            top["files"] = db.top_downloads(limit=10, kind="file")
-            top["albums"] = db.top_downloads(limit=10, kind="album")
-        except Exception:
-            pass
-
-    payload = {
-        "top": top,
-        "transfer": {
-            "speed_now": speed_now,
-            "speed_now_text": stats_mgr.format_speed(speed_now),
-            "record": record,
-            "record_text": stats_mgr.format_speed(record),
-            "sending": len(active),
-            "slots": int(getattr(config, "MAX_DCC_SLOTS", 0) or 0),
-            "next_slot": next_slot,
-            "next_slot_text": stats_mgr.format_next_slot(next_slot),
-            "queued_files": sum(len(entries) for entries in queue.values()),
-            "queued_users": len(queue),
-            "uptime_seconds": uptime,
-            "uptime_text": adminchat.format_uptime(uptime),
-        },
-        "sent": sent,
-        "library": library,
-        "version": str(getattr(config, "SCRIPT_VERSION", "")),
-    }
-    for part in STATS_PARTS:
-        if part not in wanted:
-            del payload[part]
-    return payload
-
-
-def _security_seconds_left(user_key):
-    """How long a timed ignore or ban on this nick has to run, 0 for none -
-    what turns a Queue row's Ignore button into "Ignored ... Lift" (#1206)."""
-    import security
-    return security.ban_seconds_left(user_key)
-
-
-def build_queue_payload(user=None):
-    """The Queue view's data.
-
-    With no `user`, one summary row per queued user (their status, a preview
-    of the next file, how many are waiting, the FULL list of what is waiting,
-    and - for whoever is sending - the file in flight and its progress) -
-    what the Queue table shows. With `user`, the full file list queued for
-    that one user instead - what a click-through or `?user=<nick>` on
-    /api/queue returns.
-
-    "preview"/"count"/"files" describe the QUEUE: config.dcc_queue's rows.
-    A send that found a free slot at once never has a row; a queued file
-    keeps its row while it is sent, until the send settles it (#1245). The
-    progress lives in config.active_transfers either way, which is why a
-    sending user's progress needs its own fields rather than being folded
-    into the queue ones -
-    an operator asked to see the whole queue, not just its head, and a
-    progress bar for the transfer actually running, not for whatever is
-    queued behind it.
-
-    "file_ids" is dcc.queue_row_id() of each of "files", in step: what a move
-    or a removal sends back to name the file it means (#1245).
-
-    No lock is taken, matching adminchat.py's _cmd_queue/_cmd_status idiom: a
-    shallow dict()/list() copy of the live containers, read without a lock,
-    is good enough for a status display and cannot deadlock against the
-    daemon's own queue processing.
-    """
-    queue = dict(getattr(config, "dcc_queue", {}))
-    frozen = dict(getattr(config, "frozen_queues", {}))
-    active = list(getattr(config, "active_transfers", []))
-    sending_users = {str(tx.get("user", "")).lower() for tx in active}
-
-    active_by_user = {}
-    for tx in active:
-        active_by_user.setdefault(str(tx.get("user", "")).lower(), tx)
-
-    # The user a folder is being packed for (#1202): without it their row read
-    # "queued" for as long as rar ran. The folder's name, never its path.
-    import dcc
-    pack = None
-    try:
-        pack = dcc.pack_status()
-    except Exception as err:
-        print(f"[WEBSERVER] The running pack could not be read for the queue: {err}")
-    packing_user = str(pack["user"]).lower() if pack else ""
-
-    def _progress_fields(user_key):
-        # None, not 0, when there is nothing sending or the size is not
-        # known yet (dcc.start_dcc_send() writes "size" onto the row the
-        # moment it has read the file's real size off disk - a fresh
-        # dispatch's row does not have it for the brief window before that).
-        # The dashboard tells "no bar to draw" apart from "0% so far" by
-        # this, not by a size of 0, which a genuinely empty file would also
-        # report honestly.
-        tx = active_by_user.get(user_key)
-        if tx is None:
-            return None, None, None
-        return tx.get("file"), tx.get("bytes_sent"), tx.get("size")
-
-    if user:
-        user_key = str(user).strip().lower()
-        entries = queue.get(user_key, [])
-        if user_key in sending_users:
-            status = "sending"
-        elif user_key == packing_user:
-            status = "packing"
-        elif user_key in frozen:
-            status = "frozen"
-        elif entries:
-            status = "queued"
-        else:
-            status = "empty"
-        files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
-        current_file, bytes_sent, size = _progress_fields(user_key)
-        result = {"user": user_key, "status": status, "count": len(entries), "files": files,
-                  "file_ids": [dcc.queue_row_id(e) for e in entries],
-                  "current_file": current_file, "bytes_sent": bytes_sent, "size": size,
-                  "ignored_seconds": _security_seconds_left(user_key)}
-        if status == "packing":
-            result["pack"] = _pack_fields(pack)
-        return result
-
-    # #220: a user sent with a free slot and nothing already queued never
-    # enters dcc_queue at all - dcc.py's admission check appends straight to
-    # active_transfers and returns (see start_dcc_send()). Iterating only
-    # queue.items(), as this used to, left them off the Queue table entirely
-    # while /api/stats (which reads active_transfers directly) showed the
-    # transfer correctly - the two disagreeing about the same page. The
-    # single-user branch above already got this right by checking
-    # sending_users regardless of whether entries exist; this does the same.
-    rows = []
-    # In the order the dispatcher gives out free slots (#1206): the page shows
-    # who is next, and Move up/down on a row changes that. The dispatcher's
-    # own key (#1245): ranked by the wait alone, a waiting list was shown
-    # last while it went first, and the arrows moved against a line the
-    # page did not show.
-    try:
-        waiting_order = dcc.slot_order(queue, dcc.a_list_may_go_first(active))
-        waiting_order += [key for key in queue if not queue[key]]
-    except Exception as err:
-        print(f"[WEBSERVER] The queue's order could not be read: {err}")
-        waiting_order = list(queue.keys())
-    for user_key in dict.fromkeys(waiting_order + list(sending_users) + ([packing_user] if packing_user else [])):
-        # sending_users comes from active_transfers, whose rows are built by
-        # dcc.py rather than keyed by it - an entry missing its "user" field
-        # contributes "" to that set and used to reach the page as a blank row
-        # with a "?" preview. Iterating dcc_queue alone could not produce that,
-        # because its keys are always real nicks; taking senders from a list of
-        # dicts is what introduced the possibility.
-        if not user_key:
-            continue
-        entries = queue.get(user_key, [])
-        if user_key in sending_users:
-            status = "sending"
-        elif user_key == packing_user:
-            status = "packing"
-        else:
-            status = "frozen" if user_key in frozen else "queued"
-        files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
-        first = entries[0] if entries else None
-        if first is not None:
-            preview = first.get("file", "?") if isinstance(first, dict) else str(first)
-        elif user_key in active_by_user:
-            preview = active_by_user[user_key].get("file", "?")
-        else:
-            preview = ""
-        current_file, bytes_sent, size = _progress_fields(user_key)
-        row = {"user": user_key, "preview": preview, "count": len(entries), "status": status,
-               "files": files, "file_ids": [dcc.queue_row_id(e) for e in entries],
-               "current_file": current_file,
-               "bytes_sent": bytes_sent, "size": size,
-               "ignored_seconds": _security_seconds_left(user_key)}
-        if status == "packing":
-            row["pack"] = _pack_fields(pack)
-        rows.append(row)
-    return rows
-
-
-def _pack_fields(pack):
-    """The running pack as the Queue page draws it: the folder as the list
-    shows it, how long, and the archive so far against the folder's size."""
-    import announce
-    return {"name": pack["name"], "elapsed": pack["elapsed"],
-            "done": pack["done"], "total": pack["total"],
-            "done_text": announce.format_size_human(pack["done"]),
-            "total_text": announce.format_size_human(pack["total"]) if pack["total"] else "",
-            "cancelling": bool(pack.get("cancelled"))}
-
-
-def build_pack_cancel_result():
-    """POST /api/queue/pack/cancel (#1202): stop the folder pack that is
-    running. 200 with who and what it was; 404 when nothing is packing."""
-    import dcc
-    cancelled = dcc.cancel_pack()
-    if cancelled is None:
-        return 404, {"error": "Nothing is being packed."}
-    return 200, {"cancelled": {"user": cancelled["user"], "name": cancelled["name"]}}
-
-
-def build_ignore_result(body):
-    """POST /api/ignore (#1206): ignore a nick for some minutes. 200 with
-    how long, 400 with the reason when security.ignore_user() refuses."""
-    import security
-    nick = str(body.get("nick") or "").strip()
-    ok, message = security.ignore_user(nick, body.get("minutes"))
-    if not ok:
-        return 400, {"error": message}
-    return 200, {"user": nick.lower(), "message": message,
-                 "seconds_left": security.ban_seconds_left(nick)}
-
-
-def build_unignore_result(body):
-    """POST /api/unignore (#1206): end a timed ignore or ban now. 404 when
-    the nick has none."""
-    import security
-    nick = str(body.get("nick") or "").strip()
-    ok, message = security.lift_ban(nick)
-    if not ok:
-        return 404, {"error": message}
-    return 200, {"user": nick.lower(), "message": message}
-
-
-def _queue_nick(body):
-    return str(body.get("nick") or "").strip()
-
-
-def build_queue_move_user_result(body):
-    """POST /api/queue/move-user (#1206): one place up or down the line for a
-    free slot. 200 with the new place, 400 with the reason."""
-    import commands
-    nick = _queue_nick(body)
-    ok, message = commands.move_waiting_user(nick, body.get("direction"))
-    if not ok:
-        return 400, {"error": message}
-    return 200, {"user": nick.lower(), "message": message}
-
-
-def _queue_row_id(body):
-    """The `id` of the file a move or a removal means - one of the queue
-    payload's "file_ids" - or None when it is missing. Required: without it
-    nothing says the file is still the one the page showed (#1245).
-    """
-    row_id = str(body.get("id") or "").strip()
-    return row_id or None
-
-
-def build_queue_move_file_result(body):
-    """POST /api/queue/move-file (#1206): one place up or down inside the
-    nick's own queue. `position` is 1-based and `id` the file the page saw
-    there, so a queue that moved meanwhile is refused, not misread."""
-    import commands
-    nick = _queue_nick(body)
-    row_id = _queue_row_id(body)
-    if row_id is None:
-        return 400, {"error": "Which file? The page sent no id - reload it."}
-    ok, message = commands.move_queued_file(nick, body.get("position"), body.get("direction"), row_id)
-    if not ok:
-        return 400, {"error": message}
-    return 200, {"user": nick.lower(), "message": message}
-
-
-def build_queue_remove_file_result(body):
-    """POST /api/queue/remove-file (#1206): the one file out of the queue, with
-    the same notice to the nick as their own `@<bot>-remove <file>`. `id`
-    names the file, as for a move."""
-    import commands
-    nick = _queue_nick(body)
-    row_id = _queue_row_id(body)
-    if row_id is None:
-        return 400, {"error": "Which file? The page sent no id - reload it."}
-    ok, message = commands.remove_queued_file(nick, body.get("position"), row_id)
-    if not ok:
-        return 400, {"error": message}
-    return 200, {"user": nick.lower(), "message": message}
-
-
-def build_queue_clear_result(body):
-    """POST /api/queue/clear (#1206): everything queued for the nick, as the
-    console's `clearqueue` does. 404 when nothing was queued."""
-    import commands
-    nick = _queue_nick(body)
-    if not nick or any(ch.isspace() for ch in nick):
-        return 400, {"error": "Give the nick."}
-    key = nick.lower()
-    import dcc
-    with dcc.queue_lock:
-        count = len(getattr(config, "dcc_queue", {}).get(key) or [])
-    if not count:
-        return 404, {"error": f"{nick} has nothing queued."}
-    commands.handle_admin_clear_queue("dashboard", "", f"!clearqueue {nick}", authorised=True)
-    return 200, {"user": key, "removed": count, "message": f"Cleared {count} file(s) for {nick}."}
-
-
-
-
-def build_search_payload(query):
-    """The Search view's data: up to WEBUI_MAX_SEARCH_RESULTS matches for `query`.
-
-    Delegates the actual scan to list.find_matching_entries() - the same
-    IRC-agnostic function execute_search() now calls - so a web search and an
-    IRC @find agree on what matches. This just applies a browser-sized limit
-    and its own JSON shape instead of IRC formatting.
-    """
-    import list as list_mod
-
-    search_words = split_list_search_words(query)
-    if not search_words:
-        return []
-
-    entries, _total = list_mod.find_matching_entries(search_words, limit=WEBUI_MAX_SEARCH_RESULTS)
-
-    # The data model has no real per-file "which channel is this in" - a file is
-    # just a line in the one master list, shared by every channel the bot joins
-    # (config.CHANNEL). So "channel" here means "everywhere this bot is
-    # present", not "this specific file was seen in this specific channel".
-    channel_str = ", ".join(part.strip() for part in str(getattr(config, "CHANNEL", "")).split(","))
-
-    return [
-        {
-            "title": entry.get("filename", "?"),
-            "path": entry.get("folder") or "",
-            "size": entry.get("size", ""),
-            "channel": channel_str,
-        }
-        for entry in entries
-    ]
-
-
-def build_filelists_payload(offset=0, limit=None, name=None, q=""):
-    """The File Lists view's data: a page of one of THIS bot's own lists.
-
-    `name` picks which. None means the primary, which is what every list
-    function already resolves it to and what this route meant before lists
-    had names - so an unqualified request is unchanged.
-
-    `q`, when given, narrows the list to rows matching every word in it -
-    #399's follow-up, the List Browser's own per-list search, asked for
-    because a fetched bot's archive can run to tens of thousands of rows and
-    paging through them by hand to find one file is not a real option.
-    split_list_search_words("") is [], and find_matching_entries() already
-    treats an empty word list as "match everything" - the same rule that
-    makes an unfiltered page unchanged, so this needs no branch of its own.
-
-    v1 scope is deliberately THIS BOT ONLY - it serves DCCore's own master
-    list, decomposed into rows, with "source" hardcoded to config.NICKNAME.
-    Real cross-bot deduplication (parsing other bots' adverts in the channel)
-    is out of scope; this dedup is the trivial single-source case, collapsing
-    only the same filename listed under two different folders.
-
-    Issue #76, option 3: what gets returned is a page, `[offset:offset+limit]`
-    in folders, plus the `total` counts, never the whole list. Unfiltered, the
-    page comes from list.page_of_list_files() (#1128): a table of where each
-    folder is, built once per version of the lists, so a page parses only its
-    own folders - it used to parse the ENTIRE list for every page, 31 s and
-    2.1 GB at two million rows. A `q` search, and any list the table cannot
-    answer for, still parses the whole list as before. `limit=None` (the route's
-    default when `?limit=` was omitted) means FILELISTS_DEFAULT_PAGE_SIZE, not
-    "unlimited" - a caller that genuinely wants no cap must pass a `limit` up
-    to FILELISTS_MAX_PAGE_SIZE explicitly.
-
-    Returns {"entries": [...], "total": N, "offset": offset, "limit": limit} -
-    the shape both filelists routes now return, so the frontend's paging code
-    is shared between "our own list" and "a fetched bot's list".
-    """
-    import list as list_mod
-
-    if limit is None:
-        limit = FILELISTS_DEFAULT_PAGE_SIZE
-
-    search_words = split_list_search_words(q)
-    source = getattr(config, "NICKNAME", "?")
-    answer = None
-    if not search_words:
-        answer = list_mod.page_of_list_files(
-            list_mod.all_list_paths(name), offset, limit, source,
-            max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
-    if answer is None:
-        entries, _total = list_mod.find_matching_entries(search_words, limit=None, name=name)
-        rows = list_mod.entries_to_filelist_rows(entries, source)
-        groups = list_mod.group_rows_by_folder(rows)
-        answer = list_mod.page_folder_groups(
-            groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
-    page, total_folders, total_rows, row_capped = answer
-    return {
-        "folders": page,
-        "total": total_folders,
-        "total_files": total_rows,
-        "offset": offset,
-        "limit": limit,
-        # What the caller actually got. The row ceiling can end a page early,
-        # so the frontend advances by this rather than by `limit` - otherwise
-        # a truncated page would silently skip the folders it did not receive.
-        "returned": len(page),
-        # #477: distinguishes "this page is short because the safety valve
-        # cut it" from "this page is short because it is the last one" - a
-        # page of one huge folder otherwise reads as the pager being broken.
-        "row_capped": row_capped,
-    }
+# This section is web_library.py since #1318, a step of splitting this file. Imported back by
+# name, so webserver.<name> still answers for each of them.
+from web_library import (  # noqa: F401
+    _format_library_size,
+    _rar_counts,
+    build_filelists_payload,
+    build_library_payload,
+    build_search_payload,
+    count_rar_album_folders,
+)
+
+
+
+
+
+
+
+
+# This section is web_stats.py since #1318, a step of splitting this file. Imported back by
+# name, so webserver.<name> still answers for each of them.
+from web_stats import (  # noqa: F401
+    MAX_IMPORT_BYTES,
+    MAX_IMPORT_FILES,
+    MAX_IMPORT_SPEED,
+    MAX_KTDATA_CHARS,
+    RECORD_PERIODS,
+    STATS_PARTS,
+    _FORMULA_START,
+    _IMPORT_LIMITS,
+    _RECEIVED,
+    _csv_cell,
+    _lifetime_sent,
+    _nick_rows,
+    _read_ktdata_text,
+    _record_off,
+    _record_outcomes,
+    _record_since,
+    _record_tops,
+    _wait_text,
+    apply_ktdata_import,
+    apply_record_forget,
+    apply_stats_import,
+    build_ktdata_preview,
+    build_record_nick_payload,
+    build_record_payload,
+    build_stats_import_preview,
+    build_stats_payload,
+    current_importable_stats,
+    record_csv_lines,
+    validate_import_values,
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# This section is web_queue.py since #1318, a step of splitting this file. Imported back by
+# name, so webserver.<name> still answers for each of them.
+from web_queue import (  # noqa: F401
+    _pack_fields,
+    _queue_nick,
+    _queue_row_id,
+    _security_seconds_left,
+    build_ignore_result,
+    build_pack_cancel_result,
+    build_queue_clear_result,
+    build_queue_move_file_result,
+    build_queue_move_user_result,
+    build_queue_payload,
+    build_queue_remove_file_result,
+    build_unignore_result,
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # This section is web_lists.py since #1315, a step of splitting this file. Imported back by
