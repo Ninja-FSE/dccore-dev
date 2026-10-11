@@ -3594,6 +3594,202 @@ def delayed_activate(conn):
     config.announce_thread_alive = True
 
 
+def answer_nick_change(line):
+    """Someone changed their nick: follow it in the bot's own name, the channel
+    lists, the queues and the bot registry.
+
+    The body of that branch in irc_loop() until #1330, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    nick_match = re.match(r"^:([^!\s]+)!\S*\s+NICK\s+:?(\S+)", line)
+    if nick_match:
+        # Ours? Then this is the moment the bot's name
+        # changes - not when the NICK was sent (#635).
+        note_own_nick_change(nick_match.group(1),
+                             nick_match.group(2).strip())
+        # Everything this user owns, not just their
+        # outbound messages - see note_nick_change().
+        note_nick_change(nick_match.group(1),
+                         nick_match.group(2).strip())
+        # A known bot changing nick: its List Browser
+        # rows merge, on proof (#376).
+        renamed_ident = re.match(r"^:[^!\s]+!([^@\s]+)@", line)
+        note_bot_renamed(nick_match.group(1),
+                         nick_match.group(2).strip(),
+                         renamed_ident.group(1) if renamed_ident else None)
+        # A DCCore Chat peer that changes nick is found again
+        # under the new name by the next WHO: drop the old.
+        _forget_chat_peer(nick_match.group(1).lower())
+
+
+def answer_who_reply(line):
+    """A WHO reply (352): what it says about a bot's ident and about DCCore peers.
+
+    The body of that branch in irc_loop() until #1330, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    _note_chat_peers(line)
+    parts = line.split()
+    if len(parts) > 7:
+        target_nick = parts[7].lower()
+        # Bounded (#958 follow-up): DCCore Chat asks WHO
+        # for every channel every few minutes, so this
+        # sees every nick in every channel, and nothing
+        # ever removed one. Moved to the end on each
+        # sighting, so the oldest sighting goes first.
+        config.whois_status.pop(target_nick, None)
+        config.whois_status[target_nick] = True
+        while len(config.whois_status) > WHOIS_STATUS_MAX:
+            config.whois_status.pop(next(iter(config.whois_status)))
+
+
+def answer_names(line, sock):
+    """A NAMES line (353): learn who is in the channel, and thaw the queue of
+    anyone frozen who is still there - after a reconnect, the people already in
+    a channel come back by NAMES, not by JOIN.
+
+    The body of that branch in irc_loop() until #1330, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    # The RFC form, rather than "skip to the first #".
+    # A 353 is ":<server> 353 <nick> <symbol> <channel>
+    # :<names>", where <symbol> is one of = * @. Matching
+    # the channel as [#\w\-]+ meant a name containing "&"
+    # or "^" never parsed, so config.channel_users never
+    # learned who was in it - and the presence check above
+    # then refused to dispatch to anyone there. The symbol
+    # is optional here only because not every server sends
+    # one; restricting it to those three keeps it from
+    # swallowing a real channel name.
+    name_match = re.search(
+        r"^:\S+\s+353\s+\S+\s+(?:[=*@]\s+)?(\S+)\s+:(.+)$",
+        line)
+    if name_match and is_valid_irc_target(name_match.group(1)):
+        chan = channel_key(name_match.group(1))
+        names = [n.strip("@+~&%").lower() for n in name_match.group(2).split()]
+        # A merge, except for the first line after a
+        # kick - see learn_channel_names().
+        learn_channel_names(chan, names)
+
+        # -------------------------------------------------
+        # RECONNECT THAW - this is what saves the queues:
+        # After a reconnect, everyone already in the channel comes back via
+        # NAMES (353) and NOT via JOIN. Without this, their queues stayed
+        # frozen and were deleted by the 5-minute timer despite never leaving.
+        # -------------------------------------------------
+        # pop(), not del, and the list is rebuilt from what
+        # was actually removed. The thread started for each
+        # thawed user runs check_queue_and_send(), whose own
+        # freeze sweep deletes EVERY user it finds present in
+        # channel_users - which the 353 handler above has just
+        # populated with all of these names. So the first
+        # iteration's thread routinely deletes the keys later
+        # iterations are about to delete, and `del` raised
+        # KeyError on the IRC READ THREAD. That is caught far
+        # below by the message loop's `except Exception`, which
+        # closes the socket - a NAMES sync after a reconnect,
+        # with two or more frozen users, dropping the link it
+        # was sent to recover.
+        thawed_users = thaw_frozen_users(names)
+        for frozen_user in thawed_users:
+            files_in_q = len(config.dcc_queue.get(frozen_user, []))
+            print(f"[DCC RECONNECT THAW] {frozen_user} was still in {chan} at the NAMES sync. Thawing {files_in_q} file(s).")
+            threading.Thread(target=dcc.check_queue_and_send, args=(sock, frozen_user), daemon=True).start()
+
+        if thawed_users:
+            _note_reconnect_thaw(chan, len(thawed_users))
+
+
+def answer_join(line, sock):
+    """Someone else joined a channel the bot is in.
+
+    The body of that branch in irc_loop() until #1330, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    import announce
+    join_match = parse_join(line)
+    if join_match and is_valid_irc_target(join_match[1]):
+        joined_user = join_match[0]
+        joined_chan = join_match[1]
+        j_key = joined_user.lower()
+        j_chan = channel_key(joined_chan)
+
+        with runtime.channel_users_lock():
+            if j_chan not in config.channel_users:
+                config.channel_users[j_chan] = set()
+            config.channel_users[j_chan].add(j_key)
+
+        # #376: does this look like a nick we just saw leave,
+        # reconnecting under the ordinary collision suffix?
+        # Display only - see note_possible_reconnect()'s own
+        # docstring for the three things this checks.
+        note_possible_reconnect(joined_user)
+        # #376 option B: when this nick appeared.
+        note_join_seen(joined_user)
+        # DCCore Chat: a stranger joining might be a
+        # DCCore bot reconnecting - ask WHO for just this
+        # one nick rather than wait up to WHO_EVERY.
+        # Already-known peers are skipped inside
+        # note_join() itself.
+        _note_chat_join(joined_user, joined_chan)
+
+        # One pop, not `in` then `del`. Between the two, the
+        # freeze sweep in check_queue_and_send() - which runs
+        # on every dispatch thread and deletes every user it
+        # finds present in channel_users, set three lines
+        # above - can remove this key, and the `del` then
+        # raised KeyError on the IRC READ THREAD. Same class
+        # as the 353 thaw above, same consequence: the message
+        # loop's `except Exception` closes the socket.
+        if thaw_one_user(j_key):
+            print(f"[DCC REALTIME THAW] {joined_user} rejoined {joined_chan}. Thawing their queue.")
+            files_in_q = len(config.dcc_queue.get(j_key, [])) if hasattr(config, 'dcc_queue') else 0
+            announce.send_debug(f"User {config.C_BOLD}{joined_user}{config.C_RESET} returned to {joined_chan}, continuing queue of {config.C_BOLD}{files_in_q}{config.C_RESET} file(s)", category="JOIN")
+            threading.Thread(target=dcc.check_queue_and_send, args=(sock, joined_user), daemon=True).start()
+
+
+def answer_part(line):
+    """Someone left a channel the bot is in.
+
+    The body of that branch in irc_loop() until #1330, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    part_match = parse_part(line)
+    if part_match and is_valid_irc_target(part_match[1]):
+        p_user = part_match[0].lower()
+        p_chan = channel_key(part_match[1])
+        _forget_chat_peer(p_user, p_chan)
+        with runtime.channel_users_lock():
+            if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
+                config.channel_users[p_chan].remove(p_user)
+                # #376: OBSERVED, not inferred - we just
+                # found and removed them ourselves.
+                note_observed_departure(p_user, p_chan)
+
+
+def answer_quit(line):
+    """Someone quit IRC.
+
+    The body of that branch in irc_loop() until #1330, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    quit_match = re.search(r"^:([^!]+)!", line)
+    if quit_match:
+        q_user = quit_match.group(1).lower()
+        _forget_chat_peer(q_user)
+        with runtime.channel_users_lock():
+            quit_chan = None
+            for chan in config.channel_users:
+                if q_user in config.channel_users[chan]:
+                    config.channel_users[chan].remove(q_user)
+                    quit_chan = chan
+        # #376: OBSERVED, not inferred - outside the lock
+        # above like note_nick_change()'s own pattern, and
+        # only when we actually found them somewhere.
+        if quit_chan is not None:
+            note_observed_departure(q_user, quit_chan)
+
+
 def irc_loop():
     """The connection, PING/PONG, and every incoming PRIVMSG from Undernet."""
     global bot_joined_channel
@@ -4027,41 +4223,13 @@ def irc_loop():
                     # the victim - and the assignment below overwrites, so it destroyed
                     # whatever that victim had pending.
                     if is_user_event(line, "NICK"):
-                        nick_match = re.match(r"^:([^!\s]+)!\S*\s+NICK\s+:?(\S+)", line)
-                        if nick_match:
-                            # Ours? Then this is the moment the bot's name
-                            # changes - not when the NICK was sent (#635).
-                            note_own_nick_change(nick_match.group(1),
-                                                 nick_match.group(2).strip())
-                            # Everything this user owns, not just their
-                            # outbound messages - see note_nick_change().
-                            note_nick_change(nick_match.group(1),
-                                             nick_match.group(2).strip())
-                            # A known bot changing nick: its List Browser
-                            # rows merge, on proof (#376).
-                            renamed_ident = re.match(r"^:[^!\s]+!([^@\s]+)@", line)
-                            note_bot_renamed(nick_match.group(1),
-                                             nick_match.group(2).strip(),
-                                             renamed_ident.group(1) if renamed_ident else None)
-                            # A DCCore Chat peer that changes nick is found again
-                            # under the new name by the next WHO: drop the old.
-                            _forget_chat_peer(nick_match.group(1).lower())
+                        # answer_nick_change() since #1330.
+                        answer_nick_change(line)
                             
                     # Anchored: this writes straight into config.whois_status.
                     if is_server_numeric(line, "352"):
-                        _note_chat_peers(line)
-                        parts = line.split()
-                        if len(parts) > 7:
-                            target_nick = parts[7].lower()
-                            # Bounded (#958 follow-up): DCCore Chat asks WHO
-                            # for every channel every few minutes, so this
-                            # sees every nick in every channel, and nothing
-                            # ever removed one. Moved to the end on each
-                            # sighting, so the oldest sighting goes first.
-                            config.whois_status.pop(target_nick, None)
-                            config.whois_status[target_nick] = True
-                            while len(config.whois_status) > WHOIS_STATUS_MAX:
-                                config.whois_status.pop(next(iter(config.whois_status)))
+                        # answer_who_reply() since #1330.
+                        answer_who_reply(line)
                     # DCCore Chat (#371 follow-up): the WHO round refresh_peers()
                     # opened for this channel is done - reconcile who it actually
                     # found against who we thought was still there.
@@ -4071,134 +4239,30 @@ def irc_loop():
                     # proof a user is present when deciding whether to thaw a frozen queue
                     # and dispatch to them. A forged line injected fake presence.
                     if is_server_numeric(line, "353"):
-                        # The RFC form, rather than "skip to the first #".
-                        # A 353 is ":<server> 353 <nick> <symbol> <channel>
-                        # :<names>", where <symbol> is one of = * @. Matching
-                        # the channel as [#\w\-]+ meant a name containing "&"
-                        # or "^" never parsed, so config.channel_users never
-                        # learned who was in it - and the presence check above
-                        # then refused to dispatch to anyone there. The symbol
-                        # is optional here only because not every server sends
-                        # one; restricting it to those three keeps it from
-                        # swallowing a real channel name.
-                        name_match = re.search(
-                            r"^:\S+\s+353\s+\S+\s+(?:[=*@]\s+)?(\S+)\s+:(.+)$",
-                            line)
-                        if name_match and is_valid_irc_target(name_match.group(1)):
-                            chan = channel_key(name_match.group(1))
-                            names = [n.strip("@+~&%").lower() for n in name_match.group(2).split()]
-                            # A merge, except for the first line after a
-                            # kick - see learn_channel_names().
-                            learn_channel_names(chan, names)
-
-                            # -------------------------------------------------
-                            # RECONNECT THAW - this is what saves the queues:
-                            # After a reconnect, everyone already in the channel comes back via
-                            # NAMES (353) and NOT via JOIN. Without this, their queues stayed
-                            # frozen and were deleted by the 5-minute timer despite never leaving.
-                            # -------------------------------------------------
-                            # pop(), not del, and the list is rebuilt from what
-                            # was actually removed. The thread started for each
-                            # thawed user runs check_queue_and_send(), whose own
-                            # freeze sweep deletes EVERY user it finds present in
-                            # channel_users - which the 353 handler above has just
-                            # populated with all of these names. So the first
-                            # iteration's thread routinely deletes the keys later
-                            # iterations are about to delete, and `del` raised
-                            # KeyError on the IRC READ THREAD. That is caught far
-                            # below by the message loop's `except Exception`, which
-                            # closes the socket - a NAMES sync after a reconnect,
-                            # with two or more frozen users, dropping the link it
-                            # was sent to recover.
-                            thawed_users = thaw_frozen_users(names)
-                            for frozen_user in thawed_users:
-                                files_in_q = len(config.dcc_queue.get(frozen_user, []))
-                                print(f"[DCC RECONNECT THAW] {frozen_user} was still in {chan} at the NAMES sync. Thawing {files_in_q} file(s).")
-                                threading.Thread(target=dcc.check_queue_and_send, args=(s, frozen_user), daemon=True).start()
-
-                            if thawed_users:
-                                _note_reconnect_thaw(chan, len(thawed_users))
+                        # answer_names() since #1330.
+                        answer_names(line, s)
 
                     # Anchored: " JOIN " matched the word anywhere, so a PRIVMSG containing
                     # it thawed the speaker's own frozen queue on demand, and let them insert
                     # themselves into config.channel_users for a channel they are not in -
                     # which dcc.py reads as proof of presence before it dispatches.
                     elif is_user_event(line, "JOIN") and event_source_nick(line) != config.NICKNAME.lower():
-                        join_match = parse_join(line)
-                        if join_match and is_valid_irc_target(join_match[1]):
-                            joined_user = join_match[0]
-                            joined_chan = join_match[1]
-                            j_key = joined_user.lower()
-                            j_chan = channel_key(joined_chan)
-                            
-                            with runtime.channel_users_lock():
-                                if j_chan not in config.channel_users:
-                                    config.channel_users[j_chan] = set()
-                                config.channel_users[j_chan].add(j_key)
-
-                            # #376: does this look like a nick we just saw leave,
-                            # reconnecting under the ordinary collision suffix?
-                            # Display only - see note_possible_reconnect()'s own
-                            # docstring for the three things this checks.
-                            note_possible_reconnect(joined_user)
-                            # #376 option B: when this nick appeared.
-                            note_join_seen(joined_user)
-                            # DCCore Chat: a stranger joining might be a
-                            # DCCore bot reconnecting - ask WHO for just this
-                            # one nick rather than wait up to WHO_EVERY.
-                            # Already-known peers are skipped inside
-                            # note_join() itself.
-                            _note_chat_join(joined_user, joined_chan)
-
-                            # One pop, not `in` then `del`. Between the two, the
-                            # freeze sweep in check_queue_and_send() - which runs
-                            # on every dispatch thread and deletes every user it
-                            # finds present in channel_users, set three lines
-                            # above - can remove this key, and the `del` then
-                            # raised KeyError on the IRC READ THREAD. Same class
-                            # as the 353 thaw above, same consequence: the message
-                            # loop's `except Exception` closes the socket.
-                            if thaw_one_user(j_key):
-                                print(f"[DCC REALTIME THAW] {joined_user} rejoined {joined_chan}. Thawing their queue.")
-                                files_in_q = len(config.dcc_queue.get(j_key, [])) if hasattr(config, 'dcc_queue') else 0
-                                announce.send_debug(f"User {config.C_BOLD}{joined_user}{config.C_RESET} returned to {joined_chan}, continuing queue of {config.C_BOLD}{files_in_q}{config.C_RESET} file(s)", category="JOIN")
-                                threading.Thread(target=dcc.check_queue_and_send, args=(s, joined_user), daemon=True).start()
+                        # answer_join() since #1330.
+                        answer_join(line, s)
                                 
                     # Anchored: as JOIN. This one removes people from channel_users, which
                     # freezes their queue and starts the five-minute delete timer.
                     elif is_user_event(line, "PART"):
-                        part_match = parse_part(line)
-                        if part_match and is_valid_irc_target(part_match[1]):
-                            p_user = part_match[0].lower()
-                            p_chan = channel_key(part_match[1])
-                            _forget_chat_peer(p_user, p_chan)
-                            with runtime.channel_users_lock():
-                                if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
-                                    config.channel_users[p_chan].remove(p_user)
-                                    # #376: OBSERVED, not inferred - we just
-                                    # found and removed them ourselves.
-                                    note_observed_departure(p_user, p_chan)
+                        # answer_part() since #1330.
+                        answer_part(line)
 
                     # Anchored: the worst of the three, because it removes the user from
                     # EVERY channel at once. "@find QUIT PLAYING GAMES" is an ordinary
                     # search that silently cost the searcher their whole queue five minutes
                     # later.
                     elif is_user_event(line, "QUIT"):
-                        quit_match = re.search(r"^:([^!]+)!", line)
-                        if quit_match:
-                            q_user = quit_match.group(1).lower()
-                            _forget_chat_peer(q_user)
-                            with runtime.channel_users_lock():
-                                quit_chan = None
-                                for chan in config.channel_users:
-                                    if q_user in config.channel_users[chan]:
-                                        config.channel_users[chan].remove(q_user)
-                                        quit_chan = chan
-                            # #376: OBSERVED, not inferred - outside the lock
-                            # above like note_nick_change()'s own pattern, and
-                            # only when we actually found them somewhere.
-                            if quit_chan is not None:
-                                note_observed_departure(q_user, quit_chan)
+                        # answer_quit() since #1330.
+                        answer_quit(line)
 
                     # Cross-bot search broadcast capture, NOTICE half. NOTICE
                     # lines are not parsed anywhere else in this loop - many

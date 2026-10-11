@@ -181,17 +181,17 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
 
     def test_the_whois_guard_is_wired_to_352_not_something_else(self):
         """Catches the guards being swapped between the 352 and 353 handlers."""
-        condition = _guard_condition_for("config.whois_status[target_nick]")
+        condition = _guard_condition_for("    answer_who_reply(line)")
         self.assertTrue(_evaluate(condition, REAL_LINES["352"]), condition)
         self.assertFalse(_evaluate(condition, REAL_LINES["353"]), condition)
 
     def test_the_presence_guard_is_wired_to_353_not_something_else(self):
-        condition = _guard_condition_for("name_match = re.search")
+        condition = _guard_condition_for("    answer_names(line, s)")
         self.assertTrue(_evaluate(condition, REAL_LINES["353"]), condition)
         self.assertFalse(_evaluate(condition, REAL_LINES["352"]), condition)
 
     def test_the_presence_guard_refuses_forged_channel_text(self):
-        condition = _guard_condition_for("name_match = re.search")
+        condition = _guard_condition_for("    answer_names(line, s)")
         forged = ":attacker!u@h PRIVMSG #dccore-test :lol 353 x #dccore-test :victim"
         self.assertFalse(_evaluate(condition, forged), condition)
 

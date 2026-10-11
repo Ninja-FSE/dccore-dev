@@ -254,7 +254,7 @@ class TheFollowUpTo958(Case):
         self.addCleanup(setattr, irc, "WHOIS_STATUS_MAX", real)
         with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
-        at = code.index('if is_server_numeric(line, "352"):')
+        at = code.index("def answer_who_reply(")   # the 352 handler's body since #1330
         self.assertIn("while len(config.whois_status) > WHOIS_STATUS_MAX:", code[at:at + 1200])
         self.assertIn("config.whois_status.pop(next(iter(config.whois_status)))", code[at:at + 1200])
 
