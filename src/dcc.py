@@ -1,6 +1,7 @@
 # =====================================================================
 # DCC.PY - THE TRANSFER ENGINE
 # =====================================================================
+import collections
 import select
 import socket
 import struct
@@ -4474,6 +4475,104 @@ def _find_transfer_row(user, file_name):
     return rows[-1] if len(rows) == 1 else None
 
 
+SentFile = collections.namedtuple("SentFile", (
+    "row", "user", "next_file", "file_path", "file_name", "file_size", "resume_offset", "bytes_sent",
+    "transfer_completed", "already_held", "offered_at", "start_time", "transfer_finished_at"))
+SentFile.__doc__ = """What start_dcc_send() knows about a send once it has ended (#1328): the
+transfer row, the nick, the queue row, the file and its size, where it
+resumed, the bytes sent, whether the receiver acknowledged the whole file or
+already held it, and when it was offered, started and finished. The first
+piece of the send's state as one object, which the rest of the function's
+split needs."""
+
+
+def record_completed_send(sent):
+    """Count a finished send, from a SentFile: the totals, the download
+    count and the transfer record - or nothing, for a send that ended short
+    or a resume of a file the receiver already held. Reports and swallows a
+    database failure, as the block in start_dcc_send() always did.
+
+    Was that block until #1328, step 1 of splitting start_dcc_send()
+    (docs/FUTURE.md). Moved unchanged; it reads the send through `sent`.
+    """
+    # ---------------------------------------------------------------------
+    # Update the statistics on disk
+    # ---------------------------------------------------------------------
+    try:
+        import db
+        # ONE locked read-modify-write inside db, instead of a load here, a
+        # mutate here, and a separate save here. MAX_DCC_SLOTS transfers
+        # finish concurrently, and the unsynchronised version let whichever
+        # thread saved second discard the other's increment - permanently,
+        # since nothing ever recomputes these counters. It also rotates the
+        # day, so a transfer completing after midnight is counted correctly.
+        # What went out on the wire, not what the receiver now holds. A
+        # resumed send completes a whole file while transferring only the
+        # tail of it, and the totals are a record of bytes SENT.
+        # #454: ONLY A COMPLETED TRANSFER COUNTS. sent.transfer_completed was
+        # already being computed a few lines above, and a short send
+        # already printed [DCC-FAIL] - but the totals, the per-file
+        # download counter and the "Sent the whole file" line all ran
+        # regardless. So a truncated send was reported as a failure in
+        # one line and recorded as a success in every place an operator
+        # or another bot would later read: the lifetime file count, the
+        # bytes total, the speed record that feeds the advert, and the
+        # most-downloaded list.
+        #
+        # Counting a partial send also inflates the speed figure, since
+        # the elapsed time covers a transfer that stopped early.
+        if not sent.transfer_completed:
+            raise _ShortSend()
+        if sent.already_held:
+            raise _AlreadyHeld()
+        stats = db.update_stats_on_complete(sent.file_size - sent.resume_offset)
+        print(f"[DB COUNTER] Statistics updated on disk. (Files sent: {stats[0]})")
+
+        # And count the item itself, for the Stats page's "Most
+        # downloaded". A SEPARATE _disk_lock acquisition, after the one
+        # above has been released: threading.Lock is not reentrant, and
+        # this file is not the stats row - see db.py's note on why every
+        # public entry point there takes the lock exactly once.
+        #
+        # An album goes out as a packed archive from TMP_ZIP_DIR whose
+        # name dcc.py built from the folder, so the archive's own name is
+        # already the readable one. A single file is keyed by its path
+        # relative to the library and only displayed by its basename:
+        # two albums can hold a track with the same filename (#110), and
+        # collapsing them would credit one track with another's
+        # downloads.
+        _key, _shown, _kind = download_count_identity(sent.file_path, sent.file_name)
+        db.record_download(_key, _shown, _kind)
+
+        # The same send, for the record of what went to whom and how
+        # fast (#1068). transfer_log catches its own write errors.
+        import stats_mgr
+        _queued_at = sent.next_file.get("queued_at") if isinstance(sent.next_file, dict) else None
+        _wire_bytes = max(0, sent.bytes_sent - sent.resume_offset)
+        _seconds = sent.transfer_finished_at - sent.start_time
+        if _seconds <= 0:
+            _seconds = 0.1
+        # Claimed first (#1203): a stop that cut this send off has
+        # written it as cancelled already.
+        if _claim_transfer_outcome(sent.row):
+            transfer_log.record_sent(
+                _kind, _key, _shown, sent.file_size, _wire_bytes, _seconds,
+                _wire_bytes / _seconds if stats_mgr.speed_is_measurable(_seconds, sent.file_size) else None,
+                (sent.offered_at - _queued_at) if isinstance(_queued_at, (int, float)) else None,
+                nick=sent.user)
+    except _ShortSend:
+        print(f"[DB COUNTER] Not counted: {sent.file_name} for {sent.user} ended "
+              f"short at {sent.bytes_sent} of {sent.file_size} bytes. A partial send "
+              f"is not a completed transfer, so it is left out of the "
+              f"totals, the download counter and the speed record.")
+    except _AlreadyHeld:
+        print(f"[DB COUNTER] Not counted: {sent.user} already held all "
+              f"{sent.file_size} bytes of {sent.file_name} and resumed at the end, "
+              f"so nothing was sent.")
+    except Exception as db_err:
+        print(f"[DB ERROR] Could not increment the sharing statistics through the db module: {db_err}")
+
+
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, owns_packer=False):
     """Handle the network ports and the CTCP, and stream the bytes with accurate timing.
 
@@ -5048,83 +5147,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         # wait above already returned on that. Sleeping after it only held a
         # DCC slot for nothing.
  
-        # ---------------------------------------------------------------------
-        # Update the statistics on disk
-        # ---------------------------------------------------------------------
-        try:
-            import db
-            # ONE locked read-modify-write inside db, instead of a load here, a
-            # mutate here, and a separate save here. MAX_DCC_SLOTS transfers
-            # finish concurrently, and the unsynchronised version let whichever
-            # thread saved second discard the other's increment - permanently,
-            # since nothing ever recomputes these counters. It also rotates the
-            # day, so a transfer completing after midnight is counted correctly.
-            # What went out on the wire, not what the receiver now holds. A
-            # resumed send completes a whole file while transferring only the
-            # tail of it, and the totals are a record of bytes SENT.
-            # #454: ONLY A COMPLETED TRANSFER COUNTS. transfer_completed was
-            # already being computed a few lines above, and a short send
-            # already printed [DCC-FAIL] - but the totals, the per-file
-            # download counter and the "Sent the whole file" line all ran
-            # regardless. So a truncated send was reported as a failure in
-            # one line and recorded as a success in every place an operator
-            # or another bot would later read: the lifetime file count, the
-            # bytes total, the speed record that feeds the advert, and the
-            # most-downloaded list.
-            #
-            # Counting a partial send also inflates the speed figure, since
-            # the elapsed time covers a transfer that stopped early.
-            if not transfer_completed:
-                raise _ShortSend()
-            if already_held:
-                raise _AlreadyHeld()
-            stats = db.update_stats_on_complete(file_size - resume_offset)
-            print(f"[DB COUNTER] Statistics updated on disk. (Files sent: {stats[0]})")
-
-            # And count the item itself, for the Stats page's "Most
-            # downloaded". A SEPARATE _disk_lock acquisition, after the one
-            # above has been released: threading.Lock is not reentrant, and
-            # this file is not the stats row - see db.py's note on why every
-            # public entry point there takes the lock exactly once.
-            #
-            # An album goes out as a packed archive from TMP_ZIP_DIR whose
-            # name dcc.py built from the folder, so the archive's own name is
-            # already the readable one. A single file is keyed by its path
-            # relative to the library and only displayed by its basename:
-            # two albums can hold a track with the same filename (#110), and
-            # collapsing them would credit one track with another's
-            # downloads.
-            _key, _shown, _kind = download_count_identity(file_path, file_name)
-            db.record_download(_key, _shown, _kind)
-
-            # The same send, for the record of what went to whom and how
-            # fast (#1068). transfer_log catches its own write errors.
-            import stats_mgr
-            _queued_at = next_file.get("queued_at") if isinstance(next_file, dict) else None
-            _wire_bytes = max(0, bytes_sent - resume_offset)
-            _seconds = transfer_finished_at - start_time
-            if _seconds <= 0:
-                _seconds = 0.1
-            # Claimed first (#1203): a stop that cut this send off has
-            # written it as cancelled already.
-            if _claim_transfer_outcome(_row):
-                transfer_log.record_sent(
-                    _kind, _key, _shown, file_size, _wire_bytes, _seconds,
-                    _wire_bytes / _seconds if stats_mgr.speed_is_measurable(_seconds, file_size) else None,
-                    (offered_at - _queued_at) if isinstance(_queued_at, (int, float)) else None,
-                    nick=user)
-        except _ShortSend:
-            print(f"[DB COUNTER] Not counted: {file_name} for {user} ended "
-                  f"short at {bytes_sent} of {file_size} bytes. A partial send "
-                  f"is not a completed transfer, so it is left out of the "
-                  f"totals, the download counter and the speed record.")
-        except _AlreadyHeld:
-            print(f"[DB COUNTER] Not counted: {user} already held all "
-                  f"{file_size} bytes of {file_name} and resumed at the end, "
-                  f"so nothing was sent.")
-        except Exception as db_err:
-            print(f"[DB ERROR] Could not increment the sharing statistics through the db module: {db_err}")
-        # ---------------------------------------------------------------------
+        # Counting it is record_completed_send() (#1328).
+        record_completed_send(SentFile(
+            _row, user, next_file, file_path, file_name, file_size, resume_offset, bytes_sent,
+            transfer_completed, already_held, offered_at, start_time, transfer_finished_at))
 
         try: conn.close()
         except: pass

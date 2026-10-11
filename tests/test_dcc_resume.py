@@ -43,6 +43,7 @@ import dcc  # noqa: E402
 import runtime  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
+from tests.test_a_finished_send_is_recorded_once import RecordsASend  # noqa: E402
 
 USER = "someuser"
 PORT = 5000
@@ -342,10 +343,6 @@ class TheSendPathUsesIt(unittest.TestCase):
 
         self.assertIn("_skipped", speed)
 
-    def test_the_totals_count_what_went_on_the_wire(self):
-        self.assertIn("db.update_stats_on_complete(file_size - resume_offset)",
-                      self.source())
-
     def test_every_exit_drops_the_offer(self):
         """A stale entry is not harmless: ports are reused, so the next offer
         on the same port to the same nick could read an offset agreed for a
@@ -384,6 +381,15 @@ class TheDispatchIsThrottled(unittest.TestCase):
                                   .split("\n                        )", 1)[0]
 
         self.assertIn('startswith("DCC RESUME ")', expression)
+
+
+class TheTotalsCountWhatWentOnTheWire(RecordsASend):
+    """Called (#1328), where it used to be read: a resumed send that skipped
+    most of a file moved only the rest."""
+
+    def test_only_the_bytes_after_the_resume_are_counted(self):
+        self.record(resume_offset=3_000_000)
+        self.assertEqual(self.stats, [((1_000_000,), {})])
 
 
 if __name__ == "__main__":
