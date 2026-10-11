@@ -180,7 +180,7 @@ GROUPS = (
     )),
     ("Dashboard & Console", (
         ("Web dashboard", (
-            ("Server", ("WEBUI_HOST", "WEBUI_PORT")),
+            ("Server", ("WEBUI_HOST", "WEBUI_PORT", "WEBUI_ALLOWED_HOSTS")),
             ("Console & browser", ("WEBUI_CONSOLE_ENABLED", "WEBUI_OPEN_BROWSER",
                                    "WEBUI_FOLDER_BROWSER_ENABLED")),
         )),

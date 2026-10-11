@@ -54,6 +54,83 @@ Reported privately (an audit of the admin console and admin access) and fixed be
   `tests/test_parallel_console_logins_share_the_attempt_limit.py` (13, logins, unlocks, the spaced-password line
   and the encoded unlock). 30/30 mutations caught.
 
+### 🛡️ The dashboard's login and sessions hold: parallel guesses, DNS rebinding, revocation, framing
+
+Reported privately and fixed before the release. Four findings against `webserver.py`, all in the login and session
+layer.
+
+- **Parallel logins got more guesses than the limit.** `login()` called `_is_bad_web_ip()`, spent a tenth of a
+  second in PBKDF2, and only then called `_note_bad_web_login()`, with nothing held in between. `app.run(threaded=True)`
+  gives each connection its own thread, so a burst of `POST /login` from one address all passed the check before any
+  was counted: `MAX_PASSWORD_ATTEMPTS` per block window became as many guesses as could be sent at once. Now
+  `_reserve_web_login()` claims the attempt before the hash, under the pool's lock, and refuses (429) once earlier
+  failures plus attempts still in flight reach the limit; `_settle_web_login()` counts or clears it afterwards. The
+  lock is `runtime.web_login_lock` (bound, not built, in `webserver.py`). A second limit,
+  `runtime.web_password_checks` (`WEB_PASSWORD_CHECKS_AT_ONCE = 2`), caps how many dashboard passwords are hashed at
+  once across all addresses; a login that waits more than 10 s for a slot is told the dashboard is busy (503) and is
+  not counted.
+- **DNS rebinding got past the cross-site login guard.** `_login_origin_ok()` (#609) compares Origin with the
+  request's own Host, and a rebound page sends its own name in both, so its wrong passwords were charged to
+  127.0.0.1 and the operator was locked out. The real app never looked at Host (the setup app does). Now
+  `require_login()` first refuses (403, uncounted) any Host that is not an IP literal, `localhost`, a name in the new
+  **`WEBUI_ALLOWED_HOSTS`** setting or `WEBUI_HOST` itself when that is a name, or - when the bind is not loopback -
+  this machine's own names (`socket.gethostname()`, `getfqdn()`, `<short>.local`). The port is not compared. `*`
+  turns the check off. The setting is on the Settings page and on the mIRC settings window's Web dashboard page
+  (`scripts/mirc/settings_window_layout.py`, `dccore.mrc` regenerated).
+- **Sessions could not be revoked.** The cookie was `{"authenticated": True}` and nothing else, so `/logout` only
+  forgot it in one browser and a password change left every copied cookie valid until a restart. Each login now gets
+  an id kept in a per-app table (`/logout` drops it; past `WEB_MAX_LIVE_SESSIONS = 100` the oldest goes) and an HMAC
+  stamp of `ADMIN_PASSWORD_HASH` under the app secret (`_password_stamp()`), checked on every request. A password
+  change ends every other session: `build_password_change_result()` now puts the new hash in `config` at once rather
+  than waiting for the rehash, and the route re-stamps the session that made the change. A cookie that fails either
+  check is cleared.
+- **No anti-framing header.** A page on another port of the same host is the same site, so the Lax cookie went with a
+  framed dashboard and lured clicks passed the Origin check. Every response of the dashboard and of the setup app now
+  carries `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'` (`_refuse_framing()`). The
+  dashboard frames nothing of its own.
+- **Upgrade note.** Anyone who opens the dashboard by a name other than an IP address, `localhost` or the computer's
+  own name (a router's DNS name, a reverse proxy, a VPN name) gets a 403 that names the setting: add the name to
+  `WEBUI_ALLOWED_HOSTS` in settings.conf or on the Settings page. Everyone is logged out once by the upgrade restart,
+  as on any restart.
+- **Tests:** `tests/test_parallel_logins_get_no_extra_guesses.py` (10), `tests/test_the_dashboard_answers_only_to_its_own_names.py`
+  (15), `tests/test_a_logout_or_password_change_ends_the_session.py` (13), `tests/test_no_page_can_frame_the_dashboard.py`
+  (6). The pure halves (claim, host rule, stamp, headers) run without Flask; the HTTP halves drive the real
+  `create_app()`. 13/13 mutations caught. `test_a_foreign_page_cannot_lock_the_operator_out_of_the_login.py`'s
+  case-and-port test now configures its host name; `test_runtime_state.py` and `test_commands.py` allow-list
+  `WEBUI_ALLOWED_HOSTS` as a setting re-read on a rehash.
+- **Not changed here:** the DCC CHAT console (`adminchat.is_bad_ip()`/`note_bad_ip()`) has the same check-then-count
+  shape; each attempt there needs its own DCC connection and session.
+
+### 🛡️ A request gets the file it names, and only that
+
+Reported privately and fixed before the release, because each of these is one line any peer can send.
+
+- **What was wrong (Windows).** A requested name with a `:` in it opened an NTFS alternate data stream of a library
+  file. `names_a_remote_or_absolute_path()` refuses drive and UNC prefixes only, and a stream sits inside the library
+  as far as `is_safe_path()` can tell, so it was offered and sent. Windows writes such a stream on every downloaded
+  file, recording where it came from. A name ending in a dot or a space opened the file under a second spelling,
+  past the "already queued" check (#1077) and under a different download-counter key.
+- **Fix.** A new `dcc.names_a_hidden_part_of_a_file()` refuses, on the request's text, a component holding a `:` or
+  ending in a dot or a space - on Windows only, since no Windows file can be named that way while on Linux and macOS
+  both are ordinary characters (`Live: 1999.flac`, `R.E.M.`). A `..namedfork` component (a macOS resource fork) is
+  refused everywhere. A second gate, `dcc.resolves_to_a_stream()`, checks the path the lookup settled on, whichever
+  of the memories, the list scan or the walk produced it. Device names needed nothing: every request goes through
+  `long_path()`, whose `\\?\` prefix opens a file by the literal name. A queued row that names a stream - one
+  restored from `dcc_queue.txt`, which never passed the request gates - is refused at dispatch too:
+  `dcc.may_still_be_sent()`, the check every queued row passes before its send (#1268), says no to it.
+- **What was wrong (lists).** A list archive is matched on its last path component, and a non-primary list's
+  directory sits inside the primary's. A name with that list's folder in front of it passed the containment check,
+  so a channel bound to the primary list could be sent another list's archive (#26). Now only a file directly in the
+  requesting channel's own list directory is served.
+- **What was wrong (resume).** A DCC RESUME at or past the end of the file is clamped to the size, on purpose, so the
+  receiver's transfer finishes. That send moves no bytes, yet it was counted in the files-sent total, credited to the
+  download counter and the transfer record, offered to the speed record and announced as `Sent:` - the same
+  no-bandwidth inflation #656 closed for a forged acknowledgement. It is still answered and its queue row still
+  settled as delivered, but nothing is counted or announced.
+- **Tests:** `tests/test_a_request_gets_the_file_it_names_and_nothing_else.py` (22 tests). The stream cases go
+  through `handle_download_request()` with a real stream on Windows and a stand-in file elsewhere, so they run on
+  every runner; the resume cases run the real `start_dcc_send()` against fake sockets. 14/14 mutations caught.
+
 ### 🔧 Three follow-ups from the audit fixes (#1281)
 
 Each was left as a note in the PR that fixed the audit finding next to it (#1273, #1271, #1270).

@@ -1337,6 +1337,22 @@ WEBUI_FOLDER_BROWSER_ENABLED: bool = False
 WEBUI_HOST: str = "127.0.0.1"
 WEBUI_PORT: int = 8420    # The dashboard's port; open http://WEBUI_HOST:WEBUI_PORT in a browser
 
+# Extra host NAMES the dashboard answers to, beyond the ones it always does.
+#
+# The dashboard always answers to an IP address (http://127.0.0.1:8420/,
+# http://192.168.1.20:8420/), to localhost, and - when WEBUI_HOST is not
+# loopback - to this computer's own name (http://my-pc:8420/). Any other
+# name in the browser's address bar is refused: that is how a web page
+# that points its own name at your machine (DNS rebinding) is kept away
+# from the login. If you open the dashboard by another name - a name your
+# router gives the machine, a reverse proxy, a VPN name - list it here,
+# separated by commas. The port is not part of the name.
+#
+#   WEBUI_ALLOWED_HOSTS = dccore.lan, dashboard.example.org
+#
+# A single * turns the check off.
+WEBUI_ALLOWED_HOSTS: list = []
+
 # ---------------------------------------------------------------------
 # 9. LOCAL OVERRIDES (not in git)
 # ---------------------------------------------------------------------

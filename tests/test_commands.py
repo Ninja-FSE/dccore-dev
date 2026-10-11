@@ -510,6 +510,10 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
             "An operator narrowing this after finding something packable "
             "that should not be needs the change to take effect on the "
             "rehash, not on the next restart",
+        "WEBUI_ALLOWED_HOSTS":
+            "a setting too: the extra host names the dashboard answers to. "
+            "An operator who adds one expects the next request under that "
+            "name to be answered after the rehash, not after a restart",
         "fetch_request_queue":
             "transient OUTPUT like vip_queue: the requests for files from "
             "other bots, sent within seconds - and a request lost here "
