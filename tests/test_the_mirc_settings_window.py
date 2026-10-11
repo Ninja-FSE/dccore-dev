@@ -1276,10 +1276,14 @@ class TheAuditOfBothHalves(unittest.TestCase):
     # 5. The public changelog names one version for dccore.mrc.
 
     def test_the_public_changelog_names_one_script_version(self):
+        # Checks the topmost section - "## Unreleased" while it says that,
+        # the just-rolled version heading right after a release - so this
+        # keeps working across a roll instead of only until the next one.
         with io.open(os.path.join(REPO_ROOT, "docs", "UPDATES-PUBLIC.md"), encoding="utf-8") as handle:
             text = handle.read()
-        unreleased = text[text.index("## Unreleased"):]
-        unreleased = unreleased[:unreleased.index("\n## ", 5)]
+        start = text.index("\n## ") + 1
+        unreleased = text[start:]
+        unreleased = unreleased[:unreleased.index("\n## ", 1)]
         versions = set(re.findall(r"`dccore\.mrc` to (\d+\.\d+\.\d+)", unreleased))
         self.assertEqual(versions, {"1.19.4"})
 

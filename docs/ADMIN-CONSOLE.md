@@ -210,7 +210,7 @@ Waiting for acknowledgement...
 DCC Chat connection established
 
 Welcome to DCCore
-DCCore v1.16.1 - platform=posix python=3.10 rar=/usr/bin/rar
+DCCore v1.16.2 - platform=posix python=3.10 rar=/usr/bin/rar
 
 Enter Your Password:
 ```
