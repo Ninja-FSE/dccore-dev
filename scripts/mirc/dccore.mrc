@@ -4042,20 +4042,19 @@ dialog dccore.set {
   check "Downloads", 2033, 112 79 358 10
   box "Connection", 1105, 106 98 370 25
   check "Reconnect and log in to the bot by itself when it comes back", 2037, 112 108 358 10
-  box "Sharing && search", 1106, 106 127 370 47
+  box "Sharing && search", 1106, 106 127 370 36
   check "Answer @find searches", 2041, 112 137 358 10
   check "Announce finished transfers in the channel", 2045, 112 148 358 10
-  check "Enable !rar folder packing", 2049, 112 159 358 10
-  box "Messaging && dashboard", 1107, 106 178 370 47
-  check "Keep private messages (off: keep none, reply once instead)", 2053, 112 188 358 10
-  check "Enable web dashboard", 2057, 112 199 358 10
-  check "Answer CTCP VERSION", 2061, 112 210 358 10
-  box "Updates", 1108, 106 229 370 25
-  check "Tell me when a new version is out", 2065, 112 239 358 10
+  box "Messaging && dashboard", 1107, 106 167 370 47
+  check "Keep private messages (off: keep none, reply once instead)", 2049, 112 177 358 10
+  check "Enable web dashboard", 2053, 112 188 358 10
+  check "Answer CTCP VERSION", 2057, 112 199 358 10
+  box "Updates", 1108, 106 218 370 25
+  check "Tell me when a new version is out", 2061, 112 228 358 10
   box "Admin channels", 1109, 106 32 370 48
   text "A separate channel the bot sends its own diagnostic lines to - never one it also serves files in.", 1110, 112 42 358 8
-  text "Debug channel", 2068, 112 53 358 8
-  edit "", 2069, 112 62 358 11, autohs
+  text "Debug channel", 2064, 112 53 358 8
+  edit "", 2065, 112 62 358 11, autohs
   box "Serving channels", 1111, 106 84 370 205
   text "Which channels the bot joins and sits in. What each one serves - which list, which folders, Normal, Silent or Request only - is set under Sharing > Lists and Channel bindings.", 1112, 112 94 358 16
   list 1520, 112 113 250 168, vsbar
@@ -4063,123 +4062,57 @@ dialog dccore.set {
   button "Add channel", 1522, 368 127 56 13
   button "Remove", 1523, 368 143 56 13
   box "Admin", 1113, 106 32 370 37
-  text "Admin nick(s)", 2072, 112 42 358 8
-  edit "", 2073, 112 51 358 11, autohs
+  text "Admin nick(s)", 2068, 112 42 358 8
+  edit "", 2069, 112 51 358 11, autohs
   box "What the channel sees", 1114, 106 32 370 57
-  text "Colour theme", 2076, 112 42 358 8
-  combo 2077, 112 51 120 80, drop
+  text "Colour theme", 2072, 112 42 358 8
+  combo 2073, 112 51 120 80, drop
   button "Preview", 1610, 112 65 50 13
   text "Draws the sample advert and notice in @DCCore-preview with the colours chosen here, before they are saved.", 1611, 168 65 302 16
   box "Custom override - surface colours", 1115, 106 93 370 102
   text "Set any of these and it replaces that one role in the theme above. Keep previous keeps whatever background the segment before left.", 1116, 112 103 358 16
-  text "Border colour", 2080, 112 122 358 8
-  combo 2081, 112 131 80 120, drop
-  combo 2082, 196 131 80 120, drop
-  text "Separator colour", 2084, 112 145 358 8
-  combo 2085, 112 154 80 120, drop
-  combo 2086, 196 154 80 120, drop
-  text "Text box colour", 2088, 112 168 358 8
-  combo 2089, 112 177 80 120, drop
-  combo 2090, 196 177 80 120, drop
+  text "Border colour", 2076, 112 122 358 8
+  combo 2077, 112 131 80 120, drop
+  combo 2078, 196 131 80 120, drop
+  text "Separator colour", 2080, 112 145 358 8
+  combo 2081, 112 154 80 120, drop
+  combo 2082, 196 154 80 120, drop
+  text "Text box colour", 2084, 112 168 358 8
+  combo 2085, 112 177 80 120, drop
+  combo 2086, 196 177 80 120, drop
   box "Custom override - text colours", 1117, 106 199 370 83
-  text "Value colour", 2092, 112 209 358 8
-  combo 2093, 112 218 80 120, drop
-  combo 2094, 196 218 80 120, drop
-  text "Alert colour", 2096, 112 232 358 8
-  combo 2097, 112 241 80 120, drop
-  combo 2098, 196 241 80 120, drop
-  text "Accent colour", 2100, 112 255 358 8
-  combo 2101, 112 264 80 120, drop
-  combo 2102, 196 264 80 120, drop
+  text "Value colour", 2088, 112 209 358 8
+  combo 2089, 112 218 80 120, drop
+  combo 2090, 196 218 80 120, drop
+  text "Alert colour", 2092, 112 232 358 8
+  combo 2093, 112 241 80 120, drop
+  combo 2094, 196 241 80 120, drop
+  text "Accent colour", 2096, 112 255 358 8
+  combo 2097, 112 264 80 120, drop
+  combo 2098, 196 264 80 120, drop
   box "Advert", 1118, 106 32 370 37
-  text "Advert interval (seconds)", 2104, 112 42 358 8
-  edit "", 2105, 112 51 358 11, autohs
+  text "Advert interval (seconds)", 2100, 112 42 358 8
+  edit "", 2101, 112 51 358 11, autohs
   box "Broadcast search", 1119, 106 73 370 60
-  text "Broadcast search channel", 2108, 112 83 358 8
-  edit "", 2109, 112 92 358 11, autohs
-  text "Broadcast search cooldown (seconds)", 2112, 112 106 358 8
-  edit "", 2113, 112 115 358 11, autohs
+  text "Broadcast search channel", 2104, 112 83 358 8
+  edit "", 2105, 112 92 358 11, autohs
+  text "Broadcast search cooldown (seconds)", 2108, 112 106 358 8
+  edit "", 2109, 112 115 358 11, autohs
   box "Timing", 1120, 106 137 370 60
-  text "Message delay (seconds)", 2116, 112 147 358 8
-  edit "", 2117, 112 156 358 11, autohs
-  text "Debug message delay (seconds)", 2120, 112 170 358 8
-  edit "", 2121, 112 179 358 11, autohs
-  box "Sending", 1121, 106 32 370 83
-  text "Max simultaneous sends", 2124, 112 42 358 8
-  edit "", 2125, 112 51 358 11, autohs
-  text "Max queue per user", 2128, 112 65 358 8
-  edit "", 2129, 112 74 358 11, autohs
-  text "Max global queue", 2132, 112 88 358 8
-  edit "", 2133, 112 97 358 11, autohs
-  box "Search (@find)", 1122, 106 119 370 82
-  text "How much the bot says back once it answers (the on/off switch is under General > General Settings).", 1123, 112 129 358 8
-  text "Max search results", 2136, 112 140 358 8
-  edit "", 2137, 112 149 358 11, autohs
-  check "Name the folder in search replies", 2141, 112 163 358 10
-  text "Longest folder shown (characters)", 2144, 112 174 358 8
-  edit "", 2145, 112 183 358 11, autohs
-  box "During a rebuild", 1124, 106 205 370 59
-  check "Pause sharing during !update", 2149, 112 215 358 10
-  check "Pause for the whole rebuild", 2153, 112 226 358 10
-  text "Seconds a rehash waits for transfers to finish", 2156, 112 237 358 8
-  edit "", 2157, 112 246 358 11, autohs
-  box "Buffers && packet size", 1125, 106 32 370 60
-  text "Packet size", 2160, 112 42 358 8
-  combo 2161, 112 51 120 80, drop
-  text "Socket send buffer (0 = the default for your platform) (KB)", 2164, 112 65 358 8
-  edit "", 2165, 112 74 358 11, autohs
-  box "Ports && reliability", 1126, 106 96 370 106
-  text "DCC port range start", 2168, 112 106 358 8
-  edit "", 2169, 112 115 358 11, autohs
-  text "DCC port range end", 2172, 112 129 358 8
-  edit "", 2173, 112 138 358 11, autohs
-  text "Wait for the receiver to connect (seconds)", 2176, 112 152 358 8
-  edit "", 2177, 112 161 358 11, autohs
-  text "Max send failures", 2180, 112 175 358 8
-  edit "", 2181, 112 184 358 11, autohs
-  box "Library", 1127, 106 32 181 106
-  text "Music directory (used only when no folders are set)", 2184, 112 42 169 8
-  edit "", 2185, 112 51 153 11, autohs
-  button "...", 2186, 267 50 14 12
-  text "List base name", 2188, 112 65 169 8
-  edit "", 2189, 112 74 169 11, autohs
-  text "List delivery format", 2192, 112 88 169 8
-  combo 2193, 112 97 120 80, drop
-  text "File types to leave out of the list", 2196, 112 111 169 8
-  edit "", 2197, 112 120 169 11, autohs
-  box "Film && series", 1128, 106 142 181 79
-  check "Publish film and series as a separate list", 2201, 112 152 169 10
-  text "File types that go in the film list", 2204, 112 163 169 8
-  edit "", 2205, 112 172 169 11, autohs
-  text "File types that follow a film into its list (subtitles, .nfo, .sfv)", 2208, 112 186 169 16
-  edit "", 2209, 112 203 169 11, autohs
-  box "!rar packing", 1129, 295 32 181 106
-  text "File types a folder needs to be !rar-packable", 2212, 301 42 169 8
-  edit "", 2213, 301 51 169 11, autohs
-  text "RAR binary path", 2216, 301 65 169 8
-  edit "", 2217, 301 74 153 11, autohs
-  button "...", 2218, 456 73 14 12
-  text "Largest folder !rar will pack (0 = no limit) (MB)", 2220, 301 88 169 8
-  edit "", 2221, 301 97 169 11, autohs
-  text "RAR pack timeout (seconds)", 2224, 301 111 169 8
-  edit "", 2225, 301 120 169 11, autohs
-  box "List banner", 1130, 295 142 181 71
-  text "List banner file", 2228, 301 152 169 8
-  edit "", 2229, 301 161 153 11, autohs
-  button "...", 2230, 456 160 14 12
-  text "List banner size limit (KB)", 2232, 301 175 169 8
-  edit "", 2233, 301 184 169 11, autohs
-  check "Length and quality in the list", 2237, 301 198 169 10
-  text "What each list shares: a name, its folders, and whether it is primary (it answers a private message, and any channel bound to none). Add list and Edit open a window for one list; Save lists sends the whole set to the bot.", 1131, 106 32 370 16
-  box "Lists", 1132, 106 55 370 99
+  text "Message delay (seconds)", 2112, 112 147 358 8
+  edit "", 2113, 112 156 358 11, autohs
+  text "Debug message delay (seconds)", 2116, 112 170 358 8
+  edit "", 2117, 112 179 358 11, autohs
+  text "What each list shares: a name, its folders, and whether it is primary (it answers a private message, and any channel bound to none). Add list and Edit open a window for one list; Save lists sends the whole set to the bot.", 1121, 106 32 370 16
+  box "Lists", 1122, 106 55 370 99
   list 1540, 112 65 358 64, hsbar vsbar
   button "Add list", 1551, 112 133 50 13
   button "Edit", 1554, 165 133 46 13
   button "Delete", 1555, 214 133 46 13
   button "Refresh", 1557, 263 133 46 13
   button "Save lists", 1556, 106 158 56 13
-  text "Which list answers in each channel, and that channel's mode. A change in a menu is kept at once; Save lists sends the set to the bot.", 1133, 106 32 370 16
-  box "Channel bindings", 1134, 106 55 370 229
+  text "Which list answers in each channel, and that channel's mode. A change in a menu is kept at once; Save lists sends the set to the bot.", 1123, 106 32 370 16
+  box "Channel bindings", 1124, 106 55 370 229
   text "", 1700, 112 67 98 8
   combo 1701, 214 65 84 80, drop
   combo 1702, 302 65 84 60, drop
@@ -4248,20 +4181,87 @@ dialog dccore.set {
   button "Save lists", 1566, 106 288 56 13
   button "Refresh", 1567, 165 288 46 13
   text "", 1568, 226 290 160 8
-  box "Automatic rebuild", 1135, 106 32 370 83
-  text "Rebuild the list automatically", 2240, 112 42 358 8
-  edit "", 2241, 112 51 358 11, autohs
-  text "List rebuild hard cap (seconds, 0 = none)", 2244, 112 65 358 8
-  edit "", 2245, 112 74 358 11, autohs
-  text "Give up if a rebuild reports nothing for (seconds)", 2248, 112 88 358 8
-  edit "", 2249, 112 97 358 11, autohs
-  box "Performance", 1136, 106 119 370 83
-  text "Time limit for reading audio files (no longer used)", 2252, 112 129 358 8
-  edit "", 2253, 112 138 358 11, autohs
-  text "Audio files read at once", 2256, 112 152 358 8
-  edit "", 2257, 112 161 358 11, autohs
-  text "Folders scanned at once", 2260, 112 175 358 8
-  edit "", 2261, 112 184 358 11, autohs
+  box "Library", 1125, 106 32 181 106
+  text "Music directory (used only when no folders are set)", 2120, 112 42 169 8
+  edit "", 2121, 112 51 153 11, autohs
+  button "...", 2122, 267 50 14 12
+  text "List base name", 2124, 112 65 169 8
+  edit "", 2125, 112 74 169 11, autohs
+  text "List delivery format", 2128, 112 88 169 8
+  combo 2129, 112 97 120 80, drop
+  text "File types to leave out of the list", 2132, 112 111 169 8
+  edit "", 2133, 112 120 169 11, autohs
+  box "Film && series", 1126, 106 142 181 79
+  check "Publish film and series as a separate list", 2137, 112 152 169 10
+  text "File types that go in the film list", 2140, 112 163 169 8
+  edit "", 2141, 112 172 169 11, autohs
+  text "File types that follow a film into its list (subtitles, .nfo, .sfv)", 2144, 112 186 169 16
+  edit "", 2145, 112 203 169 11, autohs
+  box "!rar packing", 1127, 295 32 181 117
+  check "Enable !rar folder packing", 2149, 301 42 169 10
+  text "File types a folder needs to be !rar-packable", 2152, 301 53 169 8
+  edit "", 2153, 301 62 169 11, autohs
+  text "RAR binary path", 2156, 301 76 169 8
+  edit "", 2157, 301 85 153 11, autohs
+  button "...", 2158, 456 84 14 12
+  text "Largest folder !rar will pack (0 = no limit) (MB)", 2160, 301 99 169 8
+  edit "", 2161, 301 108 169 11, autohs
+  text "RAR pack timeout (seconds)", 2164, 301 122 169 8
+  edit "", 2165, 301 131 169 11, autohs
+  box "List banner", 1128, 295 153 181 71
+  text "List banner file", 2168, 301 163 169 8
+  edit "", 2169, 301 172 153 11, autohs
+  button "...", 2170, 456 171 14 12
+  text "List banner size limit (KB)", 2172, 301 186 169 8
+  edit "", 2173, 301 195 169 11, autohs
+  check "Length and quality in the list", 2177, 301 209 169 10
+  box "Automatic rebuild", 1129, 106 32 370 83
+  text "Rebuild the list automatically", 2180, 112 42 358 8
+  edit "", 2181, 112 51 358 11, autohs
+  text "List rebuild hard cap (seconds, 0 = none)", 2184, 112 65 358 8
+  edit "", 2185, 112 74 358 11, autohs
+  text "Give up if a rebuild reports nothing for (seconds)", 2188, 112 88 358 8
+  edit "", 2189, 112 97 358 11, autohs
+  box "Performance", 1130, 106 119 370 83
+  text "Time limit for reading audio files (no longer used)", 2192, 112 129 358 8
+  edit "", 2193, 112 138 358 11, autohs
+  text "Audio files read at once", 2196, 112 152 358 8
+  edit "", 2197, 112 161 358 11, autohs
+  text "Folders scanned at once", 2200, 112 175 358 8
+  edit "", 2201, 112 184 358 11, autohs
+  box "Buffers && packet size", 1131, 106 32 370 60
+  text "Packet size", 2204, 112 42 358 8
+  combo 2205, 112 51 120 80, drop
+  text "Socket send buffer (0 = the default for your platform) (KB)", 2208, 112 65 358 8
+  edit "", 2209, 112 74 358 11, autohs
+  box "Ports && reliability", 1132, 106 96 370 106
+  text "DCC port range start", 2212, 112 106 358 8
+  edit "", 2213, 112 115 358 11, autohs
+  text "DCC port range end", 2216, 112 129 358 8
+  edit "", 2217, 112 138 358 11, autohs
+  text "Wait for the receiver to connect (seconds)", 2220, 112 152 358 8
+  edit "", 2221, 112 161 358 11, autohs
+  text "Max send failures", 2224, 112 175 358 8
+  edit "", 2225, 112 184 358 11, autohs
+  box "Sending", 1133, 106 32 370 83
+  text "Max simultaneous sends", 2228, 112 42 358 8
+  edit "", 2229, 112 51 358 11, autohs
+  text "Max queue per user", 2232, 112 65 358 8
+  edit "", 2233, 112 74 358 11, autohs
+  text "Max global queue", 2236, 112 88 358 8
+  edit "", 2237, 112 97 358 11, autohs
+  box "Search (@find)", 1134, 106 119 370 82
+  text "How much the bot says back once it answers (the on/off switch is under General > General Settings).", 1135, 112 129 358 8
+  text "Max search results", 2240, 112 140 358 8
+  edit "", 2241, 112 149 358 11, autohs
+  check "Name the folder in search replies", 2245, 112 163 358 10
+  text "Longest folder shown (characters)", 2248, 112 174 358 8
+  edit "", 2249, 112 183 358 11, autohs
+  box "During a rebuild", 1136, 106 205 370 59
+  check "Pause sharing during !update", 2253, 112 215 358 10
+  check "Pause for the whole rebuild", 2257, 112 226 358 10
+  text "Seconds a rehash waits for transfers to finish", 2260, 112 237 358 8
+  edit "", 2261, 112 246 358 11, autohs
   box "Auto-grab", 1137, 106 32 370 94
   check "Grab the lists of bots you have no list from", 2265, 112 42 358 10
   text "Minutes between automatic grabs", 2268, 112 53 358 8
@@ -4525,56 +4525,56 @@ alias dccore.sw.data {
   hadd dccore.swm p.2 General Settings
   hadd dccore.swm p.2.layout roomy 1
   hadd dccore.swm p.2.n 1
-  hadd dccore.swm p.2.1 1103,1104,2025,2029,2033,1105,2037,1106,2041,2045,2049,1107,2053,2057,2061,1108,2065
+  hadd dccore.swm p.2.1 1103,1104,2025,2029,2033,1105,2037,1106,2041,2045,1107,2049,2053,2057,1108,2061
   hadd dccore.swm p.3 Channels
   hadd dccore.swm p.3.layout roomy 1
   hadd dccore.swm p.3.n 1
-  hadd dccore.swm p.3.1 1109,1110,2068,2069,1111,1112,1520,1521,1522,1523
+  hadd dccore.swm p.3.1 1109,1110,2064,2065,1111,1112,1520,1521,1522,1523
   hadd dccore.swm p.3.lv 1520
   hadd dccore.swm p.3.w channels
   hadd dccore.swm p.4 Operator
   hadd dccore.swm p.4.layout roomy 1
   hadd dccore.swm p.4.n 1
-  hadd dccore.swm p.4.1 1113,2072,2073
+  hadd dccore.swm p.4.1 1113,2068,2069
   hadd dccore.swm p.5 Appearance
   hadd dccore.swm p.5.layout roomy 1
   hadd dccore.swm p.5.n 1
-  hadd dccore.swm p.5.1 1114,2076,2077,1610,1611,1115,1116,2080,2081,2082,2084,2085,2086,2088,2089,2090,1117,2092,2093,2094,2096,2097,2098,2100,2101,2102
+  hadd dccore.swm p.5.1 1114,2072,2073,1610,1611,1115,1116,2076,2077,2078,2080,2081,2082,2084,2085,2086,1117,2088,2089,2090,2092,2093,2094,2096,2097,2098
   hadd dccore.swm p.5.w preview
   hadd dccore.swm p.6 Advertising
   hadd dccore.swm p.6.layout roomy 1
   hadd dccore.swm p.6.n 1
-  hadd dccore.swm p.6.1 1118,2104,2105,1119,2108,2109,2112,2113,1120,2116,2117,2120,2121
-  hadd dccore.swm p.7 Search
+  hadd dccore.swm p.6.1 1118,2100,2101,1119,2104,2105,2108,2109,1120,2112,2113,2116,2117
+  hadd dccore.swm p.7 Lists
   hadd dccore.swm p.7.layout roomy 1
   hadd dccore.swm p.7.n 1
-  hadd dccore.swm p.7.1 1121,2124,2125,2128,2129,2132,2133,1122,1123,2136,2137,2141,2144,2145,1124,2149,2153,2156,2157
-  hadd dccore.swm p.8 Transfers
+  hadd dccore.swm p.7.1 1121,1122,1540,1551,1554,1555,1557,1556
+  hadd dccore.swm p.7.lv 1540
+  hadd dccore.swm p.7.w srvlists srvsave
+  hadd dccore.swm p.7.ask served
+  hadd dccore.swm p.8 Channel bindings
   hadd dccore.swm p.8.layout roomy 1
-  hadd dccore.swm p.8.n 1
-  hadd dccore.swm p.8.1 1125,2160,2161,2164,2165,1126,2168,2169,2172,2173,2176,2177,2180,2181
-  hadd dccore.swm p.9 Your list
+  hadd dccore.swm p.8.n 2
+  hadd dccore.swm p.8.1 1123,1124,1700,1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747
+  hadd dccore.swm p.8.2 1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1566,1567,1568
+  hadd dccore.swm p.8.w srvchans srvsaveb
+  hadd dccore.swm p.8.ask served
+  hadd dccore.swm p.9 List settings
   hadd dccore.swm p.9.layout roomy 2
   hadd dccore.swm p.9.n 1
-  hadd dccore.swm p.9.1 1127,2184,2185,2186,2188,2189,2192,2193,2196,2197,1128,2201,2204,2205,2208,2209,1129,2212,2213,2216,2217,2218,2220,2221,2224,2225,1130,2228,2229,2230,2232,2233,2237
-  hadd dccore.swm p.10 Lists
+  hadd dccore.swm p.9.1 1125,2120,2121,2122,2124,2125,2128,2129,2132,2133,1126,2137,2140,2141,2144,2145,1127,2149,2152,2153,2156,2157,2158,2160,2161,2164,2165,1128,2168,2169,2170,2172,2173,2177
+  hadd dccore.swm p.10 Rebuild
   hadd dccore.swm p.10.layout roomy 1
   hadd dccore.swm p.10.n 1
-  hadd dccore.swm p.10.1 1131,1132,1540,1551,1554,1555,1557,1556
-  hadd dccore.swm p.10.lv 1540
-  hadd dccore.swm p.10.w srvlists srvsave
-  hadd dccore.swm p.10.ask served
-  hadd dccore.swm p.11 Channel bindings
+  hadd dccore.swm p.10.1 1129,2180,2181,2184,2185,2188,2189,1130,2192,2193,2196,2197,2200,2201
+  hadd dccore.swm p.11 Transfers
   hadd dccore.swm p.11.layout roomy 1
-  hadd dccore.swm p.11.n 2
-  hadd dccore.swm p.11.1 1133,1134,1700,1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747
-  hadd dccore.swm p.11.2 1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1566,1567,1568
-  hadd dccore.swm p.11.w srvchans srvsaveb
-  hadd dccore.swm p.11.ask served
-  hadd dccore.swm p.12 Rebuild
+  hadd dccore.swm p.11.n 1
+  hadd dccore.swm p.11.1 1131,2204,2205,2208,2209,1132,2212,2213,2216,2217,2220,2221,2224,2225
+  hadd dccore.swm p.12 Search
   hadd dccore.swm p.12.layout roomy 1
   hadd dccore.swm p.12.n 1
-  hadd dccore.swm p.12.1 1135,2240,2241,2244,2245,2248,2249,1136,2252,2253,2256,2257,2260,2261
+  hadd dccore.swm p.12.1 1133,2228,2229,2232,2233,2236,2237,1134,1135,2240,2241,2245,2248,2249,1136,2253,2257,2260,2261
   hadd dccore.swm p.13 List discovery
   hadd dccore.swm p.13.layout roomy 1
   hadd dccore.swm p.13.n 1
@@ -4629,11 +4629,11 @@ alias dccore.sw.data {
   hadd dccore.swm p.24.1 1163,2508,2509,2510,2512,2513,2514,2516,2517,2518,2520,2521,2522,2524,2525,2526,1164,2528,2529,2530,2532,2533,2534,1165,2536,2537,2538,2540,2541,2542,2544,2545,2546,1166,2548,2549,2550,2552,2553,2554,1167,2556,2557,2558,2560,2561,2562,2564,2565,2566
   hadd dccore.swm p.24.2 1168,2568,2569,2570,2572,2573,2574,2576,2577,2578,1169,2580,2581,2582,2584,2585,2586,2588,2589,2590,2592,2593,2594,2596,2597,2598
   hadd dccore.swm keys.n 10
-  hadd dccore.swm keys.1 SERVER PORT NICKNAME ALT_NICKNAME REJOIN_ATTEMPTS ON_CONNECT_CHECK_MINUTES SEARCH_ENABLED ANNOUNCE_TRANSFERS RAR_ENABLED PRIVATE_MESSAGES_ENABLED WEBUI_ENABLED CTCP_VERSION_REPLY CHECK_FOR_UPDATES DEBUG_CHANNEL CHANNEL
-  hadd dccore.swm keys.2 ADMIN_NICK THEME CUSTOM_THEME_BORDER CUSTOM_THEME_SEPARATOR CUSTOM_THEME_TEXTBOX CUSTOM_THEME_VALUE CUSTOM_THEME_ALERT CUSTOM_THEME_ACCENT ANNOUNCE_INTERVAL BROADCAST_SEARCH_CHANNEL BROADCAST_SEARCH_COOLDOWN MSG_DELAY DEBUG_MSG_DELAY MAX_DCC_SLOTS MAX_USER_QUEUE
-  hadd dccore.swm keys.3 MAX_GLOBAL_QUEUE MAX_SEARCH_RESULTS SEARCH_SHOW_FOLDER SEARCH_FOLDER_MAX_CHARS PAUSE_ON_UPDATE PAUSE_FOR_WHOLE_UPDATE REHASH_TRANSFER_WAIT DCC_BLOCK_SIZE DCC_SEND_BUFFER DCC_PORT_START DCC_PORT_END DCC_ACCEPT_TIMEOUT MAX_SEND_FAILS FILE_DIRECTORY LIST_BASE_NAME
-  hadd dccore.swm keys.4 LIST_FORMAT LIST_IGNORED_EXTENSIONS SEPARATE_VIDEO_LIST LIST_VIDEO_EXTENSIONS LIST_VIDEO_COMPANION_EXTENSIONS RAR_EXTENSIONS RAR_BINARY MAX_RAR_FOLDER_SIZE RAR_TIMEOUT LIST_HEADER_FILE LIST_HEADER_MAX_BYTES LIST_SHOW_AUDIO_INFO LIST_REBUILD_SCHEDULE LIST_UPDATE_TIMEOUT LIST_UPDATE_STALL_SECONDS
-  hadd dccore.swm keys.5 LIST_AUDIO_INFO_MINUTES LIST_AUDIO_INFO_THREADS LIST_SCAN_THREADS AUTO_GRAB_LISTS AUTO_GRAB_EVERY_MINUTES AUTO_GRAB_MIN_FILES AUTO_GRAB_MIN_SPEED_KB AUTO_DISCOVER_CHANNEL_LISTS MULTI_CHANNEL_LIST_STABLE_SECONDS MAX_FETCH_SLOTS AUTO_REFETCH_LISTS AUTO_REFETCH_INTERVAL_HOURS AUTO_REFETCH_MAX_PER_RUN FETCH_OFFER_TIMEOUT FETCH_TRANSFER_TIMEOUT
+  hadd dccore.swm keys.1 SERVER PORT NICKNAME ALT_NICKNAME REJOIN_ATTEMPTS ON_CONNECT_CHECK_MINUTES SEARCH_ENABLED ANNOUNCE_TRANSFERS PRIVATE_MESSAGES_ENABLED WEBUI_ENABLED CTCP_VERSION_REPLY CHECK_FOR_UPDATES DEBUG_CHANNEL CHANNEL ADMIN_NICK
+  hadd dccore.swm keys.2 THEME CUSTOM_THEME_BORDER CUSTOM_THEME_SEPARATOR CUSTOM_THEME_TEXTBOX CUSTOM_THEME_VALUE CUSTOM_THEME_ALERT CUSTOM_THEME_ACCENT ANNOUNCE_INTERVAL BROADCAST_SEARCH_CHANNEL BROADCAST_SEARCH_COOLDOWN MSG_DELAY DEBUG_MSG_DELAY FILE_DIRECTORY LIST_BASE_NAME LIST_FORMAT
+  hadd dccore.swm keys.3 LIST_IGNORED_EXTENSIONS SEPARATE_VIDEO_LIST LIST_VIDEO_EXTENSIONS LIST_VIDEO_COMPANION_EXTENSIONS RAR_ENABLED RAR_EXTENSIONS RAR_BINARY MAX_RAR_FOLDER_SIZE RAR_TIMEOUT LIST_HEADER_FILE LIST_HEADER_MAX_BYTES LIST_SHOW_AUDIO_INFO LIST_REBUILD_SCHEDULE LIST_UPDATE_TIMEOUT LIST_UPDATE_STALL_SECONDS
+  hadd dccore.swm keys.4 LIST_AUDIO_INFO_MINUTES LIST_AUDIO_INFO_THREADS LIST_SCAN_THREADS DCC_BLOCK_SIZE DCC_SEND_BUFFER DCC_PORT_START DCC_PORT_END DCC_ACCEPT_TIMEOUT MAX_SEND_FAILS MAX_DCC_SLOTS MAX_USER_QUEUE MAX_GLOBAL_QUEUE MAX_SEARCH_RESULTS SEARCH_SHOW_FOLDER SEARCH_FOLDER_MAX_CHARS
+  hadd dccore.swm keys.5 PAUSE_ON_UPDATE PAUSE_FOR_WHOLE_UPDATE REHASH_TRANSFER_WAIT AUTO_GRAB_LISTS AUTO_GRAB_EVERY_MINUTES AUTO_GRAB_MIN_FILES AUTO_GRAB_MIN_SPEED_KB AUTO_DISCOVER_CHANNEL_LISTS MULTI_CHANNEL_LIST_STABLE_SECONDS MAX_FETCH_SLOTS AUTO_REFETCH_LISTS AUTO_REFETCH_INTERVAL_HOURS AUTO_REFETCH_MAX_PER_RUN FETCH_OFFER_TIMEOUT FETCH_TRANSFER_TIMEOUT
   hadd dccore.swm keys.6 FETCH_FOLDER_OFFER_TIMEOUT FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED FETCH_FOLDER_TRANSFER_TIMEOUT MAX_FETCH_FILE_SIZE MAX_FETCH_FOLDER_FILE_SIZE MAX_FETCH_LIST_FILE_SIZE MAX_LIST_TEXT_SIZE FETCH_HISTORY_DAYS FETCH_HISTORY_MAX_ROWS FETCH_MAX_PER_BOT FETCH_QUEUED_TIMEOUT FETCH_BOT_MAX_FAILS FETCH_BOT_COOLDOWN_MINUTES LIST_REQUEST_TAG MAX_REQUESTS
   hadd dccore.swm keys.7 REQUEST_WINDOW MUTE_TIME FLOOD_BAN_SECONDS PRIVATE_MESSAGE_COOLDOWN_SECONDS PRIVATE_MESSAGE_DECLINE_TEXT PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS PRIVATE_MESSAGE_DECLINE_BURST PRIVATE_MESSAGE_DECLINE_BURST_SECONDS ADMIN_HOSTMASKS ADMIN_CHAT_MODE ADMIN_CHANNEL_COMMANDS ADMIN_CHAT_COLOURS WEBUI_HOST WEBUI_PORT WEBUI_ALLOWED_HOSTS
   hadd dccore.swm keys.8 WEBUI_CONSOLE_ENABLED WEBUI_OPEN_BROWSER WEBUI_FOLDER_BROWSER_ENABLED CONSOLE_SHOW_REQUESTS CONSOLE_SHOW_QUEUE CONSOLE_SHOW_SENDS CONSOLE_SHOW_FAILURES CONSOLE_SHOW_SEARCHES DEBUG_CHANNEL_FEED DEBUG_MODE DEBUG_TO_CHANNEL DEBUG_TO_CONSOLE CONSOLE_TIMESTAMP_FORMAT CONSOLE_LOG_FILE CONSOLE_LOG_MAX_MB
@@ -4671,27 +4671,23 @@ alias dccore.sw.data {
   hadd dccore.swm pg.ANNOUNCE_TRANSFERS 2
   hadd dccore.swm n.ANNOUNCE_TRANSFERS Announce finished transfers in the channel
   hadd dccore.swm h.ANNOUNCE_TRANSFERS Post a line in the channel each time a file has been sent. Everything else about a transfer is private to the person who asked; this is the only public part. A file asked for by private message is never announced.
-  hadd dccore.swm k.RAR_ENABLED 2049 bool 1 2049
-  hadd dccore.swm pg.RAR_ENABLED 2
-  hadd dccore.swm n.RAR_ENABLED Enable !rar folder packing
-  hadd dccore.swm h.RAR_ENABLED Let people request a whole folder packed as one .rar file (with !rar). Turn off if you do not have the rar program or do not want the bot packing folders. Single-file downloads work either way.
-  hadd dccore.swm k.PRIVATE_MESSAGES_ENABLED 2053 bool 1 2053
+  hadd dccore.swm k.PRIVATE_MESSAGES_ENABLED 2049 bool 1 2049
   hadd dccore.swm pg.PRIVATE_MESSAGES_ENABLED 2
   hadd dccore.swm n.PRIVATE_MESSAGES_ENABLED Keep private messages (off: keep none~2C reply once instead)
   hadd dccore.swm h.PRIVATE_MESSAGES_ENABLED Keep private messages people send to the bot so you can read them on the Messages page. The bot does not answer them. Turn off to keep none and instead reply once telling the sender where to go.
-  hadd dccore.swm k.WEBUI_ENABLED 2057 bool 1 2057
+  hadd dccore.swm k.WEBUI_ENABLED 2053 bool 1 2053
   hadd dccore.swm pg.WEBUI_ENABLED 2
   hadd dccore.swm n.WEBUI_ENABLED Enable web dashboard
   hadd dccore.swm h.WEBUI_ENABLED Turn the web dashboard on. Off by default so nothing opens a web page just because the bot was updated. Needs the Flask package installed.
-  hadd dccore.swm k.CTCP_VERSION_REPLY 2061 bool 1 2061
+  hadd dccore.swm k.CTCP_VERSION_REPLY 2057 bool 1 2057
   hadd dccore.swm pg.CTCP_VERSION_REPLY 2
   hadd dccore.swm n.CTCP_VERSION_REPLY Answer CTCP VERSION
   hadd dccore.swm h.CTCP_VERSION_REPLY Answer when somebody asks the bot what software it runs (a CTCP VERSION request). The answer goes only to the person who asked. Turn off to stay quiet about it.
-  hadd dccore.swm k.CHECK_FOR_UPDATES 2065 bool 1 2065
+  hadd dccore.swm k.CHECK_FOR_UPDATES 2061 bool 1 2061
   hadd dccore.swm pg.CHECK_FOR_UPDATES 2
   hadd dccore.swm n.CHECK_FOR_UPDATES Tell me when a new version is out
   hadd dccore.swm h.CHECK_FOR_UPDATES Once a day~2C ask GitHub whether a newer DCCore has been released~2C and say so on the dashboard~2C in the console and in the mIRC window. Only the version numbers are compared; nothing about your bot is sent. Turn it off on a machine that should not go out.
-  hadd dccore.swm k.DEBUG_CHANNEL 2069 str 1 2068
+  hadd dccore.swm k.DEBUG_CHANNEL 2065 str 1 2064
   hadd dccore.swm pg.DEBUG_CHANNEL 3
   hadd dccore.swm n.DEBUG_CHANNEL Debug channel
   hadd dccore.swm h.DEBUG_CHANNEL A channel of your own where the bot reports what it is doing - transfers~2C joins~2C bans~2C problems. Leave blank for none. Do not use a channel other people sit in: everything the bot reports goes there.
@@ -4699,11 +4695,11 @@ alias dccore.sw.data {
   hadd dccore.swm pg.CHANNEL 3
   hadd dccore.swm n.CHANNEL Channels
   hadd dccore.swm h.CHANNEL The channel(s) the bot serves in~2C each starting with ~23~2C separated by commas. The first one is where announcements go unless a request came from another channel. Required.
-  hadd dccore.swm k.ADMIN_NICK 2073 str 1 2072
+  hadd dccore.swm k.ADMIN_NICK 2069 str 1 2068
   hadd dccore.swm pg.ADMIN_NICK 4
   hadd dccore.swm n.ADMIN_NICK Admin nick(s)
   hadd dccore.swm h.ADMIN_NICK Your own nick(s) - the people allowed to use the admin commands such as !ban~2C !rehash and !update. Separate several with commas. Required. If you have set ADMIN_HOSTMASKS~2C the command must also come from that host.
-  hadd dccore.swm k.THEME 2077 choice 1 2076
+  hadd dccore.swm k.THEME 2073 choice 1 2072
   hadd dccore.swm pg.THEME 5
   hadd dccore.swm n.THEME Colour theme
   hadd dccore.swm ch.THEME classic midnight forest orchid plain
@@ -4713,88 +4709,140 @@ alias dccore.sw.data {
   hadd dccore.swm cl.THEME.4 orchid
   hadd dccore.swm cl.THEME.5 plain
   hadd dccore.swm h.THEME The colour scheme for everything the bot says in the channel - the advert~2C the notices~2C the search results. Pick one you like; it is how people tell your bot apart from the others.
-  hadd dccore.swm k.CUSTOM_THEME_BORDER 2081 colour 1 2080
+  hadd dccore.swm k.CUSTOM_THEME_BORDER 2077 colour 1 2076
   hadd dccore.swm pg.CUSTOM_THEME_BORDER 5
   hadd dccore.swm n.CUSTOM_THEME_BORDER Border colour
   hadd dccore.swm h.CUSTOM_THEME_BORDER Override one colour of the chosen theme: the block that frames each message. Leave unset to keep the theme's own colour.
-  hadd dccore.swm k.CUSTOM_THEME_SEPARATOR 2085 colour 1 2084
+  hadd dccore.swm k.CUSTOM_THEME_SEPARATOR 2081 colour 1 2080
   hadd dccore.swm pg.CUSTOM_THEME_SEPARATOR 5
   hadd dccore.swm n.CUSTOM_THEME_SEPARATOR Separator colour
   hadd dccore.swm h.CUSTOM_THEME_SEPARATOR Override one colour of the chosen theme: the block between the parts of a message.
-  hadd dccore.swm k.CUSTOM_THEME_TEXTBOX 2089 colour 1 2088
+  hadd dccore.swm k.CUSTOM_THEME_TEXTBOX 2085 colour 1 2084
   hadd dccore.swm pg.CUSTOM_THEME_TEXTBOX 5
   hadd dccore.swm n.CUSTOM_THEME_TEXTBOX Text box colour
   hadd dccore.swm h.CUSTOM_THEME_TEXTBOX Override one colour of the chosen theme: the background the text sits on.
-  hadd dccore.swm k.CUSTOM_THEME_VALUE 2093 colour 1 2092
+  hadd dccore.swm k.CUSTOM_THEME_VALUE 2089 colour 1 2088
   hadd dccore.swm pg.CUSTOM_THEME_VALUE 5
   hadd dccore.swm n.CUSTOM_THEME_VALUE Value colour
   hadd dccore.swm h.CUSTOM_THEME_VALUE Override one colour of the chosen theme: the numbers and names in a message~2C like a file count or a speed.
-  hadd dccore.swm k.CUSTOM_THEME_ALERT 2097 colour 1 2096
+  hadd dccore.swm k.CUSTOM_THEME_ALERT 2093 colour 1 2092
   hadd dccore.swm pg.CUSTOM_THEME_ALERT 5
   hadd dccore.swm n.CUSTOM_THEME_ALERT Alert colour
   hadd dccore.swm h.CUSTOM_THEME_ALERT Override one colour of the chosen theme: the parts meant to stand out.
-  hadd dccore.swm k.CUSTOM_THEME_ACCENT 2101 colour 1 2100
+  hadd dccore.swm k.CUSTOM_THEME_ACCENT 2097 colour 1 2096
   hadd dccore.swm pg.CUSTOM_THEME_ACCENT 5
   hadd dccore.swm n.CUSTOM_THEME_ACCENT Accent colour
   hadd dccore.swm h.CUSTOM_THEME_ACCENT Override one colour of the chosen theme: timestamps and secondary text.
-  hadd dccore.swm k.ANNOUNCE_INTERVAL 2105 int 1 2104
+  hadd dccore.swm k.ANNOUNCE_INTERVAL 2101 int 1 2100
   hadd dccore.swm pg.ANNOUNCE_INTERVAL 6
   hadd dccore.swm n.ANNOUNCE_INTERVAL Advert interval (seconds)
   hadd dccore.swm h.ANNOUNCE_INTERVAL How often the bot posts its advert in the channel~2C in seconds. 300 is every five minutes. 60 is the least it accepts - channels do not like a bot that advertises constantly.
-  hadd dccore.swm k.BROADCAST_SEARCH_CHANNEL 2109 str 1 2108
+  hadd dccore.swm k.BROADCAST_SEARCH_CHANNEL 2105 str 1 2104
   hadd dccore.swm pg.BROADCAST_SEARCH_CHANNEL 6
   hadd dccore.swm n.BROADCAST_SEARCH_CHANNEL Broadcast search channel
   hadd dccore.swm h.BROADCAST_SEARCH_CHANNEL The one channel used when you search all bots at once from the dashboard. Leave empty to use your first channel.
-  hadd dccore.swm k.BROADCAST_SEARCH_COOLDOWN 2113 int 1 2112
+  hadd dccore.swm k.BROADCAST_SEARCH_COOLDOWN 2109 int 1 2108
   hadd dccore.swm pg.BROADCAST_SEARCH_COOLDOWN 6
   hadd dccore.swm n.BROADCAST_SEARCH_COOLDOWN Broadcast search cooldown (seconds)
   hadd dccore.swm h.BROADCAST_SEARCH_COOLDOWN How many seconds must pass between two of those search-all-bots searches~2C to be polite to the other bots in the channel.
-  hadd dccore.swm k.MSG_DELAY 2117 float 1 2116
+  hadd dccore.swm k.MSG_DELAY 2113 float 1 2112
   hadd dccore.swm pg.MSG_DELAY 6
   hadd dccore.swm n.MSG_DELAY Message delay (seconds)
   hadd dccore.swm h.MSG_DELAY How many seconds the bot waits between the lines it sends to the server. Protects you from being disconnected for flooding. 5 is safe on Undernet; lower is faster but riskier.
-  hadd dccore.swm k.DEBUG_MSG_DELAY 2121 float 1 2120
+  hadd dccore.swm k.DEBUG_MSG_DELAY 2117 float 1 2116
   hadd dccore.swm pg.DEBUG_MSG_DELAY 6
   hadd dccore.swm n.DEBUG_MSG_DELAY Debug message delay (seconds)
   hadd dccore.swm h.DEBUG_MSG_DELAY How long to wait between lines to your debug channel. Never less than MSG_DELAY - every line the bot sends shares one clock~2C and a smaller number here has no effect. Set it higher than MSG_DELAY to slow the debug channel down further; 0 means the same as MSG_DELAY.
-  hadd dccore.swm k.MAX_DCC_SLOTS 2125 int 1 2124
-  hadd dccore.swm pg.MAX_DCC_SLOTS 7
-  hadd dccore.swm n.MAX_DCC_SLOTS Max simultaneous sends
-  hadd dccore.swm h.MAX_DCC_SLOTS How many files the bot sends at the same time. Everyone else waits in the queue. 3 is a good number for a home connection; raise it only if your upload speed can take it.
-  hadd dccore.swm k.MAX_USER_QUEUE 2129 int 1 2128
-  hadd dccore.swm pg.MAX_USER_QUEUE 7
-  hadd dccore.swm n.MAX_USER_QUEUE Max queue per user
-  hadd dccore.swm h.MAX_USER_QUEUE The most files one person can have waiting in their queue at once.
-  hadd dccore.swm k.MAX_GLOBAL_QUEUE 2133 int 1 2132
-  hadd dccore.swm pg.MAX_GLOBAL_QUEUE 7
-  hadd dccore.swm n.MAX_GLOBAL_QUEUE Max global queue
-  hadd dccore.swm h.MAX_GLOBAL_QUEUE The most files that can be waiting across everybody's queues put together.
-  hadd dccore.swm k.MAX_SEARCH_RESULTS 2137 int 1 2136
-  hadd dccore.swm pg.MAX_SEARCH_RESULTS 7
-  hadd dccore.swm n.MAX_SEARCH_RESULTS Max search results
-  hadd dccore.swm h.MAX_SEARCH_RESULTS How many matching files are sent back to somebody who searches with @find. Each result is one line to that person.
-  hadd dccore.swm k.SEARCH_SHOW_FOLDER 2141 bool 1 2141
-  hadd dccore.swm pg.SEARCH_SHOW_FOLDER 7
-  hadd dccore.swm n.SEARCH_SHOW_FOLDER Name the folder in search replies
-  hadd dccore.swm h.SEARCH_SHOW_FOLDER In the reply to an @find~2C name each result's folder on a line of its own above its files~2C e.g. From: D:\MEDIA\Rock\Some Band\1999 - Some Album. One extra line per folder~2C not per file; the result lines stay exactly as they are. Off by default: every line is paced~2C so it slows the reply.
-  hadd dccore.swm k.SEARCH_FOLDER_MAX_CHARS 2145 int 1 2144
-  hadd dccore.swm pg.SEARCH_FOLDER_MAX_CHARS 7
-  hadd dccore.swm n.SEARCH_FOLDER_MAX_CHARS Longest folder shown (characters)
-  hadd dccore.swm h.SEARCH_FOLDER_MAX_CHARS The longest folder a From: line shows~2C in characters~2C so the line does not wrap. A longer one is cut from the left and starts with ...~2C keeping its end~2C where the album name is. At least 10.
-  hadd dccore.swm k.PAUSE_ON_UPDATE 2149 bool 1 2149
-  hadd dccore.swm pg.PAUSE_ON_UPDATE 7
-  hadd dccore.swm n.PAUSE_ON_UPDATE Pause sharing during !update
-  hadd dccore.swm h.PAUSE_ON_UPDATE While a rebuilt list is being swapped in - a few seconds at the end of !update - refuse searches and file requests. The rest of the rebuild~2C they are answered from the current list~2C which stays complete until the swap.
-  hadd dccore.swm k.PAUSE_FOR_WHOLE_UPDATE 2153 bool 1 2153
-  hadd dccore.swm pg.PAUSE_FOR_WHOLE_UPDATE 7
-  hadd dccore.swm n.PAUSE_FOR_WHOLE_UPDATE Pause for the whole rebuild
-  hadd dccore.swm h.PAUSE_FOR_WHOLE_UPDATE The old behaviour: refuse searches and file requests for the whole rebuild~2C not only while the new list is swapped in. Only needs Pause sharing during !update on too.
-  hadd dccore.swm k.REHASH_TRANSFER_WAIT 2157 int 1 2156
-  hadd dccore.swm pg.REHASH_TRANSFER_WAIT 7
-  hadd dccore.swm n.REHASH_TRANSFER_WAIT Seconds a rehash waits for transfers to finish
-  hadd dccore.swm h.REHASH_TRANSFER_WAIT When you rehash (reload settings)~2C how many seconds the bot waits for running transfers to finish first before reloading anyway. 0 reloads straight away.
-  hadd dccore.swm k.DCC_BLOCK_SIZE 2161 choice 1 2160
-  hadd dccore.swm pg.DCC_BLOCK_SIZE 8
+  hadd dccore.swm k.FILE_DIRECTORY 2121 str 1 2120
+  hadd dccore.swm pg.FILE_DIRECTORY 9
+  hadd dccore.swm n.FILE_DIRECTORY Music directory (used only when no folders are set)
+  hadd dccore.swm h.FILE_DIRECTORY The folder with the files you share. Used only if you have not added folders on the Library page - if you have~2C those are used instead and this is ignored.
+  hadd dccore.swm k.LIST_BASE_NAME 2125 str 1 2124
+  hadd dccore.swm pg.LIST_BASE_NAME 9
+  hadd dccore.swm n.LIST_BASE_NAME List base name
+  hadd dccore.swm h.LIST_BASE_NAME The name your list files start with (for example DCCore-2026-09-18.txt). Normally the same as the bot's nickname~2C which is what happens if you leave it alone. Letters~2C digits and - _ . ~5B ~5D ~7B ~7D ^ ~60 only~2C so it is a file name on every system.
+  hadd dccore.swm k.LIST_FORMAT 2129 choice 1 2128
+  hadd dccore.swm pg.LIST_FORMAT 9
+  hadd dccore.swm n.LIST_FORMAT List delivery format
+  hadd dccore.swm ch.LIST_FORMAT txt zip rar
+  hadd dccore.swm cl.LIST_FORMAT.1 txt
+  hadd dccore.swm cl.LIST_FORMAT.2 zip
+  hadd dccore.swm cl.LIST_FORMAT.3 rar
+  hadd dccore.swm h.LIST_FORMAT How the list is sent to somebody who asks for it: as a plain .txt~2C packed as .zip~2C or packed as .rar. Zip is what most people can open. Rar needs the rar program installed.
+  hadd dccore.swm k.LIST_IGNORED_EXTENSIONS 2133 list 1 2132
+  hadd dccore.swm pg.LIST_IGNORED_EXTENSIONS 9
+  hadd dccore.swm n.LIST_IGNORED_EXTENSIONS File types to leave out of the list
+  hadd dccore.swm h.LIST_IGNORED_EXTENSIONS File types to leave out of your list~2C separated by commas (for example .db~2C .ini). Everything else under your shared folders is listed and can be downloaded~2C so keep private files out of those folders.
+  hadd dccore.swm k.SEPARATE_VIDEO_LIST 2137 bool 1 2137
+  hadd dccore.swm pg.SEPARATE_VIDEO_LIST 9
+  hadd dccore.swm n.SEPARATE_VIDEO_LIST Publish film and series as a separate list
+  hadd dccore.swm h.SEPARATE_VIDEO_LIST Put films and series in their own list file~2C separate from the music~2C instead of one list with everything mixed. Both files are sent together when somebody asks for your list.
+  hadd dccore.swm k.LIST_VIDEO_EXTENSIONS 2141 list 1 2140
+  hadd dccore.swm pg.LIST_VIDEO_EXTENSIONS 9
+  hadd dccore.swm n.LIST_VIDEO_EXTENSIONS File types that go in the film list
+  hadd dccore.swm h.LIST_VIDEO_EXTENSIONS Which file types count as video and go in the film list (when the separate film list is on). Separated by commas.
+  hadd dccore.swm k.LIST_VIDEO_COMPANION_EXTENSIONS 2145 list 1 2144
+  hadd dccore.swm pg.LIST_VIDEO_COMPANION_EXTENSIONS 9
+  hadd dccore.swm n.LIST_VIDEO_COMPANION_EXTENSIONS File types that follow a film into its list (subtitles~2C .nfo~2C .sfv)
+  hadd dccore.swm h.LIST_VIDEO_COMPANION_EXTENSIONS File types that belong to a film and should go in the film list with it - subtitles~2C .nfo~2C .sfv - when they are in the same folder as a video. In a folder with no video (an album) they stay with the music.
+  hadd dccore.swm k.RAR_ENABLED 2149 bool 1 2149
+  hadd dccore.swm pg.RAR_ENABLED 9
+  hadd dccore.swm n.RAR_ENABLED Enable !rar folder packing
+  hadd dccore.swm h.RAR_ENABLED Let people request a whole folder packed as one .rar file (with !rar). Turn off if you do not have the rar program or do not want the bot packing folders. Single-file downloads work either way.
+  hadd dccore.swm k.RAR_EXTENSIONS 2153 list 1 2152
+  hadd dccore.swm pg.RAR_EXTENSIONS 9
+  hadd dccore.swm n.RAR_EXTENSIONS File types a folder needs to be !rar-packable
+  hadd dccore.swm h.RAR_EXTENSIONS A folder can be requested as a .rar only if it contains one of these file types~2C directly or in its disc folders (CD1~2C Disc 2). The default is music formats~2C so albums can be packed but a folder with one big film cannot.
+  hadd dccore.swm k.RAR_BINARY 2157 str 1 2156
+  hadd dccore.swm pg.RAR_BINARY 9
+  hadd dccore.swm n.RAR_BINARY RAR binary path
+  hadd dccore.swm h.RAR_BINARY Where the rar program is on this machine. Leave empty and the bot finds it by itself (on the PATH~2C or in WinRAR's folder on Windows). It also opens a list another bot sends as .rar; without it such a list is refused.
+  hadd dccore.swm k.MAX_RAR_FOLDER_SIZE 2161 int 1048576 2160
+  hadd dccore.swm pg.MAX_RAR_FOLDER_SIZE 9
+  hadd dccore.swm n.MAX_RAR_FOLDER_SIZE Largest folder !rar will pack (0 = no limit) (MB)
+  hadd dccore.swm h.MAX_RAR_FOLDER_SIZE The biggest folder the bot will pack as a .rar~2C in bytes. Stops somebody asking for a folder of hundreds of gigabytes. 10 GB fits any album or box set; 0 means no limit.
+  hadd dccore.swm k.RAR_TIMEOUT 2165 int 1 2164
+  hadd dccore.swm pg.RAR_TIMEOUT 9
+  hadd dccore.swm n.RAR_TIMEOUT RAR pack timeout (seconds)
+  hadd dccore.swm h.RAR_TIMEOUT How many seconds a folder may take to pack before the bot gives up on it.
+  hadd dccore.swm k.LIST_HEADER_FILE 2169 str 1 2168
+  hadd dccore.swm pg.LIST_HEADER_FILE 9
+  hadd dccore.swm n.LIST_HEADER_FILE List banner file
+  hadd dccore.swm h.LIST_HEADER_FILE A text file whose contents are printed at the top of your list - a greeting~2C your channel name~2C some ASCII art. If the file does not exist~2C nothing is added.
+  hadd dccore.swm k.LIST_HEADER_MAX_BYTES 2173 int 1024 2172
+  hadd dccore.swm pg.LIST_HEADER_MAX_BYTES 9
+  hadd dccore.swm n.LIST_HEADER_MAX_BYTES List banner size limit (KB)
+  hadd dccore.swm h.LIST_HEADER_MAX_BYTES The most of that file that will be used~2C in bytes~2C so a wrong file cannot bloat every list.
+  hadd dccore.swm k.LIST_SHOW_AUDIO_INFO 2177 bool 1 2177
+  hadd dccore.swm pg.LIST_SHOW_AUDIO_INFO 9
+  hadd dccore.swm n.LIST_SHOW_AUDIO_INFO Length and quality in the list
+  hadd dccore.swm h.LIST_SHOW_AUDIO_INFO Add each MP3 and FLAC file's length and quality after its size in your list~2C e.g. 10.3MB 4m31s 320/44.1/JS. Every audio file is read once~2C in the background after the list is published; searches and downloads pause only for the seconds the lengths take to swap in. Tools~2C Read audio info runs it alone.
+  hadd dccore.swm k.LIST_REBUILD_SCHEDULE 2181 str 1 2180
+  hadd dccore.swm pg.LIST_REBUILD_SCHEDULE 10
+  hadd dccore.swm n.LIST_REBUILD_SCHEDULE Rebuild the list automatically
+  hadd dccore.swm h.LIST_REBUILD_SCHEDULE Rebuild the list by itself~2C the same way !update does. Write daily 04:00~2C weekly sun 04:00~2C monthly 1 03:30 or every 12h (hours since the last rebuild~2C including yours). Empty: only when you ask. The bot's own clock; if it was off at that time~2C it rebuilds when it starts again.
+  hadd dccore.swm k.LIST_UPDATE_TIMEOUT 2185 int 1 2184
+  hadd dccore.swm pg.LIST_UPDATE_TIMEOUT 10
+  hadd dccore.swm n.LIST_UPDATE_TIMEOUT List rebuild hard cap (seconds~2C 0 = none)
+  hadd dccore.swm h.LIST_UPDATE_TIMEOUT A hard limit in seconds on how long a list rebuild may run. 0 means no limit~2C which is the right choice: a huge library can genuinely take hours~2C and the setting below already catches a rebuild that has stopped doing anything.
+  hadd dccore.swm k.LIST_UPDATE_STALL_SECONDS 2189 int 1 2188
+  hadd dccore.swm pg.LIST_UPDATE_STALL_SECONDS 10
+  hadd dccore.swm n.LIST_UPDATE_STALL_SECONDS Give up if a rebuild reports nothing for (seconds)
+  hadd dccore.swm h.LIST_UPDATE_STALL_SECONDS If a list rebuild reports no progress for this many seconds~2C it is treated as stuck and stopped. 15 minutes is generous on purpose so a slow network drive is not cut off. A silent background audio reading is stopped the same way~2C keeping what it read.
+  hadd dccore.swm k.LIST_AUDIO_INFO_MINUTES 2193 int 1 2192
+  hadd dccore.swm pg.LIST_AUDIO_INFO_MINUTES 10
+  hadd dccore.swm n.LIST_AUDIO_INFO_MINUTES Time limit for reading audio files (no longer used)
+  hadd dccore.swm h.LIST_AUDIO_INFO_MINUTES No longer used. Audio files are now read after the list is published~2C in the background and with no time limit~2C so nothing waits for them. Kept only so an older settings file still loads.
+  hadd dccore.swm k.LIST_AUDIO_INFO_THREADS 2197 int 1 2196
+  hadd dccore.swm pg.LIST_AUDIO_INFO_THREADS 10
+  hadd dccore.swm n.LIST_AUDIO_INFO_THREADS Audio files read at once
+  hadd dccore.swm h.LIST_AUDIO_INFO_THREADS How many audio files are read at once for their length and quality. On a network drive most of the time is waiting~2C so this is 64 by default; lower it only if a slow or small setup does not benefit. The reading says the rate it got~2C to compare. 1 to 128.
+  hadd dccore.swm k.LIST_SCAN_THREADS 2201 int 1 2200
+  hadd dccore.swm pg.LIST_SCAN_THREADS 10
+  hadd dccore.swm n.LIST_SCAN_THREADS Folders scanned at once
+  hadd dccore.swm h.LIST_SCAN_THREADS How many folders are listed at once while the list is rebuilt. On a network drive most of the time is waiting~2C so more at once makes every rebuild shorter. With Pause for the whole rebuild on~2C searches wait while it runs. 1 lists one folder at a time. 1 to 64.
+  hadd dccore.swm k.DCC_BLOCK_SIZE 2205 choice 1 2204
+  hadd dccore.swm pg.DCC_BLOCK_SIZE 11
   hadd dccore.swm n.DCC_BLOCK_SIZE Packet size
   hadd dccore.swm ch.DCC_BLOCK_SIZE 4096 8192 16384 32768 65536 131072 262144
   hadd dccore.swm cl.DCC_BLOCK_SIZE.1 4 KB
@@ -4805,110 +4853,62 @@ alias dccore.sw.data {
   hadd dccore.swm cl.DCC_BLOCK_SIZE.6 128 KB
   hadd dccore.swm cl.DCC_BLOCK_SIZE.7 256 KB
   hadd dccore.swm h.DCC_BLOCK_SIZE How much the bot sends at once~2C in bytes. The default~2C 64 KB~2C suits most bots. 128 or 256 KB use less CPU and suit a fast seedbox~2C but Speed now and the advert's Speed: then move a block at a time~2C so slow sends read 0 or jump~2C and a stalled receiver is dropped after a minute per 64 KB. 4-16 KB cost 2-3 times the CPU.
-  hadd dccore.swm k.DCC_SEND_BUFFER 2165 int 1024 2164
-  hadd dccore.swm pg.DCC_SEND_BUFFER 8
+  hadd dccore.swm k.DCC_SEND_BUFFER 2209 int 1024 2208
+  hadd dccore.swm pg.DCC_SEND_BUFFER 11
   hadd dccore.swm n.DCC_SEND_BUFFER Socket send buffer (0 = the default for your platform) (KB)
   hadd dccore.swm h.DCC_SEND_BUFFER How much data the operating system may hold in flight for one send~2C in bytes. 0 uses the platform default: 4 MB on Windows~2C which would otherwise hold only 64 KB~2C and the system's own tuning on Linux and macOS - right for nearly every connection. Only worth trying on a very fast link to a distant downloader.
-  hadd dccore.swm k.DCC_PORT_START 2169 int 1 2168
-  hadd dccore.swm pg.DCC_PORT_START 8
+  hadd dccore.swm k.DCC_PORT_START 2213 int 1 2212
+  hadd dccore.swm pg.DCC_PORT_START 11
   hadd dccore.swm n.DCC_PORT_START DCC port range start
   hadd dccore.swm h.DCC_PORT_START The first port the bot listens on when sending a file. If you are behind a router~2C forward this whole range (start to end) to the machine running the bot~2C or nobody can download from you.
-  hadd dccore.swm k.DCC_PORT_END 2173 int 1 2172
-  hadd dccore.swm pg.DCC_PORT_END 8
+  hadd dccore.swm k.DCC_PORT_END 2217 int 1 2216
+  hadd dccore.swm pg.DCC_PORT_END 11
   hadd dccore.swm n.DCC_PORT_END DCC port range end
   hadd dccore.swm h.DCC_PORT_END The last port of that range. Sends~2C downloads from other bots and a listen-mode admin console all take their ports from it~2C so keep at least as many ports as your send slots and fetch slots together~2C plus one.
-  hadd dccore.swm k.DCC_ACCEPT_TIMEOUT 2177 int 1 2176
-  hadd dccore.swm pg.DCC_ACCEPT_TIMEOUT 8
+  hadd dccore.swm k.DCC_ACCEPT_TIMEOUT 2221 int 1 2220
+  hadd dccore.swm pg.DCC_ACCEPT_TIMEOUT 11
   hadd dccore.swm n.DCC_ACCEPT_TIMEOUT Wait for the receiver to connect (seconds)
   hadd dccore.swm h.DCC_ACCEPT_TIMEOUT How many seconds the bot waits for someone to accept a file it has offered before withdrawing the offer and counting one failed attempt. A person who has to click Accept in a dialog often needs more than the default 30.
-  hadd dccore.swm k.MAX_SEND_FAILS 2181 int 1 2180
-  hadd dccore.swm pg.MAX_SEND_FAILS 8
+  hadd dccore.swm k.MAX_SEND_FAILS 2225 int 1 2224
+  hadd dccore.swm pg.MAX_SEND_FAILS 11
   hadd dccore.swm n.MAX_SEND_FAILS Max send failures
   hadd dccore.swm h.MAX_SEND_FAILS How many times the bot retries sending one queued file if the download does not connect or fails~2C before dropping it from the queue and telling the person.
-  hadd dccore.swm k.FILE_DIRECTORY 2185 str 1 2184
-  hadd dccore.swm pg.FILE_DIRECTORY 9
-  hadd dccore.swm n.FILE_DIRECTORY Music directory (used only when no folders are set)
-  hadd dccore.swm h.FILE_DIRECTORY The folder with the files you share. Used only if you have not added folders on the Library page - if you have~2C those are used instead and this is ignored.
-  hadd dccore.swm k.LIST_BASE_NAME 2189 str 1 2188
-  hadd dccore.swm pg.LIST_BASE_NAME 9
-  hadd dccore.swm n.LIST_BASE_NAME List base name
-  hadd dccore.swm h.LIST_BASE_NAME The name your list files start with (for example DCCore-2026-09-18.txt). Normally the same as the bot's nickname~2C which is what happens if you leave it alone. Letters~2C digits and - _ . ~5B ~5D ~7B ~7D ^ ~60 only~2C so it is a file name on every system.
-  hadd dccore.swm k.LIST_FORMAT 2193 choice 1 2192
-  hadd dccore.swm pg.LIST_FORMAT 9
-  hadd dccore.swm n.LIST_FORMAT List delivery format
-  hadd dccore.swm ch.LIST_FORMAT txt zip rar
-  hadd dccore.swm cl.LIST_FORMAT.1 txt
-  hadd dccore.swm cl.LIST_FORMAT.2 zip
-  hadd dccore.swm cl.LIST_FORMAT.3 rar
-  hadd dccore.swm h.LIST_FORMAT How the list is sent to somebody who asks for it: as a plain .txt~2C packed as .zip~2C or packed as .rar. Zip is what most people can open. Rar needs the rar program installed.
-  hadd dccore.swm k.LIST_IGNORED_EXTENSIONS 2197 list 1 2196
-  hadd dccore.swm pg.LIST_IGNORED_EXTENSIONS 9
-  hadd dccore.swm n.LIST_IGNORED_EXTENSIONS File types to leave out of the list
-  hadd dccore.swm h.LIST_IGNORED_EXTENSIONS File types to leave out of your list~2C separated by commas (for example .db~2C .ini). Everything else under your shared folders is listed and can be downloaded~2C so keep private files out of those folders.
-  hadd dccore.swm k.SEPARATE_VIDEO_LIST 2201 bool 1 2201
-  hadd dccore.swm pg.SEPARATE_VIDEO_LIST 9
-  hadd dccore.swm n.SEPARATE_VIDEO_LIST Publish film and series as a separate list
-  hadd dccore.swm h.SEPARATE_VIDEO_LIST Put films and series in their own list file~2C separate from the music~2C instead of one list with everything mixed. Both files are sent together when somebody asks for your list.
-  hadd dccore.swm k.LIST_VIDEO_EXTENSIONS 2205 list 1 2204
-  hadd dccore.swm pg.LIST_VIDEO_EXTENSIONS 9
-  hadd dccore.swm n.LIST_VIDEO_EXTENSIONS File types that go in the film list
-  hadd dccore.swm h.LIST_VIDEO_EXTENSIONS Which file types count as video and go in the film list (when the separate film list is on). Separated by commas.
-  hadd dccore.swm k.LIST_VIDEO_COMPANION_EXTENSIONS 2209 list 1 2208
-  hadd dccore.swm pg.LIST_VIDEO_COMPANION_EXTENSIONS 9
-  hadd dccore.swm n.LIST_VIDEO_COMPANION_EXTENSIONS File types that follow a film into its list (subtitles~2C .nfo~2C .sfv)
-  hadd dccore.swm h.LIST_VIDEO_COMPANION_EXTENSIONS File types that belong to a film and should go in the film list with it - subtitles~2C .nfo~2C .sfv - when they are in the same folder as a video. In a folder with no video (an album) they stay with the music.
-  hadd dccore.swm k.RAR_EXTENSIONS 2213 list 1 2212
-  hadd dccore.swm pg.RAR_EXTENSIONS 9
-  hadd dccore.swm n.RAR_EXTENSIONS File types a folder needs to be !rar-packable
-  hadd dccore.swm h.RAR_EXTENSIONS A folder can be requested as a .rar only if it contains one of these file types~2C directly or in its disc folders (CD1~2C Disc 2). The default is music formats~2C so albums can be packed but a folder with one big film cannot.
-  hadd dccore.swm k.RAR_BINARY 2217 str 1 2216
-  hadd dccore.swm pg.RAR_BINARY 9
-  hadd dccore.swm n.RAR_BINARY RAR binary path
-  hadd dccore.swm h.RAR_BINARY Where the rar program is on this machine. Leave empty and the bot finds it by itself (on the PATH~2C or in WinRAR's folder on Windows). It also opens a list another bot sends as .rar; without it such a list is refused.
-  hadd dccore.swm k.MAX_RAR_FOLDER_SIZE 2221 int 1048576 2220
-  hadd dccore.swm pg.MAX_RAR_FOLDER_SIZE 9
-  hadd dccore.swm n.MAX_RAR_FOLDER_SIZE Largest folder !rar will pack (0 = no limit) (MB)
-  hadd dccore.swm h.MAX_RAR_FOLDER_SIZE The biggest folder the bot will pack as a .rar~2C in bytes. Stops somebody asking for a folder of hundreds of gigabytes. 10 GB fits any album or box set; 0 means no limit.
-  hadd dccore.swm k.RAR_TIMEOUT 2225 int 1 2224
-  hadd dccore.swm pg.RAR_TIMEOUT 9
-  hadd dccore.swm n.RAR_TIMEOUT RAR pack timeout (seconds)
-  hadd dccore.swm h.RAR_TIMEOUT How many seconds a folder may take to pack before the bot gives up on it.
-  hadd dccore.swm k.LIST_HEADER_FILE 2229 str 1 2228
-  hadd dccore.swm pg.LIST_HEADER_FILE 9
-  hadd dccore.swm n.LIST_HEADER_FILE List banner file
-  hadd dccore.swm h.LIST_HEADER_FILE A text file whose contents are printed at the top of your list - a greeting~2C your channel name~2C some ASCII art. If the file does not exist~2C nothing is added.
-  hadd dccore.swm k.LIST_HEADER_MAX_BYTES 2233 int 1024 2232
-  hadd dccore.swm pg.LIST_HEADER_MAX_BYTES 9
-  hadd dccore.swm n.LIST_HEADER_MAX_BYTES List banner size limit (KB)
-  hadd dccore.swm h.LIST_HEADER_MAX_BYTES The most of that file that will be used~2C in bytes~2C so a wrong file cannot bloat every list.
-  hadd dccore.swm k.LIST_SHOW_AUDIO_INFO 2237 bool 1 2237
-  hadd dccore.swm pg.LIST_SHOW_AUDIO_INFO 9
-  hadd dccore.swm n.LIST_SHOW_AUDIO_INFO Length and quality in the list
-  hadd dccore.swm h.LIST_SHOW_AUDIO_INFO Add each MP3 and FLAC file's length and quality after its size in your list~2C e.g. 10.3MB 4m31s 320/44.1/JS. Every audio file is read once~2C in the background after the list is published; searches and downloads pause only for the seconds the lengths take to swap in. Tools~2C Read audio info runs it alone.
-  hadd dccore.swm k.LIST_REBUILD_SCHEDULE 2241 str 1 2240
-  hadd dccore.swm pg.LIST_REBUILD_SCHEDULE 12
-  hadd dccore.swm n.LIST_REBUILD_SCHEDULE Rebuild the list automatically
-  hadd dccore.swm h.LIST_REBUILD_SCHEDULE Rebuild the list by itself~2C the same way !update does. Write daily 04:00~2C weekly sun 04:00~2C monthly 1 03:30 or every 12h (hours since the last rebuild~2C including yours). Empty: only when you ask. The bot's own clock; if it was off at that time~2C it rebuilds when it starts again.
-  hadd dccore.swm k.LIST_UPDATE_TIMEOUT 2245 int 1 2244
-  hadd dccore.swm pg.LIST_UPDATE_TIMEOUT 12
-  hadd dccore.swm n.LIST_UPDATE_TIMEOUT List rebuild hard cap (seconds~2C 0 = none)
-  hadd dccore.swm h.LIST_UPDATE_TIMEOUT A hard limit in seconds on how long a list rebuild may run. 0 means no limit~2C which is the right choice: a huge library can genuinely take hours~2C and the setting below already catches a rebuild that has stopped doing anything.
-  hadd dccore.swm k.LIST_UPDATE_STALL_SECONDS 2249 int 1 2248
-  hadd dccore.swm pg.LIST_UPDATE_STALL_SECONDS 12
-  hadd dccore.swm n.LIST_UPDATE_STALL_SECONDS Give up if a rebuild reports nothing for (seconds)
-  hadd dccore.swm h.LIST_UPDATE_STALL_SECONDS If a list rebuild reports no progress for this many seconds~2C it is treated as stuck and stopped. 15 minutes is generous on purpose so a slow network drive is not cut off. A silent background audio reading is stopped the same way~2C keeping what it read.
-  hadd dccore.swm k.LIST_AUDIO_INFO_MINUTES 2253 int 1 2252
-  hadd dccore.swm pg.LIST_AUDIO_INFO_MINUTES 12
-  hadd dccore.swm n.LIST_AUDIO_INFO_MINUTES Time limit for reading audio files (no longer used)
-  hadd dccore.swm h.LIST_AUDIO_INFO_MINUTES No longer used. Audio files are now read after the list is published~2C in the background and with no time limit~2C so nothing waits for them. Kept only so an older settings file still loads.
-  hadd dccore.swm k.LIST_AUDIO_INFO_THREADS 2257 int 1 2256
-  hadd dccore.swm pg.LIST_AUDIO_INFO_THREADS 12
-  hadd dccore.swm n.LIST_AUDIO_INFO_THREADS Audio files read at once
-  hadd dccore.swm h.LIST_AUDIO_INFO_THREADS How many audio files are read at once for their length and quality. On a network drive most of the time is waiting~2C so this is 64 by default; lower it only if a slow or small setup does not benefit. The reading says the rate it got~2C to compare. 1 to 128.
-  hadd dccore.swm k.LIST_SCAN_THREADS 2261 int 1 2260
-  hadd dccore.swm pg.LIST_SCAN_THREADS 12
-  hadd dccore.swm n.LIST_SCAN_THREADS Folders scanned at once
-  hadd dccore.swm h.LIST_SCAN_THREADS How many folders are listed at once while the list is rebuilt. On a network drive most of the time is waiting~2C so more at once makes every rebuild shorter. With Pause for the whole rebuild on~2C searches wait while it runs. 1 lists one folder at a time. 1 to 64.
+  hadd dccore.swm k.MAX_DCC_SLOTS 2229 int 1 2228
+  hadd dccore.swm pg.MAX_DCC_SLOTS 12
+  hadd dccore.swm n.MAX_DCC_SLOTS Max simultaneous sends
+  hadd dccore.swm h.MAX_DCC_SLOTS How many files the bot sends at the same time. Everyone else waits in the queue. 3 is a good number for a home connection; raise it only if your upload speed can take it.
+  hadd dccore.swm k.MAX_USER_QUEUE 2233 int 1 2232
+  hadd dccore.swm pg.MAX_USER_QUEUE 12
+  hadd dccore.swm n.MAX_USER_QUEUE Max queue per user
+  hadd dccore.swm h.MAX_USER_QUEUE The most files one person can have waiting in their queue at once.
+  hadd dccore.swm k.MAX_GLOBAL_QUEUE 2237 int 1 2236
+  hadd dccore.swm pg.MAX_GLOBAL_QUEUE 12
+  hadd dccore.swm n.MAX_GLOBAL_QUEUE Max global queue
+  hadd dccore.swm h.MAX_GLOBAL_QUEUE The most files that can be waiting across everybody's queues put together.
+  hadd dccore.swm k.MAX_SEARCH_RESULTS 2241 int 1 2240
+  hadd dccore.swm pg.MAX_SEARCH_RESULTS 12
+  hadd dccore.swm n.MAX_SEARCH_RESULTS Max search results
+  hadd dccore.swm h.MAX_SEARCH_RESULTS How many matching files are sent back to somebody who searches with @find. Each result is one line to that person.
+  hadd dccore.swm k.SEARCH_SHOW_FOLDER 2245 bool 1 2245
+  hadd dccore.swm pg.SEARCH_SHOW_FOLDER 12
+  hadd dccore.swm n.SEARCH_SHOW_FOLDER Name the folder in search replies
+  hadd dccore.swm h.SEARCH_SHOW_FOLDER In the reply to an @find~2C name each result's folder on a line of its own above its files~2C e.g. From: D:\MEDIA\Rock\Some Band\1999 - Some Album. One extra line per folder~2C not per file; the result lines stay exactly as they are. Off by default: every line is paced~2C so it slows the reply.
+  hadd dccore.swm k.SEARCH_FOLDER_MAX_CHARS 2249 int 1 2248
+  hadd dccore.swm pg.SEARCH_FOLDER_MAX_CHARS 12
+  hadd dccore.swm n.SEARCH_FOLDER_MAX_CHARS Longest folder shown (characters)
+  hadd dccore.swm h.SEARCH_FOLDER_MAX_CHARS The longest folder a From: line shows~2C in characters~2C so the line does not wrap. A longer one is cut from the left and starts with ...~2C keeping its end~2C where the album name is. At least 10.
+  hadd dccore.swm k.PAUSE_ON_UPDATE 2253 bool 1 2253
+  hadd dccore.swm pg.PAUSE_ON_UPDATE 12
+  hadd dccore.swm n.PAUSE_ON_UPDATE Pause sharing during !update
+  hadd dccore.swm h.PAUSE_ON_UPDATE While a rebuilt list is being swapped in - a few seconds at the end of !update - refuse searches and file requests. The rest of the rebuild~2C they are answered from the current list~2C which stays complete until the swap.
+  hadd dccore.swm k.PAUSE_FOR_WHOLE_UPDATE 2257 bool 1 2257
+  hadd dccore.swm pg.PAUSE_FOR_WHOLE_UPDATE 12
+  hadd dccore.swm n.PAUSE_FOR_WHOLE_UPDATE Pause for the whole rebuild
+  hadd dccore.swm h.PAUSE_FOR_WHOLE_UPDATE The old behaviour: refuse searches and file requests for the whole rebuild~2C not only while the new list is swapped in. Only needs Pause sharing during !update on too.
+  hadd dccore.swm k.REHASH_TRANSFER_WAIT 2261 int 1 2260
+  hadd dccore.swm pg.REHASH_TRANSFER_WAIT 12
+  hadd dccore.swm n.REHASH_TRANSFER_WAIT Seconds a rehash waits for transfers to finish
+  hadd dccore.swm h.REHASH_TRANSFER_WAIT When you rehash (reload settings)~2C how many seconds the bot waits for running transfers to finish first before reloading anyway. 0 reloads straight away.
   hadd dccore.swm k.AUTO_GRAB_LISTS 2265 bool 1 2265
   hadd dccore.swm pg.AUTO_GRAB_LISTS 13
   hadd dccore.swm n.AUTO_GRAB_LISTS Grab the lists of bots you have no list from
@@ -5267,114 +5267,114 @@ alias dccore.sw.data {
   hadd dccore.swm i.2037 @auto
   hadd dccore.swm i.2041 SEARCH_ENABLED
   hadd dccore.swm i.2045 ANNOUNCE_TRANSFERS
-  hadd dccore.swm i.2049 RAR_ENABLED
-  hadd dccore.swm i.2053 PRIVATE_MESSAGES_ENABLED
-  hadd dccore.swm i.2057 WEBUI_ENABLED
-  hadd dccore.swm i.2061 CTCP_VERSION_REPLY
-  hadd dccore.swm i.2065 CHECK_FOR_UPDATES
-  hadd dccore.swm i.2068 DEBUG_CHANNEL
-  hadd dccore.swm i.2069 DEBUG_CHANNEL
+  hadd dccore.swm i.2049 PRIVATE_MESSAGES_ENABLED
+  hadd dccore.swm i.2053 WEBUI_ENABLED
+  hadd dccore.swm i.2057 CTCP_VERSION_REPLY
+  hadd dccore.swm i.2061 CHECK_FOR_UPDATES
+  hadd dccore.swm i.2064 DEBUG_CHANNEL
+  hadd dccore.swm i.2065 DEBUG_CHANNEL
   hadd dccore.swm i.1520 CHANNEL
-  hadd dccore.swm i.2072 ADMIN_NICK
-  hadd dccore.swm i.2073 ADMIN_NICK
-  hadd dccore.swm i.2076 THEME
-  hadd dccore.swm i.2077 THEME
-  hadd dccore.swm i.2080 CUSTOM_THEME_BORDER
-  hadd dccore.swm i.2081 CUSTOM_THEME_BORDER
-  hadd dccore.swm i.2082 CUSTOM_THEME_BORDER
-  hadd dccore.swm i.2084 CUSTOM_THEME_SEPARATOR
-  hadd dccore.swm i.2085 CUSTOM_THEME_SEPARATOR
-  hadd dccore.swm i.2086 CUSTOM_THEME_SEPARATOR
-  hadd dccore.swm i.2088 CUSTOM_THEME_TEXTBOX
-  hadd dccore.swm i.2089 CUSTOM_THEME_TEXTBOX
-  hadd dccore.swm i.2090 CUSTOM_THEME_TEXTBOX
-  hadd dccore.swm i.2092 CUSTOM_THEME_VALUE
-  hadd dccore.swm i.2093 CUSTOM_THEME_VALUE
-  hadd dccore.swm i.2094 CUSTOM_THEME_VALUE
-  hadd dccore.swm i.2096 CUSTOM_THEME_ALERT
-  hadd dccore.swm i.2097 CUSTOM_THEME_ALERT
-  hadd dccore.swm i.2098 CUSTOM_THEME_ALERT
-  hadd dccore.swm i.2100 CUSTOM_THEME_ACCENT
-  hadd dccore.swm i.2101 CUSTOM_THEME_ACCENT
-  hadd dccore.swm i.2102 CUSTOM_THEME_ACCENT
-  hadd dccore.swm i.2104 ANNOUNCE_INTERVAL
-  hadd dccore.swm i.2105 ANNOUNCE_INTERVAL
-  hadd dccore.swm i.2108 BROADCAST_SEARCH_CHANNEL
-  hadd dccore.swm i.2109 BROADCAST_SEARCH_CHANNEL
-  hadd dccore.swm i.2112 BROADCAST_SEARCH_COOLDOWN
-  hadd dccore.swm i.2113 BROADCAST_SEARCH_COOLDOWN
-  hadd dccore.swm i.2116 MSG_DELAY
-  hadd dccore.swm i.2117 MSG_DELAY
-  hadd dccore.swm i.2120 DEBUG_MSG_DELAY
-  hadd dccore.swm i.2121 DEBUG_MSG_DELAY
-  hadd dccore.swm i.2124 MAX_DCC_SLOTS
-  hadd dccore.swm i.2125 MAX_DCC_SLOTS
-  hadd dccore.swm i.2128 MAX_USER_QUEUE
-  hadd dccore.swm i.2129 MAX_USER_QUEUE
-  hadd dccore.swm i.2132 MAX_GLOBAL_QUEUE
-  hadd dccore.swm i.2133 MAX_GLOBAL_QUEUE
-  hadd dccore.swm i.2136 MAX_SEARCH_RESULTS
-  hadd dccore.swm i.2137 MAX_SEARCH_RESULTS
-  hadd dccore.swm i.2141 SEARCH_SHOW_FOLDER
-  hadd dccore.swm i.2144 SEARCH_FOLDER_MAX_CHARS
-  hadd dccore.swm i.2145 SEARCH_FOLDER_MAX_CHARS
-  hadd dccore.swm i.2149 PAUSE_ON_UPDATE
-  hadd dccore.swm i.2153 PAUSE_FOR_WHOLE_UPDATE
-  hadd dccore.swm i.2156 REHASH_TRANSFER_WAIT
-  hadd dccore.swm i.2157 REHASH_TRANSFER_WAIT
-  hadd dccore.swm i.2160 DCC_BLOCK_SIZE
-  hadd dccore.swm i.2161 DCC_BLOCK_SIZE
-  hadd dccore.swm i.2164 DCC_SEND_BUFFER
-  hadd dccore.swm i.2165 DCC_SEND_BUFFER
-  hadd dccore.swm i.2168 DCC_PORT_START
-  hadd dccore.swm i.2169 DCC_PORT_START
-  hadd dccore.swm i.2172 DCC_PORT_END
-  hadd dccore.swm i.2173 DCC_PORT_END
-  hadd dccore.swm i.2176 DCC_ACCEPT_TIMEOUT
-  hadd dccore.swm i.2177 DCC_ACCEPT_TIMEOUT
-  hadd dccore.swm i.2180 MAX_SEND_FAILS
-  hadd dccore.swm i.2181 MAX_SEND_FAILS
-  hadd dccore.swm i.2184 FILE_DIRECTORY
-  hadd dccore.swm i.2185 FILE_DIRECTORY
-  hadd dccore.swm i.2186 FILE_DIRECTORY
-  hadd dccore.swm i.2188 LIST_BASE_NAME
-  hadd dccore.swm i.2189 LIST_BASE_NAME
-  hadd dccore.swm i.2192 LIST_FORMAT
-  hadd dccore.swm i.2193 LIST_FORMAT
-  hadd dccore.swm i.2196 LIST_IGNORED_EXTENSIONS
-  hadd dccore.swm i.2197 LIST_IGNORED_EXTENSIONS
-  hadd dccore.swm i.2201 SEPARATE_VIDEO_LIST
-  hadd dccore.swm i.2204 LIST_VIDEO_EXTENSIONS
-  hadd dccore.swm i.2205 LIST_VIDEO_EXTENSIONS
-  hadd dccore.swm i.2208 LIST_VIDEO_COMPANION_EXTENSIONS
-  hadd dccore.swm i.2209 LIST_VIDEO_COMPANION_EXTENSIONS
-  hadd dccore.swm i.2212 RAR_EXTENSIONS
-  hadd dccore.swm i.2213 RAR_EXTENSIONS
-  hadd dccore.swm i.2216 RAR_BINARY
-  hadd dccore.swm i.2217 RAR_BINARY
-  hadd dccore.swm i.2218 RAR_BINARY
-  hadd dccore.swm i.2220 MAX_RAR_FOLDER_SIZE
-  hadd dccore.swm i.2221 MAX_RAR_FOLDER_SIZE
-  hadd dccore.swm i.2224 RAR_TIMEOUT
-  hadd dccore.swm i.2225 RAR_TIMEOUT
-  hadd dccore.swm i.2228 LIST_HEADER_FILE
-  hadd dccore.swm i.2229 LIST_HEADER_FILE
-  hadd dccore.swm i.2230 LIST_HEADER_FILE
-  hadd dccore.swm i.2232 LIST_HEADER_MAX_BYTES
-  hadd dccore.swm i.2233 LIST_HEADER_MAX_BYTES
-  hadd dccore.swm i.2237 LIST_SHOW_AUDIO_INFO
-  hadd dccore.swm i.2240 LIST_REBUILD_SCHEDULE
-  hadd dccore.swm i.2241 LIST_REBUILD_SCHEDULE
-  hadd dccore.swm i.2244 LIST_UPDATE_TIMEOUT
-  hadd dccore.swm i.2245 LIST_UPDATE_TIMEOUT
-  hadd dccore.swm i.2248 LIST_UPDATE_STALL_SECONDS
-  hadd dccore.swm i.2249 LIST_UPDATE_STALL_SECONDS
-  hadd dccore.swm i.2252 LIST_AUDIO_INFO_MINUTES
-  hadd dccore.swm i.2253 LIST_AUDIO_INFO_MINUTES
-  hadd dccore.swm i.2256 LIST_AUDIO_INFO_THREADS
-  hadd dccore.swm i.2257 LIST_AUDIO_INFO_THREADS
-  hadd dccore.swm i.2260 LIST_SCAN_THREADS
-  hadd dccore.swm i.2261 LIST_SCAN_THREADS
+  hadd dccore.swm i.2068 ADMIN_NICK
+  hadd dccore.swm i.2069 ADMIN_NICK
+  hadd dccore.swm i.2072 THEME
+  hadd dccore.swm i.2073 THEME
+  hadd dccore.swm i.2076 CUSTOM_THEME_BORDER
+  hadd dccore.swm i.2077 CUSTOM_THEME_BORDER
+  hadd dccore.swm i.2078 CUSTOM_THEME_BORDER
+  hadd dccore.swm i.2080 CUSTOM_THEME_SEPARATOR
+  hadd dccore.swm i.2081 CUSTOM_THEME_SEPARATOR
+  hadd dccore.swm i.2082 CUSTOM_THEME_SEPARATOR
+  hadd dccore.swm i.2084 CUSTOM_THEME_TEXTBOX
+  hadd dccore.swm i.2085 CUSTOM_THEME_TEXTBOX
+  hadd dccore.swm i.2086 CUSTOM_THEME_TEXTBOX
+  hadd dccore.swm i.2088 CUSTOM_THEME_VALUE
+  hadd dccore.swm i.2089 CUSTOM_THEME_VALUE
+  hadd dccore.swm i.2090 CUSTOM_THEME_VALUE
+  hadd dccore.swm i.2092 CUSTOM_THEME_ALERT
+  hadd dccore.swm i.2093 CUSTOM_THEME_ALERT
+  hadd dccore.swm i.2094 CUSTOM_THEME_ALERT
+  hadd dccore.swm i.2096 CUSTOM_THEME_ACCENT
+  hadd dccore.swm i.2097 CUSTOM_THEME_ACCENT
+  hadd dccore.swm i.2098 CUSTOM_THEME_ACCENT
+  hadd dccore.swm i.2100 ANNOUNCE_INTERVAL
+  hadd dccore.swm i.2101 ANNOUNCE_INTERVAL
+  hadd dccore.swm i.2104 BROADCAST_SEARCH_CHANNEL
+  hadd dccore.swm i.2105 BROADCAST_SEARCH_CHANNEL
+  hadd dccore.swm i.2108 BROADCAST_SEARCH_COOLDOWN
+  hadd dccore.swm i.2109 BROADCAST_SEARCH_COOLDOWN
+  hadd dccore.swm i.2112 MSG_DELAY
+  hadd dccore.swm i.2113 MSG_DELAY
+  hadd dccore.swm i.2116 DEBUG_MSG_DELAY
+  hadd dccore.swm i.2117 DEBUG_MSG_DELAY
+  hadd dccore.swm i.2120 FILE_DIRECTORY
+  hadd dccore.swm i.2121 FILE_DIRECTORY
+  hadd dccore.swm i.2122 FILE_DIRECTORY
+  hadd dccore.swm i.2124 LIST_BASE_NAME
+  hadd dccore.swm i.2125 LIST_BASE_NAME
+  hadd dccore.swm i.2128 LIST_FORMAT
+  hadd dccore.swm i.2129 LIST_FORMAT
+  hadd dccore.swm i.2132 LIST_IGNORED_EXTENSIONS
+  hadd dccore.swm i.2133 LIST_IGNORED_EXTENSIONS
+  hadd dccore.swm i.2137 SEPARATE_VIDEO_LIST
+  hadd dccore.swm i.2140 LIST_VIDEO_EXTENSIONS
+  hadd dccore.swm i.2141 LIST_VIDEO_EXTENSIONS
+  hadd dccore.swm i.2144 LIST_VIDEO_COMPANION_EXTENSIONS
+  hadd dccore.swm i.2145 LIST_VIDEO_COMPANION_EXTENSIONS
+  hadd dccore.swm i.2149 RAR_ENABLED
+  hadd dccore.swm i.2152 RAR_EXTENSIONS
+  hadd dccore.swm i.2153 RAR_EXTENSIONS
+  hadd dccore.swm i.2156 RAR_BINARY
+  hadd dccore.swm i.2157 RAR_BINARY
+  hadd dccore.swm i.2158 RAR_BINARY
+  hadd dccore.swm i.2160 MAX_RAR_FOLDER_SIZE
+  hadd dccore.swm i.2161 MAX_RAR_FOLDER_SIZE
+  hadd dccore.swm i.2164 RAR_TIMEOUT
+  hadd dccore.swm i.2165 RAR_TIMEOUT
+  hadd dccore.swm i.2168 LIST_HEADER_FILE
+  hadd dccore.swm i.2169 LIST_HEADER_FILE
+  hadd dccore.swm i.2170 LIST_HEADER_FILE
+  hadd dccore.swm i.2172 LIST_HEADER_MAX_BYTES
+  hadd dccore.swm i.2173 LIST_HEADER_MAX_BYTES
+  hadd dccore.swm i.2177 LIST_SHOW_AUDIO_INFO
+  hadd dccore.swm i.2180 LIST_REBUILD_SCHEDULE
+  hadd dccore.swm i.2181 LIST_REBUILD_SCHEDULE
+  hadd dccore.swm i.2184 LIST_UPDATE_TIMEOUT
+  hadd dccore.swm i.2185 LIST_UPDATE_TIMEOUT
+  hadd dccore.swm i.2188 LIST_UPDATE_STALL_SECONDS
+  hadd dccore.swm i.2189 LIST_UPDATE_STALL_SECONDS
+  hadd dccore.swm i.2192 LIST_AUDIO_INFO_MINUTES
+  hadd dccore.swm i.2193 LIST_AUDIO_INFO_MINUTES
+  hadd dccore.swm i.2196 LIST_AUDIO_INFO_THREADS
+  hadd dccore.swm i.2197 LIST_AUDIO_INFO_THREADS
+  hadd dccore.swm i.2200 LIST_SCAN_THREADS
+  hadd dccore.swm i.2201 LIST_SCAN_THREADS
+  hadd dccore.swm i.2204 DCC_BLOCK_SIZE
+  hadd dccore.swm i.2205 DCC_BLOCK_SIZE
+  hadd dccore.swm i.2208 DCC_SEND_BUFFER
+  hadd dccore.swm i.2209 DCC_SEND_BUFFER
+  hadd dccore.swm i.2212 DCC_PORT_START
+  hadd dccore.swm i.2213 DCC_PORT_START
+  hadd dccore.swm i.2216 DCC_PORT_END
+  hadd dccore.swm i.2217 DCC_PORT_END
+  hadd dccore.swm i.2220 DCC_ACCEPT_TIMEOUT
+  hadd dccore.swm i.2221 DCC_ACCEPT_TIMEOUT
+  hadd dccore.swm i.2224 MAX_SEND_FAILS
+  hadd dccore.swm i.2225 MAX_SEND_FAILS
+  hadd dccore.swm i.2228 MAX_DCC_SLOTS
+  hadd dccore.swm i.2229 MAX_DCC_SLOTS
+  hadd dccore.swm i.2232 MAX_USER_QUEUE
+  hadd dccore.swm i.2233 MAX_USER_QUEUE
+  hadd dccore.swm i.2236 MAX_GLOBAL_QUEUE
+  hadd dccore.swm i.2237 MAX_GLOBAL_QUEUE
+  hadd dccore.swm i.2240 MAX_SEARCH_RESULTS
+  hadd dccore.swm i.2241 MAX_SEARCH_RESULTS
+  hadd dccore.swm i.2245 SEARCH_SHOW_FOLDER
+  hadd dccore.swm i.2248 SEARCH_FOLDER_MAX_CHARS
+  hadd dccore.swm i.2249 SEARCH_FOLDER_MAX_CHARS
+  hadd dccore.swm i.2253 PAUSE_ON_UPDATE
+  hadd dccore.swm i.2257 PAUSE_FOR_WHOLE_UPDATE
+  hadd dccore.swm i.2260 REHASH_TRANSFER_WAIT
+  hadd dccore.swm i.2261 REHASH_TRANSFER_WAIT
   hadd dccore.swm i.2265 AUTO_GRAB_LISTS
   hadd dccore.swm i.2268 AUTO_GRAB_EVERY_MINUTES
   hadd dccore.swm i.2269 AUTO_GRAB_EVERY_MINUTES
@@ -5561,9 +5561,9 @@ alias dccore.sw.data {
   hadd dccore.swm lo.nodcx 2469
   hadd dccore.swm h.@nodcx This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
   hadd dccore.swm locals start.main start.chat start.downloads auto nodcx
-  hadd dccore.swm br.2186 dir FILE_DIRECTORY
-  hadd dccore.swm br.2218 file RAR_BINARY
-  hadd dccore.swm br.2230 file LIST_HEADER_FILE
+  hadd dccore.swm br.2122 dir FILE_DIRECTORY
+  hadd dccore.swm br.2158 file RAR_BINARY
+  hadd dccore.swm br.2170 file LIST_HEADER_FILE
   hadd dccore.swm br.2490 file CONSOLE_LOG_FILE
   hadd dccore.swm br.2510 dir TMP_ZIP_DIR
   hadd dccore.swm br.2514 dir LOCAL_LIST_DIR
@@ -5589,10 +5589,10 @@ alias dccore.sw.data {
   hadd dccore.swm br.2594 file PRIVATE_MESSAGES_FILE
   hadd dccore.swm br.2598 file DCC_QUEUE_FILE
   hadd dccore.swm bot.n 6
-  hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1506,1504,1505,2041,2045,2049,2053,2057,2061,2065,2069,1520,1521,1522,1523,2073,2077,1610,1611,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2102,2105,2109,2113,2117,2121,2125,2129,2133,2137
-  hadd dccore.swm bot.2 2141,2145,2149,2153,2157,2161,2165,2169,2173,2177,2181,2185,2186,2189,2193,2197,2201,2205,2209,2213,2217,2218,2221,2225,2229,2230,2233,2237,1540,1551,1554,1555,1557,1556,1700,1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715
-  hadd dccore.swm bot.3 1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747,1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1566
-  hadd dccore.swm bot.4 1567,1568,2241,2245,2249,2253,2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,1580,1583,1584,1585,1586,1587,1581,1582,1595,1597,1598,1596
+  hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1506,1504,1505,2041,2045,2049,2053,2057,2061,2065,1520,1521,1522,1523,2069,2073,1610,1611,2077,2078,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2105,2109,2113,2117,1540,1551,1554,1555,1557
+  hadd dccore.swm bot.2 1556,1700,1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747,1748
+  hadd dccore.swm bot.3 1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1566,1567,1568,2121,2122,2125,2129,2133,2137,2141,2145,2149,2153,2157,2158,2161,2165,2169,2170,2173,2177,2181,2185,2189,2193,2197,2201,2205,2209,2213,2217,2221,2225,2229
+  hadd dccore.swm bot.4 2233,2237,2241,2245,2249,2253,2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,1580,1583,1584,1585,1586,1587,1581,1582,1595,1597,1598,1596
   hadd dccore.swm bot.5 2385,2389,2393,2397,2401,2405,2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2473,2477,2481,2485,2489,2490,2493,2497,2501,2505,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545
   hadd dccore.swm bot.6 2546,2549,2550,2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598
   hadd dccore.swm confirm TMP_ZIP_DIR LOCAL_LIST_DIR FETCHED_FILES_DIR LIBRARY_FOLDERS_FILE LISTS_FILE BANS_FILE HARD_BANS_FILE STATS_FILE KNOWN_BOTS_FILE FETCHED_BOT_LISTS_FILE LIST_INDEX_FILE LIST_AUDIO_INFO_CACHE FETCH_HISTORY_FILE DOWNLOAD_COUNTS_FILE TRANSFER_LOG_FILE LIST_SIZE_FILE LIST_RAWBYTES_FILE LIST_PROGRESS_FILE ADMIN_TOKENS_FILE ON_CONNECT_FILE NOTICES_FILE PRIVATE_MESSAGES_FILE DCC_QUEUE_FILE

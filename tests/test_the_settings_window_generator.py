@@ -153,11 +153,15 @@ class EverySettingHasAPlace(unittest.TestCase):
     def test_the_mockups_most_used_switches_are_on_general_settings(self):
         general = dict(dict(layout.GROUPS)["General"])["General Settings"]
         keys = placed_keys([("General", [("General Settings", general)])])
-        for key in ("SEARCH_ENABLED", "ANNOUNCE_TRANSFERS", "RAR_ENABLED", "PRIVATE_MESSAGES_ENABLED",
+        for key in ("SEARCH_ENABLED", "ANNOUNCE_TRANSFERS", "PRIVATE_MESSAGES_ENABLED",
                     "WEBUI_ENABLED", "CTCP_VERSION_REPLY", "CHECK_FOR_UPDATES"):
             self.assertIn(key, keys)
         search = dict(dict(layout.GROUPS)["Sharing"])["Search"]
         self.assertNotIn("SEARCH_ENABLED", placed_keys([("Sharing", [("Search", search)])]))
+        # the !rar switch sits with the !rar settings, where the operator looked for it
+        settings = dict(dict(layout.GROUPS)["Sharing"])["List settings"]
+        self.assertEqual(dict(settings)["!rar packing"][0], "RAR_ENABLED")
+        self.assertNotIn("RAR_ENABLED", keys)
 
     def test_the_tabs_and_pages_are_the_mockups(self):
         self.assertEqual([group for group, _pages in layout.GROUPS],
@@ -165,7 +169,9 @@ class EverySettingHasAPlace(unittest.TestCase):
         pages = {group: [page for page, _sections in pages] for group, pages in layout.GROUPS}
         self.assertEqual(pages["General"], ["IRC Server", "General Settings", "Channels", "Operator",
                                             "Appearance", "Advertising"])
-        self.assertEqual(pages["Sharing"], ["Search", "Transfers", "Your list", "Lists", "Channel bindings", "Rebuild"])
+        # what is shared, where, how the list is built, then transfers and search
+        self.assertEqual(pages["Sharing"], ["Lists", "Channel bindings", "List settings", "Rebuild", "Transfers",
+                                            "Search"])
         self.assertEqual(pages["Downloads"], ["List discovery", "Fetch tuning", "Queue"])
         self.assertEqual(pages["Security"], ["Anti-flood", "Bans & ignores", "Private messages",
                                              "Admin console"])
@@ -208,12 +214,12 @@ class TheGeneratorRefusesABadLayout(unittest.TestCase):
             self.build(layout_copy(GROUPS=with_groups(longer)))
 
     def test_a_check_too_long_for_one_column_sends_the_page_to_one_column(self):
-        # Your list is two roomy columns; a check that fits one column of the
-        # page's width but not half of it makes it one column instead
+        # List settings is two roomy columns; a check that fits one column of
+        # the page's width but not half of it makes it one column instead
         def wider(groups):
             groups[1][1][2][1][1][1].append({"local": "x", "label": "A check box label " * 5})
         builder = self.build(layout_copy(GROUPS=with_groups(wider)))
-        page = next(number for number, _group, name in builder.pages if name == "Your list")
+        page = next(number for number, _group, name in builder.pages if name == "List settings")
         self.assertEqual(builder.page_layout[page], "compact 1")
 
     def test_a_page_that_cannot_fit_is_refused(self):

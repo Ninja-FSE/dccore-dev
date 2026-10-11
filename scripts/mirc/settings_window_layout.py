@@ -52,7 +52,7 @@ GROUPS = (
             ("Connection", (
                 {"local": "auto", "label": "Reconnect and log in to the bot by itself when it comes back"},
             )),
-            ("Sharing & search", ("SEARCH_ENABLED", "ANNOUNCE_TRANSFERS", "RAR_ENABLED")),
+            ("Sharing & search", ("SEARCH_ENABLED", "ANNOUNCE_TRANSFERS")),
             ("Messaging & dashboard", ("PRIVATE_MESSAGES_ENABLED", "WEBUI_ENABLED", "CTCP_VERSION_REPLY")),
             ("Updates", ("CHECK_FOR_UPDATES",)),
         )),
@@ -97,27 +97,6 @@ GROUPS = (
         )),
     )),
     ("Sharing", (
-        ("Search", (
-            ("Sending", ("MAX_DCC_SLOTS", "MAX_USER_QUEUE", "MAX_GLOBAL_QUEUE")),
-            ("Search (@find)", (
-                {"note": "How much the bot says back once it answers (the on/off switch is under "
-                         "General > General Settings)."},
-                "MAX_SEARCH_RESULTS", "SEARCH_SHOW_FOLDER", "SEARCH_FOLDER_MAX_CHARS",
-            )),
-            ("During a rebuild", ("PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE", "REHASH_TRANSFER_WAIT")),
-        )),
-        ("Transfers", (
-            ("Buffers & packet size", ("DCC_BLOCK_SIZE", "DCC_SEND_BUFFER")),
-            ("Ports & reliability", ("DCC_PORT_START", "DCC_PORT_END", "DCC_ACCEPT_TIMEOUT",
-                                     "MAX_SEND_FAILS")),
-        )),
-        ("Your list", (
-            ("Library", ("FILE_DIRECTORY", "LIST_BASE_NAME", "LIST_FORMAT", "LIST_IGNORED_EXTENSIONS")),
-            ("Film & series", ("SEPARATE_VIDEO_LIST", "LIST_VIDEO_EXTENSIONS",
-                               "LIST_VIDEO_COMPANION_EXTENSIONS")),
-            ("!rar packing", ("RAR_EXTENSIONS", "RAR_BINARY", "MAX_RAR_FOLDER_SIZE", "RAR_TIMEOUT")),
-            ("List banner", ("LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES", "LIST_SHOW_AUDIO_INFO")),
-        )),
         ("Lists", (
             ("", (
                 {"note": "What each list shares: a name, its folders, and whether it is primary (it "
@@ -135,10 +114,31 @@ GROUPS = (
             ("Channel bindings", ({"widget": "srvchans"},)),
             ("", ({"widget": "srvsaveb"},)),
         )),
+        ("List settings", (
+            ("Library", ("FILE_DIRECTORY", "LIST_BASE_NAME", "LIST_FORMAT", "LIST_IGNORED_EXTENSIONS")),
+            ("Film & series", ("SEPARATE_VIDEO_LIST", "LIST_VIDEO_EXTENSIONS",
+                               "LIST_VIDEO_COMPANION_EXTENSIONS")),
+            ("!rar packing", ("RAR_ENABLED", "RAR_EXTENSIONS", "RAR_BINARY", "MAX_RAR_FOLDER_SIZE", "RAR_TIMEOUT")),
+            ("List banner", ("LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES", "LIST_SHOW_AUDIO_INFO")),
+        )),
         ("Rebuild", (
             ("Automatic rebuild", ("LIST_REBUILD_SCHEDULE", "LIST_UPDATE_TIMEOUT",
                                    "LIST_UPDATE_STALL_SECONDS")),
             ("Performance", ("LIST_AUDIO_INFO_MINUTES", "LIST_AUDIO_INFO_THREADS", "LIST_SCAN_THREADS")),
+        )),
+        ("Transfers", (
+            ("Buffers & packet size", ("DCC_BLOCK_SIZE", "DCC_SEND_BUFFER")),
+            ("Ports & reliability", ("DCC_PORT_START", "DCC_PORT_END", "DCC_ACCEPT_TIMEOUT",
+                                     "MAX_SEND_FAILS")),
+        )),
+        ("Search", (
+            ("Sending", ("MAX_DCC_SLOTS", "MAX_USER_QUEUE", "MAX_GLOBAL_QUEUE")),
+            ("Search (@find)", (
+                {"note": "How much the bot says back once it answers (the on/off switch is under "
+                         "General > General Settings)."},
+                "MAX_SEARCH_RESULTS", "SEARCH_SHOW_FOLDER", "SEARCH_FOLDER_MAX_CHARS",
+            )),
+            ("During a rebuild", ("PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE", "REHASH_TRANSFER_WAIT")),
         )),
     )),
     ("Downloads", (
