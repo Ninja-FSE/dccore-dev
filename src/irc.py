@@ -3302,6 +3302,7 @@ class Connection:
         self.epoch = epoch
         self.joined = False             # 001 (or 376) seen
         self.channels_confirmed = set()  # 366 seen for these
+        self.target_channels = set()     # CHANNEL's, which activation waits on
 
 
 def answer_welcome(line, conn):
@@ -3790,6 +3791,149 @@ def answer_quit(line):
             note_observed_departure(q_user, quit_chan)
 
 
+def answer_end_of_names(line, conn):
+    """The end of a channel's member list (366): mark the channel confirmed, and
+    activate once every target channel is.
+
+    The body of that branch in irc_loop() until #1332, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    target_channels, channels_confirmed = conn.target_channels, conn.channels_confirmed
+    # FIXED (issue #9): parses WHICH channel the 366 line refers to instead
+    # of just counting them. Activates only once every real target channel
+    # is confirmed - the debug channel's 366 can no longer mask a broken
+    # huvudkanal.
+    # Anchored to the server prefix: the old unanchored search matched
+    # anywhere in the line, so a user could PRIVMSG " 366 x #chan" and
+    # forge a channel confirmation, activating the bot early.
+    # \S+ for the channel, not [#\w\-]+ - see
+    # is_valid_irc_target(). A channel with an "&" or a
+    # "^" in its name never had its 366 recognised, so it
+    # never counted as confirmed at startup.
+    m366 = re.match(r"^:\S+ 366 \S+ (\S+)", line)
+    if m366 and is_valid_irc_target(m366.group(1)):
+        confirmed_chan = channel_key(m366.group(1))
+        channels_confirmed.add(confirmed_chan)
+        print(f"[INFO] Received End of NAMES for {confirmed_chan} ({len(channels_confirmed & target_channels)}/{len(target_channels)} target channels confirmed)")
+
+    if target_channels.issubset(channels_confirmed):
+        config.activation_triggered = True
+        print(f"[INFO] All channels joined successfully! Waiting 5 seconds for settle...")
+        threading.Thread(target=delayed_activate, args=(conn,), daemon=True).start()
+        # DCCore Chat (#371 follow-up): NAMES (353/366)
+        # gives nicknames only, never a realname - so
+        # this is the earliest point a WHO round can
+        # actually find a peer. Without this, the first
+        # one waited for the keepalive or the advert
+        # thread, both minutes away. Not forced: a
+        # rehash-triggered rejoin still respects
+        # WHO_EVERY, so it does not re-ask right after a
+        # round that already ran.
+        _refresh_chat_peers()
+
+
+def answer_kick(kick_parsed):
+    """A KICK, parsed: of the bot itself, or of someone else, which is a departure.
+
+    The body of that branch in irc_loop() until #1332, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    import announce
+    kicker, kicked_chan, victim = kick_parsed
+    if victim.lower() == str(getattr(config, "CURRENT_NICK",
+                                     config.NICKNAME)).lower():
+        if note_kicked_from(kicked_chan, kicker):
+            announce.send_debug(
+                kicked_notice(kicked_chan, kicker),
+                category="PART", notice="warning")
+        else:
+            # Not coming back, so nothing will ever
+            # correct the member list - drop it.
+            forget_channel_members(kicked_chan)
+            print(f"[KICK] Removed from {kicked_chan}, which is "
+                  f"not in CHANNEL - not rejoining.")
+    else:
+        # Somebody else: the same departure a PART is
+        # (#629). Left in channel_users, they stayed
+        # "present" to dcc.py for the whole connection.
+        note_user_kicked(victim, kicked_chan)
+
+
+def answer_join_refusal(refusal):
+    """A JOIN the server refused, parsed: count it against the channel's retries
+    and say why.
+
+    The body of that branch in irc_loop() until #1332, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    import announce
+    refused_chan, numeric = refusal
+    count = note_join_refused(refused_chan)
+    if count:
+        limit = int(getattr(config, "REJOIN_ATTEMPTS", 3))
+        if numeric == JOIN_REFUSED_AT_THE_LIMIT:
+            announce.send_debug(
+                f"{refused_chan}: this server will not put "
+                f"the bot in any more channels ({numeric}). "
+                f"It is configured for more than the server "
+                f"allows - remove some from CHANNEL rather "
+                f"than waiting for this to clear.",
+                category="PART", notice="error")
+        elif numeric == JOIN_REFUSED_NEEDS_A_LOGIN:
+            # #632: the fix is a services login sent
+            # before the JOIN, so say that - and keep
+            # counting, so a login that never comes
+            # ends in "gave up" like any other refusal.
+            announce.send_debug(
+                f"{refused_chan} needs a registered nick "
+                f"({numeric}, channel mode +r): the bot must "
+                f"log in to services first. Put the login "
+                f"in Settings > On connect, or check that "
+                f"it is sent before the JOIN. "
+                f"Attempt {count}/{limit}.",
+                category="PART", notice="error")
+        elif count >= limit:
+            announce.send_debug(
+                f"Cannot rejoin {refused_chan} ({numeric}) - "
+                f"gave up after {count} attempt(s). It will not "
+                f"be tried again until you rehash.",
+                category="PART", notice="error")
+        else:
+            print(f"[REJOIN] {refused_chan} refused us "
+                  f"({numeric}), attempt {count}/{limit}.")
+    else:
+        # Not counted - note_join_refused() only counts for
+        # a channel already being retried, deliberately.
+        # Said out loud anyway (#510): a refusal at CONNECT
+        # time was discarded in silence, which is most of
+        # why serving eleven of fourteen channels looked
+        # like nothing had happened.
+        print(f"[JOIN] {refused_chan} refused us ({numeric}).")
+
+
+def answer_notice(notice_parsed):
+    """A NOTICE, parsed: what other bots and services tell the bot.
+
+    The body of that branch in irc_loop() until #1332, a step of splitting
+    the loop (docs/FUTURE.md). Moved unchanged; the guard stays in the loop.
+    """
+    notice_user, notice_target, notice_text = notice_parsed
+    notice_text = notice_text.strip()
+    if notice_user.lower() != config.NICKNAME.lower():
+        _capture_broadcast_search_reply(
+            notice_user, notice_target, notice_text)
+        if notice_target.lower() == config.NICKNAME.lower():
+            # A private NOTICE addressed to us, from
+            # another bot - how file servers answer a
+            # request: "queued at position 12", "I don't
+            # have that", "queue full", "!rar is disabled
+            # here" (#926, dcc_fetch.handle_bot_reply()).
+            # It only ever moves a request we sent to
+            # THAT bot, and nothing else.
+            import dcc_fetch
+            dcc_fetch.handle_bot_reply(notice_user, notice_text)
+
+
 def irc_loop():
     """The connection, PING/PONG, and every incoming PRIVMSG from Undernet."""
     global bot_joined_channel
@@ -3921,6 +4065,8 @@ def irc_loop():
         # never answered - and if two or more failed the threshold was never reached,
         # which silenced ALL advertising permanently, with no error message.
         target_channels = set(c.strip().lower() for c in config.CHANNEL.split(",") if c.strip())
+        # On the connection too (#1332): answer_end_of_names() reads it there.
+        conn.target_channels = target_channels
         channels_confirmed = conn.channels_confirmed
         last_recv_time = time.time()
 
@@ -4184,37 +4330,8 @@ def irc_loop():
                             claim_channel_sync(s, my_epoch, late=True)
 
                     if conn.joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
-                        # FIXED (issue #9): parses WHICH channel the 366 line refers to instead
-                        # of just counting them. Activates only once every real target channel
-                        # is confirmed - the debug channel's 366 can no longer mask a broken
-                        # huvudkanal.
-                        # Anchored to the server prefix: the old unanchored search matched
-                        # anywhere in the line, so a user could PRIVMSG " 366 x #chan" and
-                        # forge a channel confirmation, activating the bot early.
-                        # \S+ for the channel, not [#\w\-]+ - see
-                        # is_valid_irc_target(). A channel with an "&" or a
-                        # "^" in its name never had its 366 recognised, so it
-                        # never counted as confirmed at startup.
-                        m366 = re.match(r"^:\S+ 366 \S+ (\S+)", line)
-                        if m366 and is_valid_irc_target(m366.group(1)):
-                            confirmed_chan = channel_key(m366.group(1))
-                            channels_confirmed.add(confirmed_chan)
-                            print(f"[INFO] Received End of NAMES for {confirmed_chan} ({len(channels_confirmed & target_channels)}/{len(target_channels)} target channels confirmed)")
-                        
-                        if target_channels.issubset(channels_confirmed):
-                            config.activation_triggered = True
-                            print(f"[INFO] All channels joined successfully! Waiting 5 seconds for settle...")
-                            threading.Thread(target=delayed_activate, args=(conn,), daemon=True).start()
-                            # DCCore Chat (#371 follow-up): NAMES (353/366)
-                            # gives nicknames only, never a realname - so
-                            # this is the earliest point a WHO round can
-                            # actually find a peer. Without this, the first
-                            # one waited for the keepalive or the advert
-                            # thread, both minutes away. Not forced: a
-                            # rehash-triggered rejoin still respects
-                            # WHO_EVERY, so it does not re-ask right after a
-                            # round that already ran.
-                            _refresh_chat_peers()
+                        # answer_end_of_names() since #1332.
+                        answer_end_of_names(line, conn)
 
 
 
@@ -4292,90 +4409,21 @@ def irc_loop():
                     # on a socket write.
                     kick_parsed = parse_kick(line)
                     if kick_parsed:
-                        kicker, kicked_chan, victim = kick_parsed
-                        if victim.lower() == str(getattr(config, "CURRENT_NICK",
-                                                         config.NICKNAME)).lower():
-                            if note_kicked_from(kicked_chan, kicker):
-                                announce.send_debug(
-                                    kicked_notice(kicked_chan, kicker),
-                                    category="PART", notice="warning")
-                            else:
-                                # Not coming back, so nothing will ever
-                                # correct the member list - drop it.
-                                forget_channel_members(kicked_chan)
-                                print(f"[KICK] Removed from {kicked_chan}, which is "
-                                      f"not in CHANNEL - not rejoining.")
-                        else:
-                            # Somebody else: the same departure a PART is
-                            # (#629). Left in channel_users, they stayed
-                            # "present" to dcc.py for the whole connection.
-                            note_user_kicked(victim, kicked_chan)
+                        # answer_kick() since #1332.
+                        answer_kick(kick_parsed)
 
                     # And the answer when it will not have us back. Counted
                     # only for a channel we are already trying to return to -
                     # see note_join_refused().
                     refusal = parse_join_refusal(line)
                     if refusal:
-                        refused_chan, numeric = refusal
-                        count = note_join_refused(refused_chan)
-                        if count:
-                            limit = int(getattr(config, "REJOIN_ATTEMPTS", 3))
-                            if numeric == JOIN_REFUSED_AT_THE_LIMIT:
-                                announce.send_debug(
-                                    f"{refused_chan}: this server will not put "
-                                    f"the bot in any more channels ({numeric}). "
-                                    f"It is configured for more than the server "
-                                    f"allows - remove some from CHANNEL rather "
-                                    f"than waiting for this to clear.",
-                                    category="PART", notice="error")
-                            elif numeric == JOIN_REFUSED_NEEDS_A_LOGIN:
-                                # #632: the fix is a services login sent
-                                # before the JOIN, so say that - and keep
-                                # counting, so a login that never comes
-                                # ends in "gave up" like any other refusal.
-                                announce.send_debug(
-                                    f"{refused_chan} needs a registered nick "
-                                    f"({numeric}, channel mode +r): the bot must "
-                                    f"log in to services first. Put the login "
-                                    f"in Settings > On connect, or check that "
-                                    f"it is sent before the JOIN. "
-                                    f"Attempt {count}/{limit}.",
-                                    category="PART", notice="error")
-                            elif count >= limit:
-                                announce.send_debug(
-                                    f"Cannot rejoin {refused_chan} ({numeric}) - "
-                                    f"gave up after {count} attempt(s). It will not "
-                                    f"be tried again until you rehash.",
-                                    category="PART", notice="error")
-                            else:
-                                print(f"[REJOIN] {refused_chan} refused us "
-                                      f"({numeric}), attempt {count}/{limit}.")
-                        else:
-                            # Not counted - note_join_refused() only counts for
-                            # a channel already being retried, deliberately.
-                            # Said out loud anyway (#510): a refusal at CONNECT
-                            # time was discarded in silence, which is most of
-                            # why serving eleven of fourteen channels looked
-                            # like nothing had happened.
-                            print(f"[JOIN] {refused_chan} refused us ({numeric}).")
+                        # answer_join_refusal() since #1332.
+                        answer_join_refusal(refusal)
 
                     notice_parsed = parse_notice(line)
                     if notice_parsed:
-                        notice_user, notice_target, notice_text = notice_parsed
-                        notice_text = notice_text.strip()
-                        if notice_user.lower() != config.NICKNAME.lower():
-                            _capture_broadcast_search_reply(
-                                notice_user, notice_target, notice_text)
-                            if notice_target.lower() == config.NICKNAME.lower():
-                                # A private NOTICE addressed to us, from
-                                # another bot - how file servers answer a
-                                # request: "queued at position 12", "I don't
-                                # have that", "queue full", "!rar is disabled
-                                # here" (#926, dcc_fetch.handle_bot_reply()).
-                                # It only ever moves a request we sent to
-                                # THAT bot, and nothing else.
-                                import dcc_fetch
-                                dcc_fetch.handle_bot_reply(notice_user, notice_text)
+                        # answer_notice() since #1332.
+                        answer_notice(notice_parsed)
 
                     # See parse_privmsg()'s own docstring (top of this file)
                     # for why the anchoring matters, and what user_host is
