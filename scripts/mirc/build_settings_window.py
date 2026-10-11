@@ -121,6 +121,12 @@ CONNECTED = (4, 272, 254, 8)
 STATUS = (4, 281, 254, 16)
 BUTTONS = (("Reload", 1017, 262), ("Apply", 1014, 302), ("OK", 1015, 341), ("Cancel", 1016, 380))
 BUTTON_Y, BUTTON_W, BUTTON_H = 279, 36, 13
+# The DCX tree that takes the left column when DCX can be used (#1288): over
+# where the tab strip and the page buttons were, clear of the content and of
+# the connection line below it. The script turns it into pixels with the
+# scale $dialog().cw / DIALOG_W gives.
+DCX_TREE = (4, 4, 86, 264)
+DCX_TREE_ID = 900
 
 # One column: label | control. Two columns (a page too tall for one): the same,
 # narrower, side by side.
@@ -618,6 +624,9 @@ def render(builder):
             raise LayoutError("%d pages in one tab do not fit in the column of page buttons" % slots)
         out.append('  radio "", %d, %d %d %d %d, push%s' % (FIRST_SLOT_ID + number, PAGE_SLOT_X, y, PAGE_SLOT_W,
                                                          PAGE_SLOT_H, " group" if number == 0 else ""))
+    tree_x, tree_y, tree_w, tree_h = DCX_TREE
+    if tree_x + tree_w > CONTENT_X - 2 or tree_y + tree_h > CONNECTED[1] - 2 or DCX_TREE_ID >= min(TAB_IDS):
+        raise LayoutError("the DCX tree %r (id %d) overlaps the page or another control" % (DCX_TREE, DCX_TREE_ID))
     for _group, pages in layout.GROUPS:
         for name, _sections in pages:
             if text_px(name) + BUTTON_PAD_PX > PAGE_SLOT_W * PX_PER_DBU:
@@ -637,6 +646,8 @@ def render(builder):
     data = list(builder.data)
     data.insert(0, ("groups", str(len(groups))))
     data.insert(1, ("slots", str(max(len(pages) for _group, pages in layout.GROUPS))))
+    data.insert(2, ("size", "%d %d" % (DIALOG_W, DIALOG_H)))
+    data.insert(3, ("dcxtree", "%d %d %d %d %d" % ((DCX_TREE_ID,) + DCX_TREE)))
     data.append(("pages", str(len(builder.pages))))
     for number, _group, name in builder.pages:
         data.append(("p.%d" % number, hash_text(name)))

@@ -4,6 +4,75 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪟 dccore.mrc: the settings window draws its pages as a DCX tree (#1288, phase 2)
+
+`/dccore dcx check` in the operator's mIRC (32-bit, the shipped dll from `C:\mIRC\scripts\dcx\`) answered what the
+design rests on: the dll loads and passes its hash, the tree raises `sclick` with the item path (`1 1` = General >
+IRC Server), **mIRC's own button still raises its `sclick` in the DCX-marked dialog**, and the 240 x 120 dbu window's
+client area is 480 x 240 - `$dialog().cw` over the width in dialog units is the pixel scale, and the tree placed by it
+filled its box. So the DCX window is the built-in one, marked, with a tree for the navigation:
+
+- **`dccore.sw.dcx`**, called by `dccore.sw.init` before the first page is shown, returns at once when
+  `$dccore.dcx.why` says no. Otherwise it marks `dccore.set` (callback `dccore.sw.dcxcb`), hides the tab strip
+  (1001-1006) and the page buttons (1020 up), and creates a DCX treeview over the left column: each group bold and
+  expanded, its pages under it, names from the window's own data (`g.N`, `g.N.pages`, `p.N`).
+- **Its place comes from the generator**: `build_settings_window.py`'s `DCX_TREE` (4, 4, 86 x 264 dbu, id 900) and
+  the dialog's size go into the data as `dcxtree` and `size`, and the script turns them into pixels with
+  `$dialog(dccore.set).cw/.ch`. The generator refuses a tree that would overlap the page or the connection line, or
+  an id inside the dialog's own range.
+- **A click drives the same switch as the buttons.** `dccore.sw.dcxcb` takes `sclick` and `selchange` on the tree
+  only: a page item (`G N`) becomes `last.G` and `dccore.sw.tab G`; a group item switches to that group's last page.
+  `dccore.sw.page` selects the page shown in the tree (`dccore.sw.dcxshow`, with `dcxquiet` set so the selection is
+  not taken as a click), so `dccore.sw.goto` - Apply jumping to the first refused setting - moves the tree too.
+  `dccore.sw.tab` no longer shows the page buttons again in DCX mode, and `dccore.sw.goto` no longer focuses a hidden
+  tab.
+- **`WebView2Loader.dll` ships beside `dcx.dll`.** Run in mIRC, DCX wrote `D_ERROR LoadDLL (Warning Unable to Load
+  WebView2Loader.dll, web2ctrl will not work.)` in the status window: its `DcxWebView2Module::load()` runs every time
+  the dll starts, tries mIRC's folder and then the dll's own, and has no setting to skip it. The file in the DCX zip
+  is byte for byte Microsoft's `runtimes/win-x86/native/WebView2Loader.dll` from the `Microsoft.Web.WebView2`
+  1.0.2151.40 NuGet package (same SHA-256), whose `LICENSE.txt` - BSD-3-Clause-style - ships beside it as
+  `LICENSE-WebView2.txt`. It also leaves DCX's web control available to a later version of the script. The script
+  pins it like `dcx.dll` (`dccore.dcx.wv2sha256`): a loader beside the dll that is not that file is a reason in
+  `$dccore.dcx.why`; a missing one is not (DCX only warns).
+- **Tests:** seven more in `tests/test_the_mirc_script_falls_back_when_dcx_cannot_load.py` (the order in `init`, the
+  early return, the hidden strip and buttons, the generated geometry against the dialog, the names from the data, the
+  quiet selection, the click's path to `dccore.sw.tab`) and one for the loader's check;
+  `tests/test_the_bundled_dcx_dll_is_the_pinned_release.py` checks the loader's hash against the README and the
+  script, that it is 32-bit and version 1.0.2151.40, and Microsoft's notice beside it.
+
+### 🪟 dccore.mrc: DCX for the settings window, phase 1 - the dll, the loader and the fallback (#1288)
+
+The settings window (#1264) is to be drawn with DCX (https://github.com/twig/dcxdll, BSD-3-Clause): a real treeview
+for the pages, listviews with columns for the ban, channel and list tables, colour combos for the theme overrides.
+The DCX window will be the default and the built-in window the fallback. This first step ships what both need and
+what can only be learnt in a real mIRC; the window itself comes in phase 2.
+
+- **The dll ships with the script.** `scripts/mirc/dcx/dcx.dll` is release `3.1-git978`'s `Optimal` build,
+  unmodified, 32-bit, beside `LICENSE-DCX.txt` (BSD-3-Clause requires the notice with a binary) and a README with the
+  release, the build and its SHA-256. `dcx.dll` imports only Windows' own libraries (`gdiplus.dll` delay-loaded).
+  `.gitattributes` marks `*.dll` binary. (`WebView2Loader.dll` was left out here at first; phase 2 ships it - see
+  there.)
+- **`$dccore.dcx.why`** says why DCX cannot be used, or nothing: the new local option `nodcx` (*Use the built-in
+  settings window, not DCX*, on the window's *This mIRC window* page, off by default), a mIRC below version 7.45 (DCX 3.1's
+  floor), a 64-bit mIRC (`$bits`), the file missing, its `$sha256` not the pinned one (`dccore.dcx.sha256`), or a
+  `$dll(...,Version,)` that fails - an error that would stop the script, so `dccore.dcx.version` catches it with
+  `:error`. A `dcx.dll` another script already loaded is used as it is and not hash-checked: it is in this mIRC
+  already, and DCX warns against loading a second copy beside it.
+- **`dccore.dcx`** calls the dll by its full path (`/dccore.dcx xdialog <dialog> -c ...`, `$dccore.dcx(Version)`),
+  so a user's own DCX helper aliases (`xdid`, `xdialog`, `dcx`) are neither needed nor shadowed.
+- **`/dccore dcx`** says whether DCX is used and why not; **`/dccore dcx check`** opens `dccore.dcxcheck`, a 240 x 120
+  dbu window that DCX marks, with one of mIRC's own buttons and a DCX treeview placed by the scale
+  `$dialog().cw/.ch` reports. It writes to @DCCore whether the native button still raises its click in a marked
+  dialog, whether the tree raises its own, and the scale - and the tree fills the box drawn for it only when that
+  scale is the pixel one. Both are what phase 2's design rests on and neither can be run here.
+- `dccore.ver` is 1.20.0.
+- **Docs:** `docs/ADMIN-CONSOLE.md` (copy the `dcx` folder with the script, a DCX section, `/dccore dcx` in the
+  command list), `docs/INSTALL.md` (the upgrade step), `scripts/mirc/dcx/README.md`.
+- **Tests:** `tests/test_the_bundled_dcx_dll_is_the_pinned_release.py` (the file's SHA-256 against the README and
+  the script, a 32-bit PE whose imports are Windows' own, the licence with its copyright line, the README's link and
+  release) and `tests/test_the_mirc_script_falls_back_when_dcx_cannot_load.py` (each reason in `dccore.dcx.why`, its
+  order, the error trap, the full-path calls, the option's default and its place in the window, the check window).
+
 ### 🧱 Splitting `dcc.py`, step 3: choosing the next user is its own function (#1304)
 
 Step 3 of splitting `dcc.py` (`docs/FUTURE.md`; steps 1 and 2 are #1298 and #1300). Section B of
