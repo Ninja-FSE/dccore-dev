@@ -538,10 +538,10 @@ class TheDialog(unittest.TestCase):
         return rows
 
     def test_the_size_is_the_mockups(self):
-        # 480 x 358 dialog units: the mockup's proportions at a size that
+        # 488 x 364 dialog units: the mockup's proportions at a size that
         # fits a 1080p screen, with room for the frames, the labels above
         # their fields and the page's name under the tabs (#1288, phase 3)
-        self.assertEqual(self.size, (480, 358))
+        self.assertEqual(self.size, (488, 364))
 
     def test_ids_are_unique_and_clear_of_the_other_dialogs(self):
         ids = [c[2] for c in self.controls]
@@ -620,12 +620,22 @@ class TheDialog(unittest.TestCase):
                         continue
                     self.assertFalse(overlap, "page %d: %d and %d overlap" % (page, a, b))
 
-    def test_the_tabs_are_a_strip_above_the_pages(self):
+    def test_the_tab_control_frames_the_body(self):
+        """Its page border runs under every tab and round the body: a strip
+        of tabs only had Windows draw that border cut off (#1288)."""
+        import build_settings_window as generator
         tabs = [c for c in self.controls if c[0] == "tab"]
         self.assertEqual([t[1] for t in tabs], ["General", "Sharing", "Downloads", "Security",
                                                 "Dashboard & Console", "Advanced", "Script"])
-        top = min(c[4] for c in self.controls if c[0] != "tab")
-        self.assertLessEqual(tabs[0][4] + tabs[0][6], top)
+        _kind, _label, _cid, tx, ty, tw, th, _style = tabs[0]
+        body = [c for c in self.controls if c[0] not in ("tab", "button") and c[2] not in (1013, 1018)]
+        self.assertGreaterEqual(min(c[4] for c in body), ty + generator.TAB_HEADER_H)
+        self.assertLessEqual(max(c[4] + (12 if c[0] == "combo" else c[6]) for c in body), ty + th)
+        self.assertGreater(min(c[3] for c in body), tx)
+        self.assertLess(max(c[3] + c[5] for c in body), tx + tw)
+        # the connection and status lines and the buttons sit under it
+        self.assertGreater(min(c[4] for c in self.controls if c[0] == "button" and c[2] in (1014, 1015, 1016, 1017)),
+                           ty + th)
 
     def test_the_footer_has_apply_ok_and_cancel(self):
         buttons = {c[2]: c[1] for c in self.controls if c[0] == "button"}
@@ -1007,18 +1017,18 @@ class ThePageButtons(unittest.TestCase):
         self.assertEqual([c[2] for c in buttons], sorted(slot_ids()))
         self.assertEqual([c[7] for c in buttons], ["push group"] + ["push"] * (self.slots - 1))
         for kind, _label, cid, x, y, w, h, _style in buttons:
-            self.assertEqual((x, w), (4, 90), cid)
+            self.assertEqual((x, w), (10, 88), cid)
             self.assertGreaterEqual(h, 14, cid)
         tops = [c[4] for c in buttons]
         self.assertTrue(all(b - a >= buttons[0][6] for a, b in zip(tops, tops[1:])), tops)
         # air between the column and the page: the title beside the column's
         # edge looked squeezed against it
         import build_settings_window as generator
-        self.assertGreaterEqual(generator.CONTENT_X - (4 + 90), 12)
+        self.assertGreaterEqual(generator.CONTENT_X - (generator.PAGE_SLOT_X + generator.PAGE_SLOT_W), 12)
         self.assertGreater(generator.DCX_TITLE[1], generator.DCX_PAGES[1])
 
     def test_every_page_name_fits_its_button(self):
-        width = 90 * PX_PER_DBU
+        width = 88 * PX_PER_DBU
         for page in range(1, int(self.data["pages"]) + 1):
             name = untext(self.data["p.%d" % page])
             self.assertLessEqual(text_px(name) + 8, width, name)

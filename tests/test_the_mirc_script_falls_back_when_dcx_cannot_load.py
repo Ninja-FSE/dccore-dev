@@ -206,8 +206,10 @@ class ThePageList(unittest.TestCase):
         import build_settings_window as builder
         self.assertEqual((int(size.group(1)), int(size.group(2))), (builder.DIALOG_W, builder.DIALOG_H))
         self.assertLessEqual(x + w, builder.CONTENT_X - 2)
-        self.assertGreaterEqual(y, builder.TABS[1] + builder.TABS[3])
-        self.assertLessEqual(y + h, builder.CONNECTED[1] - 2)
+        # inside the tab control's frame, under the tabs themselves
+        self.assertGreaterEqual(y, builder.TABS[1] + builder.TAB_HEADER_H)
+        self.assertLessEqual(y + h, builder.TABS[1] + builder.TABS[3] - 2)
+        self.assertGreater(x, builder.TABS[0])
         table = block("dialog dccore.set {", raw())
         self.assertNotIn(", %d, " % list_id, table)
 
@@ -318,7 +320,7 @@ class TheMockupLayout(unittest.TestCase):
     def test_the_title_sits_between_the_tabs_and_the_page(self):
         tid, x, y, w, h = (int(n) for n in self.data["dcxtitle"].split())
         self.assertEqual(tid, self.builder.DCX_TITLE_ID)
-        self.assertGreaterEqual(y, self.builder.TABS[1] + self.builder.TABS[3])
+        self.assertGreaterEqual(y, self.builder.TABS[1] + self.builder.TAB_HEADER_H)
         self.assertLessEqual(y + h, self.builder.CONTENT_Y)
         self.assertGreaterEqual(x, self.builder.CONTENT_X)
         body = alias("dccore.sw.dcx")

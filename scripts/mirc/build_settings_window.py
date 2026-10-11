@@ -116,30 +116,35 @@ def wrapped_lines(text, width_dbu):
 # Geometry, in dialog units (option dbu)
 # ---------------------------------------------------------------------------
 
-DIALOG_W, DIALOG_H = 480, 358
-TABS = (4, 2, 472, 14)
+DIALOG_W, DIALOG_H = 488, 364
+# The tab control frames the whole body - the page list, the page and the
+# help line - as a tabbed dialog does: its page border runs under every
+# tab, open under the chosen one, and round the body. A strip of tabs
+# only had Windows draw that border cut off under the first tab (#1288).
+TABS = (4, 2, 480, 338)
+TAB_HEADER_H = 14                           # the tabs themselves; the body starts under them
 # The pages of the chosen tab: a column of push-style radio buttons, one per
 # slot, as many slots as the tab with the most pages has. Not a listbox: a
 # listbox's row height cannot be set from a script, and at a display scale
 # above 100% its highlight was shorter than the text, which looked cut.
-# The column ends 16 units before the page starts: the title beside its
-# edge looked squeezed against it.
-PAGE_SLOT_X, PAGE_SLOT_Y, PAGE_SLOT_W, PAGE_SLOT_H, PAGE_SLOT_GAP = 4, 22, 90, 15, 2
-CONTENT_X, CONTENT_Y, CONTENT_W, CONTENT_H = 106, 36, 370, 274
-HELP = (106, 312, 370, 24)                  # three lines of the hovered setting's help
-CONNECTED = (4, 338, 310, 8)
-STATUS = (4, 347, 310, 10)
-BUTTONS = (("Reload", 1017, 319), ("Apply", 1014, 358), ("OK", 1015, 397), ("Cancel", 1016, 436))
-BUTTON_Y, BUTTON_W, BUTTON_H = 342, 36, 13
+# The column sits inside the frame, clear of its edge, and ends 12 units
+# before the page starts: the title beside its edge looked squeezed.
+PAGE_SLOT_X, PAGE_SLOT_Y, PAGE_SLOT_W, PAGE_SLOT_H, PAGE_SLOT_GAP = 10, 24, 88, 15, 2
+CONTENT_X, CONTENT_Y, CONTENT_W, CONTENT_H = 110, 38, 370, 274
+HELP = (110, 314, 370, 24)                  # three lines of the hovered setting's help
+CONNECTED = (10, 342, 310, 8)
+STATUS = (10, 351, 310, 10)
+BUTTONS = (("Reload", 1017, 331), ("Apply", 1014, 370), ("OK", 1015, 409), ("Cancel", 1016, 448))
+BUTTON_Y, BUTTON_W, BUTTON_H = 346, 36, 13
 # With DCX (#1288) the mockup's navigation: the tab strip stays, and a list
 # of the chosen tab's pages takes the left column where the page buttons
 # are, clear of the page and of the connection line below; the page's name
 # goes, in bold, into the band between the tabs and the page, a little
 # below the list's top edge. The script turns both into pixels with the
 # scale $dialog().cw / DIALOG_W gives.
-DCX_PAGES = (4, 22, 90, 286)
+DCX_PAGES = (10, 24, 88, 286)
 DCX_PAGES_ID = 900
-DCX_TITLE = (106, 24, 370, 10)
+DCX_TITLE = (110, 26, 370, 10)
 DCX_TITLE_ID = 901
 
 # A page is its sections, each in a titled frame (a section with no title is
@@ -780,13 +785,17 @@ def render(builder):
             raise LayoutError("%d pages in one tab do not fit in the column of page buttons" % slots)
         out.append('  radio "", %d, %d %d %d %d, push%s' % (FIRST_SLOT_ID + number, PAGE_SLOT_X, y, PAGE_SLOT_W,
                                                          PAGE_SLOT_H, " group" if number == 0 else ""))
+    body_top, body_bottom = TABS[1] + TAB_HEADER_H, TABS[1] + TABS[3]
+    if not (TABS[0] < PAGE_SLOT_X and TABS[0] < CONTENT_X and CONTENT_X + CONTENT_W < TABS[0] + TABS[2]
+            and HELP[1] + HELP[3] < body_bottom < CONNECTED[1]):
+        raise LayoutError("the tab control %r does not frame the body" % (TABS,))
     pages_x, pages_y, pages_w, pages_h = DCX_PAGES
-    if (pages_x + pages_w > CONTENT_X - 2 or pages_y < TABS[1] + TABS[3] or pages_y + pages_h > CONNECTED[1] - 2
+    if (pages_x + pages_w > CONTENT_X - 2 or pages_y < body_top or pages_y + pages_h > body_bottom - 2
             or DCX_PAGES_ID >= min(TAB_IDS)):
         raise LayoutError("the DCX page list %r (id %d) overlaps the tabs, the page or another control"
                           % (DCX_PAGES, DCX_PAGES_ID))
     title_x, title_y, title_w, title_h = DCX_TITLE
-    if (title_x < CONTENT_X or title_x + title_w > CONTENT_X + CONTENT_W or title_y < TABS[1] + TABS[3]
+    if (title_x < CONTENT_X or title_x + title_w > CONTENT_X + CONTENT_W or title_y < body_top
             or title_y + title_h > CONTENT_Y):
         raise LayoutError("the DCX title %r is not between the tabs and the page" % (DCX_TITLE,))
     if not DCX_PAGES_ID < DCX_TITLE_ID < min(LISTVIEWS[n][0] for n in LISTVIEWS):
