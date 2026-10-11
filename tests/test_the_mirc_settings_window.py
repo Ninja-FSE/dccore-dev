@@ -1286,7 +1286,7 @@ class TheAuditOfBothHalves(unittest.TestCase):
             public_changelog = os.path.join(REPO_ROOT, "docs", "UPDATES.md")
         with io.open(public_changelog, encoding="utf-8") as handle:
             text = handle.read()
-        top, newest = script_versions_named(text)
+        top, newest = script_versions_named(with_pending_public_entries(text))
         self.assertLessEqual(len(top), 1, "the top section asks for more than one dccore.mrc: %s" % sorted(top))
         self.assertEqual(newest, script_version(),
                          "the newest dccore.mrc the changelog asks for is not the one the script says it is")
@@ -1318,6 +1318,23 @@ def script_versions_named(text):
     top = text[start:following if following >= 0 else len(text)]
     named = SCRIPT_VERSION_NAMED.search(text, start)
     return set(SCRIPT_VERSION_NAMED.findall(top)), named.group(1) if named else None
+
+
+def with_pending_public_entries(text):
+    """The public changelog as the next release will read: the public
+    fragments still waiting in docs/changes/ (#1307) as a section above the
+    top one, in the order scripts/roll_changelog.py rolls them. The public
+    tree has no docs/changes/, so there it is the file as it is."""
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    try:
+        import roll_changelog
+    finally:
+        sys.path.remove(os.path.join(REPO_ROOT, "scripts"))
+    fragments, _problems = roll_changelog.load(REPO_ROOT)
+    public = sorted((f for f in fragments if f.public), key=lambda f: f.order, reverse=True)
+    if not public:
+        return text
+    return roll_changelog.insert_release(text, "## Unreleased", "\n".join(f.text for f in public))
 
 
 def script_version():

@@ -87,9 +87,13 @@ Every PR is supposed to carry its own documentation, so this is a check that
 nothing slipped through rather than a writing session. In practice it is where
 the omissions surface, because it is the last point at which they are cheap.
 
-- **Roll `## Unreleased` into a version heading** in both `docs/UPDATES.md` and
-  `docs/UPDATES-PUBLIC.md`, with the date. If either has no Unreleased section
-  but commits have landed since the last release, something shipped without an
+- **Roll the changelog**: `python scripts/roll_changelog.py vX.Y.Z "Title"`
+  (#1307). Every PR writes its entry to `docs/changes/` instead of the two
+  changelogs (`docs/changes/README.md`); this writes the version heading, with
+  the date, into both `docs/UPDATES.md` and `docs/UPDATES-PUBLIC.md`, puts the
+  entries under it newest issue first, and deletes the fragments. It refuses,
+  changing nothing, when a fragment is malformed. If commits have landed since
+  the last release and `docs/changes/` is empty, something shipped without an
   entry — write it now from the merged PRs.
 - **Bump `SCRIPT_VERSION`** in `defaults.py` **and the version line in
   `README.md`**. `SCRIPT_VERSION` is what the bot reports over CTCP VERSION,
