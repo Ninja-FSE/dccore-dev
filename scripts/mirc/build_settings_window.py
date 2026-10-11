@@ -116,27 +116,30 @@ def wrapped_lines(text, width_dbu):
 # Geometry, in dialog units (option dbu)
 # ---------------------------------------------------------------------------
 
-DIALOG_W, DIALOG_H = 480, 354
+DIALOG_W, DIALOG_H = 480, 358
 TABS = (4, 2, 472, 14)
 # The pages of the chosen tab: a column of push-style radio buttons, one per
 # slot, as many slots as the tab with the most pages has. Not a listbox: a
 # listbox's row height cannot be set from a script, and at a display scale
 # above 100% its highlight was shorter than the text, which looked cut.
-PAGE_SLOT_X, PAGE_SLOT_Y, PAGE_SLOT_W, PAGE_SLOT_H, PAGE_SLOT_GAP = 4, 20, 96, 15, 2
-CONTENT_X, CONTENT_Y, CONTENT_W, CONTENT_H = 106, 32, 370, 274
-HELP = (106, 308, 370, 24)                  # three lines of the hovered setting's help
-CONNECTED = (4, 334, 310, 8)
-STATUS = (4, 343, 310, 10)
+# The column ends 16 units before the page starts: the title beside its
+# edge looked squeezed against it.
+PAGE_SLOT_X, PAGE_SLOT_Y, PAGE_SLOT_W, PAGE_SLOT_H, PAGE_SLOT_GAP = 4, 22, 90, 15, 2
+CONTENT_X, CONTENT_Y, CONTENT_W, CONTENT_H = 106, 36, 370, 274
+HELP = (106, 312, 370, 24)                  # three lines of the hovered setting's help
+CONNECTED = (4, 338, 310, 8)
+STATUS = (4, 347, 310, 10)
 BUTTONS = (("Reload", 1017, 319), ("Apply", 1014, 358), ("OK", 1015, 397), ("Cancel", 1016, 436))
-BUTTON_Y, BUTTON_W, BUTTON_H = 338, 36, 13
+BUTTON_Y, BUTTON_W, BUTTON_H = 342, 36, 13
 # With DCX (#1288) the mockup's navigation: the tab strip stays, and a list
 # of the chosen tab's pages takes the left column where the page buttons
 # are, clear of the page and of the connection line below; the page's name
-# goes, in bold, into the row between the tabs and the page. The script
-# turns both into pixels with the scale $dialog().cw / DIALOG_W gives.
-DCX_PAGES = (4, 20, 96, 288)
+# goes, in bold, into the band between the tabs and the page, a little
+# below the list's top edge. The script turns both into pixels with the
+# scale $dialog().cw / DIALOG_W gives.
+DCX_PAGES = (4, 22, 90, 286)
 DCX_PAGES_ID = 900
-DCX_TITLE = (106, 20, 370, 10)
+DCX_TITLE = (106, 24, 370, 10)
 DCX_TITLE_ID = 901
 
 # A page is its sections, each in a titled frame (a section with no title is
