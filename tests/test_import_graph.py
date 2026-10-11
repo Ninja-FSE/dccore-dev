@@ -62,7 +62,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #   web_on_connect,          (#1320); stdlib, config, runtime,
 #   web_messages             platform_compat, adminchat and web_common
 #   web_login, web_console - the login checks, the console and the setup
-#   web_setup                page, split out (#1322); stdlib, config,
+#   web_setup_page                page, split out (#1322); stdlib, config,
 #                            runtime, adminchat and the modules above
 ALLOWED = {
     "webserver",
@@ -80,7 +80,7 @@ ALLOWED = {
     "web_messages",
     "web_login",
     "web_console",
-    "web_setup",
+    "web_setup_page",
     "defaults",
     "runtime",
     "settings_file",

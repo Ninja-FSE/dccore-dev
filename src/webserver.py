@@ -1446,9 +1446,9 @@ if HAVE_FLASK:
         return app
 
 
-# This section is web_setup.py since #1322, a step of splitting this file. Imported back by
+# This section is web_setup_page.py since #1322, a step of splitting this file. Imported back by
 # name, so webserver.<name> still answers for each of them.
-from web_setup import (  # noqa: F401
+from web_setup_page import (  # noqa: F401
     SETUP_FIELDS,
     SETUP_LANGS,
     SETUP_PAGE,
