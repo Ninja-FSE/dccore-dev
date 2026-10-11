@@ -45,8 +45,11 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #   adminchat              - verify_password() for the dashboard login (#131);
 #                            stdlib plus config and platform_compat only
 #   platform_compat        - stdlib wrappers, imported by adminchat
+#   web_common             - the dashboard's shared limits and helpers, split
+#                            out of webserver.py (#1311); stdlib only at import
 ALLOWED = {
     "webserver",
+    "web_common",
     "defaults",
     "runtime",
     "settings_file",
