@@ -1279,7 +1279,13 @@ class TheAuditOfBothHalves(unittest.TestCase):
         # Checks the topmost section - "## Unreleased" while it says that,
         # the just-rolled version heading right after a release - so this
         # keeps working across a roll instead of only until the next one.
-        with io.open(os.path.join(REPO_ROOT, "docs", "UPDATES-PUBLIC.md"), encoding="utf-8") as handle:
+        # The public changelog is docs/UPDATES-PUBLIC.md here and
+        # docs/UPDATES.md once extraction has renamed it onto that path
+        # (docs/PUBLIC-REPO-WORKFLOW.md, step 3) - try both, in that order.
+        public_changelog = os.path.join(REPO_ROOT, "docs", "UPDATES-PUBLIC.md")
+        if not os.path.exists(public_changelog):
+            public_changelog = os.path.join(REPO_ROOT, "docs", "UPDATES.md")
+        with io.open(public_changelog, encoding="utf-8") as handle:
             text = handle.read()
         start = text.index("\n## ") + 1
         unreleased = text[start:]
