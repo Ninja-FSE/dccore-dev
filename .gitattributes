@@ -64,6 +64,12 @@ docs/UPDATES.md    export-ignore
 # two of us, not shipped.
 docs/PUBLIC-REPO-WORKFLOW.md    export-ignore
 
+# docs/changes/ holds the changelog entries waiting for a release (#1307).
+# The release roll joins them into the two changelogs and deletes them before
+# extraction; if a roll is ever forgotten, the internal entries - with this
+# repository's issue numbers in them - still do not ship.
+docs/changes/** export-ignore
+
 # The denylist, NOT the guard. tests/test_no_personal_identifiers_ship.py
 # still ships and still runs every structural check it has; only the list
 # of hashes stops travelling with it. See that file's own docstring: the
