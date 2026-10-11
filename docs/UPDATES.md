@@ -50,6 +50,35 @@ layer.
   `WEBUI_ALLOWED_HOSTS` as a setting re-read on a rehash.
 - **Not changed here:** the DCC CHAT console (`adminchat.is_bad_ip()`/`note_bad_ip()`) has the same check-then-count
   shape; each attempt there needs its own DCC connection and session.
+### 🛡️ A request gets the file it names, and only that
+
+Reported privately and fixed before the release, because each of these is one line any peer can send.
+
+- **What was wrong (Windows).** A requested name with a `:` in it opened an NTFS alternate data stream of a library
+  file. `names_a_remote_or_absolute_path()` refuses drive and UNC prefixes only, and a stream sits inside the library
+  as far as `is_safe_path()` can tell, so it was offered and sent. Windows writes such a stream on every downloaded
+  file, recording where it came from. A name ending in a dot or a space opened the file under a second spelling,
+  past the "already queued" check (#1077) and under a different download-counter key.
+- **Fix.** A new `dcc.names_a_hidden_part_of_a_file()` refuses, on the request's text, a component holding a `:` or
+  ending in a dot or a space - on Windows only, since no Windows file can be named that way while on Linux and macOS
+  both are ordinary characters (`Live: 1999.flac`, `R.E.M.`). A `..namedfork` component (a macOS resource fork) is
+  refused everywhere. A second gate, `dcc.resolves_to_a_stream()`, checks the path the lookup settled on, whichever
+  of the memories, the list scan or the walk produced it. Device names needed nothing: every request goes through
+  `long_path()`, whose `\\?\` prefix opens a file by the literal name. A queued row that names a stream - one
+  restored from `dcc_queue.txt`, which never passed the request gates - is refused at dispatch too:
+  `dcc.may_still_be_sent()`, the check every queued row passes before its send (#1268), says no to it.
+- **What was wrong (lists).** A list archive is matched on its last path component, and a non-primary list's
+  directory sits inside the primary's. A name with that list's folder in front of it passed the containment check,
+  so a channel bound to the primary list could be sent another list's archive (#26). Now only a file directly in the
+  requesting channel's own list directory is served.
+- **What was wrong (resume).** A DCC RESUME at or past the end of the file is clamped to the size, on purpose, so the
+  receiver's transfer finishes. That send moves no bytes, yet it was counted in the files-sent total, credited to the
+  download counter and the transfer record, offered to the speed record and announced as `Sent:` - the same
+  no-bandwidth inflation #656 closed for a forged acknowledgement. It is still answered and its queue row still
+  settled as delivered, but nothing is counted or announced.
+- **Tests:** `tests/test_a_request_gets_the_file_it_names_and_nothing_else.py` (22 tests). The stream cases go
+  through `handle_download_request()` with a real stream on Windows and a stand-in file elsewhere, so they run on
+  every runner; the resume cases run the real `start_dcc_send()` against fake sockets. 14/14 mutations caught.
 
 ### 🔧 Three follow-ups from the audit fixes (#1281)
 
