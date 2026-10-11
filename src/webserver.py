@@ -4650,6 +4650,10 @@ def build_lists_payload():
             "modes": dict(getattr(entry, "modes", None) or {}),
             "folders": [{"name": f.name, "path": f.path} for f in entry.folders],
         })
+        # Only when there is one (#1295), the way lists.json keeps `modes`:
+        # a list without exclusions reads exactly as it did before.
+        if getattr(entry, "exclude", None):
+            rows[-1]["exclude"] = list(entry.exclude)
     return {
         "lists": rows,
         "source": "file" if stored else "implied",
@@ -4687,6 +4691,14 @@ def apply_list_changes(payload):
     if len(rows) > MAX_SERVED_LISTS:
         return 400, {"error": f"At most {MAX_SERVED_LISTS} lists."}
 
+    # A row that does not carry 'exclude' keeps what the list of that name
+    # has (#1295). The mIRC settings window, a dashboard tab opened before
+    # the upgrade and the console's `served` transaction all send the whole
+    # set without it; treated as "none", each of those saves would wipe every
+    # list's exclusions without a word.
+    stored_exclude = {entry.name.lower(): tuple(getattr(entry, "exclude", None) or ())
+                      for entry in (library.load_lists() or [])}
+
     entries = []
     for row in rows:
         if not isinstance(row, dict):
@@ -4706,6 +4718,15 @@ def apply_list_changes(payload):
         if not isinstance(raw_modes, dict):
             return 400, {"error": f"{name or 'A list'}: 'modes' must be an object "
                                   f"of channel -> mode."}
+        if "exclude" in row:
+            raw_exclude = row.get("exclude")
+            if raw_exclude is None:
+                raw_exclude = []
+            if not isinstance(raw_exclude, (list, str)):
+                return 400, {"error": f"{name or 'A list'}: 'exclude' must be a list "
+                                      f"or a comma-separated text."}
+        else:
+            raw_exclude = stored_exclude.get(name.lower(), ())
         raw_folders = row.get("folders")
         if raw_folders is None:
             raw_folders = []
@@ -4735,7 +4756,8 @@ def apply_list_changes(payload):
             folders,
             {str(c).strip().lower(): str(m or "").strip().lower()
              for c, m in raw_modes.items()
-             if str(m or "").strip().lower() not in (library.NORMAL, "")}))
+             if str(m or "").strip().lower() not in (library.NORMAL, "")},
+            raw_exclude))
 
     if not entries:
         import os as os_mod

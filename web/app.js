@@ -5452,6 +5452,13 @@
         servedListChannelsHtml(entry, index) +
         '<div class="served-list-folders">' + folderRows + "</div>" +
         '<button type="button" class="btn btn-small list-folder-add">' + t("settings.addFolder") + '</button>' +
+        // #1295: this list's own file types to leave out, on top of
+        // LIST_IGNORED_EXTENSIONS. The value goes in as a property in
+        // attachListRows(), never into the markup.
+        '<label class="served-list-exclude-label">' + t("settings.listExclude") +
+          '<input type="text" class="served-list-exclude" placeholder=".db, .ini">' +
+        "</label>" +
+        '<p class="served-list-exclude-hint">' + t("settings.listExcludeHint") + "</p>" +
         "</div>";
     }).join("");
 
@@ -5623,6 +5630,15 @@
         draft[index].name = nameInput.value;
       });
 
+      // Sent as typed; the server spells it (#1295).
+      var excludeInput = block.querySelector(".served-list-exclude");
+      if (excludeInput) {
+        excludeInput.value = entry.exclude || "";
+        excludeInput.addEventListener("input", function () {
+          draft[index].exclude = excludeInput.value;
+        });
+      }
+
       // The channel NAME is assigned as a property, never written into the
       // markup - see channelBoxHtml(). The label text goes in as textContent
       // for the same reason.
@@ -5704,7 +5720,7 @@
     }
 
     if (button.classList.contains("served-list-add")) {
-      draft.push({ name: "", primary: draft.length === 0, channels: [], folders: [] });
+      draft.push({ name: "", primary: draft.length === 0, channels: [], folders: [], exclude: "" });
     } else if (button.classList.contains("served-list-remove")) {
       var block = button.closest(".served-list-block");
       var removeIndex = parseInt(block.dataset.listIndex, 10);
@@ -5746,6 +5762,8 @@
               primary: !!entry.primary,
               channels: (entry.channels || []).slice(),
               modes: Object.assign({}, entry.modes || {}),
+              // Held as the text the field shows; the save sends it as is.
+              exclude: (entry.exclude || []).join(", "),
               folders: (entry.folders || []).map(function (f) {
                 return { name: f.name, path: f.path };
               })

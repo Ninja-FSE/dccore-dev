@@ -288,6 +288,8 @@
   "settings.primary": "Principal",
   "settings.removeList": "Eliminar lista",
   "settings.addFolder": "Añadir carpeta",
+  "settings.listExclude": "Tipos de archivo que esta lista deja fuera",
+  "settings.listExcludeHint": "Además de los que dejan fuera todas las listas (LIST_IGNORED_EXTENSIONS). Sepáralos con comas; el punto es opcional. Reconstruye las listas para aplicarlo.",
   "settings.servedListsHeading": "Listas servidas",
   "settings.servedListsSummary": "Cada lista se construye a partir de sus propias carpetas y responde en sus propios canales. Un canal que ninguna lista nombra no se sirve en absoluto; una lista que no nombra ningún canal responde en todos, lo cual solo tiene sentido para una de ellas. La principal es lo que significa un mensaje privado.",
   "settings.addList": "Añadir lista",

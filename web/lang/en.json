@@ -288,6 +288,8 @@
   "settings.primary": "Primary",
   "settings.removeList": "Remove list",
   "settings.addFolder": "Add folder",
+  "settings.listExclude": "File types to leave out of this list",
+  "settings.listExcludeHint": "On top of the file types every list leaves out (LIST_IGNORED_EXTENSIONS). Separate them with commas; the dot is optional. Rebuild the lists to apply it.",
   "settings.servedListsHeading": "Served lists",
   "settings.servedListsSummary": "Each list is built from its own folders and answered in its own channels. A channel named by no list is not served at all; a list naming no channels answers everywhere, which only makes sense for one of them. The primary is what a private message means.",
   "settings.addList": "Add list",

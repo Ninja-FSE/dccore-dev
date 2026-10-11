@@ -4,6 +4,48 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗂️ Each served list can leave out file types of its own (#1295)
+
+From `docs/FUTURE.md`'s "Smaller things worth having": the per-list `Exclude = .mpu,.db` that OmenServe has.
+`LIST_IGNORED_EXTENSIONS` did this for every list at once; now a list can add its own on top.
+
+- **Stored** as `exclude` in `data/lists.json`, on `library.ServedList` (a new last field, default `()`).
+  - Spelled by `library.normalise_extensions()`: lower case, the dot added, each once. The dot is what stops `ts`
+    matching a file called `credits`, the same rule as `update_list._extension_set()`.
+  - Checked on save by `library.extension_problems()`: no slashes, spaces or control characters, at most 32
+    characters each and 50 in all. A refusal names the list.
+  - A bad entry in a hand-edited file is dropped on load and the rest is kept. An old `lists.json` has none.
+- **Built:** `update_list.ignored_extensions(list_name)` is `LIST_IGNORED_EXTENSIONS` and then the list's own set.
+  `generate_master_list()` passes the list it builds. `scripts/setup_check.py` now resolves the set once per count:
+  asked per file, it would read `lists.json` once per file in the library.
+- **A save that doesn't carry the field keeps it.** The mIRC settings window, a dashboard tab from before the upgrade
+  and the console's `served` transaction all send the whole set of lists without it. `apply_list_changes()` keeps
+  the stored exclusions of the list with the same name, and only an explicit value (`""` or `[]` clears) replaces
+  them. Without this, a save from mIRC would silently drop every exclusion. The console's "nothing changed" check
+  leaves the field out for the same reason.
+- **Dashboard:** each list on the lists page has *File types to leave out of this list*, with es/fr strings.
+  `GET /api/lists` shows `exclude` only on a list that has some, as `lists.json` does with `modes`.
+- **Console:** the typed `served` shows a list's exclusions. The `SRV` snapshot does not carry them, and
+  `docs/ADMIN-CONSOLE.md` says so. Editing them from the mIRC window is a follow-up.
+- **Tests:** `tests/test_each_list_leaves_out_its_own_file_types.py` (19 tests). They run the real scan of two
+  lists, the dashboard's save, and the console's `served` send-back, unchanged and with a change.
+  `test_master_list_generation.py`'s stand-in for `ignored_extensions()` takes the list name, and its source check
+  reads the resolved-once count.
+- **Mutation checks, 16/16 caught:**
+  - the build reads the primary's set for every list;
+  - a list's own set is never applied, or replaces the global one;
+  - no dot is added; case is kept;
+  - bad entries are kept on load;
+  - slashes and spaces are allowed;
+  - no count limit;
+  - a save does not check them;
+  - they are not read from or not written to `lists.json`;
+  - a row without the field wipes them (the mIRC save);
+  - a non-list value is accepted;
+  - the dashboard is not shown them;
+  - an unchanged console send-back is saved anyway;
+  - the typed snapshot does not show them.
+
 ### 🧱 Splitting `irc_loop`, step 2: the QUIT/PART nick reclaim is its own function (#1291)
 
 Step 2 of "Splitting the largest functions" in `docs/FUTURE.md`, after #1287. The body of the block that asks for the

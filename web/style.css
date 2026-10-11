@@ -1502,6 +1502,25 @@ mark.filter-hit {
   margin-bottom: 8px;
 }
 
+/* #1295: a list's own file types to leave out. */
+.served-list-exclude-label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 0.9em;
+}
+
+.served-list-exclude {
+  flex: 1 1 auto;
+}
+
+.served-list-exclude-hint {
+  margin: 4px 0 0;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
 .list-folder-row {
   display: flex;
   gap: 8px;

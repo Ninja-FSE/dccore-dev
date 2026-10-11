@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **New: each list can leave out file types of its own**, like OmenServe's per-list *Exclude*. On the Settings page's lists editor, every list has *File types to leave out of this list* (for example `.cue, .nfo`). These are on top of the file types every list leaves out (`LIST_IGNORED_EXTENSIONS`). Rebuild the lists to apply it. Saving the lists from the mIRC settings window keeps them as they are.
+
 ## v1.16.2 — The Hardened Release
 
 - **Fixed (security): several holes in admin access are closed.** `dccore.mrc` could accept a new login token from someone other than your bot, so update it to 1.19.4 and reload it with `/reload -rs dccore.mrc`. The console's fallback connection now waits for you alone. Console logins made at the same time from one address no longer get more password tries than the limit. A `!rehash` that cannot read `settings.conf` keeps the settings it had, and a line you delete from `admin_config.py` is gone after a `!rehash`. `unpair` now says so when it could not revoke a token. **Update if you use the DCC console or `dccore.mrc`.**
