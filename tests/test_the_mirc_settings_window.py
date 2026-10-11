@@ -1273,12 +1273,10 @@ class TheAuditOfBothHalves(unittest.TestCase):
         self.assertIn("hdel dccore.sws keep", alias("dccore.sw.reload"))
         self.assertNotIn("keep", alias("dccore.sw.start"))
 
-    # 5. The public changelog names one version for dccore.mrc.
+    # 5. The public changelog names one version for dccore.mrc, and it is
+    #    the version the script says it is.
 
     def test_the_public_changelog_names_one_script_version(self):
-        # Checks the topmost section - "## Unreleased" while it says that,
-        # the just-rolled version heading right after a release - so this
-        # keeps working across a roll instead of only until the next one.
         # The public changelog is docs/UPDATES-PUBLIC.md here and
         # docs/UPDATES.md once extraction has renamed it onto that path
         # (docs/PUBLIC-REPO-WORKFLOW.md, step 3) - try both, in that order.
@@ -1287,12 +1285,44 @@ class TheAuditOfBothHalves(unittest.TestCase):
             public_changelog = os.path.join(REPO_ROOT, "docs", "UPDATES.md")
         with io.open(public_changelog, encoding="utf-8") as handle:
             text = handle.read()
-        start = text.index("\n## ") + 1
-        unreleased = text[start:]
-        unreleased = unreleased[:unreleased.index("\n## ", 1)]
-        versions = set(re.findall(r"`dccore\.mrc` to (\d+\.\d+\.\d+)", unreleased))
-        self.assertEqual(versions, {"1.19.4"})
+        top, newest = script_versions_named(text)
+        self.assertLessEqual(len(top), 1, "the top section asks for more than one dccore.mrc: %s" % sorted(top))
+        self.assertEqual(newest, script_version(),
+                         "the newest dccore.mrc the changelog asks for is not the one the script says it is")
 
+    def test_a_new_section_without_a_script_bullet_still_passes(self):
+        # Right after a release the next change opens "## Unreleased" above
+        # the rolled version, usually without touching the script. The check
+        # must still find the newest version below it, not demand one there.
+        text = ("# Changelog\n\n## Unreleased\n\n- **Fixed: something else.**\n\n"
+                "## v9.9.9 - Old\n\n- **New.** Update `dccore.mrc` to 1.2.3 and reload it.\n\n"
+                "## v9.9.8 - Older\n\n- **New.** Update `dccore.mrc` to 1.2.2.\n")
+        self.assertEqual(script_versions_named(text), (set(), "1.2.3"))
+
+    def test_two_versions_in_one_section_are_both_seen(self):
+        text = ("# Changelog\n\n## Unreleased\n\n- Update `dccore.mrc` to 1.2.4.\n"
+                "- Update `dccore.mrc` to 1.2.5.\n\n## v9.9.9 - Old\n\n- Update `dccore.mrc` to 1.2.3.\n")
+        self.assertEqual(script_versions_named(text), ({"1.2.4", "1.2.5"}, "1.2.4"))
+
+
+SCRIPT_VERSION_NAMED = re.compile(r"`dccore\.mrc` to (\d+(?:\.\d+)+)")
+
+
+def script_versions_named(text):
+    """(versions the topmost "## " section asks for, newest one asked for
+    anywhere). The topmost section is "## Unreleased" between releases and
+    the just-rolled version right after one."""
+    start = text.index("\n## ") + 1
+    following = text.find("\n## ", start)
+    top = text[start:following if following >= 0 else len(text)]
+    named = SCRIPT_VERSION_NAMED.search(text, start)
+    return set(SCRIPT_VERSION_NAMED.findall(top)), named.group(1) if named else None
+
+
+def script_version():
+    with io.open(SCRIPT, encoding="utf-8") as handle:
+        found = re.search(r"^alias dccore\.ver \{ return (\S+) \}$", handle.read(), re.M)
+    return found.group(1) if found else None
 
 if __name__ == "__main__":
     unittest.main()
