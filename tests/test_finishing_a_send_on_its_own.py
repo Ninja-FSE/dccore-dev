@@ -79,7 +79,7 @@ class Ending(DCCoreTestCase):
             file_size=SIZE, resume_offset=0, bytes_sent=SIZE if completed else 1_000_000,
             transfer_completed=completed, already_held=False, offered_at=100.0, start_time=100.0,
             transfer_finished_at=102.0, channel="#somechannel", irc_sock=object(),
-            owns_packer=False, outcome_identity=("file", "k", "Some_Album.rar"),
+            owns_packer=False, outcome_identity=("k", "Some_Album.rar", "file"),
             outcome_status="failed", acked=0, never_connected=False, assigned_port=5001,
             conn=self.conn, dcc_sock=self.listener)
         sent.update(fields)
