@@ -48,6 +48,7 @@ why the connect-failure paths had to reset `joined = False`.
   - the welcome guard's `or` becomes `and`;
   - a new connection starts registered;
   - the backoff forgets whether the link registered.
+
 ### 🪟 dccore.mrc: the settings window draws its pages as a DCX tree (#1288, phase 2)
 
 `/dccore dcx check` in the operator's mIRC (32-bit, the shipped dll from `C:\mIRC\scripts\dcx\`) answered what the
