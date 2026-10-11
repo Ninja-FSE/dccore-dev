@@ -448,9 +448,26 @@ class TheMockupLayout(unittest.TestCase):
         add = builder.BIND_ADD_ID
         self.assertEqual([self.where[add + k][0] for k in range(4)], ["edit", "combo", "combo", "button"])
         self.assertEqual(self.where[add + 3][1], "Add")
-        self.assertEqual([self.where[i][1] for i in (1566, 1567, 1569, 1570)], ["Save lists", "Refresh", "Previous", "Next"])
+        self.assertEqual([self.where[i][1] for i in (1566, 1567)], ["Save lists", "Refresh"])
         self.assertEqual(statements(alias("dccore.sw.srv.rowbase")), ["return $calc(1700 + 4 * ($1 - 1))"])
         self.assertEqual(builder.BIND_FIRST_ID, 1700)
+        # a scrollbar beside the rows, not pages: every channel is reached by
+        # scrolling, and the rows are filled from its position
+        scroll = self.where[builder.BIND_SCROLL_ID]
+        self.assertEqual(scroll[0], "scroll")
+        self.assertIn(builder.BIND_SCROLL_ID, ids)
+        self.assertGreater(scroll[3], self.where[builder.BIND_FIRST_ID + 3][3] + self.where[builder.BIND_FIRST_ID + 3][5])
+        self.assertIn("vertical", scroll[7])
+        self.assertIn("on *:dialog:dccore.set:scroll:*: { dccore.sw.scrolled $did }", code())
+        self.assertEqual(statements(alias("dccore.sw.scrolled")),
+                         ["if ($1 != 1774) { return }", "hadd dccore.sws bind.off $did(dccore.set,1774).sel",
+                          "dccore.sw.srv.drawrows"])
+        drawrows = alias("dccore.sw.srv.drawrows")
+        self.assertIn("did -z dccore.set 1774 range 0 $iif(%n > 15,$calc(%n - 15),0)", drawrows)
+        self.assertIn("did -c dccore.set 1774 %off", drawrows)
+        self.assertIn("if (%off > $calc(%n - 15)) { %off = $calc(%n - 15) }", drawrows)
+        self.assertNotIn("Previous", code())
+        self.assertNotIn("pagenext", code())
         # a click in a row: its menus change the binding at once, its Remove takes it
         click = alias("dccore.sw.click")
         self.assertIn("if (%id isnum 1700-1759) { dccore.sw.srv.rowclick %id | return }", click)

@@ -202,9 +202,7 @@ WIDGETS = {
     "srvsaveb": (
         (1566, "button", "Save lists", 0, 0, 56, 13, ""),
         (1567, "button", "Refresh", 59, 0, 46, 13, ""),
-        (1568, "text", "", 120, 2, 120, 8, ""),
-        (1569, "button", "Previous", 244, 0, 50, 13, ""),
-        (1570, "button", "Next", 297, 0, 46, 13, ""),
+        (1568, "text", "", 120, 2, 160, 8, ""),
     ),
     "bantimed": (
         (1580, "list", "", 0, 0, 358, 60, "vsbar"),
@@ -235,27 +233,31 @@ WIDGETS = {
     ),
 }
 # The Channel bindings page: the mockup's rows. A row per channel, each with
-# its own List and Mode menus and a Remove button, then the row that adds
-# one. Row R's controls are BIND_FIRST_ID + 4(R-1): its channel, +1 its
-# List menu, +2 its Mode menu, +3 its Remove. The script fills BIND_ROWS of
-# them a page and hides the spare ones (dccore.sw.srv.drawrows).
+# its own List and Mode menus and a Remove button, a scrollbar beside them
+# for the channels beyond the BIND_ROWS shown, then the row that adds one.
+# Row R's controls are BIND_FIRST_ID + 4(R-1): its channel, +1 its List
+# menu, +2 its Mode menu, +3 its Remove. The script fills the rows from the
+# scrollbar's position and hides the spare ones (dccore.sw.srv.drawrows):
+# the rows never move, their contents do.
 BIND_ROWS, BIND_FIRST_ID, BIND_PITCH = 15, 1700, 13
 BIND_ADD_ID = 1770                          # the row that adds one: edit, List, Mode, Add
+BIND_SCROLL_ID = 1774
 
 
 def binding_rows():
     parts = []
     for r in range(BIND_ROWS):
         base, y = BIND_FIRST_ID + 4 * r, BIND_PITCH * r
-        parts += [(base, "text", "", 0, y + 2, 106, 8, ""),
-                  (base + 1, "combo", "", 110, y, 90, 80, "drop"),
-                  (base + 2, "combo", "", 204, y, 90, 60, "drop"),
-                  (base + 3, "button", "Remove", 306, y - 1, 52, 13, "")]
+        parts += [(base, "text", "", 0, y + 2, 98, 8, ""),
+                  (base + 1, "combo", "", 102, y, 84, 80, "drop"),
+                  (base + 2, "combo", "", 190, y, 84, 60, "drop"),
+                  (base + 3, "button", "Remove", 284, y - 1, 56, 13, "")]
+    parts.append((BIND_SCROLL_ID, "scroll", "", 347, 0, 11, BIND_PITCH * BIND_ROWS - 1, "range 0 0 vertical"))
     y = BIND_PITCH * BIND_ROWS + 4
-    parts += [(BIND_ADD_ID, "edit", "", 0, y, 106, 11, "autohs"),
-              (BIND_ADD_ID + 1, "combo", "", 110, y, 90, 80, "drop"),
-              (BIND_ADD_ID + 2, "combo", "", 204, y, 90, 60, "drop"),
-              (BIND_ADD_ID + 3, "button", "Add", 306, y - 1, 52, 13, "")]
+    parts += [(BIND_ADD_ID, "edit", "", 0, y, 98, 11, "autohs"),
+              (BIND_ADD_ID + 1, "combo", "", 102, y, 84, 80, "drop"),
+              (BIND_ADD_ID + 2, "combo", "", 190, y, 84, 60, "drop"),
+              (BIND_ADD_ID + 3, "button", "Add", 284, y - 1, 56, 13, "")]
     return tuple(parts)
 
 

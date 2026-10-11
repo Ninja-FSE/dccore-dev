@@ -98,7 +98,7 @@ def untext(text):
 
 
 CONTROL = re.compile(
-    r'^\s+(check|text|button|box|edit|combo|list|tab|radio) (?:"([^"]*)", )?(\d+)(?:, (\d+) (\d+) (\d+) (\d+))?(?:, (.*))?$',
+    r'^\s+(check|text|button|box|edit|combo|list|tab|radio|scroll) (?:"([^"]*)", )?(\d+)(?:, (\d+) (\d+) (\d+) (\d+))?(?:, (.*))?$',
     re.M)
 
 

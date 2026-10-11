@@ -3363,8 +3363,6 @@ alias dccore.sw.click {
   if (%id == 1555) { dccore.sw.srv.delete | return }
   if (%id == 1556) || (%id == 1566) { dccore.sw.srv.save | return }
   if (%id == 1557) || (%id == 1567) { dccore.sw.reask served | return }
-  if (%id == 1569) { dccore.sw.srv.pageback | return }
-  if (%id == 1570) { dccore.sw.srv.pagenext | return }
   if (%id == 1773) { dccore.sw.srv.newchan | return }
   if (%id isnum 1700-1759) { dccore.sw.srv.rowclick %id | return }
   ; Bans & ignores
@@ -3521,8 +3519,9 @@ alias dccore.sw.oc.wire {
 ;  it - Add list and Edit open the list window (dccore.setl) for one
 ;  list's name, primary flag and folders. Channel bindings: a row per
 ;  channel with its own List and Mode menus and a Remove button (a change
-;  in a menu is kept at once) and the row that adds one under them,
-;  fifteen rows a page. Each list has an id of the window's own
+;  in a menu is kept at once), a scrollbar beside the fifteen rows shown
+;  for the channels beyond them, and the row that adds one under them.
+;  Each list has an id of the window's own
 ;  (srv.l.<id> = "<primary> <name>", in srv.order), so removing one
 ;  renumbers nothing; channels and folders name the id of their list
 ;  (srv.c.<n> = "<list> <channel token> <mode>", srv.f.<n> = "<list>
@@ -3660,18 +3659,23 @@ alias dccore.sw.srv.delete {
 
 ; -- Channel bindings: the mockup's rows ----------------------------------
 ;  Row R of the fifteen: its channel is 1700 + 4(R-1), its List menu +1,
-;  its Mode menu +2, its Remove +3; the row that adds one is 1770 to 1773,
-;  and Previous, Next and the "1-15 of N" line sit beside Save lists
-;  (1568 to 1570). bind.off is the first row shown, bind.row.R the binding
-;  (its number in srv.corder) row R holds.
+;  its Mode menu +2, its Remove +3; the scrollbar beside them is 1774, the
+;  row that adds one 1770 to 1773, and the count sits beside Save lists
+;  (1568). The rows never move: the scrollbar's position is bind.off, the
+;  first binding shown, and the rows are filled from it - bind.row.R is
+;  the binding (its number in srv.corder) row R holds.
 alias dccore.sw.srv.rowbase { return $calc(1700 + 4 * ($1 - 1)) }
-; The page of rows from bind.off: a row each, the spare rows hidden
+; The rows from bind.off: a row each, the spare rows hidden, the scrollbar
+; ranged over what is beyond the fifteen
 alias dccore.sw.srv.drawrows {
   var %c = $dccore.sw.s(srv.corder), %n = $numtok(%c,32), %off = $dccore.sw.s(bind.off), %r = 1
   if (%off == $null) { %off = 0 }
-  while (%off >= %n) && (%off > 0) { dec %off 15 }
+  if (%off > $calc(%n - 15)) { %off = $calc(%n - 15) }
   if (%off < 0) { %off = 0 }
   hadd dccore.sws bind.off %off
+  did -z dccore.set 1774 range 0 $iif(%n > 15,$calc(%n - 15),0)
+  did -c dccore.set 1774 %off
+  did $iif(%n > 15,-e,-b) dccore.set 1774
   hdel -w dccore.sws bind.row.*
   while (%r <= 15) {
     var %k = $calc(%off + %r), %base = $dccore.sw.srv.rowbase(%r)
@@ -3690,7 +3694,14 @@ alias dccore.sw.srv.drawrows {
   dccore.sw.pickline 1771 $iif($dccore.sw.s(srv.order) != $null,1,0)
   if (!$did(dccore.set,1772).sel) { did -c dccore.set 1772 1 }
   dccore.sw.srv.rowsvis
-  dccore.sw.put 1568 $iif(%n,$calc(%off + 1) - $iif($calc(%off + 15) < %n,$calc(%off + 15),%n) of %n,No channel bindings yet)
+  dccore.sw.put 1568 $iif(%n,%n channel binding $+ $iif(%n != 1,s),No channel bindings yet)
+}
+; The scrollbar moved: the rows filled from its position
+on *:dialog:dccore.set:scroll:*: { dccore.sw.scrolled $did }
+alias dccore.sw.scrolled {
+  if ($1 != 1774) { return }
+  hadd dccore.sws bind.off $did(dccore.set,1774).sel
+  dccore.sw.srv.drawrows
 }
 ; The rows with a binding shown, the rest hidden - again each time the
 ; page is shown, since showing a page shows every control of it
@@ -3702,8 +3713,6 @@ alias dccore.sw.srv.rowsvis {
     did $iif($calc(%off + %r) <= %n,-v,-h) dccore.set $+(%base,$chr(44),$calc(%base + 1),$chr(44),$calc(%base + 2),$chr(44),$calc(%base + 3))
     inc %r
   }
-  did $iif(%off > 0,-e,-b) dccore.set 1569
-  did $iif($calc(%off + 15) < %n,-e,-b) dccore.set 1570
 }
 ; A click in a row ($1 the control): its List or Mode menu changed, kept
 ; at once, or its Remove pressed
@@ -3731,12 +3740,10 @@ alias dccore.sw.srv.newchan {
   if (%chan == $null) || ($dccore.sw.s(srv.order) == $null) { dccore.sw.status Type the channel first, and have a list for it. | return }
   dccore.sw.srv.addchan $dccore.sw.srv.chosen(1771) $dccore.sw.tok(%chan) $dccore.sw.srv.mode(1772)
   did -r dccore.set 1770
-  ; the page that holds the new row
-  hadd dccore.sws bind.off $calc(15 * $int($calc(($numtok($dccore.sw.s(srv.corder),32) - 1) / 15)))
+  ; scrolled to the end, where the new row is
+  hadd dccore.sws bind.off $calc($numtok($dccore.sw.s(srv.corder),32) - 15)
   dccore.sw.srv.edited
 }
-alias dccore.sw.srv.pageback { hadd dccore.sws bind.off $calc($dccore.sw.s(bind.off) - 15) | dccore.sw.srv.drawrows }
-alias dccore.sw.srv.pagenext { hadd dccore.sws bind.off $calc($dccore.sw.s(bind.off) + 15) | dccore.sw.srv.drawrows }
 alias dccore.sw.srv.edited {
   hadd dccore.sws srv.dirty 1
   dccore.sw.srv.draw
@@ -4173,75 +4180,74 @@ dialog dccore.set {
   button "Save lists", 1556, 106 158 56 13
   text "Which list answers in each channel, and that channel's mode. A change in a menu is kept at once; Save lists sends the set to the bot.", 1133, 106 32 370 16
   box "Channel bindings", 1134, 106 55 370 229
-  text "", 1700, 112 67 106 8
-  combo 1701, 222 65 90 80, drop
-  combo 1702, 316 65 90 60, drop
-  button "Remove", 1703, 418 64 52 13
-  text "", 1704, 112 80 106 8
-  combo 1705, 222 78 90 80, drop
-  combo 1706, 316 78 90 60, drop
-  button "Remove", 1707, 418 77 52 13
-  text "", 1708, 112 93 106 8
-  combo 1709, 222 91 90 80, drop
-  combo 1710, 316 91 90 60, drop
-  button "Remove", 1711, 418 90 52 13
-  text "", 1712, 112 106 106 8
-  combo 1713, 222 104 90 80, drop
-  combo 1714, 316 104 90 60, drop
-  button "Remove", 1715, 418 103 52 13
-  text "", 1716, 112 119 106 8
-  combo 1717, 222 117 90 80, drop
-  combo 1718, 316 117 90 60, drop
-  button "Remove", 1719, 418 116 52 13
-  text "", 1720, 112 132 106 8
-  combo 1721, 222 130 90 80, drop
-  combo 1722, 316 130 90 60, drop
-  button "Remove", 1723, 418 129 52 13
-  text "", 1724, 112 145 106 8
-  combo 1725, 222 143 90 80, drop
-  combo 1726, 316 143 90 60, drop
-  button "Remove", 1727, 418 142 52 13
-  text "", 1728, 112 158 106 8
-  combo 1729, 222 156 90 80, drop
-  combo 1730, 316 156 90 60, drop
-  button "Remove", 1731, 418 155 52 13
-  text "", 1732, 112 171 106 8
-  combo 1733, 222 169 90 80, drop
-  combo 1734, 316 169 90 60, drop
-  button "Remove", 1735, 418 168 52 13
-  text "", 1736, 112 184 106 8
-  combo 1737, 222 182 90 80, drop
-  combo 1738, 316 182 90 60, drop
-  button "Remove", 1739, 418 181 52 13
-  text "", 1740, 112 197 106 8
-  combo 1741, 222 195 90 80, drop
-  combo 1742, 316 195 90 60, drop
-  button "Remove", 1743, 418 194 52 13
-  text "", 1744, 112 210 106 8
-  combo 1745, 222 208 90 80, drop
-  combo 1746, 316 208 90 60, drop
-  button "Remove", 1747, 418 207 52 13
-  text "", 1748, 112 223 106 8
-  combo 1749, 222 221 90 80, drop
-  combo 1750, 316 221 90 60, drop
-  button "Remove", 1751, 418 220 52 13
-  text "", 1752, 112 236 106 8
-  combo 1753, 222 234 90 80, drop
-  combo 1754, 316 234 90 60, drop
-  button "Remove", 1755, 418 233 52 13
-  text "", 1756, 112 249 106 8
-  combo 1757, 222 247 90 80, drop
-  combo 1758, 316 247 90 60, drop
-  button "Remove", 1759, 418 246 52 13
-  edit "", 1770, 112 264 106 11, autohs
-  combo 1771, 222 264 90 80, drop
-  combo 1772, 316 264 90 60, drop
-  button "Add", 1773, 418 263 52 13
+  text "", 1700, 112 67 98 8
+  combo 1701, 214 65 84 80, drop
+  combo 1702, 302 65 84 60, drop
+  button "Remove", 1703, 396 64 56 13
+  text "", 1704, 112 80 98 8
+  combo 1705, 214 78 84 80, drop
+  combo 1706, 302 78 84 60, drop
+  button "Remove", 1707, 396 77 56 13
+  text "", 1708, 112 93 98 8
+  combo 1709, 214 91 84 80, drop
+  combo 1710, 302 91 84 60, drop
+  button "Remove", 1711, 396 90 56 13
+  text "", 1712, 112 106 98 8
+  combo 1713, 214 104 84 80, drop
+  combo 1714, 302 104 84 60, drop
+  button "Remove", 1715, 396 103 56 13
+  text "", 1716, 112 119 98 8
+  combo 1717, 214 117 84 80, drop
+  combo 1718, 302 117 84 60, drop
+  button "Remove", 1719, 396 116 56 13
+  text "", 1720, 112 132 98 8
+  combo 1721, 214 130 84 80, drop
+  combo 1722, 302 130 84 60, drop
+  button "Remove", 1723, 396 129 56 13
+  text "", 1724, 112 145 98 8
+  combo 1725, 214 143 84 80, drop
+  combo 1726, 302 143 84 60, drop
+  button "Remove", 1727, 396 142 56 13
+  text "", 1728, 112 158 98 8
+  combo 1729, 214 156 84 80, drop
+  combo 1730, 302 156 84 60, drop
+  button "Remove", 1731, 396 155 56 13
+  text "", 1732, 112 171 98 8
+  combo 1733, 214 169 84 80, drop
+  combo 1734, 302 169 84 60, drop
+  button "Remove", 1735, 396 168 56 13
+  text "", 1736, 112 184 98 8
+  combo 1737, 214 182 84 80, drop
+  combo 1738, 302 182 84 60, drop
+  button "Remove", 1739, 396 181 56 13
+  text "", 1740, 112 197 98 8
+  combo 1741, 214 195 84 80, drop
+  combo 1742, 302 195 84 60, drop
+  button "Remove", 1743, 396 194 56 13
+  text "", 1744, 112 210 98 8
+  combo 1745, 214 208 84 80, drop
+  combo 1746, 302 208 84 60, drop
+  button "Remove", 1747, 396 207 56 13
+  text "", 1748, 112 223 98 8
+  combo 1749, 214 221 84 80, drop
+  combo 1750, 302 221 84 60, drop
+  button "Remove", 1751, 396 220 56 13
+  text "", 1752, 112 236 98 8
+  combo 1753, 214 234 84 80, drop
+  combo 1754, 302 234 84 60, drop
+  button "Remove", 1755, 396 233 56 13
+  text "", 1756, 112 249 98 8
+  combo 1757, 214 247 84 80, drop
+  combo 1758, 302 247 84 60, drop
+  button "Remove", 1759, 396 246 56 13
+  scroll "", 1774, 459 65 11 194, range 0 0 vertical
+  edit "", 1770, 112 264 98 11, autohs
+  combo 1771, 214 264 84 80, drop
+  combo 1772, 302 264 84 60, drop
+  button "Add", 1773, 396 263 56 13
   button "Save lists", 1566, 106 288 56 13
   button "Refresh", 1567, 165 288 46 13
-  text "", 1568, 226 290 120 8
-  button "Previous", 1569, 350 288 50 13
-  button "Next", 1570, 403 288 46 13
+  text "", 1568, 226 290 160 8
   box "Automatic rebuild", 1135, 106 32 370 83
   text "Rebuild the list automatically", 2240, 112 42 358 8
   edit "", 2241, 112 51 358 11, autohs
@@ -4562,7 +4568,7 @@ alias dccore.sw.data {
   hadd dccore.swm p.11.layout roomy 1
   hadd dccore.swm p.11.n 2
   hadd dccore.swm p.11.1 1133,1134,1700,1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747
-  hadd dccore.swm p.11.2 1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1770,1771,1772,1773,1566,1567,1568,1569,1570
+  hadd dccore.swm p.11.2 1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1566,1567,1568
   hadd dccore.swm p.11.w srvchans srvsaveb
   hadd dccore.swm p.11.ask served
   hadd dccore.swm p.12 Rebuild
@@ -5585,10 +5591,10 @@ alias dccore.sw.data {
   hadd dccore.swm bot.n 6
   hadd dccore.swm bot.1 2001,2005,2009,2013,2017,2021,1500,1501,1502,1503,1506,1504,1505,2041,2045,2049,2053,2057,2061,2065,2069,1520,1521,1522,1523,2073,2077,1610,1611,2081,2082,2085,2086,2089,2090,2093,2094,2097,2098,2101,2102,2105,2109,2113,2117,2121,2125,2129,2133,2137
   hadd dccore.swm bot.2 2141,2145,2149,2153,2157,2161,2165,2169,2173,2177,2181,2185,2186,2189,2193,2197,2201,2205,2209,2213,2217,2218,2221,2225,2229,2230,2233,2237,1540,1551,1554,1555,1557,1556,1700,1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715
-  hadd dccore.swm bot.3 1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747,1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1770,1771,1772,1773,1566,1567
-  hadd dccore.swm bot.4 1568,1569,1570,2241,2245,2249,2253,2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,1580,1583,1584,1585,1586,1587,1581,1582,1595,1597,1598
-  hadd dccore.swm bot.5 1596,2385,2389,2393,2397,2401,2405,2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2473,2477,2481,2485,2489,2490,2493,2497,2501,2505,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542
-  hadd dccore.swm bot.6 2545,2546,2549,2550,2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598
+  hadd dccore.swm bot.3 1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747,1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1566
+  hadd dccore.swm bot.4 1567,1568,2241,2245,2249,2253,2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,1580,1583,1584,1585,1586,1587,1581,1582,1595,1597,1598,1596
+  hadd dccore.swm bot.5 2385,2389,2393,2397,2401,2405,2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2473,2477,2481,2485,2489,2490,2493,2497,2501,2505,2509,2510,2513,2514,2517,2518,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545
+  hadd dccore.swm bot.6 2546,2549,2550,2553,2554,2557,2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598
   hadd dccore.swm confirm TMP_ZIP_DIR LOCAL_LIST_DIR FETCHED_FILES_DIR LIBRARY_FOLDERS_FILE LISTS_FILE BANS_FILE HARD_BANS_FILE STATS_FILE KNOWN_BOTS_FILE FETCHED_BOT_LISTS_FILE LIST_INDEX_FILE LIST_AUDIO_INFO_CACHE FETCH_HISTORY_FILE DOWNLOAD_COUNTS_FILE TRANSFER_LOG_FILE LIST_SIZE_FILE LIST_RAWBYTES_FILE LIST_PROGRESS_FILE ADMIN_TOKENS_FILE ON_CONNECT_FILE NOTICES_FILE PRIVATE_MESSAGES_FILE DCC_QUEUE_FILE
   hadd dccore.swm t.1500 Sent once the server has registered the bot~2C before it joins: one command per line~2C exactly as typed into a client. ~25nick~25 is the nickname the server gave it.
   hadd dccore.swm t.2388 That reply's wording (~25admin becomes the admin nick)

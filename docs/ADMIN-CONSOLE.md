@@ -1006,8 +1006,9 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
   primary flag and folders (a label and a path each) and **Delete** takes a
   list with its channels and folders; **Channel bindings**, a row per
   channel with its own List and Mode menus - a change in a menu is kept at
-  once - and a **Remove**, with a row to add one under them, fifteen rows a
-  page; **Save lists**, on both pages, sends the whole set; and **Bans &
+  once - and a **Remove**, a scrollbar beside the fifteen rows shown for the
+  channels beyond them, and a row to add one under them; **Save lists**, on
+  both pages, sends the whole set; and **Bans &
   ignores** (lift a timed ban, ignore a nick for some minutes, add or remove
   a permanent pattern). **Channels** edits `CHANNEL` as a list and is
   saved by Apply. A save the bot refuses keeps your edits there. A row or a
