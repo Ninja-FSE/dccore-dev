@@ -2114,13 +2114,21 @@ class ListUpdateStalled(Exception):
         super().__init__(f"no progress for {int(silent_for)}s")
 
 
-def last_progress_at():
+def last_progress_at(token=None):
     """When the running rebuild last reported, or None if we cannot tell.
 
     None is "cannot tell", never "a long time ago". A rebuild that cannot
     write its progress file - a full disk, a read-only data/ - is not evidence
     of a rebuild that is stuck, and killing one for it would turn a cosmetic
     failure into the loss of an eight-hour run.
+
+    `token`: the one the bot gave the child being watched (audio_run_env()).
+    A report carrying ANOTHER run's token is not this child's (#1361): a run
+    killed for stalling, or ended by a crash or a reboot, never clears its
+    file, and read as this child's it said "silent for hours" at the first
+    tick - so the next rebuild was killed before it had written anything,
+    and the one after, every time. A report with no token at all (a run from
+    a terminal, or from before #1182) is read as before.
     """
     import json
     import platform_compat
@@ -2131,9 +2139,20 @@ def last_progress_at():
     try:
         with open(platform_compat.long_path(path), encoding="utf-8") as handle:
             loaded = json.load(handle)
-        return float(loaded["at"])
+        at = float(loaded["at"])
+        theirs = str(loaded.get("token") or "")
     except Exception:
         return None
+    if token and theirs and theirs != token:
+        return None
+    return at
+
+
+def _forget_progress():
+    """A killed child never clears its own progress file (#1361): it would
+    show the dashboard a bar that never moves until the next rebuild."""
+    import update_list
+    update_list.clear_progress()
 
 
 def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=None, env=None):
@@ -2174,6 +2193,7 @@ def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=Non
 
     begun = time.time()
     import platform_compat
+    import update_list
     process = subprocess.Popen(argv, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True,
                                encoding="utf-8", errors="replace", env=env,
@@ -2200,9 +2220,10 @@ def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=Non
         if ceiling and (now - begun) >= ceiling:
             process.kill()
             process.communicate()
+            _forget_progress()
             raise subprocess.TimeoutExpired(argv, ceiling)
 
-        reported_at = last_progress_at()
+        reported_at = last_progress_at(token=(env or {}).get(update_list.RUN_TOKEN_ENV))
         if reported_at is None:
             # Cannot tell. Never kill for it.
             continue
@@ -2210,6 +2231,7 @@ def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=Non
         if silent_for >= stall:
             process.kill()
             process.communicate()
+            _forget_progress()
             raise ListUpdateStalled(silent_for)
 
 
@@ -2513,8 +2535,18 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
         announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory...", category="INFO")
 
     # 1. Take the previous real file count from line 1
-    old_counts = count_by_list()
-    announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory, bot paused...", category="INFO")
+    #
+    # Guarded, as the thread start below is (#1361): the flags are up, and
+    # until the thread's own finally exists nothing else would take them
+    # down - every search and file request refused as "rebuilding", and
+    # every later !update as "already running", for the life of the process.
+    try:
+        old_counts = count_by_list()
+        announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory, bot paused...", category="INFO")
+    except BaseException:
+        _release_update_flags(paused_searches)
+        raise
+
     def async_list_updater():
         # HOW LONG THE WHOLE THING TOOK, from here rather than from the
         # subprocess's own progress file. That file reports the scan; this
@@ -2741,8 +2773,21 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
     # re-raised here: a second assignment would read as though something in
     # between might have cleared it.
 
-    # Start the background thread
-    threading.Thread(target=async_list_updater, daemon=True).start()
+    # Start the background thread. "can't start new thread" on a busy bot is
+    # the realistic failure, and its finally never runs then (#1361).
+    try:
+        threading.Thread(target=async_list_updater, daemon=True).start()
+    except BaseException:
+        _release_update_flags(paused_searches)
+        raise
+
+
+def _release_update_flags(paused_searches):
+    """What async_list_updater()'s finally does, for a rebuild that never got
+    as far as running it (#1361)."""
+    if paused_searches:
+        config.search_inprogress = False
+    config.update_inprogress = False
 
 
 # ---------------------------------------------------------------------------
@@ -2830,7 +2875,15 @@ def start_audio_watch(process, kind, start=None, token=""):
         runtime.audio_reading = job
     starter = start or (lambda: threading.Thread(
         target=watch_audio_reading, args=(job,), daemon=True).start())
-    starter()
+    try:
+        starter()
+    except BaseException:
+        # Nothing will watch it, so nothing would ever clear it (#1361), and
+        # every list download would be refused while it "runs".
+        with runtime.audio_reading_lock:
+            if runtime.audio_reading is job:
+                runtime.audio_reading = None
+        raise
     return job
 
 
