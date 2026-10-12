@@ -4924,6 +4924,8 @@
     MAX_LIST_TEXT_SIZE: "settings.field.MAX_LIST_TEXT_SIZE",
     DCC_BLOCK_SIZE: "settings.field.DCC_BLOCK_SIZE",
     DCC_SEND_BUFFER: "settings.field.DCC_SEND_BUFFER",
+    MAX_UPLOAD_KB: "settings.field.MAX_UPLOAD_KB",
+    MAX_DOWNLOAD_KB: "settings.field.MAX_DOWNLOAD_KB",
     REHASH_TRANSFER_WAIT: "settings.field.REHASH_TRANSFER_WAIT",
     AUTO_REFETCH_LISTS: "settings.field.AUTO_REFETCH_LISTS",
     AUTO_REFETCH_INTERVAL_HOURS: "settings.field.AUTO_REFETCH_INTERVAL_HOURS",

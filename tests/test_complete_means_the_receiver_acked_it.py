@@ -335,6 +335,37 @@ class ARealReceiver(DCCoreTestCase):
         self.assertIsNotNone(sent.transfer_finished_at)
         self.assertEqual(sent.assigned_port, port)
 
+    def test_a_send_that_fails_mid_file_hands_the_ending_the_bytes_it_sent(self):
+        """The send loop is stream_the_file() since #1350, and a send that
+        raises out of it never returns its count: the ending must read the
+        tracker's, not the 0 start_dcc_send() started with. The loop is
+        replaced by one that sends a block's worth and then finds the
+        receiver gone, so the count is known exactly."""
+        handed = []
+        real = dcc.finish_send
+
+        def spy(sent):
+            handed.append(sent)
+            return real(sent)
+        dcc.finish_send = spy
+        self.addCleanup(setattr, dcc, "finish_send", real)
+
+        def one_block_then_gone(conn, file_path, resume_offset, bytes_sent, acks, row, user):
+            acks.sent = bytes_sent + 4096
+            raise dcc._ReceiverGone(1024)
+        real_loop = dcc.stream_the_file
+        dcc.stream_the_file = one_block_then_gone
+        self.addCleanup(setattr, dcc, "stream_the_file", real_loop)
+
+        irc, sender = self.start_send()
+        self.connect(irc.port())
+        sender.join(30)
+
+        self.assertEqual(len(handed), 1)
+        self.assertFalse(handed[0].transfer_completed)
+        self.assertEqual(handed[0].bytes_sent, 4096)
+        self.assertEqual(len(self.failed_lines()), 1, self.debug_lines)
+
     def test_a_receiver_that_hangs_up_early_is_a_failure(self):
         irc, sender = self.start_send()
         client = self.connect(irc.port())

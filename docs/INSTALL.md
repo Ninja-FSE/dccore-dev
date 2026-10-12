@@ -230,6 +230,17 @@ UPnP in the standard library, and the bot does not know your router's
 password. Test from a second machine or a phone, not from the same network
 (see WINDOWS.md for why that fails even when everything is right).
 
+### Leaving room on your line
+
+Out of the box the bot uses all the speed your line has. To keep some for
+yourself, set **Max upload speed** (`MAX_UPLOAD_KB`) and **Max download
+speed** (`MAX_DOWNLOAD_KB`), in KB/s, on the Settings page under
+*Transfers* or in the mIRC settings window under *Sharing > Transfers*.
+Upload is every send to people downloading from you; download is everything
+the bot fetches - lists, automatic grabs, files and folders from other bots.
+Each is one limit shared by all the transfers going that way, and a change
+applies at once, to transfers already running too. 0 is no limit.
+
 ### Starting with the system
 
 Once the bot runs by hand, it can start by itself. Each script has a twin
