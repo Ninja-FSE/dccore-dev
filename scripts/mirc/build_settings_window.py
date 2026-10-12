@@ -150,38 +150,81 @@ DCX_TITLE_ID = 901
 # (#1288): Windows draws the tab strip and the frames in light greys of its
 # own, the first tab with no left edge at all, and none of it can be
 # recoloured. So in DCX mode the native tabs and frames are hidden, and in
-# their place DCX boxes with the "rounded" style, which draw a rounded
-# rectangle a pixel wide in the line colour (GDI's FrameRgn, so the curve
-# holds together; a ring cut from a region did not) with the title over its
-# top line, as Windows draws a group box: every section's frame, over the
-# native box's rectangle, existing by its window region only as a band
-# along its edge, so nothing of it is drawn or clicked inside and the
-# controls there stay Windows' own; the body frame, round the tab control's
-# area under the tabs; and the tab strip - a box on the tab's face and a
-# text with its name for each tab, TAB_GAP apart from ROUND in from the tab
-# control's left edge (clear of the body frame's rounded corner), the
-# chosen one from the strip's top down onto the body frame's top line, the
-# others TAB_LIFT lower and ending above it, each box reaching under the
-# strip and cut off there by its region, so its top corners are round and
-# its sides straight. The colours are the system's, so a theme is followed:
-# the lines COLOR_3DSHADOW, the faces COLOR_3DFACE and 3DLIGHT. DCX ids: the
-# frames from FRAME_DCX_FIRST, a page's frames consecutive so one id range
-# shows or hides them; the tabs from TAB_DCX_FIRST, two each (the box, the
-# text); the body frame BODY_DCX_FIRST. All below the page list's. A box
-# puts its title TITLE_SPACING_PX in from its left edge (DCX_BOXTEXTSPACING).
-FRAME_DCX_FIRST, FRAME_DCX_STRIDE = 100, 1
-TAB_DCX_FIRST, TAB_DCX_STRIDE = 800, 2
+# their place: the tab strip - an outline panel, a panel on the face and a
+# text for each tab, TAB_GAP apart from ROUND in from the tab control's
+# left edge (clear of the body frame's rounded corner), the chosen one from
+# the strip's top down onto the body frame's top line, the others TAB_LIFT
+# lower and ending above it; the body frame, a ring a pixel wide round the
+# tab control's area under the tabs; and every section's frame, a ring
+# LINE_DROP under the frame's top (through the middle of its title) and the
+# title over its top line, from TITLE_X, TITLE_H tall, TITLE_PAD of face
+# either side of its text. A ring is one panel shaped by its window region,
+# so nothing else of it is drawn or clicked and the controls inside stay
+# Windows' own. Every corner is round, ROUND_PX across: the pixels of the
+# midpoint circle, as GDI draws one with a pen, and the regions are polygons
+# on pixel edges, which are exact - a ring cut from GDI's rounded rectangle
+# came out as dots, and the frame of one as an uneven stair. The colours
+# are the system's, so a theme is followed: the lines COLOR_3DSHADOW, the
+# faces COLOR_3DFACE and 3DLIGHT. DCX ids: the frames from FRAME_DCX_FIRST,
+# FRAME_DCX_STRIDE each (the ring, the title), a page's frames consecutive
+# so one id range shows or hides them; the tabs from TAB_DCX_FIRST, three
+# each (the outline, the face, the text); the body frame BODY_DCX_FIRST.
+# All below the page list's.
+FRAME_DCX_FIRST, FRAME_DCX_STRIDE = 100, 2
+TAB_DCX_FIRST, TAB_DCX_STRIDE = 800, 3
 BODY_DCX_FIRST = 830
 ROUND = 4
+ROUND_PX = 6
 TAB_PAD = 5
 TAB_GAP = 1
 TAB_LIFT = 2
-TITLE_SPACING_PX = 10
+LINE_DROP = 4
+TITLE_X = 6
+TITLE_H = 9
+TITLE_PAD = 2
 
 
 def dbu_for(px):
     """Dialog units enough for `px` pixels of the dialog font at 96 DPI."""
     return int(-(-px // PX_PER_DBU))
+
+
+def arc_pixels(radius):
+    """The pixels of a quarter circle of `radius`: the midpoint algorithm's,
+    as GDI draws one with a pen. A frame's top-left corner, from (0, radius)
+    on its left edge to (radius, 0) on its top edge."""
+    pixels = set()
+    x, y, d = radius, 0, 1 - radius
+    while x >= y:
+        pixels.add((radius - x, radius - y))
+        pixels.add((radius - y, radius - x))
+        y += 1
+        if d < 0:
+            d += 2 * y + 1
+        else:
+            x -= 1
+            d += 2 * (y - x) + 1
+    return pixels
+
+
+def corner_traces(radius):
+    """A frame's top-left corner as two staircases on pixel edges, from the
+    left edge up to the top edge: round the outside of the ring, and round
+    the inside. A polygon region on pixel edges holds exactly the pixels in
+    it, so the outside less the inside is exactly the arc and the lines."""
+    arc = arc_pixels(radius)
+    outer = [min(x for x, y in arc if y == row) for row in range(radius + 1)]
+    inner = [None] + [max(x for x, y in arc if y == row) + 1 for row in range(1, radius + 1)]
+
+    def trace(edge, last_row):
+        points = [(edge[radius], radius + 1)]
+        for row in range(radius, last_row, -1):
+            if edge[row - 1] != edge[row]:
+                points += [(edge[row], row), (edge[row - 1], row)]
+        points.append((edge[last_row], last_row))
+        return points
+
+    return trace(outer, 0), trace(inner, 1)
 
 # A page is its sections, each in a titled frame (a section with no title is
 # bare), down one column - or two side by side when one is too tall. Inside a
@@ -852,8 +895,10 @@ def render(builder):
             raise LayoutError("the frame title %r has characters the width table lacks: %s"
                               % (control["text"], missing))
         control["dcx"] = FRAME_DCX_FIRST + index * FRAME_DCX_STRIDE
-        if 2 * TITLE_SPACING_PX + text_px(control["text"]) > control["w"] * PX_PER_DBU:
+        if TITLE_X + dbu_for(text_px(control["text"])) + 2 * TITLE_PAD > control["w"] - TITLE_X:
             raise LayoutError("the frame title %r does not fit its frame" % control["text"])
+        if control["h"] - LINE_DROP < 2 * (ROUND_PX + 1) + 1 or control["w"] < 2 * (ROUND_PX + 1) + 1:
+            raise LayoutError("the frame %r is too small for its rounded corners" % control["text"])
     if (FRAME_DCX_FIRST + len(frames) * FRAME_DCX_STRIDE > TAB_DCX_FIRST
             or TAB_DCX_FIRST + len(groups) * TAB_DCX_STRIDE > BODY_DCX_FIRST or BODY_DCX_FIRST + 1 > DCX_PAGES_ID):
         raise LayoutError("the DCX ids of the frames (%d), the tabs, the body frame and the page list collide"
@@ -895,19 +940,26 @@ def render(builder):
     data.insert(3, ("dcxpages", "%d %d %d %d %d" % ((DCX_PAGES_ID,) + DCX_PAGES)))
     data.insert(4, ("dcxtitle", "%d %d %d %d %d" % ((DCX_TITLE_ID,) + DCX_TITLE)))
     # the tab strip (first id, stride, top, height, lift; each tab's x and
-    # width) and the body frame (id, rectangle), in dialog units
+    # width) and the body frame (id, rectangle), in dialog units; a rounded
+    # corner's two staircases, in pixels
     data.insert(5, ("dcxtabs", "%d %d %d %d %d" % (TAB_DCX_FIRST, TAB_DCX_STRIDE, TABS[1], TAB_HEADER_H, TAB_LIFT)))
     data.insert(6, ("dcxbody", "%d %d %d %d %d" % (BODY_DCX_FIRST, TABS[0], TABS[1] + TAB_HEADER_H, TABS[2],
                                                    TABS[3] - TAB_HEADER_H)))
+    outer, inner = corner_traces(ROUND_PX)
+    data.insert(7, ("dcxcorner.o", " ".join("%d,%d" % point for point in outer)))
+    data.insert(8, ("dcxcorner.i", " ".join("%d,%d" % point for point in inner)))
     # the tables: each native list, the DCX listview over its rectangle, and
     # that listview's columns and extra styles
-    data.insert(7, ("lvs", " ".join(str(c["id"]) for c in lists)))
+    data.insert(9, ("lvs", " ".join(str(c["id"]) for c in lists)))
     for number, (tab_x, tab_w) in enumerate(tabs, start=1):
         data.append(("tab.%d" % number, "%d %d" % (tab_x, tab_w)))
-    # every frame: its DCX id, the native box's rectangle, and the title
+    # every frame: its DCX ids' first, the rectangle of its ring, the
+    # rectangle of its title, and the title
     for control in frames:
-        data.append(("fr.%d" % control["id"], "%d %d %d %d %d %s" % (
-            control["dcx"], control["x"], control["y"], control["w"], control["h"], control["text"])))
+        data.append(("fr.%d" % control["id"], "%d %d %d %d %d %d %d %d %d %s" % (
+            control["dcx"], control["x"], control["y"] + LINE_DROP, control["w"], control["h"] - LINE_DROP,
+            control["x"] + TITLE_X, control["y"], dbu_for(text_px(control["text"])) + 2 * TITLE_PAD, TITLE_H,
+            control["text"])))
     for control in lists:
         dcx_id, columns, extra = LISTVIEWS[control["id"]]
         data.append(("lv.%d" % control["id"], "%d %d %d %d %d"
