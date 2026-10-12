@@ -221,8 +221,10 @@ GROUPS = (
     )),
     # This mIRC's own settings (dccore.ini), in the same window and form as
     # the bot's: what was the Options dialog. The locals are saved by Apply
-    # like every other; the widgets by dccore.sw.opt.save.
-    ("Script", (
+    # like every other; the widgets by dccore.sw.opt.save. The last group:
+    # with DCX it is the window's mIRC side, entered from the start page,
+    # with no tab strip - its pages are the list.
+    ("mIRC", (
         ("@DCCore window", (
             ("Show in @DCCore", ({"widget": "showin"},)),
             ("Colours", (

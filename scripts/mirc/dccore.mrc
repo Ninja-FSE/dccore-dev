@@ -1490,8 +1490,7 @@ menu @DCCore-Downloads {
   Clear the finished ones...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
   -
   Open the dashboard in the browser:dccore.dl.web
-  Script Settings...:dccore.options
-  Bot Settings...:dccore.settings
+  Control Panel...:dccore.settings
   Close:window -c @DCCore-Downloads
 }
 
@@ -1674,8 +1673,7 @@ alias dccore.askfont {
 ; Every /dccore command, and every console command worth a click, is here.
 menu @DCCore {
   $iif($dccore.st(packing) != $null,Cancel the running pack...):dccore.packcancel
-  Script Settings:dccore.options
-  Bot Settings:dccore.settings
+  Control Panel:dccore.settings
   Console command:dccore.askraw
   -
   Info
@@ -1756,27 +1754,25 @@ menu status,channel {
   .Fetch the changed lists:dccore fetch
   .Command list:dccore
   .$iif($chat($dccore.bot),Disconnect,Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
-  .Script Settings...:dccore.options
-  .Bot Settings...:dccore.settings
+  .Control Panel...:dccore.settings
 }
 
 ; ---------------------------------------------------------------------
-;  Script Settings: this mIRC's own settings, on the settings window's
-;  Script tab (#1288)
+;  This mIRC's own settings: the control panel's mIRC side (#1288)
 ; ---------------------------------------------------------------------
 ;
 ;  What @DCCore shows and in which colours, the window's look, the bot
 ;  this mIRC is paired with, DCCore Chat - kept in dccore.ini beside the
 ;  script, never on the bot. They were the Options dialog; they are pages
-;  of the settings window now, in its form, and /dccore options or Script
-;  Settings in the menus open the window on that tab. The checks among
-;  them are the window's locals (dccore.sw.savelocal); the menus, the
-;  fields, the pairing line and the console feed check are filled by
-;  dccore.sw.opt.fill and read back by dccore.sw.opt.save, which Apply
-;  runs and which redraws what changed. The console feed check is the
-;  bot's own live state, never saved here.
+;  of the control panel now, in its form - its mIRC side, the mIRC tab
+;  of the native form - and /dccore options opens the window there. The
+;  checks among them are the window's locals (dccore.sw.savelocal); the
+;  menus, the fields, the pairing line and the console feed check are
+;  filled by dccore.sw.opt.fill and read back by dccore.sw.opt.save,
+;  which Apply runs and which redraws what changed. The console feed
+;  check is the bot's own live state, never saved here.
 
-alias dccore.options { dccore.settings script }
+alias dccore.options { dccore.settings mirc }
 
 alias dccore.colours { return 00 white,01 black,02 navy,03 green,04 red,05 maroon,06 purple,07 orange,08 yellow,09 lime,10 teal,11 cyan,12 blue,13 pink,14 grey,15 silver }
 alias dccore.groups { return request queued sends fail search joins bans info }
@@ -1957,12 +1953,18 @@ alias dccore.spanval {
 ;
 ;  It needs mIRC 6.17 or later, for $regsubex, which decodes the values.
 
-; $1 script: opened on its Script tab - this mIRC's own settings
+; The control panel: with DCX it opens on its start page, Bot or mIRC to
+; choose from; the native form on its first tab. $1 mirc: opened on this
+; mIRC's own settings - the mIRC side, the mIRC tab
 alias dccore.settings {
   dccore.init
-  if ($version < 6.17) { dccore.sys The settings window needs mIRC 6.17 or later. The console has the same: type settings in this window. | return }
-  if ($dialog(dccore.set)) { dialog -v dccore.set | if ($1 == script) { dccore.sw.go tab $dccore.sw.group(Script) } | return }
-  hadd dccore.live sw.open $iif($1 == script,script,general)
+  if ($version < 6.17) { dccore.sys The control panel needs mIRC 6.17 or later. The console has the same: type settings in this window. | return }
+  if ($dialog(dccore.set)) {
+    dialog -v dccore.set
+    if ($1 == mirc) { dccore.sw.go $iif($dccore.sw.s(dcx),side 2,tab $dccore.sw.m(groups)) }
+    return
+  }
+  hadd dccore.live sw.open $iif($1 == mirc,mirc,start)
   dialog -m dccore.set dccore.set
 }
 ; $1 a tab's name: its number, or 1
@@ -2204,7 +2206,8 @@ alias dccore.sw.init {
   while (%i <= $dccore.sw.m(pages)) { dccore.sw.showpage %i -h | inc %i }
   dccore.sw.enable 0
   dccore.sw.dcx
-  dccore.sw.tab $iif($hget(dccore.live,sw.open) == script,$dccore.sw.group(Script),1)
+  if ($dccore.sw.s(dcx)) { dccore.sw.side $iif($hget(dccore.live,sw.open) == mirc,2,0) }
+  else { dccore.sw.tab $iif($hget(dccore.live,sw.open) == mirc,$dccore.sw.m(groups),1) }
   if ($hget(dccore.live,sw.open)) { hdel dccore.live sw.open }
   .timerdccoreSwTick 0 5 dccore.sw.tick
   dccore.sw.start
@@ -2287,6 +2290,8 @@ alias dccore.sw.enable {
 ; last shown in it.
 alias dccore.sw.tab {
   hadd dccore.sws tab $1
+  ; the bot's tab last shown, for the way back to its side from the start
+  if ($1 < $dccore.sw.m(groups)) { hadd dccore.sws bottab $1 }
   var %pages = $dccore.sw.m(g. $+ $1 $+ .pages), %i = 1
   while (%i <= $dccore.sw.m(slots)) {
     if (%i <= $numtok(%pages,32)) {
@@ -2333,6 +2338,8 @@ alias dccore.sw.goto {
     if ($istok($dccore.sw.m(g. $+ %g $+ .pages),%page,32)) {
       if (!$dccore.sw.s(dcx)) { did -f dccore.set $calc(1000 + %g) }
       hadd dccore.sws last. $+ %g %page
+      ; with DCX the page's side first, from the start page or the other side
+      if ($dccore.sw.s(dcx)) && ($dccore.sw.s(side) != $iif(%g == $dccore.sw.m(groups),2,1)) { dccore.sw.side $iif(%g == $dccore.sw.m(groups),2,1) }
       dccore.sw.tab %g
       return
     }
@@ -2377,6 +2384,7 @@ alias dccore.sw.dcx {
   %i = 1
   while (%i <= $dccore.sw.m(pages)) { dccore.sw.dcxframes %i | inc %i }
   dccore.sw.dcxtabs
+  dccore.sw.dcxhome
   ; the chosen tab's pages, where the page buttons were: filled by dccore.sw.tab
   var %t = $dccore.sw.m(dcxpages), %id = $gettok(%t,1,32), %rect = $dccore.sw.dcxrect($gettok(%t,2-5,32))
   dccore.dcx xdialog dccore.set -c %id listview %rect report noheader singlesel fullrow showsel
@@ -2445,7 +2453,7 @@ alias dccore.sw.dcxframes {
 ; dccore.sw.dcxtabsel
 alias dccore.sw.dcxtabs {
   var %t = $dccore.sw.m(dcxtabs), %i = 1
-  while (%i <= $dccore.sw.m(groups)) {
+  while (%i <= $gettok(%t,6,32)) {
     var %id = $calc($gettok(%t,1,32) + $gettok(%t,2,32) * (%i - 1))
     dccore.sw.dcxline %id 0 0 1 1
     dccore.dcx xdialog dccore.set -c $calc(%id + 1) panel 0 0 1 1
@@ -2463,11 +2471,13 @@ alias dccore.sw.dcxtabs {
 ; again after: a region set does not redraw, so what a panel had drawn
 ; outside its new region - the chosen tab's extra height - stayed on the
 ; screen, and hiding it first has the window wipe all of it. The text a line
-; of dialog text tall, in the middle - the dll has no vcenter
+; of dialog text tall, in the middle - the dll has no vcenter. Not on the
+; mIRC side, which has no strip: its tabs stay hidden
 alias dccore.sw.dcxtabsel {
+  if ($dccore.sw.s(side) == 2) { return }
   var %t = $dccore.sw.m(dcxtabs), %first = $gettok(%t,1,32), %stride = $gettok(%t,2,32), %top = $gettok(%t,3,32), %lift = $gettok(%t,5,32)
   var %line = $gettok($dccore.sw.dcxrect($gettok($dccore.sw.m(dcxbody),2-5,32)),2,32), %th = $gettok($dccore.sw.dcxrect(0 8 0 0),2,32), %i = 1
-  while (%i <= $dccore.sw.m(groups)) {
+  while (%i <= $gettok(%t,6,32)) {
     var %id = $calc(%first + %stride * (%i - 1)), %tab = $dccore.sw.m(tab. $+ %i), %sel = $iif(%i == $dccore.sw.s(tab),1,0)
     var %r = $dccore.sw.dcxrect($gettok(%tab,1,32) $calc(%top + $iif(%sel,0,%lift)) $calc($gettok(%tab,1,32) + $gettok(%tab,2,32)) 1)
     var %x = $gettok(%r,1,32), %y = $gettok(%r,2,32), %w = $calc($gettok(%r,3,32) - %x), %h = $calc(%line - %y + %sel), %face = $iif(%sel,$dccore.sw.s(face),$dccore.sw.s(light))
@@ -2482,6 +2492,82 @@ alias dccore.sw.dcxtabsel {
     dccore.dcx xdid dccore.set $calc(%id + 2) -C +b %face
     inc %i
   }
+}
+; $1 the first of two DCX ids, $2- a rectangle in pixels: a pill - an
+; outline in the line colour and, inside it, the lighter face - shaped
+; like a frame, four round corners; its text is the caller's (dcxlabel)
+alias dccore.sw.dcxpill {
+  dccore.sw.dcxline $1 $2 $3 $4 $5
+  dccore.dcx xdid dccore.set $1 -R +p $dccore.sw.dcxpoly($4,$5,o,4)
+  dccore.dcx xdialog dccore.set -c $calc($1 + 1) panel $2 $3 $4 $5
+  dccore.dcx xdid dccore.set $calc($1 + 1) -R +p $dccore.sw.dcxpoly($4,$5,i,4)
+  dccore.dcx xdid dccore.set $calc($1 + 1) -C +b $dccore.sw.s(light)
+}
+; $1 a DCX id, $2-4 x, y and a width in pixels, $5 1 for bold, $6- the
+; text: a line of text, a line of dialog text tall, centred, on the
+; lighter face
+alias dccore.sw.dcxlabel {
+  dccore.dcx xdialog dccore.set -c $1 text $2 $3 $4 $dccore.sw.dcxth nowrap center noprefix noformat
+  dccore.dcx xdid dccore.set $1 -C +b $dccore.sw.s(light)
+  if ($5) { dccore.dcx xdid dccore.set $1 -f +b default 8 Tahoma }
+  dccore.dcx xdid dccore.set $1 -t $6-
+}
+; a line of dialog text, in pixels
+alias dccore.sw.dcxth { return $gettok($dccore.sw.dcxrect(0 8 0 0),2,32) }
+; the start page - a pill for each side, Bot and mIRC, its name and a line
+; on what is there - and the way back from a side: a pill with an arrow at
+; the strip's left end and the side's name beside it. All of it made here;
+; dccore.sw.side shows what the side shown has
+alias dccore.sw.dcxhome {
+  var %th = $dccore.sw.dcxth, %b = $dccore.sw.m(dcxback), %r = $dccore.sw.dcxrect($gettok(%b,2-5,32))
+  dccore.sw.dcxpill $gettok(%b,1,32) %r
+  dccore.sw.dcxlabel $calc($gettok(%b,1,32) + 2) $calc($gettok(%r,1,32) + 1) $calc($gettok(%r,2,32) + $int($calc(($gettok(%r,4,32) - %th) / 2))) $calc($gettok(%r,3,32) - 2) 1 $chr(8592)
+  var %c = $dccore.sw.m(dcxcrumb)
+  dccore.dcx xdialog dccore.set -c $gettok(%c,1,32) text $dccore.sw.dcxrect($gettok(%c,2-5,32)) nowrap noprefix noformat
+  dccore.dcx xdid dccore.set $gettok(%c,1,32) -f +b default 8 Tahoma
+  var %i = 1
+  while (%i <= $dccore.sw.m(home.n)) {
+    var %p = $dccore.sw.m(home. $+ %i), %id = $gettok(%p,1,32)
+    %r = $dccore.sw.dcxrect($gettok(%p,2-5,32))
+    var %x = $calc($gettok(%r,1,32) + 2), %y = $calc($gettok(%r,2,32) + $int($calc(($gettok(%r,4,32) - 2 * %th) / 2))), %w = $calc($gettok(%r,3,32) - 4)
+    dccore.sw.dcxpill %id %r
+    dccore.sw.dcxlabel $calc(%id + 2) %x %y %w 1 $dccore.sw.m(home. $+ %i $+ .t)
+    dccore.sw.dcxlabel $calc(%id + 3) %x $calc(%y + %th) %w 0 $dccore.sw.m(home. $+ %i $+ .s)
+    dccore.dcx xdid dccore.set $calc(%id + 3) -C +t $dccore.dcx(GetSystemColor,COLOR_GRAYTEXT)
+    inc %i
+  }
+}
+; $1 a side: 0 the start page, 1 the bot's settings, 2 this mIRC's. The
+; start page's pills and the way back swap places; the bot's tabs show on
+; its side only, and on the mIRC side its group - the last - fills the
+; list straight away. A page shown is hidden on the way to the start,
+; with the list, the page's name and the help under it
+alias dccore.sw.side {
+  hadd dccore.sws side $1
+  var %h = $dccore.sw.m(home. $+ $dccore.sw.m(home.n)), %b = $dccore.sw.m(dcxback), %t = $dccore.sw.m(dcxtabs)
+  var %pills = $+($gettok($dccore.sw.m(home.1),1,32),-,$calc($gettok(%h,1,32) + 3))
+  var %way = $+($gettok(%b,1,32),-,$gettok($dccore.sw.m(dcxcrumb),1,32))
+  var %tabs = $+($gettok(%t,1,32),-,$calc($gettok(%t,1,32) + $gettok(%t,2,32) * $gettok(%t,6,32) - 1))
+  var %list = $gettok($dccore.sw.m(dcxpages),1,32), %title = $gettok($dccore.sw.m(dcxtitle),1,32)
+  if ($1 == 0) {
+    if ($dccore.sw.s(page)) { dccore.sw.showpage $dccore.sw.s(page) -h | hdel dccore.sws page }
+    dccore.dcx xdid dccore.set %way -h
+    dccore.dcx xdid dccore.set %tabs -h
+    dccore.dcx xdid dccore.set %list -h
+    dccore.dcx xdid dccore.set %title -h
+    did -h dccore.set 1012
+    dccore.dcx xdid dccore.set %pills -s
+    return
+  }
+  dccore.dcx xdid dccore.set %pills -h
+  dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxcrumb),1,32) -t $iif($1 == 1,Bot,mIRC)
+  dccore.dcx xdid dccore.set %way -s
+  dccore.dcx xdid dccore.set %list -s
+  dccore.dcx xdid dccore.set %title -s
+  did -v dccore.set 1012
+  if ($1 == 2) { dccore.dcx xdid dccore.set %tabs -h | dccore.sw.tab $dccore.sw.m(groups) | return }
+  var %bt = $dccore.sw.s(bottab)
+  dccore.sw.tab $iif(%bt,%bt,1)
 }
 ; $1- the pages of the tab shown: the list filled with their names, a row
 ; each, without that being taken as a click
@@ -2533,6 +2619,12 @@ alias dccore.sw.dcxshow {
 ; DCX's events: $1 the dialog, $2 the event, $3 the control, $4- the row
 alias dccore.sw.dcxcb {
   if ($dccore.sw.s(dcxquiet)) { return }
+  ; the way back, or a side's pill on the start page: any part of it
+  if ($2 == sclick) && ($3 isnum) {
+    var %b = $gettok($dccore.sw.m(dcxback),1,32), %h = $gettok($dccore.sw.m(home.1),1,32)
+    if ($3 >= %b) && ($3 < $calc(%b + 3)) { dccore.sw.go side 0 | return }
+    if ($3 >= %h) && ($3 < $calc(%h + 4 * $dccore.sw.m(home.n))) { dccore.sw.go side $calc($int($calc(($3 - %h) / 4)) + 1) | return }
+  }
   ; a tab of the strip clicked, its outline or its text
   if ($2 == sclick) && ($3 isnum) && ($3 >= $gettok($dccore.sw.m(dcxtabs),1,32)) {
     var %g = $calc($int($calc(($3 - $gettok($dccore.sw.m(dcxtabs),1,32)) / $gettok($dccore.sw.m(dcxtabs),2,32))) + 1)
@@ -3008,7 +3100,7 @@ alias dccore.sw.confirm {
   var %q = $dccore.sw.s(question)
   ; the wait starts once it is answered: timers run while $input is up,
   ; and a question left open for a minute is not a bot that stopped answering
-  if ($input(%q,yq,DCCore - Settings)) {
+  if ($input(%q,yq,DCCore - Control Panel)) {
     hadd dccore.sws phase apply
     dccore.sw.wait settings
     hadd dccore.sws lastcommit setcommit confirm
@@ -3342,7 +3434,7 @@ alias dccore.sw.riskyask {
   if (!$dialog(dccore.set)) || ($dccore.sw.s(asking) == $null) { return }
   var %how = $dccore.sw.s(asking)
   hdel dccore.sws asking
-  if ($input(Change where the bot keeps its files? A wrong path there can lose a queue or a statistics file.,yq,DCCore - Settings)) { dccore.sw.apply %how asked | return }
+  if ($input(Change where the bot keeps its files? A wrong path there can lose a queue or a statistics file.,yq,DCCore - Control Panel)) { dccore.sw.apply %how asked | return }
   hdel dccore.sws close
   dccore.sw.status The settings were not sent.
 }
@@ -3362,7 +3454,8 @@ alias dccore.sw.maybeclose {
 
 ; $1 tab or page, $2 which: as the click meant
 alias dccore.sw.go {
-  if ($1 == tab) && ($2 == $dccore.sw.s(tab)) { return }
+  if ($1 == side) && ($2 == $dccore.sw.s(side)) { return }
+  if ($1 == tab) && ($2 == $dccore.sw.s(tab)) && ($dccore.sw.s(page)) { return }
   if ($1 == page) && ($2 == $dccore.sw.s(page)) { return }
   if (!$dccore.sw.anydirty) { dccore.sw.goon $1 $2 | return }
   hadd dccore.sws going $1 $2
@@ -3370,7 +3463,8 @@ alias dccore.sw.go {
   .timerdccoreSwAsk -m 1 0 dccore.sw.leaveask
 }
 alias dccore.sw.goon {
-  if ($1 == tab) { dccore.sw.tab $2 }
+  if ($1 == side) { dccore.sw.side $2 }
+  elseif ($1 == tab) { dccore.sw.tab $2 }
   else { dccore.sw.page $2 }
 }
 ; The tab and the page shown selected again, after the click elsewhere
@@ -3384,7 +3478,7 @@ alias dccore.sw.leaveask {
   if (!$dialog(dccore.set)) || ($dccore.sw.s(going) == $null) { return }
   var %go = $dccore.sw.s(going)
   hdel dccore.sws going
-  if ($input(You have changes that are not saved. Save them before leaving this page? Yes saves them and goes on; No stays here.,yq,DCCore - Settings)) { dccore.sw.apply apply | dccore.sw.goon %go }
+  if ($input(You have changes that are not saved. Save them before leaving this page? Yes saves them and goes on; No stays here.,yq,DCCore - Control Panel)) { dccore.sw.apply apply | dccore.sw.goon %go }
 }
 ; Whether anything in the window is not saved: a setting, one of this
 ; mIRC's switches, the lists and bindings, the on-connect commands.
@@ -3499,7 +3593,7 @@ alias dccore.sw.click {
   if (%id == 1587) { dccore.sw.ban.ignore | return }
   if (%id == 1596) { dccore.sw.ban.unban | return }
   if (%id == 1598) { dccore.sw.ban.add | return }
-  ; Appearance, and the Script tab's pairing
+  ; Appearance, and the mIRC side's pairing
   if (%id == 1610) { dccore.sw.preview | return }
   if (%id == 1683) { dccore.sw.opt.pair | return }
   if (%id == 1684) { dccore.sw.opt.unpair | return }
@@ -4124,7 +4218,7 @@ alias dccore.sw.ban.add {
 ; Generated - do not edit by hand. Change scripts/mirc/settings_window_layout.py (or the
 ; bot's settings metadata) and run: python scripts/mirc/build_settings_window.py
 dialog dccore.set {
-  title "DCCore - Settings"
+  title "DCCore - Control Panel"
   size -1 -1 488 364
   option dbu
   tab "General", 1001, 4 2 480 338
@@ -4133,7 +4227,7 @@ dialog dccore.set {
   tab "Security", 1004
   tab "Dashboard && Console", 1005
   tab "Advanced", 1006
-  tab "Script", 1007
+  tab "mIRC", 1007
   radio "", 1020, 10 24 88 15, push group
   radio "", 1021, 10 41 88 15, push
   radio "", 1022, 10 58 88 15, push
@@ -4678,10 +4772,15 @@ alias dccore.sw.data {
   hadd dccore.swm size 488 364
   hadd dccore.swm dcxpages 900 10 24 88 286
   hadd dccore.swm dcxtitle 901 110 26 370 10
-  hadd dccore.swm dcxtabs 800 3 2 14 2
+  hadd dccore.swm dcxtabs 800 3 2 14 2 6
   hadd dccore.swm dcxbody 830 4 16 480 324
   hadd dccore.swm dcxcorner.o 0,7 0,4 1,4 1,3 2,3 2,2 3,2 3,1 4,1 4,0
   hadd dccore.swm dcxcorner.i 1,7 1,4 2,4 2,3 3,3 3,2 4,2 4,1
+  hadd dccore.swm dcxback 840 8 3 14 12
+  hadd dccore.swm dcxcrumb 843 26 5 22 9
+  hadd dccore.swm home.n 2
+  hadd dccore.swm home.1 844 98 28 140 24
+  hadd dccore.swm home.2 848 250 28 140 24
   hadd dccore.swm lvs 1520 1540 1580 1595
   hadd dccore.swm g.1 General
   hadd dccore.swm g.1.pages 1 2 3 4 5 6
@@ -4695,15 +4794,18 @@ alias dccore.sw.data {
   hadd dccore.swm g.5.pages 20 21
   hadd dccore.swm g.6 Advanced
   hadd dccore.swm g.6.pages 22 23
-  hadd dccore.swm g.7 Script
+  hadd dccore.swm g.7 mIRC
   hadd dccore.swm g.7.pages 24 25 26 27
-  hadd dccore.swm tab.1 8 35
-  hadd dccore.swm tab.2 44 34
-  hadd dccore.swm tab.3 79 45
-  hadd dccore.swm tab.4 125 36
-  hadd dccore.swm tab.5 162 79
-  hadd dccore.swm tab.6 242 42
-  hadd dccore.swm tab.7 285 28
+  hadd dccore.swm home.1.t Bot
+  hadd dccore.swm home.1.s The bot's settings, sent with Apply
+  hadd dccore.swm home.2.t mIRC
+  hadd dccore.swm home.2.s This mIRC's own: window, link, chat
+  hadd dccore.swm tab.1 50 35
+  hadd dccore.swm tab.2 86 34
+  hadd dccore.swm tab.3 121 45
+  hadd dccore.swm tab.4 167 36
+  hadd dccore.swm tab.5 204 79
+  hadd dccore.swm tab.6 284 42
   hadd dccore.swm fr.1100 100 110 42 370 102 116 38 40 9 Connection
   hadd dccore.swm fr.1101 102 110 152 370 56 116 148 48 9 Reconnection
   hadd dccore.swm fr.1102 104 110 216 370 87 116 212 41 9 On connect
@@ -6236,8 +6338,7 @@ menu @DCCore-Chat {
   $iif($sline($dccore.chat.win,1),Message this bot privately):dccore.chat.pickpeer $sline($dccore.chat.win,1).ln
   -
   Clear window:clear $dccore.chat.win
-  Script Settings...:dccore.options
-  Bot Settings...:dccore.settings
+  Control Panel...:dccore.settings
 }
 
 ; A PEERS line: the DCCore bots WHO found in one channel, right now - kept

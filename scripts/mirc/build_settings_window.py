@@ -182,6 +182,20 @@ LINE_DROP = 4
 TITLE_X = 6
 TITLE_H = 9
 TITLE_PAD = 2
+# With DCX the window opens on a start page: a pill for each side, Bot (the
+# groups but the last, with the tab strip) and mIRC (the last group, its
+# pages the list and no strip), each with a line on what is there. A side
+# has the way back at the strip's left end - a pill with an arrow and the
+# side's name beside it - and the bot's tabs start after that. A pill is an
+# outline, a face and its text, shaped like the frames, PILL_STRIDE DCX ids.
+BACK_DCX_FIRST, CRUMB_DCX = 840, 843
+HOME_DCX_FIRST, PILL_STRIDE = 844, 4
+BACK = (TABS[0] + ROUND, TABS[1] + 1, 14, 12)
+CRUMB = (BACK[0] + BACK[2] + 4, TABS[1] + 3, 22, 9)
+TAB_START = CRUMB[0] + CRUMB[2] + 2
+HOME_PILL_W, HOME_PILL_H, HOME_PILL_GAP = 140, 24, 12
+HOME_PILL_Y = TABS[1] + TAB_HEADER_H + 12
+HOME = (("Bot", "The bot's settings, sent with Apply"), ("mIRC", "This mIRC's own: window, link, chat"))
 
 
 def dbu_for(px):
@@ -848,7 +862,7 @@ def render(builder):
            "; Generated - do not edit by hand. Change scripts/mirc/settings_window_layout.py (or the",
            "; bot's settings metadata) and run: python scripts/mirc/build_settings_window.py",
            "dialog dccore.set {",
-           '  title "DCCore - Settings"',
+           '  title "DCCore - Control Panel"',
            "  size -1 -1 %d %d" % (DIALOG_W, DIALOG_H),
            "  option dbu"]
     groups = [group for group, _pages in layout.GROUPS]
@@ -882,12 +896,26 @@ def render(builder):
     # the lines the script draws with DCX: the tab strip, side by side from
     # the tab control's left edge; every frame, its DCX ids in page order
     tabs = []
-    x = TABS[0] + ROUND
-    for group in groups:
+    x = TAB_START
+    for group in groups[:-1]:
         tabs.append((x, dbu_for(text_px(group)) + 2 * TAB_PAD))
         x += tabs[-1][1] + TAB_GAP
     if x - TAB_GAP > TABS[0] + TABS[2]:
         raise LayoutError("the tab strip is wider than the tab control: %d > %d" % (x - TAB_GAP - TABS[0], TABS[2]))
+    if not (TABS[0] < BACK[0] and BACK[0] + BACK[2] < CRUMB[0] and CRUMB[0] + CRUMB[2] <= TAB_START
+            and TABS[1] <= BACK[1] and BACK[1] + BACK[3] <= TABS[1] + TAB_HEADER_H):
+        raise LayoutError("the way back %r and the side's name %r are not at the strip's left end" % (BACK, CRUMB))
+    if dbu_for(text_px("mIRC")) + 2 * TITLE_PAD > CRUMB[2]:
+        raise LayoutError("the side's name does not fit %r" % (CRUMB,))
+    pills_w = len(HOME) * HOME_PILL_W + (len(HOME) - 1) * HOME_PILL_GAP
+    if pills_w > TABS[2] - 2 * ROUND or HOME_PILL_Y + HOME_PILL_H > CONTENT_Y + CONTENT_H:
+        raise LayoutError("the start page's pills do not fit the body")
+    for name, line in HOME:
+        if text_px(line) + 2 * TITLE_PAD * PX_PER_DBU > HOME_PILL_W * PX_PER_DBU or set(name + line) - set(CHAR_PX):
+            raise LayoutError("the start page's line %r does not fit its pill" % line)
+    if not (BACK_DCX_FIRST + 3 <= CRUMB_DCX < HOME_DCX_FIRST
+            and HOME_DCX_FIRST + len(HOME) * PILL_STRIDE <= DCX_PAGES_ID and BODY_DCX_FIRST + 1 <= BACK_DCX_FIRST):
+        raise LayoutError("the DCX ids of the way back, the side's name and the start page collide")
     frames = [c for c in builder.controls if c["kind"] == "box"]
     for index, control in enumerate(frames):
         missing = sorted(set(control["text"]) - set(CHAR_PX))
@@ -939,18 +967,31 @@ def render(builder):
     data.insert(2, ("size", "%d %d" % (DIALOG_W, DIALOG_H)))
     data.insert(3, ("dcxpages", "%d %d %d %d %d" % ((DCX_PAGES_ID,) + DCX_PAGES)))
     data.insert(4, ("dcxtitle", "%d %d %d %d %d" % ((DCX_TITLE_ID,) + DCX_TITLE)))
-    # the tab strip (first id, stride, top, height, lift; each tab's x and
-    # width) and the body frame (id, rectangle), in dialog units; a rounded
-    # corner's two staircases, in pixels
-    data.insert(5, ("dcxtabs", "%d %d %d %d %d" % (TAB_DCX_FIRST, TAB_DCX_STRIDE, TABS[1], TAB_HEADER_H, TAB_LIFT)))
+    # the tab strip (first id, stride, top, height, lift, how many - the bot's
+    # groups; each tab's x and width), the body frame (id, rectangle), the way
+    # back and the side's name (id, rectangle) and the start page's pills
+    # (first id, rectangle; the name; the line under it), in dialog units; a
+    # rounded corner's two staircases, in pixels
+    data.insert(5, ("dcxtabs", "%d %d %d %d %d %d" % (TAB_DCX_FIRST, TAB_DCX_STRIDE, TABS[1], TAB_HEADER_H, TAB_LIFT,
+                                                      len(tabs))))
     data.insert(6, ("dcxbody", "%d %d %d %d %d" % (BODY_DCX_FIRST, TABS[0], TABS[1] + TAB_HEADER_H, TABS[2],
                                                    TABS[3] - TAB_HEADER_H)))
     outer, inner = corner_traces(ROUND_PX)
     data.insert(7, ("dcxcorner.o", " ".join("%d,%d" % point for point in outer)))
     data.insert(8, ("dcxcorner.i", " ".join("%d,%d" % point for point in inner)))
+    data.insert(9, ("dcxback", "%d %d %d %d %d" % ((BACK_DCX_FIRST,) + BACK)))
+    data.insert(10, ("dcxcrumb", "%d %d %d %d %d" % ((CRUMB_DCX,) + CRUMB)))
+    data.insert(11, ("home.n", str(len(HOME))))
+    pill_x = TABS[0] + (TABS[2] - pills_w) // 2
+    for number, (name, line) in enumerate(HOME, start=1):
+        data.insert(11 + number, ("home.%d" % number, "%d %d %d %d %d" % (
+            HOME_DCX_FIRST + (number - 1) * PILL_STRIDE, pill_x, HOME_PILL_Y, HOME_PILL_W, HOME_PILL_H)))
+        data.append(("home.%d.t" % number, name))
+        data.append(("home.%d.s" % number, line))
+        pill_x += HOME_PILL_W + HOME_PILL_GAP
     # the tables: each native list, the DCX listview over its rectangle, and
     # that listview's columns and extra styles
-    data.insert(9, ("lvs", " ".join(str(c["id"]) for c in lists)))
+    data.insert(12 + len(HOME), ("lvs", " ".join(str(c["id"]) for c in lists)))
     for number, (tab_x, tab_w) in enumerate(tabs, start=1):
         data.append(("tab.%d" % number, "%d %d" % (tab_x, tab_w)))
     # every frame: its DCX ids' first, the rectangle of its ring, the

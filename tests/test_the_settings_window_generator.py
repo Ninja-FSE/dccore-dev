@@ -98,9 +98,9 @@ class TheBlockIsUpToDate(unittest.TestCase):
         stale = os.path.join(folder, "dccore.mrc")
         with io.open(generator.SCRIPT, encoding="ascii", newline="") as handle:
             text = handle.read()
-        self.assertIn('  title "DCCore - Settings"', text)
+        self.assertIn('  title "DCCore - Control Panel"', text)
         with io.open(stale, "w", encoding="ascii", newline="") as handle:
-            handle.write(text.replace('  title "DCCore - Settings"', '  title "DCCore - Old"', 1))
+            handle.write(text.replace('  title "DCCore - Control Panel"', '  title "DCCore - Old"', 1))
         original = generator.SCRIPT
         generator.SCRIPT = stale
         self.addCleanup(setattr, generator, "SCRIPT", original)
@@ -166,7 +166,7 @@ class EverySettingHasAPlace(unittest.TestCase):
     def test_the_tabs_and_pages_are_the_mockups(self):
         self.assertEqual([group for group, _pages in layout.GROUPS],
                          ["General", "Sharing", "Downloads", "Security", "Dashboard & Console", "Advanced",
-                          "Script"])
+                          "mIRC"])
         pages = {group: [page for page, _sections in pages] for group, pages in layout.GROUPS}
         self.assertEqual(pages["General"], ["IRC Server", "General Settings", "Channels", "Operator",
                                             "Appearance", "Advertising"])
@@ -178,7 +178,7 @@ class EverySettingHasAPlace(unittest.TestCase):
                                              "Admin console"])
         self.assertEqual(pages["Dashboard & Console"], ["Web dashboard", "Console feed"])
         # this mIRC's own settings, the Options dialog that was, in the same form
-        self.assertEqual(pages["Script"], ["@DCCore window", "Window", "Connection", "Chat"])
+        self.assertEqual(pages["mIRC"], ["@DCCore window", "Window", "Connection", "Chat"])
         self.assertEqual(pages["Advanced"], ["Debug & logging", "File locations"])
 
 

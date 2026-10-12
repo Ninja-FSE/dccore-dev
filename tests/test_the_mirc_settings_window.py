@@ -424,7 +424,7 @@ class ApplyIsOneTransaction(unittest.TestCase):
     def test_the_confirm_question_is_asked_from_a_timer_and_answered(self):
         self.assertIn(".timerdccoreSwAsk -m 1 0 dccore.sw.confirm", alias("dccore.sw.done"))
         confirm = alias("dccore.sw.confirm")
-        self.assertIn("if ($input(%q,yq,DCCore - Settings)) {", confirm)
+        self.assertIn("if ($input(%q,yq,DCCore - Control Panel)) {", confirm)
         self.assertIn("dccore.send setcommit confirm", confirm)
         self.assertIn("dccore.send setabort", confirm)
 
@@ -626,7 +626,7 @@ class TheDialog(unittest.TestCase):
         import build_settings_window as generator
         tabs = [c for c in self.controls if c[0] == "tab"]
         self.assertEqual([t[1] for t in tabs], ["General", "Sharing", "Downloads", "Security",
-                                                "Dashboard & Console", "Advanced", "Script"])
+                                                "Dashboard & Console", "Advanced", "mIRC"])
         _kind, _label, _cid, tx, ty, tw, th, _style = tabs[0]
         body = [c for c in self.controls if c[0] not in ("tab", "button") and c[2] not in (1013, 1018)]
         self.assertGreaterEqual(min(c[4] for c in body), ty + generator.TAB_HEADER_H)
@@ -669,15 +669,17 @@ class TheWindowsBehaviour(unittest.TestCase):
         for match in re.finditer(r"\$input\(([^%][^)]*)\)", handwritten()):
             self.assertEqual(match.group(1).count(","), 2, match.group(0))
 
-    def test_script_settings_open_the_window_on_its_script_tab(self):
-        # /dccore options and Script Settings in the menus: the same window
-        self.assertEqual(statements(alias("dccore.options")), ["dccore.settings script"])
+    def test_dccore_options_opens_the_window_on_its_mirc_side(self):
+        # /dccore options: the same window, on this mIRC's own settings
+        self.assertEqual(statements(alias("dccore.options")), ["dccore.settings mirc"])
         self.assertIn("if (%cmd == options) { dccore.options | return }", alias("dccore"))
         self.assertIn("if (%cmd == settings) { dccore.settings | return }", alias("dccore"))
         settings = alias("dccore.settings")
-        self.assertIn("hadd dccore.live sw.open $iif($1 == script,script,general)", settings)
-        self.assertIn("if ($1 == script) { dccore.sw.go tab $dccore.sw.group(Script) }", settings)
-        self.assertIn("dccore.sw.tab $iif($hget(dccore.live,sw.open) == script,$dccore.sw.group(Script),1)",
+        self.assertIn("hadd dccore.live sw.open $iif($1 == mirc,mirc,start)", settings)
+        # a window already open goes there: the mIRC side with DCX, the mIRC
+        # tab (the last group) in the native form
+        self.assertIn("if ($1 == mirc) { dccore.sw.go $iif($dccore.sw.s(dcx),side 2,tab $dccore.sw.m(groups)) }", settings)
+        self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.side $iif($hget(dccore.live,sw.open) == mirc,2,0) }",
                       alias("dccore.sw.init"))
         self.assertNotIn("dialog dccore.opt {", code())
 
@@ -691,17 +693,17 @@ class TheWindowsBehaviour(unittest.TestCase):
 
     def test_every_menu_with_options_has_settings_next_to_it(self):
         text = code()
+        # one entry, the control panel, where the two settings entries were:
+        # the window holds both sides now
         menus = re.findall(r"\nmenu [^\n]+ \{\n(.*?)\n\}", text, re.S)
-        with_options = 0
+        with_panel = 0
         for menu in menus:
-            lines = [line.strip() for line in menu.split("\n")]
-            for n, line in enumerate(lines):
-                if line.lstrip(".").startswith("Script Settings...:"):
-                    with_options += 1
-                    dots = line[:len(line) - len(line.lstrip("."))]
-                    self.assertEqual(lines[n + 1], dots + "Bot Settings...:dccore.settings")
-        self.assertEqual(with_options, 3)
-        self.assertIn("\n  Bot Settings:dccore.settings\n", block("menu @DCCore {"))
+            lines = [line.strip().lstrip(".") for line in menu.split("\n")]
+            with_panel += lines.count("Control Panel...:dccore.settings")
+        self.assertEqual(with_panel, 3)
+        self.assertIn("\n  Control Panel:dccore.settings\n", block("menu @DCCore {"))
+        self.assertNotIn("Script Settings", text)
+        self.assertNotIn("Bot Settings", text)
 
     def test_the_preview_window_draws_the_decoded_lines(self):
         body = alias("dccore.sw.line")
@@ -843,7 +845,7 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
     # 3. The confirm question's wait starts once it is answered.
     def test_the_confirm_wait_starts_after_the_answer(self):
         body = alias("dccore.sw.confirm")
-        asked = body.index("$input(%q,yq,DCCore - Settings)")
+        asked = body.index("$input(%q,yq,DCCore - Control Panel)")
         self.assertEqual(body.count("dccore.sw.wait settings"), 2)
         self.assertGreater(body.index("dccore.sw.wait settings"), asked)
         for send in ("dccore.send setcommit confirm", "dccore.send setabort"):

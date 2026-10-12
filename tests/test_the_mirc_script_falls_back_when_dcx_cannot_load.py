@@ -165,8 +165,11 @@ class ThePageList(unittest.TestCase):
 
     def test_it_is_built_before_the_first_page_is_shown(self):
         lines = statements(alias("dccore.sw.init"))
-        self.assertLess(lines.index("dccore.sw.dcx"), lines.index("dccore.sw.tab $iif($hget(dccore.live,sw.open) == script,"
-                                                           "$dccore.sw.group(Script),1)"))
+        # with DCX the window opens on its start page (or the mIRC side, asked
+        # for); the native form on its first tab (or the mIRC tab, the last)
+        self.assertLess(lines.index("dccore.sw.dcx"),
+                        lines.index("if ($dccore.sw.s(dcx)) { dccore.sw.side $iif($hget(dccore.live,sw.open) == mirc,2,0) }"))
+        self.assertIn("else { dccore.sw.tab $iif($hget(dccore.live,sw.open) == mirc,$dccore.sw.m(groups),1) }", lines)
 
     def test_nothing_happens_when_dcx_cannot_be_used(self):
         lines = statements(alias("dccore.sw.dcx"))
@@ -385,11 +388,14 @@ class TheMockupLayout(unittest.TestCase):
 
     def test_the_tab_strip_is_the_tabs_side_by_side_on_the_frames_top_line(self):
         b = self.builder
-        first, stride, top, height, lift = (int(n) for n in self.data["dcxtabs"].split())
+        first, stride, top, height, lift, count = (int(n) for n in self.data["dcxtabs"].split())
         self.assertEqual((first, stride, top, height, lift),
                          (b.TAB_DCX_FIRST, b.TAB_DCX_STRIDE, b.TABS[1], b.TAB_HEADER_H, b.TAB_LIFT))
-        groups = [group for group, _pages in layout.GROUPS]
-        x = b.TABS[0] + b.ROUND      # clear of the body frame's rounded corner
+        # the bot's groups have tabs; the last group is the mIRC side, no strip
+        groups = [group for group, _pages in layout.GROUPS][:-1]
+        self.assertEqual(count, len(groups))
+        self.assertEqual([group for group, _pages in layout.GROUPS][-1], "mIRC")
+        x = b.TAB_START              # after the way back and the side's name
         for number, group in enumerate(groups, start=1):
             tab_x, tab_w = (int(n) for n in self.data["tab.%d" % number].split())
             self.assertEqual(tab_x, x, group)
@@ -430,6 +436,93 @@ class TheMockupLayout(unittest.TestCase):
                       "$calc(%w - 4) %th", sel)
         self.assertIn("xdid dccore.set $calc(%id + 2) -C +b %face", sel)
         self.assertNotIn("vcenter", code())
+
+    def test_the_window_opens_on_a_start_page_with_a_side_to_choose_and_a_way_back(self):
+        """With DCX: a pill for each side, Bot (the groups with tabs) and mIRC
+        (the last group, its pages the list and no strip), on a start page the
+        window always opens on; a side has the way back at the strip's left
+        end, a pill with an arrow and the side's name beside it."""
+        b = self.builder
+        first, x, y, w, h = (int(n) for n in self.data["dcxback"].split())
+        self.assertEqual((first, x, y, w, h), (b.BACK_DCX_FIRST,) + b.BACK)
+        cid, cx, cy, cw, ch = (int(n) for n in self.data["dcxcrumb"].split())
+        self.assertEqual((cid, cx, cy, cw, ch), (b.CRUMB_DCX,) + b.CRUMB)
+        self.assertLess(x + w, cx)
+        self.assertLessEqual(cx + cw, int(self.data["tab.1"].split()[0]))
+        self.assertEqual(int(self.data["home.n"]), len(b.HOME))
+        pills = []
+        for number, (name, line) in enumerate(b.HOME, start=1):
+            pid, px, py, pw, ph = (int(n) for n in self.data["home.%d" % number].split())
+            self.assertEqual(pid, b.HOME_DCX_FIRST + (number - 1) * b.PILL_STRIDE)
+            self.assertEqual((py, pw, ph), (b.HOME_PILL_Y, b.HOME_PILL_W, b.HOME_PILL_H))
+            self.assertEqual(self.data["home.%d.t" % number], name)
+            self.assertEqual(self.data["home.%d.s" % number], line)
+            pills.append(px)
+        self.assertEqual(pills[1], pills[0] + b.HOME_PILL_W + b.HOME_PILL_GAP)
+        self.assertGreater(pills[0], b.TABS[0])
+        self.assertLess(pills[-1] + b.HOME_PILL_W, b.TABS[0] + b.TABS[2])
+        self.assertEqual([name for name, _line in b.HOME], ["Bot", "mIRC"])
+        self.assertLess(b.BODY_DCX_FIRST, b.BACK_DCX_FIRST)
+        self.assertLess(b.HOME_DCX_FIRST + len(b.HOME) * b.PILL_STRIDE, b.DCX_PAGES_ID + 1)
+        # made with the rest, after the tabs
+        lines = statements(alias("dccore.sw.dcx"))
+        self.assertLess(lines.index("dccore.sw.dcxtabs"), lines.index("dccore.sw.dcxhome"))
+        home = alias("dccore.sw.dcxhome")
+        self.assertIn("dccore.sw.dcxpill $gettok(%b,1,32) %r", home)
+        self.assertIn("1 $chr(8592)", home)                       # the arrow, bold
+        self.assertIn("-c $gettok(%c,1,32) text $dccore.sw.dcxrect($gettok(%c,2-5,32)) nowrap noprefix noformat", home)
+        self.assertIn("dccore.sw.dcxlabel $calc(%id + 2) %x %y %w 1 $dccore.sw.m(home. $+ %i $+ .t)", home)
+        self.assertIn("dccore.sw.dcxlabel $calc(%id + 3) %x $calc(%y + %th) %w 0 $dccore.sw.m(home. $+ %i $+ .s)", home)
+        self.assertIn("-C +t $dccore.dcx(GetSystemColor,COLOR_GRAYTEXT)", home)
+        pill = statements(alias("dccore.sw.dcxpill"))
+        self.assertEqual(pill[0], "dccore.sw.dcxline $1 $2 $3 $4 $5")
+        self.assertIn("dccore.dcx xdid dccore.set $1 -R +p $dccore.sw.dcxpoly($4,$5,o,4)", pill)
+        self.assertIn("dccore.dcx xdid dccore.set $calc($1 + 1) -R +p $dccore.sw.dcxpoly($4,$5,i,4)", pill)
+        label = alias("dccore.sw.dcxlabel")
+        self.assertIn("-c $1 text $2 $3 $4 $dccore.sw.dcxth nowrap center noprefix noformat", label)
+        self.assertIn("if ($5) { dccore.dcx xdid dccore.set $1 -f +b default 8 Tahoma }", label)
+
+    def test_a_side_shows_its_own_and_hides_the_others(self):
+        side = statements(alias("dccore.sw.side"))
+        self.assertEqual(side[0], "hadd dccore.sws side $1")
+        start = side.index("if ($1 == 0) {")
+        # to the start: the page shown goes, with the list, the title and the
+        # help; the way back and the tabs too; the pills come
+        self.assertEqual(side[start + 1], "if ($dccore.sw.s(page)) { dccore.sw.showpage $dccore.sw.s(page) -h | hdel dccore.sws page }")
+        self.assertIn("dccore.dcx xdid dccore.set %way -h", side[start:start + 8])
+        self.assertIn("dccore.dcx xdid dccore.set %tabs -h", side[start:start + 8])
+        self.assertIn("dccore.dcx xdid dccore.set %list -h", side[start:start + 8])
+        self.assertIn("dccore.dcx xdid dccore.set %title -h", side[start:start + 8])
+        self.assertIn("did -h dccore.set 1012", side[start:start + 8])
+        self.assertIn("dccore.dcx xdid dccore.set %pills -s", side[start:start + 8])
+        # a side: the pills go, the way back with its name comes, and the bot's
+        # tab last shown or the mIRC group - the last - with no tabs
+        after = side[start + 8:]
+        self.assertIn("dccore.dcx xdid dccore.set %pills -h", after)
+        self.assertIn("dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxcrumb),1,32) -t $iif($1 == 1,Bot,mIRC)", after)
+        self.assertIn("dccore.dcx xdid dccore.set %way -s", after)
+        self.assertIn("if ($1 == 2) { dccore.dcx xdid dccore.set %tabs -h | dccore.sw.tab $dccore.sw.m(groups) | return }", after)
+        self.assertEqual(after[-1], "dccore.sw.tab $iif(%bt,%bt,1)")
+        self.assertIn("if ($1 < $dccore.sw.m(groups)) { hadd dccore.sws bottab $1 }", alias("dccore.sw.tab"))
+        self.assertEqual(statements(alias("dccore.sw.dcxtabsel"))[0], "if ($dccore.sw.s(side) == 2) { return }")
+        # a pill or the way back clicked goes through dccore.sw.go, which asks
+        # about changes not saved as a tab does; a jump to a setting's page
+        # enters its side first
+        cb = statements(alias("dccore.sw.dcxcb"))
+        self.assertIn("if ($3 >= %b) && ($3 < $calc(%b + 3)) { dccore.sw.go side 0 | return }", cb)
+        self.assertIn("if ($3 >= %h) && ($3 < $calc(%h + 4 * $dccore.sw.m(home.n))) { dccore.sw.go side "
+                      "$calc($int($calc(($3 - %h) / 4)) + 1) | return }", cb)
+        go = statements(alias("dccore.sw.go"))
+        self.assertEqual(go[0], "if ($1 == side) && ($2 == $dccore.sw.s(side)) { return }")
+        self.assertIn("if ($1 == side) { dccore.sw.side $2 }", statements(alias("dccore.sw.goon")))
+        self.assertIn("if ($dccore.sw.s(dcx)) && ($dccore.sw.s(side) != $iif(%g == $dccore.sw.m(groups),2,1)) "
+                      "{ dccore.sw.side $iif(%g == $dccore.sw.m(groups),2,1) }", alias("dccore.sw.goto"))
+        # the native form has none of it: its tabs are the groups, the mIRC
+        # group the last
+        table = block("dialog dccore.set {", raw())
+        for key in ("dcxback", "dcxcrumb", "home."):
+            self.assertNotIn(key, table)
+        self.assertIn('tab "mIRC", 1007', table)
 
     def test_the_corners_are_the_midpoint_circles_pixels_and_the_polygons_cut_exactly_them(self):
         """The ring a region on pixel edges holds is exactly the pixels in
@@ -685,8 +778,9 @@ class TheMockupLayout(unittest.TestCase):
         self.assertEqual(rowsvis[0], "if (!$istok($dccore.sw.m(p. $+ $dccore.sw.s(page) $+ .w),srvchans,32)) { return }")
         shows = [line for line in handwritten().split("\n") if "did -v dccore.set" in line or "-v,-h" in line]
         for line in shows:
+            # (1012 is the help under the page, shown with a side, not a page's)
             self.assertTrue("dccore.sw.showpage" in line or "$calc(1019 + %i)" in line
-                            or "-v,-h" in line, line)
+                            or "-v,-h" in line or "did -v dccore.set 1012" in line, line)
         self.assertIn("if ($istok($dccore.sw.m(p. $+ $1 $+ .w),srvchans,32)) { dccore.sw.srv.rowsvis }",
                       alias("dccore.sw.page"))
         self.assertIn("srvchans", self.data["p.%d.w" % page].split())
@@ -755,7 +849,7 @@ class ApplySavesEverything(unittest.TestCase):
                                    ".timerdccoreSwAsk -m 1 0 dccore.sw.leaveask"])
         ask = alias("dccore.sw.leaveask")
         self.assertIn("if ($input(You have changes that are not saved. Save them before leaving this page? "
-                      "Yes saves them and goes on; No stays here.,yq,DCCore - Settings)) "
+                      "Yes saves them and goes on; No stays here.,yq,DCCore - Control Panel)) "
                       "{ dccore.sw.apply apply | dccore.sw.goon %go }", ask)
         # the page the bot refused a setting on is shown without asking
         self.assertIn("dccore.sw.tab %g", alias("dccore.sw.goto"))
