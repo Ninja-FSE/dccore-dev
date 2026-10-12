@@ -251,8 +251,16 @@ class AFetchUnderACap(DCCoreTestCase):
         ours, theirs = socket.socketpair()
         self.addCleanup(ours.close)
         self.addCleanup(theirs.close)
-        theirs.sendall(self.PAYLOAD)
-        theirs.shutdown(socket.SHUT_WR)
+
+        # The far end writes from its own thread: a macOS socket pair holds
+        # about 8 KB, so writing all 16 KB before the loop reads any of it
+        # never returned there.
+        def offer():
+            theirs.sendall(self.PAYLOAD)
+            theirs.shutdown(socket.SHUT_WR)
+        writer = threading.Thread(target=offer, daemon=True)
+        writer.start()
+        self.addCleanup(writer.join, 10)
         rid = dcc_fetch.enqueue_fetch("ServerOne", "Some_Track.flac", request_type="file")
         row = config.fetch_queue[rid]
         row.update(state="receiving", request_type="file")
