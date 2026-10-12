@@ -797,6 +797,9 @@ PRESERVE_RUNTIME = (
     'list_grab_others_asked',  # #926: who just asked which bot for its list.
                           # Losing it lets the automatic grab ask a bot that is
                           # busy sending someone else's list
+    'speed_cap_clocks',   # #1352: when the capped line is next free. Emptied,
+                          # every transfer running through a Save would send
+                          # its next chunk at once, past the cap
     'private_messages',  # somebody spoke to the bot and it said nothing back. A
                           # rehash is not a reply, and losing these would drop the
                           # only record that anybody tried

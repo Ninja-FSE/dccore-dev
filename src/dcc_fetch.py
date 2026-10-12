@@ -80,6 +80,7 @@ import defaults as config
 import db
 import dcc
 import runtime
+import speed_cap
 import transfer_log
 import list as list_mod
 import platform_compat
@@ -3439,7 +3440,9 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
                 failure_reason = "overall transfer timeout"
                 break
             try:
-                chunk = sock.recv(RECV_CHUNK)
+                # The bot's download cap (#1352): a tenth of a second of line
+                # at a time under a cap, the whole RECV_CHUNK without one.
+                chunk = sock.recv(speed_cap.chunk_size(speed_cap.DOWNLOAD, RECV_CHUNK))
             except socket.timeout:
                 failure_reason = "idle timeout"
                 break
@@ -3475,6 +3478,14 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
                     sock.sendall(struct.pack("!I", bytes_received & 0xFFFFFFFF))
                 except OSError:
                     acknowledging = False   # closed after the last byte, or not listening
+            # Wait for this chunk's share of the download cap, shared with
+            # every other fetch (#1352) - after the acknowledgement, so the
+            # sender is never kept waiting for it. The wall clock above is
+            # for a peer that drips, and our own waiting is not that: without
+            # moving it, a 200 MB list under a 200 KB/s cap would be cut off at
+            # FETCH_TRANSFER_TIMEOUT every time and asked for again from the
+            # start.
+            wall_deadline += speed_cap.take(speed_cap.DOWNLOAD, len(chunk))
     except Exception as recv_err:
         failure_reason = f"transfer error: {recv_err}"
         disk_full = _is_disk_full(recv_err)

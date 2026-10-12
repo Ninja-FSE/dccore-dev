@@ -21,6 +21,7 @@ import announce
 import db
 import library
 import runtime
+import speed_cap
 import transfer_log
 
 # THE queue lock: bound to runtime.py's object, not constructed here - dcc.py is
@@ -4351,6 +4352,20 @@ class _AckTracker:
         return ((now if now is not None else time.time())
                 - self.last_advance_at) > ACK_STALL_SECONDS
 
+    def sending(self, now=None):
+        """More is about to be sent. A receiver that holds everything it has
+        been sent owes nothing, so the time since its last acknowledgement
+        is not silence, and the stall clock starts again here.
+
+        It used to start at the last acknowledgement whatever happened after
+        it, which only held while the sender never paused between chunks.
+        Under the bot's own upload cap (#1352) it does: a receiver that had
+        acknowledged the last chunk, followed by a wait past
+        ACK_STALL_SECONDS, read as stalled the instant the next chunk went.
+        """
+        if self.acked >= self.sent:
+            self.last_advance_at = now if now is not None else time.time()
+
 
 def _drain_acks(conn, tracker, wait=0.0):
     """Read whatever acknowledgements are waiting, without blocking the send.
@@ -5014,8 +5029,14 @@ def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user)
         # scales with the block; see SEND_TIMEOUT_SECONDS.
         conn.settimeout(_send_timeout(block))
         while True:
-            chunk = f.read(block)
+            # The bot's upload cap (#1352), read per chunk so a change
+            # reaches a send already running: under a cap the chunk is a
+            # tenth of a second of line, and it waits its turn behind
+            # every other send's.
+            chunk = f.read(speed_cap.chunk_size(speed_cap.UPLOAD, block))
             if not chunk: break
+            speed_cap.take(speed_cap.UPLOAD, len(chunk))
+            acks.sending()
             try:
                 conn.sendall(chunk)
                 bytes_sent += len(chunk)

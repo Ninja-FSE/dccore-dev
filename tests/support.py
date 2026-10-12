@@ -123,6 +123,9 @@ RUNTIME_CONTAINERS = {
     # #926: who else asked which bot for its list. A leftover is a bot the
     # next test's automatic grab leaves alone for no reason it can see.
     "list_grab_others_asked": dict,
+    # #1352: the speed caps' clocks. A leftover is a line still "busy" into
+    # the next test, whose first capped chunk would wait for no reason.
+    "speed_cap_clocks": dict,
     # Offers in flight. A leftover here is not inert: it is keyed by (nick,
     # port), the DCC port range is small and reused, and a stale entry would
     # hand the next test's send an offset agreed for a different file.

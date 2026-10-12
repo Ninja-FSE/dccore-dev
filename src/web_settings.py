@@ -69,9 +69,11 @@ SETTINGS_CATEGORIES = (
                                                 "SEARCH_SHOW_FOLDER", "SEARCH_FOLDER_MAX_CHARS",
                                                 "PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE",
                                                 "REHASH_TRANSFER_WAIT"]),
-    # The transfer-tuning pair, together. Anyone reaching for one wants the
-    # other in front of them.
-    ("transfers",     "Transfers",             ["DCC_BLOCK_SIZE", "DCC_SEND_BUFFER",
+    # The speed caps first (#1352), the setting most operators come here for;
+    # then the transfer-tuning pair, together. Anyone reaching for one wants
+    # the other in front of them.
+    ("transfers",    "Transfers",             ["MAX_UPLOAD_KB", "MAX_DOWNLOAD_KB",
+                                                "DCC_BLOCK_SIZE", "DCC_SEND_BUFFER",
                                                 "DCC_PORT_START", "DCC_PORT_END",
                                                 "DCC_ACCEPT_TIMEOUT", "MAX_SEND_FAILS"]),
     ("your-list",     "Your list",             ["FILE_DIRECTORY", "LIST_BASE_NAME",
@@ -208,6 +210,8 @@ SETTINGS_LABELS = {
     "MAX_LIST_TEXT_SIZE": "Largest list text accepted from a peer",
     "DCC_BLOCK_SIZE": "Packet size",
     "DCC_SEND_BUFFER": "Socket send buffer (0 = the default for your platform)",
+    "MAX_UPLOAD_KB": "Max upload speed (KB/s, 0 = no limit)",
+    "MAX_DOWNLOAD_KB": "Max download speed (KB/s, 0 = no limit)",
     "REHASH_TRANSFER_WAIT": "Seconds a rehash waits for transfers to finish",
     "AUTO_REFETCH_LISTS": "Re-fetch a held list when its bot advertises a new one",
     "AUTO_GRAB_LISTS": "Grab the lists of bots you have no list from",

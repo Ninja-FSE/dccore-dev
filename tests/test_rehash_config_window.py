@@ -963,7 +963,8 @@ class TheSocketSendBuffer(DCCoreTestCase):
             code = handle.read()
 
         self.assertIn("block = dcc_block_size()", code)
-        self.assertIn("f.read(block)", code)
+        # Under a speed cap (#1352) a chunk is smaller, never larger than this.
+        self.assertIn("f.read(speed_cap.chunk_size(speed_cap.UPLOAD, block))", code)
         self.assertNotIn("f.read(65536)", code,
                          "the send loop still has the number hardcoded")
 
