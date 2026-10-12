@@ -192,9 +192,9 @@
 # Pause searching and sharing for the whole rebuild, not only the swap
 #PAUSE_FOR_WHOLE_UPDATE = false
 
-# The folder with the files you share. Used only if you have not added folders
-# on the Library page - if you have, those are used instead and this is
-# ignored.
+# The folder the setup chose for the files you share. On the Settings page it
+# is the first of the folders under Your list; once you save those, this is no
+# longer used.
 #
 # None, not a real path - a shipped literal path would let a copy-paste
 # install silently inherit somebody else's actual music folder path. Unlike
@@ -1168,6 +1168,23 @@
 # knows, not to be set hopefully.
 # 0 = per-platform default (4MB on Windows, OS auto-tuning on Linux)
 #DCC_SEND_BUFFER = 0
+
+# The most all your sends together may use, in KB/s, so sharing leaves room on
+# your line. Shared: three sends under 600 get about 200 each, and the others
+# speed up when one ends. A change applies at once, to sends already running
+# too. 0 is no limit.
+#
+# Speed caps (#1352), in KB/s, 0 = no limit: one pace per direction, shared by
+# every transfer that way - see speed_cap.py. Waiting on the download cap moves
+# a fetch's FETCH_TRANSFER_TIMEOUT along by as long as it waited.
+#MAX_UPLOAD_KB = 0
+
+# The most everything the bot fetches may use together, in KB/s: list fetches,
+# automatic grabs, files and folders from other bots. Waiting on this limit
+# does not count toward the fetch timeouts, so a big list is not cut off for
+# being slow. Very low values, a few KB/s, can make the other bot give up. 0
+# is no limit.
+#MAX_DOWNLOAD_KB = 0
 
 # The first port the bot listens on when sending a file. If you are behind a
 # router, forward this whole range (start to end) to the machine running the

@@ -74,16 +74,15 @@ class TheTopLevel(unittest.TestCase):
         top, _ = parse()
         loose = [label for label, action in top if action is not None]
         self.assertEqual([label for label in loose if not label.startswith("$iif($dccore.sel")],
-                         ["$iif($dccore.st(packing) != $null,Cancel the running pack...)", "Script Settings", "Bot Settings",
+                         ["$iif($dccore.st(packing) != $null,Cancel the running pack...)", "Control Panel",
                           "Console command", "Clear finished..."])
 
     def test_the_settings_and_the_console_command_come_first(self):
         top, _ = parse()
         rest = [item for item in top if not item[0].startswith("$iif($dccore.st(packing)")]
-        self.assertEqual(names(rest)[:4], ["Script Settings", "Bot Settings", "Console command", SEPARATOR])
-        self.assertEqual(dict(top)["Script Settings"], "dccore.options")
-        # #1264: the bot's own settings, next to this mIRC's
-        self.assertEqual(dict(top)["Bot Settings"], "dccore.settings")
+        self.assertEqual(names(rest)[:4], ["Control Panel", "Console command", SEPARATOR, "Info"])
+        # #1288: one window for the bot's settings and this mIRC's own
+        self.assertEqual(dict(top)["Control Panel"], "dccore.settings")
 
     def test_cancelling_a_running_pack_is_on_the_top_level_and_only_while_one_runs(self):
         top, groups = parse()
@@ -181,7 +180,7 @@ OLD_ACTIONS = [
     "dccore.ask clearqueue Clear the queue of which nick",
     "dccore.confirm rehash Reload the bot's code and settings?", "dccore.askraw",
     "dccore $iif($chat($dccore.bot),disconnect,connect)", "dccore pair $dccore.bot", "dccore unpair",
-    "dccore trust", "dccore.options", "dccore panel $iif($dccore.opt(panel),off,on)", "dccore.askfont",
+    "dccore trust", "dccore.settings", "dccore panel $iif($dccore.opt(panel),off,on)", "dccore.askfont",
     "dccore weburl", "clear @DCCore", "dccore chat", "dccore downloads", "dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.", "dccore",
 ]
 

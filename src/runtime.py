@@ -285,6 +285,13 @@ list_index_backfill_done.set()
 # reason every other lock in this file is.
 transfer_log_lock = threading.Lock()
 
+# speed_cap.py's clocks (#1352): per direction, the cap the clock runs at and
+# the moment the line is next free. One clock for every transfer that way, so
+# here: a second one after a reload would let the old transfers and the new
+# ones each take the whole cap.
+speed_cap_lock = threading.Lock()
+speed_cap_clocks = {}
+
 # db.py's download counters database (#1133). One writer at a time - the
 # sends, the startup migrations and an import of the old JSON - so two
 # transfers ending together never meet a busy file, and a damaged file is only

@@ -332,50 +332,52 @@ class PerNick(unittest.TestCase):
         ])
 
 
-class TheOptionsDialog(unittest.TestCase):
+class TheThreeMenusOnTheScriptTab(unittest.TestCase):
+    """The colour inside a line - the search text, nicks, channels - as
+    menus beside their labels in the Colours frame of the settings window's
+    Script tab, filled by dccore.sw.opt.fill and read back by
+    dccore.sw.opt.save (they were the Options dialog's)."""
 
-    COMBOS = (("col.term", 220, "Search text", 221, "name -1"),
-              ("col.nick", 222, "Nicks", 223, "-1 per"),
-              ("col.chan", 224, "Channels", 225, "-1"))
+    COMBOS = (("col.term", 1663, "Search text", 1643, "name -1"),
+              ("col.nick", 1664, "Nicks", 1644, "-1 per"),
+              ("col.chan", 1665, "Channels", 1645, "-1"))
 
     def table(self):
-        return block("dialog dccore.opt {")
+        return block("dialog dccore.set {")
 
     def geometry(self, pattern):
         return tuple(int(n) for n in re.search(pattern, self.table()).groups())
 
-    def test_the_three_combos_are_in_the_show_box_under_the_checks(self):
-        bx, by, bw, bh = self.geometry(r'box "Show in @DCCore", 100, (\d+) (\d+) (\d+) (\d+)')
-        _x, last_check_y, _w, last_check_h = self.geometry(r'check "Other log lines", 108, (\d+) (\d+) (\d+) (\d+)')
+    def test_the_three_menus_are_in_the_colours_frame_each_beside_its_label(self):
+        bx, by, bw, bh = self.geometry(r'box "Colours", \d+, (\d+) (\d+) (\d+) (\d+)')
         for _key, text_id, label, combo_id, _own in self.COMBOS:
             tx, ty, tw, th = self.geometry(r'text "%s", %d, (\d+) (\d+) (\d+) (\d+)' % (label, text_id))
             cx, cy, cw = self.geometry(r"combo %d, (\d+) (\d+) (\d+) \d+, drop" % combo_id)
             for x, y, w in ((tx, ty, tw), (cx, cy, cw)):
                 self.assertTrue(bx <= x and x + w <= bx + bw, label)
                 self.assertTrue(by <= y and y + 12 <= by + bh, label)
-                self.assertGreaterEqual(y, last_check_y + last_check_h, label)
-            # the label above its combo, in the same column
-            self.assertEqual(tx, cx, label)
-            self.assertLessEqual(ty + th, cy, "the label runs into its combo: " + label)
+            # the label on the same row, to the left of its menu
+            self.assertLess(tx + tw, cx, label)
+            self.assertEqual(ty, cy + 2, label)
 
-    def test_the_columns_do_not_overlap(self):
-        spans = sorted(self.geometry(r"combo %d, (\d+) \d+ (\d+) \d+, drop" % combo_id)
-                       for _key, _text_id, _label, combo_id, _own in self.COMBOS)
-        for (x, w), (next_x, _w) in zip(spans, spans[1:]):
-            self.assertLess(x + w, next_x)
+    def test_the_rows_do_not_overlap(self):
+        tops = sorted(self.geometry(r"combo %d, \d+ (\d+) \d+ \d+, drop" % combo_id)[0]
+                      for _key, _text_id, _label, combo_id, _own in self.COMBOS)
+        for y, next_y in zip(tops, tops[1:]):
+            self.assertGreaterEqual(next_y - y, 12)
 
-    def test_init_fills_each_from_its_setting(self):
-        init = statements(block("on *:dialog:dccore.opt:init:0: {"))
+    def test_the_fill_fills_each_from_its_setting(self):
+        fill = statements(alias("dccore.sw.opt.fill"))
         for key, _text_id, _label, combo_id, own in self.COMBOS:
-            self.assertIn("dccore.fillspan %d $dccore.opt(%s) %s" % (combo_id, key, own), init)
+            self.assertIn("dccore.fillspan %d $dccore.opt(%s) %s" % (combo_id, key, own), fill)
 
-    def test_ok_saves_each_with_the_same_lines_it_was_filled_with(self):
-        ok = statements(block("on *:dialog:dccore.opt:sclick:1: {"))
-        saved = ok.index("dccore.save")
+    def test_apply_saves_each_with_the_same_lines_it_was_filled_with(self):
+        save = statements(alias("dccore.sw.opt.save"))
+        saved = save.index("dccore.save")
         for key, _text_id, _label, combo_id, own in self.COMBOS:
             line = "hadd dccore %s $dccore.spanval(%d,%s)" % (key, combo_id, own)
-            self.assertIn(line, ok)
-            self.assertLess(ok.index(line), saved, line)
+            self.assertIn(line, save)
+            self.assertLess(save.index(line), saved, line)
 
     def test_the_fill_and_the_read_back_are_one_mapping(self):
         """N lines of its own, then colour C on line C + N + 1; read back the
@@ -384,7 +386,7 @@ class TheOptionsDialog(unittest.TestCase):
         back = statements(alias("dccore.spanval"))
         self.assertIn("var %at = $findtok(%own,$2,1,32)", fill)
         self.assertIn("if (!%at) { %at = $iif($2 isnum 0-15,$calc($2 + %n + 1),1) }", fill)
-        self.assertIn("did -c dccore.opt $1 %at", fill)
+        self.assertIn("did -c dccore.set $1 %at", fill)
         self.assertIn("if (%sel <= %n) { return $gettok($2,$iif(%sel < 1,1,%sel),32) }", back)
         self.assertIn("return $calc(%sel - %n - 1)", back)
 
