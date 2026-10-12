@@ -126,6 +126,11 @@ GROUPS = (
             ("Performance", ("LIST_AUDIO_INFO_MINUTES", "LIST_AUDIO_INFO_THREADS", "LIST_SCAN_THREADS")),
         )),
         ("Transfers", (
+            ("Speed limits", (
+                {"note": "Upload is your sends to people; download is everything the bot fetches. "
+                         "Each is one limit shared by all transfers that way."},
+                "MAX_UPLOAD_KB", "MAX_DOWNLOAD_KB",
+            )),
             ("Buffers & packet size", ("DCC_BLOCK_SIZE", "DCC_SEND_BUFFER")),
             ("Ports & reliability", ("DCC_PORT_START", "DCC_PORT_END", "DCC_ACCEPT_TIMEOUT",
                                      "MAX_SEND_FAILS")),
