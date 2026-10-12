@@ -733,10 +733,12 @@ def _shut_down():
             _announce_flush.flush_private_messages()
         except Exception:
             pass
-        # A background audio reading (#1182) is the rebuild's own process
-        # and would outlive the bot: asked to stop, it saves what it read.
+        # A rebuild (#1356) and a background audio reading (#1182) run in
+        # update_list.py's own process and would outlive the bot. Asked to
+        # stop, a rebuild publishes nothing and a reading saves what it read.
         try:
             import commands as _commands_stop
+            _commands_stop.stop_rebuild(wait=10.0)
             _commands_stop.stop_audio_reading(wait=10.0)
         except Exception:
             pass

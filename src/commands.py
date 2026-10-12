@@ -3014,6 +3014,39 @@ def stop_orphaned_reading():
     return True
 
 
+def stop_rebuild(wait=10.0, poll=0.25, sleep=None, clock=None):
+    """At shutdown: the rebuild this bot is running is asked to stop before it
+    publishes (#1356), and waited for, up to `wait` seconds, to let go of the
+    list lock. True if one was running.
+
+    It used to run on: update_list.py is a process of its own, and it scanned
+    on for half an hour after Tools > Stop, holding the lock, so the restarted
+    bot's Update list was refused. The rebuild also stops by itself when this
+    process is gone; this makes it prompt. The stop file is cleared only once
+    the lock is free, so a rebuild still finishing its directory sees it."""
+    import time
+    import update_list
+
+    if not getattr(config, "update_inprogress", False):
+        return False
+    holder = update_list.list_lock_holder()
+    if not holder or holder[1] != "rebuild":
+        return False
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    update_list.request_stop()
+    print(f"[LIST-GEN] Asking the list rebuild (pid {holder[0] or '?'}) to stop; "
+          f"the published list stays as it is.")
+    deadline = clock() + wait
+    while clock() < deadline:
+        current = update_list.list_lock_holder()
+        if not current or current[1] != "rebuild":
+            update_list.clear_stop_request()
+            return True
+        sleep(poll)
+    return True
+
+
 def stop_audio_reading(wait=None):
     """Stop a reading that runs, keeping what it read. True if one was.
 
