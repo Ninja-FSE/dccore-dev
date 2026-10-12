@@ -876,7 +876,7 @@ Chat request** to auto-accept so it never asks again.
 | the side panel | **Sending n/m**: each running transfer with its size, percentage and speed; **Queue n**: who is waiting, in order, with `frozen m:ss` on a queue that is counting down; **Today**: files and bytes sent, the speed record; and what this window has seen since it opened |
 | the title bar | `MusicBot on Undernet · slots 2/3 · queue 14 · today 38 files / 12.4GB · 1.5MB/s`, updated with every status burst |
 | the editbox | anything you type is a console command - `status`, `queue helen`, `clearqueue ivan`, `ban *!*@bad.host` - and the reply comes back as `[CONSOLE]` lines, or into a second `@DCCore-console` window if you prefer |
-| right-click | **Cancel the running pack** at the very top while one runs, the common commands, **Script Settings**, **Bot Settings** and **Console command** on top, then the groups **Info** (with **Download queues...**), **Lists**, **Library** (duplicate filenames, rebuild the list, **Read audio info**), **User control**, **Control** (update check, console feed, reload, **Stop the bot**), **Connection** and **Window** (DCCore Chat, Downloads window, panel, font); on a panel line, that user's queue, clearing it, ignoring them for a while, clearing and ignoring, or moving them earlier or later in line; in any channel's nick list, **DCCore → Queue of / Clear the queue of / Ignore for... / Clear the queue of and ignore for... / Stop ignoring** that nick |
+| right-click | **Cancel the running pack** at the very top while one runs, the common commands, **Control Panel** and **Console command** on top, then the groups **Info** (with **Download queues...**), **Lists**, **Library** (duplicate filenames, rebuild the list, **Read audio info**), **User control**, **Control** (update check, console feed, reload, **Stop the bot**), **Connection** and **Window** (DCCore Chat, Downloads window, panel, font); on a panel line, that user's queue, clearing it, ignoring them for a while, clearing and ignoring, or moving them earlier or later in line; in any channel's nick list, **DCCore → Queue of / Clear the queue of / Ignore for... / Clear the queue of and ignore for... / Stop ignoring** that nick |
 | the window's button | on the switchbar or treebar, like any channel's: the **message** colour when there is new activity - a request, a queue position, a send, a search - and the **highlight** colour (the one mIRC uses when somebody says your nick) on a failed transfer or dropped lines, so a failure stands out. The `[STATUS]` line, joins, parts and bans do not light it, as they would not in a channel. mIRC 7 or later |
 | a beep | on a failed transfer, if you leave that on |
 
@@ -901,33 +901,41 @@ the bot's network fills it in. Closing the window does not stop it opening next 
 **Open when mIRC starts** in the options does. DCCore Chat and the Downloads
 window can open the same way; both are off by default.
 
-### Options
+### This mIRC's own settings
 
-`/dccore options` (or right-click → Script Settings):
+`/dccore options` (or **mIRC** on the control panel's start page) opens the
+control panel on its **mIRC** side: this mIRC's own settings, in the same
+form as the bot's, saved by Apply or OK like everything else in the window.
+(They were a dialog of their own, "Options", until dccore.mrc 1.20.) Without
+DCX they are the window's **mIRC** tab.
 
-- a tickbox and a colour for each kind of event - requests, queue
-  positions, sends, failures, searches, joins/parts/quits, bans, other log
-  lines - plus the colour of file names, of console replies and of the side
-  panel's headings, and how
-  often the `[STATUS]` line is written when the side panel is off (0 = never);
-- under those, the colours inside a line (dccore.mrc 1.18 or later): **Search
-  text** (the searched term; *same as File names* until you choose), **Nicks** and
-  **Channels** (both *same as the line*, no colour of their own, until you choose).
-  **Nicks** can also be *per nick*: each nick gets a colour of its own from its
-  name, the same every time whatever its case, out of the colours that can be
-  read on the window's background. A new choice colours new lines; what is
-  already in the window stays as it was drawn;
-- the side panel, the title bar figures, console replies in a separate
-  window, the beep, the fixed-width font and its size (the Status window's
-  size until you set one - on a high-resolution screen you may want a
-  bigger number), and the window's background colour (one of mIRC's sixteen,
-  or "none" to leave the window as mIRC has it). mIRC has no per-window
-  colour setting, so the script writes a one-pixel picture of the colour
-  beside itself (`dccore-bg-<n>.bmp`) and tiles it behind the text;
-- the bot's nick, whether the script reconnects by itself, the pairing
-  state with **Pair again...** and **Forget token**.
-- **Open when mIRC starts (minimised)**: `@DCCore` (on by default),
-  `@DCCore-Chat` and `@DCCore-Downloads` (both off by default).
+- **@DCCore window**: a tickbox and a colour for each kind of event -
+  requests, queue positions, sends, failures, searches, joins/parts/quits,
+  bans, other log lines - and how often the `[STATUS]` line is written when
+  the side panel is off (0 = never); then the colours of file names, of
+  console replies and of the side panel's headings, and the colours inside a
+  line: **Search text** (the searched term; *same as File names* until you
+  choose), **Nicks** and **Channels** (both *same as the line*, no colour of
+  their own, until you choose). **Nicks** can also be *per nick*: each nick
+  gets a colour of its own from its name, the same every time whatever its
+  case, out of the colours that can be read on the window's background. A
+  new choice colours new lines; what is already in the window stays as it
+  was drawn.
+- **Window**: the side panel, the title bar figures, console replies in a
+  separate window, the beep, the fixed-width font and its size (the Status
+  window's size until you set one - on a high-resolution screen you may
+  want a bigger number), the window's background colour (one of mIRC's
+  sixteen, or "none" to leave the window as mIRC has it; mIRC has no
+  per-window colour setting, so the script writes a one-pixel picture of the
+  colour beside itself, `dccore-bg-<n>.bmp`, and tiles it behind the text),
+  how many finished downloads the Downloads window shows, and whether the
+  settings window itself is drawn with DCX.
+- **Connection**: the bot's nick, the pairing state with **Pair again...**
+  and **Forget token**, and whether the console feed is on (the bot's own
+  state, never saved here). Reconnecting by itself is under **General →
+  General Settings**, with the windows to open when mIRC starts.
+- **Chat**: whether DCCore Chat listens on every channel, and opens when a
+  line arrives.
 
 These are the script's own filters, kept by mIRC in `dccore.ini`. The
 bot's **Settings → Console feed** tickboxes remain the ceiling on what is
@@ -935,19 +943,29 @@ sent at all: what is off there never reaches the script.
 
 ### The bot's settings
 
-`/dccore settings` (or right-click -> **Bot Settings**, or **Settings...** next to
-**Options...** in the other menus) opens the settings window (dccore.mrc 1.19 or
-later, mIRC 6.17 or later): the bot's own settings, as the dashboard's Settings
-page has them, over the console commands above. Six tabs - **General**,
+`/dccore settings` (or right-click -> **Control Panel**, the one entry in every
+menu) opens the control panel (dccore.mrc 1.19 or later, mIRC 6.17 or later).
+With DCX it opens on a start page with two choices, **Bot** and **mIRC**, and
+under them the bot's figures - nick, network, up since and the connection;
+the running sends; today's sent, queue, speed record, failed and searches;
+the lists, the rebuild and the pack running - from the same status the side
+panel draws, refreshed with it. A side has a back arrow at the top left and
+the side's name beside it, and the window opens on the start page every time. **Bot** is the bot's own settings,
+as the dashboard's Settings page has them, over the console commands above:
+six groups - **General**,
 **Sharing**, **Downloads**, **Security**, **Dashboard & Console**, **Advanced** -
-each with its pages as a column of buttons on the left, and **Apply**, **OK** and **Cancel**
-at the bottom.
+each with its pages, chosen on the left; every page its sections in titled
+frames, each label above its field; and **Apply**, **OK** and **Cancel** at the
+bottom.
 
 #### DCX (#1288)
 
 The settings window is being moved onto **DCX** (Dialog Control eXtensions,
-https://github.com/twig/dcxdll, BSD-3-Clause), which gives it a real tree for the
-pages and tables with columns for the bans, channels and lists. `dcx.dll` ships
+https://github.com/twig/dcxdll, BSD-3-Clause), which gives it a list of the chosen
+tab's pages, tables with columns for the bans, channels and lists, and every line
+of the window - the tab strip, the body frame, the sections' frames - drawn by the
+script in one colour, the system's shadow grey, where Windows draws its own in
+light greys that are hard to see. `dcx.dll` ships
 unmodified in `scripts/mirc/dcx/`, with Microsoft's `WebView2Loader.dll` (which
 DCX loads every time it starts, and warns about in the status window when it is
 missing), their licences, and a README naming both files and their SHA-256s; the
@@ -955,17 +973,25 @@ script checks those hashes before it loads DCX.
 Whenever DCX cannot be used, the window drawn with mIRC's own controls opens,
 exactly as before:
 
-- the option *Use the built-in settings window, not DCX* is on (the window's
-  **This mIRC window** page);
+- the option *Use the built-in settings window, not DCX* is on (the **Script**
+  tab's **Window** page);
 - the mIRC version is below 7.45 (DCX 3.1 needs 7.45 or later), or it is the 64-bit build - the dll
   is 32-bit;
 - `dcx\dcx.dll` is not beside the script, is not that release, or will not load.
 
-With DCX, the six tabs and the column of page buttons give way to a **tree**
-on the left: each group in bold with its pages under it, the page shown
-selected. Everything to its right - the pages, their settings, Apply, OK and
-Cancel - is the same window either way. Tables with columns for the bans,
-channels and lists come next.
+With DCX the window has the operator's navigation: a start page with two
+choices, **Bot** and **mIRC**, and on a side a back arrow at the top left
+with the side's name. The Bot side has the six groups as tabs, and the
+column of page buttons gives way to a **list of the chosen tab's pages** on
+the left, the page shown highlighted, with the page's name in bold between
+the tabs and the page; the mIRC side has its four pages in that list and no
+tab strip. Every table is a **listview with columns**: the
+channels; the lists (Name | Primary | Folders) on **Lists**; the timed bans
+(Nick | Time left) and the permanent patterns on **Bans & ignores**. Select a
+row and use the buttons under its table. (**Channel bindings** is a row per
+channel with its own menus, the same with or without DCX.) Without DCX the
+tabs, the page buttons and plain lists draw the same pages: the settings,
+Apply, OK and Cancel are the same window either way.
 
 `/dccore dcx` says which applies. `/dccore dcx check` opens a small window that
 tests DCX in this mIRC and writes what it found in `@DCCore`.
@@ -976,13 +1002,18 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
 - **General Settings** gathers the switches used most, including four of this
   mIRC's own: open @DCCore, Chat and Downloads when mIRC starts, and reconnect
   to the bot by itself. Those are saved here, in `dccore.ini`, by Apply or OK.
-- **Apply** sends what changed - only that - as one transaction (`setbegin`, a
-  `set` for each, `setcommit`), so the bot saves it in one go and rehashes once.
-  A value the bot refuses comes back with the dashboard's reason in the status
-  line, the window shows the page it is on, and nothing is saved; your edits
-  stay. Clearing the debug channel asks first, as the dashboard does. A change
-  on **File locations** asks before it is sent. **OK** is Apply, then closes once
-  the bot has saved; **Cancel** closes and sends nothing.
+- **Apply saves everything that changed**, and nothing else saves: the pages
+  have no Save buttons of their own. The settings go as one transaction
+  (`setbegin`, a `set` for each, `setcommit`), so the bot saves them in one go
+  and rehashes once; the on-connect commands and the lists with their bindings
+  go as transactions of their own; this mIRC's own switches go to `dccore.ini`
+  at once. A value the bot refuses comes back with the dashboard's reason in
+  the status line, the window shows the page it is on, and nothing is saved;
+  your edits stay. Clearing the debug channel asks first, as the dashboard
+  does. A change on **File locations** asks before it is sent. **OK** is Apply,
+  then closes once every reply has come back ok; **Cancel** closes and sends
+  nothing. **Leaving a page with changes not saved asks first**: Yes saves
+  them and goes on, No stays on the page.
 - **The admin password, once per connection.** The script logs in with its
   paired token, which may read the settings but not change them. The first
   time a save needs it, the window asks for the admin password (masked), sends
@@ -994,19 +1025,25 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
   reloaded (it may first wait for transfers to finish), then *Saved and
   applied*, and the page shows the bot's values. If the console reconnects
   while you have changes not saved, they are kept: **Reload** discards them.
-- **Structured pages** save with buttons of their own: the on-connect commands
-  on **IRC Server** (and **Resend now**), the served lists, their folders and
-  each channel's list and mode on **Lists & channels** (rows such as
-  `#music -> Main - Normal`; select one to edit it, then **Save lists**), and
-  **Bans & ignores** (lift a timed ban, ignore a nick for some minutes, add or
-  remove a permanent pattern). **Channels** edits `CHANNEL` as a list and is
+- **Structured pages**: the on-connect commands on **IRC Server** (**Resend
+  now** sends them again, **Unlock** shows them); **Lists**, a table with a row
+  per list, where **Add list** and **Edit** open a window for one list's name,
+  primary flag and folders (a label and a path each) and **Delete** takes a
+  list with its channels and folders; **Channel bindings**, a row per
+  channel with its own List and Mode menus - a change in a menu is kept at
+  once - and a **Remove**, a scrollbar beside the fifteen rows shown for the
+  channels beyond them, and a row to add one under them. Apply sends the
+  lot. **Bans & ignores** acts at once (lift a timed ban, ignore a nick for
+  some minutes, add or remove a permanent pattern): those are commands, not
+  settings. **Channels** edits `CHANNEL` as a list and is
   saved by Apply. A save the bot refuses keeps your edits there. A row or a
   command you did not touch goes back exactly as the bot sent it.
 - **Appearance**: the theme and the six custom colours as menus of mIRC's
   sixteen. **Preview** draws the sample advert and notice, with the colours as
   chosen and not saved, in `@DCCore-preview`.
-- **This mIRC window** opens the old **Options** dialog - `/dccore options` is
-  still that one.
+- **mIRC** - the window's other side, the **mIRC** tab without DCX - holds this
+  mIRC's own settings (see *This mIRC's own settings* above); `/dccore options`
+  opens the window there.
 - **Paths** are the bot's. The **...** buttons that browse for one work only when
   the bot runs on this PC - the console connection is 127.0.0.1, or the computer
   name the bot reports (`machine:` in its `CAPS` line) is this one's; otherwise
@@ -1032,7 +1069,7 @@ whether the block is up to date.
 /dccore disconnect           close the chat and stop reconnecting
 /dccore unpair               forget the token here and revoke it on the bot
 /dccore trust                accept the bot's current host as the one to send the token to
-/dccore options              what to show, colours, panel, title bar, beep, windows at start
+/dccore options              this mIRC's own settings: the settings window on its Script tab
 /dccore settings             the bot's own settings, as its dashboard's Settings page has them
 /dccore dcx [check]          whether the settings window can draw with DCX, and why not; check tests it in this mIRC
 /dccore window               open or focus @DCCore
