@@ -4986,6 +4986,60 @@ def refuse_without_a_port(irc_sock, user, row, next_file, dcc_sock, listener_err
     return
 
 
+def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user):
+    """Send the file down a connected DCC socket, from resume_offset to its
+    end, reading the receiver's acknowledgements as it goes; return the
+    bytes sent, counted the way the receiver holds them (the skipped part
+    of a resume included).
+
+    Raises _ReceiverGone or _ReceiverStalled when the receiver closes or
+    stops acknowledging with bytes outstanding, and lets a socket error
+    through. acks.sent equals the bytes sent after every chunk, so whoever
+    catches it still knows how far the send got. Each chunk also moves the
+    transfer row's bytes_sent and the bot's total.
+
+    start_dcc_send()'s send loop until #1350, step 4 of splitting it
+    (docs/FUTURE.md). Moved unchanged.
+    """
+    with open(platform_compat.long_path(file_path), 'rb') as f:
+        if resume_offset:
+            f.seek(resume_offset)
+        # mIRC's "packet size", and the reason raising it there is
+        # noticeable: mIRC defaults to 4 KB and this has always been 64.
+        # Resolved once per transfer, not once per pass - the value cannot
+        # change mid-file, and a getattr in the inner loop of a 4 GB send
+        # is a million lookups for one answer.
+        block = dcc_block_size()
+        # The timeout covers one whole sendall() of `block` bytes, so it
+        # scales with the block; see SEND_TIMEOUT_SECONDS.
+        conn.settimeout(_send_timeout(block))
+        while True:
+            chunk = f.read(block)
+            if not chunk: break
+            try:
+                conn.sendall(chunk)
+                bytes_sent += len(chunk)
+                acks.sent = bytes_sent
+            except socket.error as e:
+                raise e
+            # Read whatever the receiver has acknowledged so far, without
+            # waiting for it - the sends must not sit behind the acks any
+            # more than the acks should be ignored. A receiver that has gone
+            # quiet for ACK_STALL_SECONDS while bytes are outstanding is
+            # dead, and this is the first place that can tell.
+            _drain_acks(conn, acks)
+            if acks.eof and acks.acked < bytes_sent:
+                raise _ReceiverGone(acks.acked)
+            if acks.stalled() and acks.acked < bytes_sent:
+                raise _ReceiverStalled(acks.acked)
+            for tx in config.active_transfers:
+                if _is_this_send(tx, row, user):
+                    tx['bytes_sent'] += len(chunk)
+            oserve = sys.modules.get('oserve')
+            if oserve: oserve.total_sent_bytes += len(chunk)
+    return bytes_sent
+
+
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, owns_packer=False):
     """Handle the network ports and the CTCP, and stream the bytes with accurate timing.
 
@@ -5287,42 +5341,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             print(f"[DCC-RESUME] Resuming {file_name} for {user} at byte "
                   f"{resume_offset} of {file_size}.")
 
-        with open(platform_compat.long_path(file_path), 'rb') as f:
-            if resume_offset:
-                f.seek(resume_offset)
-            # mIRC's "packet size", and the reason raising it there is
-            # noticeable: mIRC defaults to 4 KB and this has always been 64.
-            # Resolved once per transfer, not once per pass - the value cannot
-            # change mid-file, and a getattr in the inner loop of a 4 GB send
-            # is a million lookups for one answer.
-            block = dcc_block_size()
-            # The timeout covers one whole sendall() of `block` bytes, so it
-            # scales with the block; see SEND_TIMEOUT_SECONDS.
-            conn.settimeout(_send_timeout(block))
-            while True:
-                chunk = f.read(block)
-                if not chunk: break
-                try:
-                    conn.sendall(chunk)
-                    bytes_sent += len(chunk)
-                    acks.sent = bytes_sent
-                except socket.error as e:
-                    raise e
-                # Read whatever the receiver has acknowledged so far, without
-                # waiting for it - the sends must not sit behind the acks any
-                # more than the acks should be ignored. A receiver that has gone
-                # quiet for ACK_STALL_SECONDS while bytes are outstanding is
-                # dead, and this is the first place that can tell.
-                _drain_acks(conn, acks)
-                if acks.eof and acks.acked < bytes_sent:
-                    raise _ReceiverGone(acks.acked)
-                if acks.stalled() and acks.acked < bytes_sent:
-                    raise _ReceiverStalled(acks.acked)
-                for tx in config.active_transfers:
-                    if _mine(tx):
-                        tx['bytes_sent'] += len(chunk)
-                oserve = sys.modules.get('oserve')
-                if oserve: oserve.total_sent_bytes += len(chunk)
+        # stream_the_file() since #1350; acks.sent follows it when it raises.
+        bytes_sent = stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, _row, user)
                 
         # COMPLETE MEANS ALL OF IT. The loop above ends on local EOF, which
         # says the file stopped giving bytes - not that it gave as many as the
@@ -5464,10 +5484,13 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
     finally:
         # finish_send() since #1336. resume_offset, acks and
         # transfer_finished_at are unset on the exits before the transfer.
+        # Once acks is set, acks.sent is the bytes sent: a send that raised
+        # out of stream_the_file() never returned its count (#1350).
         _here = locals()
         finish_send(SentFile(
             _row, user, next_file, file_path, file_name, file_size,
-            _here.get('resume_offset', 0), bytes_sent, transfer_completed, already_held,
+            _here.get('resume_offset', 0), _here['acks'].sent if 'acks' in _here else bytes_sent,
+            transfer_completed, already_held,
             offered_at, start_time, _here.get('transfer_finished_at'),
             channel=channel, irc_sock=irc_sock, owns_packer=owns_packer,
             outcome_identity=outcome_identity, outcome_status=outcome_status,
