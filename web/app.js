@@ -4950,7 +4950,6 @@
     LIST_BASE_NAME: "settings.field.LIST_BASE_NAME",
     PAUSE_ON_UPDATE: "settings.field.PAUSE_ON_UPDATE",
     PAUSE_FOR_WHOLE_UPDATE: "settings.field.PAUSE_FOR_WHOLE_UPDATE",
-    FILE_DIRECTORY: "settings.field.FILE_DIRECTORY",
     LIST_FORMAT: "settings.field.LIST_FORMAT",
     LIST_IGNORED_EXTENSIONS: "settings.field.LIST_IGNORED_EXTENSIONS",
     SEPARATE_VIDEO_LIST: "settings.field.SEPARATE_VIDEO_LIST",
@@ -5289,12 +5288,12 @@
       refreshThemePreview();
     }
     var count = Object.keys(state.settingsDirty).length;
-    // #1354: Save & rehash does not save the folder or list editor, so the
-    // bar says so rather than "All changes saved" over an unsaved one.
+    // #1354: an unsaved folder or list editor is named here too, rather than
+    // "All changes saved" over it. The button saves it (#1357).
     var editor = servedDraftUnsaved();
     var editorText = editor === "lists" ? t("settings.savebarListsNotSaved")
       : editor === "folders" ? t("settings.savebarFoldersNotSaved") : "";
-    el.settingsSaveBtn.disabled = count === 0;
+    el.settingsSaveBtn.disabled = count === 0 && editorText === "";
     el.settingsSavebarText.classList.toggle("is-dirty", count > 0 || editorText !== "");
     var text = count === 0
       ? (editorText || t("settings.allChangesSaved"))
@@ -5360,11 +5359,8 @@
     var unsaved = servedDraftUnsaved();
     if (unsaved === "lists") { return t("settings.listsNotSaved"); }
     if (unsaved !== "folders") { return ""; }
-    if (state.foldersSource === "file") {
-      return t((state.folders || []).length === 1 ? "settings.foldersNotSavedOne" : "settings.foldersNotSavedMany")
-        .replace("{count}", (state.folders || []).length);
-    }
-    return t("settings.foldersNotSavedDirectory");
+    return t((state.folders || []).length === 1 ? "settings.foldersNotSavedOne" : "settings.foldersNotSavedMany")
+      .replace("{count}", (state.folders || []).length);
   }
 
   // Called on every edit as well as every render: typing does not re-render
@@ -5563,7 +5559,6 @@
       blocks +
       '<div class="served-folder-actions">' +
         '<button type="button" class="btn served-list-add">' + t("settings.addList") + '</button>' +
-        '<button type="button" class="btn btn-accent served-list-save">' + t("settings.saveLists") + '</button>' +
       "</div>" + '<p class="served-folder-note is-error served-draft-unsaved" hidden></p>' + note + "</div>";
   }
 
@@ -5807,11 +5802,6 @@
       return;
     }
 
-    if (button.classList.contains("served-list-save")) {
-      saveLists();
-      return;
-    }
-
     if (button.classList.contains("served-list-add")) {
       draft.push({ name: "", primary: draft.length === 0, channels: [], folders: [], exclude: "" });
     } else if (button.classList.contains("served-list-remove")) {
@@ -5885,7 +5875,7 @@
           // trimmed would otherwise stay untrimmed on screen.
           state.listsDraft = null;
           state.lists = res.data.lists || [];
-          return loadLists();
+          return loadLists().then(function () { return true; });
         }
         // The server returns every fault at once, newline separated, so an
         // operator fixing three things is told about three things.
@@ -5897,6 +5887,7 @@
           problems: parts.length > 1 ? parts : []
         };
         renderSettingsCategory();
+        return false;
       });
   }
 
@@ -5925,14 +5916,14 @@
     }
 
     var summary;
-    // What is SAVED (#1354): the rows below are the draft, and until Save
-    // folders the bot serves the saved list, not them.
+    // What is SERVED (#1354): the rows below are the draft, and until Save
+    // the bot serves what was saved. A bot that never saved a folder list
+    // serves the Music directory, and the server reports it as the one
+    // folder served - the first row here, not a field of its own (#1357).
     var served = (state.folders || []).length;
-    if (state.foldersSource === "file") {
+    if (state.foldersSource === "file" || state.foldersSource === "file_directory") {
       summary = t(served === 1 ? "settings.servingOneFolder" : "settings.servingManyFolders")
         .replace("{count}", served);
-    } else if (state.foldersSource === "file_directory") {
-      summary = t("settings.noFolderListYet");
     } else {
       summary = t("settings.nothingServedYet");
     }
@@ -5990,7 +5981,6 @@
       browsePanel +
       '<div class="served-folder-actions">' +
         '<button type="button" class="btn served-folder-add">' + t("settings.addFolder") + '</button>' +
-        '<button type="button" class="btn btn-accent served-folder-save">' + t("settings.saveFolders") + '</button>' +
       "</div>" + '<p class="served-folder-note is-error served-draft-unsaved" hidden></p>' + note + "</div>";
   }
 
@@ -6075,7 +6065,7 @@
     var rows = (state.foldersDraft || []).filter(function (entry) {
       return String(entry.path || "").trim() !== "";
     });
-    postJson("/api/folders", { folders: rows }).then(function (res) {
+    return postJson("/api/folders", { folders: rows }).then(function (res) {
       if (res.ok) {
         state.folders = res.data.folders || [];
         state.foldersSource = res.data.source || "";
@@ -6084,10 +6074,8 @@
         });
         state.foldersNote = {
           ok: true,
-          text: res.data.written
-            ? t(res.data.written === 1 ? "settings.savedOneFolder" : "settings.savedManyFolders")
-                .replace("{count}", res.data.written)
-            : t("settings.folderListCleared")
+          text: t(res.data.written === 1 ? "settings.savedOneFolder" : "settings.savedManyFolders")
+            .replace("{count}", res.data.written)
         };
       } else {
         state.foldersNote = {
@@ -6097,6 +6085,7 @@
         };
       }
       renderSettingsCategory();
+      return res.ok;
     });
   }
 
@@ -6402,22 +6391,19 @@
     }
 
     var listButton = evt.target.closest(
-      ".served-list-add, .served-list-save, .served-list-remove, " +
+      ".served-list-add, .served-list-remove, " +
       ".list-folder-add, .list-folder-remove, .served-list-start");
     if (listButton) {
       handleListButton(listButton);
       return;
     }
 
-    var button = evt.target.closest(".served-folder-add, .served-folder-save, .served-folder-remove, .served-folder-up, .served-folder-down");
+    var button = evt.target.closest(".served-folder-add, .served-folder-remove, .served-folder-up, .served-folder-down");
     if (!button) { return; }
     var draft = state.foldersDraft || (state.foldersDraft = []);
 
     if (button.classList.contains("served-folder-add")) {
       draft.push({ name: "", path: "" });
-    } else if (button.classList.contains("served-folder-save")) {
-      saveFolders();
-      return;
     } else {
       var row = button.closest(".served-folder-row");
       var index = parseInt(row.dataset.servedFolderIndex, 10);
@@ -6485,9 +6471,16 @@
     });
   });
 
-  el.settingsSaveBtn.addEventListener("click", function () {
+  // ONE SAVE FOR THE PAGE (#1357). The folder and list editors had buttons
+  // of their own and this one saved only the settings, so an operator who
+  // removed folders and pressed it saved nothing of what they had changed -
+  // and after Save folders, this one sat disabled with nothing to do. The
+  // editor goes first: a refused folder list says why beside the rows, and
+  // the settings wait until it is put right.
+  function saveSettingsPage() {
     var dirty = state.settingsDirty;
-    if (!Object.keys(dirty).length) { return; }
+    var editor = servedDraftUnsaved();
+    if (!Object.keys(dirty).length && !editor) { return; }
 
     // #1008 follow-up: the bot otherwise only ever leaves a cleared debug
     // channel on the next reconnect - see sync_channels()'s own reasoning
@@ -6506,6 +6499,26 @@
       return;
     }
 
+    el.settingsSaveBtn.disabled = true;
+    el.settingsSaveStatus.style.display = "none";
+    el.settingsSavebarText.textContent = t("settings.saving");
+    var saveEditor = editor === "folders" ? saveFolders : editor === "lists" ? saveLists : null;
+    Promise.resolve(saveEditor ? saveEditor() : true).then(function (saved) {
+      if (!saved) { updateSettingsSaveBar(); return; }
+      if (!Object.keys(dirty).length) {
+        var note = editor === "lists" ? state.listsNote : state.foldersNote;
+        if (note) { showSettingsStatus(el.settingsSaveStatus, note.text, false); }
+        updateSettingsSaveBar();
+        return;
+      }
+      saveTheSettings(dirty, clearingDebugChannel);
+    }, function () {
+      showSettingsStatus(el.settingsSaveStatus, t("settings.couldNotReachDashboard"), true);
+      updateSettingsSaveBar();
+    });
+  }
+
+  function saveTheSettings(dirty, clearingDebugChannel) {
     var payload = {};
     for (var dirtyKey in dirty) {
       if (Object.prototype.hasOwnProperty.call(dirty, dirtyKey)) { payload[dirtyKey] = dirty[dirtyKey]; }
@@ -6540,7 +6553,9 @@
         showSettingsStatus(el.settingsSaveStatus, t("settings.couldNotReachDashboard"), true);
         updateSettingsSaveBar();
       });
-  });
+  }
+
+  el.settingsSaveBtn.addEventListener("click", saveSettingsPage);
 
   // ------------------------------------------------------------------ Init
 

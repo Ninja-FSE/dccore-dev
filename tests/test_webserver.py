@@ -3136,6 +3136,7 @@ class SettingsPayloadTests(DCCoreTestCase):
         types = settings_file.declared_types(vars(config))
         expected = {name for name in types
                     if name != "ADMIN_PASSWORD_HASH"
+                    and name not in webserver.EDITED_ELSEWHERE   # #1357: an editor of its own
                     and settings_file.is_overridable(name, getattr(config, name, None))}
 
         payload = webserver.build_settings_payload()

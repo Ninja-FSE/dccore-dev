@@ -114,7 +114,7 @@ GROUPS = (
             ("", ({"widget": "srvsaveb"},)),
         )),
         ("List settings", (
-            ("Library", ("FILE_DIRECTORY", "LIST_BASE_NAME", "LIST_FORMAT", "LIST_IGNORED_EXTENSIONS")),
+            ("Library", ("LIST_BASE_NAME", "LIST_FORMAT", "LIST_IGNORED_EXTENSIONS")),
             ("Film & series", ({"key": "SEPARATE_VIDEO_LIST", "label": "Separate film and series list"},
                                "LIST_VIDEO_EXTENSIONS", "LIST_VIDEO_COMPANION_EXTENSIONS")),
             ("!rar packing", ("RAR_ENABLED", "RAR_EXTENSIONS", "RAR_BINARY", "MAX_RAR_FOLDER_SIZE", "RAR_TIMEOUT")),
@@ -281,7 +281,7 @@ EXCLUDED = {
 # The settings whose value is a path on the BOT's machine, and whether it is a
 # folder or a file: they get a "..." browse button, enabled only when the
 # console connection is local (the bot runs on this PC).
-FOLDER_KEYS = ("FILE_DIRECTORY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR", "FETCHED_FILES_DIR")
+FOLDER_KEYS = ("TMP_ZIP_DIR", "LOCAL_LIST_DIR", "FETCHED_FILES_DIR")
 FILE_KEYS = ("RAR_BINARY", "LIST_HEADER_FILE", "CONSOLE_LOG_FILE", "LIBRARY_FOLDERS_FILE", "LISTS_FILE",
              "BANS_FILE", "HARD_BANS_FILE", "STATS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
              "LIST_INDEX_FILE", "LIST_AUDIO_INFO_CACHE", "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",

@@ -59,6 +59,19 @@ from web_common import WEB_DASHBOARD_SOURCE, json_object
 # Every name here is checked against config.py's actual annotations by
 # SettingsPayloadTests' completeness guard, so a setting added later and never
 # slotted in fails a test instead of silently never showing up.
+#
+# Settings an editor of their own replaces on this page (#1357), and so on no
+# category. FILE_DIRECTORY is the folder a bot with no folder list serves.
+# Your list's folder rows show it as their first row, and saving them writes
+# the list, so a field for it as well put one folder on the page twice - and
+# the field's "used only when no folders are set" was a second way to say
+# what is shared that the rows silently overrode. It stays a setting: the
+# first-time setup writes it, and a bot that never saved a folder list still
+# serves it.
+EDITED_ELSEWHERE = {
+    "FILE_DIRECTORY": "Your list's folder rows",
+}
+
 SETTINGS_CATEGORIES = (
     ("identity",      "Identity & network",    ["SERVER", "PORT", "NICKNAME", "ALT_NICKNAME", "REJOIN_ATTEMPTS",
                                                 "ON_CONNECT_CHECK_MINUTES",
@@ -76,7 +89,7 @@ SETTINGS_CATEGORIES = (
                                                 "DCC_BLOCK_SIZE", "DCC_SEND_BUFFER",
                                                 "DCC_PORT_START", "DCC_PORT_END",
                                                 "DCC_ACCEPT_TIMEOUT", "MAX_SEND_FAILS"]),
-    ("your-list",     "Your list",             ["FILE_DIRECTORY", "LIST_BASE_NAME",
+    ("your-list",     "Your list",             ["LIST_BASE_NAME",
                                                 "LIST_FORMAT", "LIST_IGNORED_EXTENSIONS",
                                                 "SEPARATE_VIDEO_LIST", "LIST_VIDEO_EXTENSIONS",
                                                 "LIST_VIDEO_COMPANION_EXTENSIONS",
@@ -626,6 +639,7 @@ def _settings_payload_unlocked(settings_file):
     # name rather than raising, matching how it already reaches the page at
     # all despite being uncategorised.
     leftover = [n for n in types if n not in seen and n != "ADMIN_PASSWORD_HASH"
+                and n not in EDITED_ELSEWHERE
                 and settings_file.is_overridable(n, getattr(config, n, None))]
     if leftover:
         categories.append({"id": "other", "label": "Other", "fields": [

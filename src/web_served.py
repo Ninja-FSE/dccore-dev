@@ -332,11 +332,11 @@ def apply_folder_changes(payload):
     them apart. library.problems() returns every fault at once for the same
     reason: an operator fixing three things should be told about three things.
 
-    AN EMPTY LIST IS ALLOWED and means "go back to the single Music
-    directory". The file is REMOVED rather than written as [], because
-    library.load_folders() already returns None for an empty list and falls
-    back - so writing [] would leave a file on disk that does nothing, and the
-    next operator to read it would have to work that out.
+    AN EMPTY LIST IS REFUSED (#1357). It used to mean "go back to the single
+    Music directory" and removed the file. Since the folder rows became the
+    one place a bot's folders are set - the Music directory showing as their
+    first row when no list is saved - there is nothing to go back to, and a
+    bot with no folders has nothing to share.
 
     NO REHASH. Unlike a settings save, nothing here needs reloading:
     library.folders() re-reads the file on every call, so the running daemon
@@ -375,15 +375,9 @@ def apply_folder_changes(payload):
         return 400, {"error": "Those folders cannot be served.",
                      "problems": faults}
 
-    target = library.folders_file()
     if not entries:
-        try:
-            if os.path.exists(target):
-                os.remove(target)
-        except OSError as err:
-            return 400, {"error": f"Could not remove {os.path.basename(target)}: {err}"}
-        return 200, dict(build_folders_payload(), written=0,
-                         rebuild_required=True)
+        return 400, {"error": "Keep at least one folder: a bot with no folders "
+                              "has nothing to share."}
 
     try:
         library.save_folders(entries)
