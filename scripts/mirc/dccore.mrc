@@ -2396,15 +2396,15 @@ alias dccore.sw.dcx {
 ; ring cut from a region did not) with the title over its top line, as
 ; Windows draws a group box. By its window region it exists only as a band
 ; three pixels wide along its edge, so nothing of it is drawn or clicked
-; inside and the controls there stay Windows' own: the band's top reaches
-; under the title's line, half a line of dialog text down, where the box
-; draws it. A region combined is the new one less the old: the inside first,
-; then the whole rectangle less that
+; inside and the controls there stay Windows' own: the band's top holds the
+; whole title, a line of dialog text tall, and the line through its middle.
+; A region combined is the new one less the old: the inside first, then the
+; whole rectangle less that
 alias dccore.sw.dcxframe {
   dccore.dcx xdialog dccore.set -c $1 box $2 $3 $4 $5 rounded
   dccore.dcx xdid dccore.set $1 -C +b $dccore.sw.s(face)
   dccore.dcx xdid dccore.set $1 -C +r $dccore.sw.s(line)
-  var %t = $calc($round($calc($gettok($dccore.sw.dcxrect(0 8 0 0),2,32) / 2),0) + 3), %r = $calc($4 - 3), %b = $calc($5 - 3)
+  var %t = $calc($gettok($dccore.sw.dcxrect(0 8 0 0),2,32) + 1), %r = $calc($4 - 3), %b = $calc($5 - 3)
   dccore.dcx xdid dccore.set $1 -R +p $dccore.sw.dcxpt(3,%t) $dccore.sw.dcxpt(%r,%t) $dccore.sw.dcxpt(%r,%b) $dccore.sw.dcxpt(3,%b)
   dccore.dcx xdid dccore.set $1 -R +ip $dccore.sw.dcxpt(0,0) $dccore.sw.dcxpt($4,0) $dccore.sw.dcxpt($4,$5) $dccore.sw.dcxpt(0,$5)
   if ($6 != $null) { dccore.dcx xdid dccore.set $1 -t $6- }
@@ -2439,8 +2439,11 @@ alias dccore.sw.dcxtabs {
 ; others a little lower, ending above the line, on the lighter face. Each box
 ; reaches eight pixels under the strip, past its bottom corners' curve, and
 ; its window region cuts that off: the top corners round, the sides straight
-; down, no bottom edge. The text a line of dialog text tall, in the middle -
-; the dll has no vcenter
+; down, no bottom edge. A box is hidden while it is moved and shaped, and
+; shown again after: a region set does not redraw, so what a box had drawn
+; outside its new region - the chosen tab's extra height - stayed on the
+; screen, and hiding it first has the window wipe all of it. The text a line
+; of dialog text tall, in the middle - the dll has no vcenter
 alias dccore.sw.dcxtabsel {
   var %t = $dccore.sw.m(dcxtabs), %first = $gettok(%t,1,32), %stride = $gettok(%t,2,32), %top = $gettok(%t,3,32), %lift = $gettok(%t,5,32)
   var %line = $gettok($dccore.sw.dcxrect($gettok($dccore.sw.m(dcxbody),2-5,32)),2,32), %th = $gettok($dccore.sw.dcxrect(0 8 0 0),2,32), %i = 1
@@ -2448,9 +2451,11 @@ alias dccore.sw.dcxtabsel {
     var %id = $calc(%first + %stride * (%i - 1)), %tab = $dccore.sw.m(tab. $+ %i), %sel = $iif(%i == $dccore.sw.s(tab),1,0)
     var %r = $dccore.sw.dcxrect($gettok(%tab,1,32) $calc(%top + $iif(%sel,0,%lift)) $calc($gettok(%tab,1,32) + $gettok(%tab,2,32)) 1)
     var %x = $gettok(%r,1,32), %y = $gettok(%r,2,32), %w = $calc($gettok(%r,3,32) - %x), %h = $calc(%line - %y + %sel), %face = $iif(%sel,$dccore.sw.s(face),$dccore.sw.s(light))
+    dccore.dcx xdid dccore.set %id -h
     dccore.dcx xdid dccore.set %id -p %x %y %w $calc(%h + 8)
     dccore.dcx xdid dccore.set %id -R +p $dccore.sw.dcxpt(0,0) $dccore.sw.dcxpt(%w,0) $dccore.sw.dcxpt(%w,%h) $dccore.sw.dcxpt(0,%h)
     dccore.dcx xdid dccore.set %id -C +b %face
+    dccore.dcx xdid dccore.set %id -s
     dccore.dcx xdid dccore.set $calc(%id + 1) -p $calc(%x + 2) $calc(%y + 1 + $int($calc((%h - 1 - %th) / 2))) $calc(%w - 4) %th
     dccore.dcx xdid dccore.set $calc(%id + 1) -C +b %face
     inc %i

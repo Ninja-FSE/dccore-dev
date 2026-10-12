@@ -358,7 +358,7 @@ class TheMockupLayout(unittest.TestCase):
         inside = [s for s in frame if " -R +p " in s]
         self.assertEqual(len(inside), 1)
         self.assertIn("$dccore.sw.dcxpt(3,%t) $dccore.sw.dcxpt(%r,%t) $dccore.sw.dcxpt(%r,%b) $dccore.sw.dcxpt(3,%b)", inside[0])
-        self.assertIn("%t = $calc($round($calc($gettok($dccore.sw.dcxrect(0 8 0 0),2,32) / 2),0) + 3)", frame[3])
+        self.assertIn("%t = $calc($gettok($dccore.sw.dcxrect(0 8 0 0),2,32) + 1)", frame[3])
         whole = [s for s in frame if " -R +ip " in s]
         self.assertEqual(len(whole), 1)
         self.assertIn("$dccore.sw.dcxpt(0,0) $dccore.sw.dcxpt($4,0) $dccore.sw.dcxpt($4,$5) $dccore.sw.dcxpt(0,$5)", whole[0])
@@ -407,10 +407,15 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("%face = $iif(%sel,$dccore.sw.s(face),$dccore.sw.s(light))", sel)
         self.assertIn("xdid dccore.set %id -C +b %face", sel)
         # the box reaches under the strip, past its bottom corners' curve,
-        # and its region cuts that off: round top corners, straight sides
-        self.assertIn("xdid dccore.set %id -p %x %y %w $calc(%h + 8)", sel)
-        self.assertIn("xdid dccore.set %id -R +p $dccore.sw.dcxpt(0,0) $dccore.sw.dcxpt(%w,0) $dccore.sw.dcxpt(%w,%h) "
-                      "$dccore.sw.dcxpt(0,%h)", sel)
+        # and its region cuts that off: round top corners, straight sides -
+        # hidden while it is moved and shaped, since a region set does not
+        # redraw and what was drawn outside the new one would stay on screen
+        steps = statements(sel)
+        hide = steps.index("dccore.dcx xdid dccore.set %id -h")
+        self.assertEqual(steps[hide + 1], "dccore.dcx xdid dccore.set %id -p %x %y %w $calc(%h + 8)")
+        self.assertEqual(steps[hide + 2], "dccore.dcx xdid dccore.set %id -R +p $dccore.sw.dcxpt(0,0) $dccore.sw.dcxpt(%w,0) "
+                                          "$dccore.sw.dcxpt(%w,%h) $dccore.sw.dcxpt(0,%h)")
+        self.assertEqual(steps[hide + 4], "dccore.dcx xdid dccore.set %id -s")
         # the text a line of dialog text tall, in the middle of the tab: the
         # dll the script ships has no vcenter
         self.assertIn("%th = $gettok($dccore.sw.dcxrect(0 8 0 0),2,32)", sel)
