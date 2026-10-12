@@ -8,9 +8,10 @@ so on a busy window one person or one channel was hard to follow. /dccore
 options now has three more colours - Search text, Nicks, Channels - and Nicks
 can be "per nick": a colour of its own for each nick, from a hash of it.
 
-Nothing may change for somebody who does not touch them. Nicks and Channels
-default to "same as the line", which adds no colour codes at all; Search
-text defaults to "same as File names", the colour the term already had.
+#1348: each of the three has a colour of its own by default - with Nicks and
+Channels "same as the line" and the term in navy, a busy window was nearly all
+black. A script that ran before saved the old defaults with everything else,
+so they move to the new ones once; a colour somebody picked stays.
 
 mIRC cannot run here, so the script is read as source. Comment lines are
 dropped first: every statement asserted on below has to be code, not a
@@ -117,26 +118,97 @@ def per_nick_colour(nick, background):
     return palette[(number % len(palette) + 1) - 1]
 
 
-class TheDefaultsChangeNothing(unittest.TestCase):
+# The defaults since #1348, and the ones every script before 1.20.0 saved.
+NEW_DEFAULTS = {"col.term": "12", "col.nick": "6", "col.chan": "10"}
+OLD_DEFAULTS = {"col.term": "name", "col.nick": "-1", "col.chan": "-1"}
+YELLOW = 8
+
+
+def what_init_leaves(saved):
+    """The three keys after dccore.init, from `saved` - what dccore.ini held.
+    dccore.inlinecolours and dccore.default are read from the script and run
+    here in the order dccore.init calls them, so a changed value, a lost line
+    or a swapped order changes the answer."""
+    table = dict(saved)
+    for line in statements(alias("dccore.init")):
+        if line == "dccore.inlinecolours":
+            move_once(table)
+        found = re.match(r"dccore\.default (col\.(?:term|nick|chan)) (\S+)$", line)
+        if found and found.group(1) not in table:
+            table[found.group(1)] = found.group(2)
+    return {key: table.get(key) for key in NEW_DEFAULTS}
+
+
+def move_once(table):
+    body = statements(alias("dccore.inlinecolours"))
+    mark = re.match(r"if \(\$hget\(dccore,(\w+)\) != \$null\) \{ return \}$", body[0])
+    assert mark, body[0]
+    if mark.group(1) in table:
+        return
+    for line in body[1:]:
+        moved = re.match(r"if \(\$hget\(dccore,(col\.\w+)\) == (\S+)\) \{ hadd dccore \1 (\S+) \}$", line)
+        if moved and table.get(moved.group(1)) == moved.group(2):
+            table[moved.group(1)] = moved.group(3)
+        added = re.match(r"hadd dccore (\w+) 1$", line)
+        if added:
+            table[added.group(1)] = "1"
+
+
+class TheDefaults(unittest.TestCase):
 
     def init(self):
         return statements(alias("dccore.init"))
 
-    def test_nicks_and_channels_default_to_same_as_the_line(self):
-        self.assertIn("dccore.default col.nick -1", self.init())
-        self.assertIn("dccore.default col.chan -1", self.init())
+    def test_each_has_a_colour_of_its_own(self):
+        for key, colour in NEW_DEFAULTS.items():
+            self.assertIn("dccore.default %s %s" % (key, colour), self.init())
 
-    def test_the_search_text_defaults_to_the_file_names_colour(self):
-        """What it had before: the term went through dccore.name."""
-        self.assertIn("dccore.default col.term name", self.init())
+    def test_none_of_them_is_yellow(self):
+        """Hard to read on mIRC's white background."""
+        for key, colour in NEW_DEFAULTS.items():
+            self.assertNotEqual(int(colour), YELLOW, key)
+
+    def test_a_new_install_gets_the_colours(self):
+        self.assertEqual(what_init_leaves({}), NEW_DEFAULTS)
+
+    def test_an_older_scripts_saved_defaults_move_to_the_colours(self):
+        self.assertEqual(what_init_leaves(OLD_DEFAULTS), NEW_DEFAULTS)
+
+    def test_a_colour_somebody_picked_stays(self):
+        picked = {"col.term": "4", "col.nick": "per", "col.chan": "3"}
+        self.assertEqual(what_init_leaves(picked), picked)
+        self.assertEqual(what_init_leaves(dict(OLD_DEFAULTS, **{"col.nick": "per"})),
+                         dict(NEW_DEFAULTS, **{"col.nick": "per"}))
+
+    def test_same_as_the_line_picked_after_the_move_stays(self):
+        """The mark is in the table, so a later -1 is somebody's choice."""
+        again = dict(OLD_DEFAULTS, inlinecolours="1")
+        self.assertEqual(what_init_leaves(again), OLD_DEFAULTS)
+
+    def test_the_move_is_saved_with_its_mark(self):
+        body = statements(alias("dccore.inlinecolours"))
+        self.assertIn("hadd dccore inlinecolours 1", body)
+        self.assertEqual(body[-1], "if ($isfile($dccore.ini)) { dccore.save }")
+        self.assertLess(body.index("hadd dccore inlinecolours 1"), len(body) - 1)
+
+    def test_the_move_runs_after_the_saved_table_is_loaded(self):
+        init = self.init()
+        self.assertLess(init.index("if ($isfile($dccore.ini)) { hload dccore $dccore.ini }"),
+                        init.index("dccore.inlinecolours"))
+
+    def test_the_search_text_can_still_take_the_file_names_colour(self):
         self.assertIn("if ($dccore.opt(col.term) == name) { return $dccore.name($1-) }",
                       statements(alias("dccore.term")))
 
-    def test_a_saved_choice_is_never_overwritten(self):
-        """Through dccore.default, which sets a key only when nothing is saved."""
+    def test_a_saved_choice_is_never_overwritten_by_a_default(self):
+        """dccore.init itself sets them only through dccore.default, which sets
+        a key only when nothing is saved."""
         for key in ("col.term", "col.nick", "col.chan"):
             self.assertNotRegex(alias("dccore.init"), r"hadd dccore %s " % re.escape(key))
         self.assertIn("if ($hget(dccore,$1) == $null) { hadd dccore $1 $2- }", alias("dccore.default"))
+
+
+class SameAsTheLine(unittest.TestCase):
 
     def test_same_as_the_line_adds_no_codes_at_all(self):
         """Not even a colour reset: a stray ^O would end a span the line has."""
