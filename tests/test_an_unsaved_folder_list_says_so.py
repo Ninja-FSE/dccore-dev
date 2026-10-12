@@ -121,15 +121,17 @@ out.blankRow = look(p);
 // One saved folder, then a settings edit as well as the folder edit.
 state.folders = [TWENTY[0]];
 state.foldersDraft = [];
-state.settingsDirty = { FILE_DIRECTORY: "X:\\Music" };
+state.settingsDirty = { LIST_BASE_NAME: "Shelves" };
 out.oneSavedAndASetting = look(p);
 state.settingsDirty = {};
 
-// No folder list saved at all: the Music directory is served.
-state.folders = [];
+// No folder list saved at all: the Music directory is served, and the
+// server reports it as the one folder served (#1357).
+state.folders = [{ name: "Music", path: "X:\\Music" }];
 state.foldersSource = "file_directory";
 state.foldersDraft = [{ name: "", path: "X:\\New Shelf" }];
 out.directory = look(p);
+out.directorySummary = p.foldersSectionHtml();
 
 // Typing reaches the note without a re-render.
 state = { folders: copy(TWENTY.slice(0, 2)), foldersDraft: copy(TWENTY.slice(0, 2)),
@@ -209,8 +211,8 @@ class TheFolderEditor(unittest.TestCase):
         self.assertEqual(got["note"], "settings.foldersNotSavedMany 20")
         self.assertEqual(got["bar"], "settings.savebarFoldersNotSaved")
         self.assertTrue(got["barDirty"])
-        # Save & rehash would not save it, so it is not offered for it.
-        self.assertTrue(got["saveDisabled"])
+        # The page's Save saves the editor too (#1357), so it is offered.
+        self.assertFalse(got["saveDisabled"])
 
     def test_the_summary_counts_what_is_saved_not_the_rows_on_screen(self):
         html = self.result["removedAllSummary"]
@@ -231,8 +233,12 @@ class TheFolderEditor(unittest.TestCase):
         self.assertEqual(got["bar"], "settings.oneUnsavedChange 1 \u00b7 settings.savebarFoldersNotSaved")
         self.assertFalse(got["saveDisabled"])
 
-    def test_with_no_folder_list_saved_it_says_the_music_directory_is_served(self):
-        self.assertEqual(self.result["directory"]["note"], "settings.foldersNotSavedDirectory")
+    def test_with_no_folder_list_saved_the_music_directory_is_the_one_folder_served(self):
+        """#1357: the Music directory is the editor's first row, so the page
+        counts it like any saved folder."""
+        self.assertEqual(self.result["directory"]["note"], "settings.foldersNotSavedOne 1")
+        self.assertIn('<p class="served-folder-summary">settings.servingOneFolder 1</p>',
+                      self.result["directorySummary"])
 
     def test_typing_updates_the_note_without_a_redraw(self):
         self.assertEqual(self.result["beforeTyping"], "")
