@@ -955,8 +955,10 @@ bottom.
 
 The settings window is being moved onto **DCX** (Dialog Control eXtensions,
 https://github.com/twig/dcxdll, BSD-3-Clause), which gives it a list of the chosen
-tab's pages, tables with columns for the bans, channels and lists, and the first
-tab's left edge, which Windows 10 draws for no unselected tab. `dcx.dll` ships
+tab's pages, tables with columns for the bans, channels and lists, and every line
+of the window - the tab strip, the body frame, the sections' frames - drawn by the
+script in one colour, the system's shadow grey, where Windows draws its own in
+light greys that are hard to see. `dcx.dll` ships
 unmodified in `scripts/mirc/dcx/`, with Microsoft's `WebView2Loader.dll` (which
 DCX loads every time it starts, and warns about in the status window when it is
 missing), their licences, and a README naming both files and their SHA-256s; the

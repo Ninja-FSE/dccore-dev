@@ -174,15 +174,15 @@ class ThePageList(unittest.TestCase):
         self.assertEqual(lines[1], "dccore.dcx Mark dccore.set dccore.sw.dcxcb")
         self.assertEqual(lines[2], "hadd dccore.sws dcx 1")
 
-    def test_the_buttons_are_hidden_for_it_and_the_tab_strip_stays(self):
+    def test_the_buttons_and_the_native_tabs_are_hidden_for_it(self):
         body = alias("dccore.sw.dcx")
         self.assertIn("did -h dccore.set $calc(1019 + %i)", body)
-        self.assertNotIn("$calc(1000 + %g)", body)
-        # dccore.sw.tab does not show the buttons again, and a jump to a
-        # page selects its tab in either form
+        # the tab strip is the script's own with DCX (every line in one
+        # colour): the native tabs are hidden, so a jump to a page selects
+        # its native tab only in the native form
+        self.assertIn("did -h dccore.set $calc(1000 + %i)", body)
         self.assertIn("if (!$dccore.sw.s(dcx)) { did -v dccore.set $calc(1019 + %i) }", alias("dccore.sw.tab"))
-        self.assertIn("did -f dccore.set $calc(1000 + %g)", alias("dccore.sw.goto"))
-        self.assertNotIn("if (!$dccore.sw.s(dcx)) { did -f", alias("dccore.sw.goto"))
+        self.assertIn("if (!$dccore.sw.s(dcx)) { did -f dccore.set $calc(1000 + %g) }", alias("dccore.sw.goto"))
 
     def test_it_is_placed_by_the_generated_geometry_and_the_reported_scale(self):
         body = alias("dccore.sw.dcx")
@@ -214,7 +214,7 @@ class ThePageList(unittest.TestCase):
         self.assertNotIn(", %d, " % list_id, table)
 
     def test_the_chosen_tabs_pages_fill_it_from_the_window_data(self):
-        self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.dcxpages %pages }", alias("dccore.sw.tab"))
+        self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.dcxpages %pages | dccore.sw.dcxtabsel }", alias("dccore.sw.tab"))
         lines = statements(alias("dccore.sw.dcxpages"))
         self.assertIn("dccore.dcx xdid dccore.set %id -r", lines)
         self.assertIn("dccore.dcx xdid dccore.set %id -a 0 0 + 0 0 0 0 0 0 $dccore.sw.untext($dccore.sw.m(p. $+ "
@@ -330,28 +330,106 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("if ($2 == -v) { dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxtitle),1,32) -t "
                       "$dccore.sw.untext($dccore.sw.m(p. $+ $1)) }", show)
 
-    def test_the_first_tabs_left_edge_is_drawn_as_a_line_of_its_own(self):
-        """Windows 10 draws an unselected tab with its top and right edges
-        only, so the first tab has no left edge: a DCX panel a pixel wide,
-        in the tab border's colour, runs down it into the frame's edge."""
-        eid, x, y, h, colour = (int(n) for n in self.data["dcxtabedge"].split())
-        self.assertEqual(eid, self.builder.DCX_TABEDGE_ID)
-        self.assertTrue(self.builder.DCX_TITLE_ID < eid < 910)
-        self.assertEqual((x, y, h), self.builder.DCX_TABEDGE)
-        self.assertEqual(x, self.builder.TABS[0])
-        self.assertLess(self.builder.TABS[1], y)
-        self.assertLess(y, self.builder.TABS[1] + self.builder.TAB_HEADER_H)
-        self.assertLess(self.builder.TABS[1] + self.builder.TAB_HEADER_H, y + h)
-        red, green, blue = self.builder.DCX_TABEDGE_RGB
-        self.assertEqual(colour, red + green * 256 + blue * 65536)
+    def test_the_windows_lines_are_the_scripts_own_in_one_colour(self):
+        """Windows draws the tabs and the frames in light greys of its own,
+        and the first tab with no left edge at all; with DCX the script
+        draws every line itself, in the system's shadow colour, and hides
+        the native tabs and frames. The native form keeps Windows' look."""
+        b = self.builder
         body = alias("dccore.sw.dcx")
-        self.assertIn("%t = $dccore.sw.m(dcxtabedge)", body)
-        # the height scaled with the window, the width a pixel whatever the scale
-        self.assertIn("var %e = $dccore.sw.dcxrect($gettok(%t,2,32) $gettok(%t,3,32) 1 $gettok(%t,4,32))", body)
-        self.assertIn("-c $gettok(%t,1,32) panel $gettok(%e,1,32) $gettok(%e,2,32) 1 $gettok(%e,4,32)", body)
-        self.assertIn("xdid dccore.set $gettok(%t,1,32) -C +b $gettok(%t,5,32)", body)
-        # nothing of it in the native form: that keeps Windows' own look
-        self.assertNotIn("dcxtabedge", block("dialog dccore.set {", raw()))
+        for name, attribute in (("line", "COLOR_3DSHADOW"), ("face", "COLOR_3DFACE"), ("light", "COLOR_3DLIGHT")):
+            self.assertIn("hadd dccore.sws %s $dccore.dcx(GetSystemColor,%s)" % (name, attribute), body)
+        self.assertIn("while (%i <= $dccore.sw.m(groups)) { did -h dccore.set $calc(1000 + %i) | inc %i }", body)
+        lines = statements(body)
+        # the chosen tab stands on the body frame's top line: made after it
+        self.assertLess(lines.index("dccore.sw.dcxlines $gettok(%b,1,32) $dccore.sw.dcxrect($gettok(%b,2-5,32))"),
+                        lines.index("dccore.sw.dcxtabs"))
+        self.assertIn("while (%i <= $dccore.sw.m(pages)) { dccore.sw.dcxframes %i | inc %i }", lines)
+        line = alias("dccore.sw.dcxline")
+        self.assertIn("-c $1 panel $2 $3 $4 $5", line)
+        self.assertIn("-C +b $dccore.sw.s(line)", line)
+        four = [s for s in statements(alias("dccore.sw.dcxlines")) if s.startswith("dccore.sw.dcxline ")]
+        self.assertEqual(len(four), 4)
+        self.assertIn("dccore.sw.dcxline $1 $2 $3 $4 1", four)                              # top
+        self.assertIn("dccore.sw.dcxline $calc($1 + 3) $calc($2 + $4 - 1) $3 1 $5", four)   # right
+        # the body frame: the tab control's area under the tabs
+        first, x, y, w, h = (int(n) for n in self.data["dcxbody"].split())
+        self.assertEqual((first, x, y, w, h),
+                         (b.BODY_DCX_FIRST, b.TABS[0], b.TABS[1] + b.TAB_HEADER_H, b.TABS[2], b.TABS[3] - b.TAB_HEADER_H))
+        self.assertTrue(b.BODY_DCX_FIRST + 4 <= b.DCX_PAGES_ID)
+        # nothing of it in the native form, where the tabs still take the focus
+        table = block("dialog dccore.set {", raw())
+        for key in ("dcxbody", "dcxtabs", "dcxline"):
+            self.assertNotIn(key, table)
+        self.assertIn("if (!$dccore.sw.s(dcx)) { did -f dccore.set $calc(1000 + %g) }", alias("dccore.sw.goto"))
+        stay = statements(alias("dccore.sw.stay"))
+        self.assertLess(stay.index("if ($dccore.sw.s(dcx)) { dccore.sw.dcxshow $dccore.sw.s(page) | return }"),
+                        stay.index("did -f dccore.set $calc(1000 + $dccore.sw.s(tab))"))
+
+    def test_the_tab_strip_is_the_tabs_side_by_side_on_the_frames_top_line(self):
+        b = self.builder
+        first, stride, top, height, lift = (int(n) for n in self.data["dcxtabs"].split())
+        self.assertEqual((first, stride, top, height, lift),
+                         (b.TAB_DCX_FIRST, b.TAB_DCX_STRIDE, b.TABS[1], b.TAB_HEADER_H, b.TAB_LIFT))
+        groups = [group for group, _pages in layout.GROUPS]
+        x = b.TABS[0]
+        for number, group in enumerate(groups, start=1):
+            tab_x, tab_w = (int(n) for n in self.data["tab.%d" % number].split())
+            self.assertEqual(tab_x, x, group)
+            self.assertGreaterEqual(tab_w * b.PX_PER_DBU, b.text_px(group) + 2 * b.TAB_PAD * b.PX_PER_DBU, group)
+            x += tab_w
+        self.assertLessEqual(x, b.TABS[0] + b.TABS[2])
+        self.assertLessEqual(first + stride * len(groups), b.BODY_DCX_FIRST)
+        make = alias("dccore.sw.dcxtabs")
+        self.assertIn("dccore.sw.dcxline %id 0 0 1 1", make)
+        self.assertIn("-c $calc(%id + 1) text 0 0 1 1 nowrap center vcenter noprefix noformat", make)
+        self.assertIn("-t $dccore.sw.m(g. $+ %i)", make)
+        sel = alias("dccore.sw.dcxtabsel")
+        # the chosen tab reaches down over the line, the others end above it;
+        # a tab's right edge is the next one's left
+        self.assertIn("%h = $calc(%line - %y + %sel)", sel)
+        self.assertIn("%w = $calc($gettok(%r,3,32) - %x + 1)", sel)
+        self.assertIn("-C +b $iif(%sel,$dccore.sw.s(face),$dccore.sw.s(light))", sel)
+        self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.dcxpages %pages | dccore.sw.dcxtabsel }", alias("dccore.sw.tab"))
+        # a click on a tab, its outline or its text, goes through dccore.sw.go
+        cb = statements(alias("dccore.sw.dcxcb"))
+        self.assertIn("if (%g <= $dccore.sw.m(groups)) { dccore.sw.go tab %g | return }", cb)
+
+    def test_every_frame_is_drawn_with_dcx_from_its_box_and_shown_with_its_page(self):
+        b = self.builder
+        boxes = [c for c in self.controls if c[0] == "box"]
+        expect = b.FRAME_DCX_FIRST
+        for _kind, label, cid, x, y, w, h, _style in boxes:
+            title = label.replace("&&", "&")
+            f = self.data["fr.%d" % cid].split()
+            self.assertEqual(int(f[0]), expect, cid)
+            expect += b.FRAME_DCX_STRIDE
+            self.assertEqual([int(n) for n in f[1:5]], [x, y + b.LINE_DROP, w, h - b.LINE_DROP], cid)
+            tx, ty, tw, th = (int(n) for n in f[5:9])
+            self.assertEqual((tx, ty, th), (x + b.TITLE_X, y, b.TITLE_H), cid)
+            self.assertGreaterEqual(tw * b.PX_PER_DBU, b.text_px(title) + 2 * b.TITLE_PAD * b.PX_PER_DBU, cid)
+            self.assertLessEqual(tx + tw, x + w - b.TITLE_X, cid)
+            self.assertEqual(" ".join(f[9:]), title, cid)
+        self.assertLessEqual(expect, b.TAB_DCX_FIRST)
+        for page in self.pages:
+            ids = [c[2] for c in boxes if self.page_of(c[2]) == page]
+            if not ids:
+                self.assertNotIn("p.%d.bx" % page, self.data)
+                continue
+            self.assertEqual(self.data["p.%d.bx" % page], ",".join(str(i) for i in ids))
+            first, last = (int(n) for n in self.data["p.%d.fr" % page].split("-"))
+            self.assertEqual(first, int(self.data["fr.%d" % ids[0]].split()[0]))
+            self.assertEqual(last, int(self.data["fr.%d" % ids[-1]].split()[0]) + b.FRAME_DCX_STRIDE - 1)
+        frames = alias("dccore.sw.dcxframes")
+        self.assertIn("dccore.sw.dcxlines %base $dccore.sw.dcxrect($gettok(%f,2-5,32))", frames)
+        self.assertIn("-c %title text $dccore.sw.dcxrect($gettok(%f,6-9,32)) nowrap center vcenter noprefix noformat",
+                      frames)
+        self.assertIn("-C +b $dccore.sw.s(face)", frames)
+        self.assertIn("-t $gettok(%f,10-,32)", frames)
+        self.assertIn("xdid dccore.set $+(%base,-,%title) -h", frames)
+        show = statements(alias("dccore.sw.showpage"))
+        self.assertIn("if (%bx != $null) { did -h dccore.set %bx | dccore.dcx xdid dccore.set "
+                      "$dccore.sw.m(p. $+ $1 $+ .fr) $iif($2 == -v,-s,-h) }", show)
 
     def test_every_table_has_its_columns_and_a_listview_over_its_place(self):
         lists = [c for c in self.controls if c[0] == "list"]
@@ -601,10 +679,11 @@ class ApplySavesEverything(unittest.TestCase):
         local = alias("dccore.sw.localdirty")
         self.assertIn("if ($did(dccore.set,$dccore.sw.m(lo. $+ %o)).state != $iif($dccore.opt(%o),1,0)) { return $true }",
                       local)
-        # staying puts the tab and the page shown back, in either form
+        # staying puts the page shown back, in either form - and the native
+        # tab in the native form, where the tab strip is Windows' own
         stay = statements(alias("dccore.sw.stay"))
-        self.assertEqual(stay[0], "did -f dccore.set $calc(1000 + $dccore.sw.s(tab))")
-        self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.dcxshow $dccore.sw.s(page) | return }", stay)
+        self.assertEqual(stay[0], "if ($dccore.sw.s(dcx)) { dccore.sw.dcxshow $dccore.sw.s(page) | return }")
+        self.assertEqual(stay[1], "did -f dccore.set $calc(1000 + $dccore.sw.s(tab))")
         self.assertIn("if (%at) { did -c dccore.set $calc(1019 + %at) }", stay)
 
 

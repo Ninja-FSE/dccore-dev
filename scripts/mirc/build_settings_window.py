@@ -146,19 +146,37 @@ DCX_PAGES = (10, 24, 88, 286)
 DCX_PAGES_ID = 900
 DCX_TITLE = (110, 26, 370, 10)
 DCX_TITLE_ID = 901
-# Windows 10 draws an unselected tab with its top and right edges only - the
-# tab before it supplies the left one - so the first tab has no left edge
-# at all, and the frame's left line looked cut off under it (the operator's
-# screenshot). With DCX that edge is drawn as a line of its own: a panel a
-# pixel wide in the tab border's colour, from where an unselected tab's top
-# edge is (TAB_INSET under the control's top; measured at 125 %, within a
-# pixel or two elsewhere) down into the frame's left edge, which the tab
-# control draws from under the tabs. x, y, h in dialog units; the colour as
-# the number $rgb gives.
-DCX_TABEDGE_ID = 902
-TAB_INSET = 3
-DCX_TABEDGE = (TABS[0], TABS[1] + TAB_INSET, TAB_HEADER_H - 1)
-DCX_TABEDGE_RGB = (217, 217, 217)
+# With DCX every line of the window is the script's own, in one colour
+# (#1288): Windows draws the tab strip and the frames in light greys of its
+# own, the first tab with no left edge at all, and none of it can be
+# recoloured. So in DCX mode the native tabs and frames are hidden, and in
+# their place: the tab strip - an outline panel and a text for each tab,
+# side by side from the tab control's left edge, the chosen one from the
+# strip's top down onto the body frame's top line, the others TAB_LIFT lower
+# and ending above it; the body frame, four lines a pixel wide round the tab
+# control's area under the tabs; and every section's frame, four lines
+# LINE_DROP under the frame's top (through the middle of its title) and
+# the title over the top one, from TITLE_X, TITLE_H tall, TITLE_PAD of face
+# either side of its text. The colours are the system's, so a theme is
+# followed: the lines COLOR_3DSHADOW, the faces COLOR_3DFACE and 3DLIGHT.
+# DCX ids: the frames from FRAME_DCX_FIRST, FRAME_DCX_STRIDE each (the four
+# lines, then the title), a page's frames consecutive so one id range shows
+# or hides them; the tabs from TAB_DCX_FIRST, two each (the outline, the
+# text); the body frame BODY_DCX_FIRST, four. All below the page list's.
+FRAME_DCX_FIRST, FRAME_DCX_STRIDE = 100, 5
+TAB_DCX_FIRST, TAB_DCX_STRIDE = 800, 2
+BODY_DCX_FIRST = 820
+TAB_PAD = 5
+TAB_LIFT = 2
+LINE_DROP = 4
+TITLE_X = 6
+TITLE_H = 9
+TITLE_PAD = 2
+
+
+def dbu_for(px):
+    """Dialog units enough for `px` pixels of the dialog font at 96 DPI."""
+    return int(-(-px // PX_PER_DBU))
 
 # A page is its sections, each in a titled frame (a section with no title is
 # bare), down one column - or two side by side when one is too tall. Inside a
@@ -811,12 +829,30 @@ def render(builder):
     if (title_x < CONTENT_X or title_x + title_w > CONTENT_X + CONTENT_W or title_y < body_top
             or title_y + title_h > CONTENT_Y):
         raise LayoutError("the DCX title %r is not between the tabs and the page" % (DCX_TITLE,))
-    if not DCX_PAGES_ID < DCX_TITLE_ID < DCX_TABEDGE_ID < min(LISTVIEWS[n][0] for n in LISTVIEWS):
-        raise LayoutError("the DCX ids collide: page list %d, title %d, tab edge %d"
-                          % (DCX_PAGES_ID, DCX_TITLE_ID, DCX_TABEDGE_ID))
-    edge_x, edge_y, edge_h = DCX_TABEDGE
-    if not (edge_x == TABS[0] and TABS[1] < edge_y < body_top < edge_y + edge_h < pages_y):
-        raise LayoutError("the tab edge %r is not down the first tab into the frame" % (DCX_TABEDGE,))
+    if not DCX_PAGES_ID < DCX_TITLE_ID < min(LISTVIEWS[n][0] for n in LISTVIEWS):
+        raise LayoutError("the DCX ids collide: page list %d, title %d" % (DCX_PAGES_ID, DCX_TITLE_ID))
+    # the lines the script draws with DCX: the tab strip, side by side from
+    # the tab control's left edge; every frame, its DCX ids in page order
+    tabs = []
+    x = TABS[0]
+    for group in groups:
+        tabs.append((x, dbu_for(text_px(group)) + 2 * TAB_PAD))
+        x += tabs[-1][1]
+    if x > TABS[0] + TABS[2]:
+        raise LayoutError("the tab strip is wider than the tab control: %d > %d" % (x - TABS[0], TABS[2]))
+    frames = [c for c in builder.controls if c["kind"] == "box"]
+    for index, control in enumerate(frames):
+        missing = sorted(set(control["text"]) - set(CHAR_PX))
+        if missing:
+            raise LayoutError("the frame title %r has characters the width table lacks: %s"
+                              % (control["text"], missing))
+        control["dcx"] = FRAME_DCX_FIRST + index * FRAME_DCX_STRIDE
+        if TITLE_X + dbu_for(text_px(control["text"])) + 2 * TITLE_PAD > control["w"] - TITLE_X:
+            raise LayoutError("the frame title %r does not fit its frame" % control["text"])
+    if (FRAME_DCX_FIRST + len(frames) * FRAME_DCX_STRIDE > TAB_DCX_FIRST
+            or TAB_DCX_FIRST + len(groups) * TAB_DCX_STRIDE > BODY_DCX_FIRST or BODY_DCX_FIRST + 4 > DCX_PAGES_ID):
+        raise LayoutError("the DCX ids of the frames (%d), the tabs, the body frame and the page list collide"
+                          % len(frames))
     # every table has its columns, and every set of columns its table
     lists = [c for c in builder.controls if c["kind"] == "list"]
     if sorted(c["id"] for c in lists) != sorted(LISTVIEWS):
@@ -853,12 +889,23 @@ def render(builder):
     data.insert(2, ("size", "%d %d" % (DIALOG_W, DIALOG_H)))
     data.insert(3, ("dcxpages", "%d %d %d %d %d" % ((DCX_PAGES_ID,) + DCX_PAGES)))
     data.insert(4, ("dcxtitle", "%d %d %d %d %d" % ((DCX_TITLE_ID,) + DCX_TITLE)))
-    red, green, blue = DCX_TABEDGE_RGB
-    data.insert(5, ("dcxtabedge", "%d %d %d %d %d" % ((DCX_TABEDGE_ID,) + DCX_TABEDGE
-                                                      + (red + green * 256 + blue * 65536,))))
+    # the tab strip (first id, stride, top, height, lift; each tab's x and
+    # width) and the body frame (first id, rectangle), in dialog units
+    data.insert(5, ("dcxtabs", "%d %d %d %d %d" % (TAB_DCX_FIRST, TAB_DCX_STRIDE, TABS[1], TAB_HEADER_H, TAB_LIFT)))
+    data.insert(6, ("dcxbody", "%d %d %d %d %d" % (BODY_DCX_FIRST, TABS[0], TABS[1] + TAB_HEADER_H, TABS[2],
+                                                   TABS[3] - TAB_HEADER_H)))
     # the tables: each native list, the DCX listview over its rectangle, and
     # that listview's columns and extra styles
-    data.insert(6, ("lvs", " ".join(str(c["id"]) for c in lists)))
+    data.insert(7, ("lvs", " ".join(str(c["id"]) for c in lists)))
+    for number, (tab_x, tab_w) in enumerate(tabs, start=1):
+        data.append(("tab.%d" % number, "%d %d" % (tab_x, tab_w)))
+    # every frame: its DCX ids' first, the rectangle of its lines, the
+    # rectangle of its title, and the title
+    for control in frames:
+        data.append(("fr.%d" % control["id"], "%d %d %d %d %d %d %d %d %d %s" % (
+            control["dcx"], control["x"], control["y"] + LINE_DROP, control["w"], control["h"] - LINE_DROP,
+            control["x"] + TITLE_X, control["y"], dbu_for(text_px(control["text"])) + 2 * TITLE_PAD, TITLE_H,
+            control["text"])))
     for control in lists:
         dcx_id, columns, extra = LISTVIEWS[control["id"]]
         data.append(("lv.%d" % control["id"], "%d %d %d %d %d"
@@ -878,6 +925,15 @@ def render(builder):
         page_lists = [c["id"] for c in lists if c["page"] == number]
         if page_lists:
             data.append(("p.%d.lv" % number, " ".join(str(i) for i in page_lists)))
+        # the page's frames: the native boxes (hidden with DCX) and the one
+        # range of DCX ids that shows or hides their lines and titles
+        page_frames = [c for c in frames if c["page"] == number]
+        if page_frames:
+            first, last = page_frames[0]["dcx"], page_frames[-1]["dcx"]
+            if [c["dcx"] for c in page_frames] != list(range(first, last + 1, FRAME_DCX_STRIDE)):
+                raise LayoutError("page %d: its frames' DCX ids are not consecutive" % number)
+            data.append(("p.%d.bx" % number, ",".join(str(c["id"]) for c in page_frames)))
+            data.append(("p.%d.fr" % number, "%d-%d" % (first, last + FRAME_DCX_STRIDE - 1)))
         widgets = builder.page_widgets.get(number)
         if widgets:
             data.append(("p.%d.w" % number, " ".join(widgets)))

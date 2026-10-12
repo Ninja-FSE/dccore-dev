@@ -636,14 +636,6 @@ class TheDialog(unittest.TestCase):
         # the connection and status lines and the buttons sit under it
         self.assertGreater(min(c[4] for c in self.controls if c[0] == "button" and c[2] in (1014, 1015, 1016, 1017)),
                            ty + th)
-        # Windows 10 draws no left edge on the first tab: with DCX a line of
-        # its own runs down it, from an unselected tab's top into the frame
-        ex, ey, eh = generator.DCX_TABEDGE
-        self.assertEqual(ex, tx)
-        self.assertLess(ty, ey)
-        self.assertLess(ey, ty + generator.TAB_HEADER_H)
-        self.assertLess(ty + generator.TAB_HEADER_H, ey + eh)
-        self.assertLess(ey + eh, generator.DCX_PAGES[1])
 
     def test_the_footer_has_apply_ok_and_cancel(self):
         buttons = {c[2]: c[1] for c in self.controls if c[0] == "button"}
