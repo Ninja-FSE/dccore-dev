@@ -1181,7 +1181,11 @@ alias dccore.waiting {
 
 ; SLOT and QUEUE lines arrive one by one after STATUS with no end marker,
 ; so the panel is redrawn a quarter of a second after the last of them.
-alias dccore.panel.soon { .timerdccorePanel -m 1 250 dccore.panel }
+; and the control panel's start page, drawn from the same figures (#1288)
+alias dccore.panel.soon {
+  .timerdccorePanel -m 1 250 dccore.panel
+  if ($dialog(dccore.set)) { .timerdccoreSwHome -m 1 300 dccore.sw.home.fill }
+}
 
 ; THE BUTTON KEEPS ITS COLOUR ACROSS A REDRAW (#1013). The panel is redrawn
 ; after every status burst - about every 30 seconds - and it starts with
@@ -2481,15 +2485,15 @@ alias dccore.sw.dcxtabsel {
     var %id = $calc(%first + %stride * (%i - 1)), %tab = $dccore.sw.m(tab. $+ %i), %sel = $iif(%i == $dccore.sw.s(tab),1,0)
     var %r = $dccore.sw.dcxrect($gettok(%tab,1,32) $calc(%top + $iif(%sel,0,%lift)) $calc($gettok(%tab,1,32) + $gettok(%tab,2,32)) 1)
     var %x = $gettok(%r,1,32), %y = $gettok(%r,2,32), %w = $calc($gettok(%r,3,32) - %x), %h = $calc(%line - %y + %sel), %face = $iif(%sel,$dccore.sw.s(face),$dccore.sw.s(light))
-    dccore.dcx xdid dccore.set $+(%id,-,$calc(%id + 1)) -h
+    dccore.dcx xdid dccore.set $+(%id,-,$calc(%id + 2)) -h
     dccore.dcx xdid dccore.set %id -p %x %y %w %h
     dccore.dcx xdid dccore.set %id -R +p $dccore.sw.dcxpoly(%w,%h,o,2)
     dccore.dcx xdid dccore.set $calc(%id + 1) -p %x %y %w %h
     dccore.dcx xdid dccore.set $calc(%id + 1) -R +p $dccore.sw.dcxpoly(%w,%h,i,2)
     dccore.dcx xdid dccore.set $calc(%id + 1) -C +b %face
-    dccore.dcx xdid dccore.set $+(%id,-,$calc(%id + 1)) -s
     dccore.dcx xdid dccore.set $calc(%id + 2) -p $calc(%x + 2) $calc(%y + 1 + $int($calc((%h - 1 - %th) / 2))) $calc(%w - 4) %th
     dccore.dcx xdid dccore.set $calc(%id + 2) -C +b %face
+    dccore.dcx xdid dccore.set $+(%id,-,$calc(%id + 2)) -s
     inc %i
   }
 }
@@ -2536,6 +2540,108 @@ alias dccore.sw.dcxhome {
     dccore.dcx xdid dccore.set $calc(%id + 3) -C +t $dccore.dcx(GetSystemColor,COLOR_GRAYTEXT)
     inc %i
   }
+  dccore.sw.dcxstats
+}
+; the start page's figures: frames like a page's, with rows of a key and a
+; value, or lines of fixed-width text (the running sends, as the side panel
+; has them) - made here, filled by dccore.sw.home.fill
+alias dccore.sw.dcxstats {
+  var %i = 1, %grey = $dccore.dcx(GetSystemColor,COLOR_GRAYTEXT)
+  while (%i <= $dccore.sw.m(home.f.n)) {
+    var %f = $dccore.sw.m(home.f. $+ %i), %title = $gettok(%f,2,32)
+    dccore.sw.dcxring $gettok(%f,1,32) $dccore.sw.dcxrect($gettok(%f,3-6,32))
+    dccore.dcx xdialog dccore.set -c %title text $dccore.sw.dcxrect($gettok(%f,7-10,32)) nowrap center noprefix noformat
+    dccore.dcx xdid dccore.set %title -C +b $dccore.sw.s(face)
+    dccore.dcx xdid dccore.set %title -t $gettok(%f,12-,32)
+    var %j = 1
+    while (%j <= $dccore.sw.m($+(home.f.,%i,.n))) {
+      var %r = $dccore.sw.m($+(home.f.,%i,.r.,%j)), %k = $gettok(%r,1,32), %v = $gettok(%r,2,32)
+      dccore.dcx xdialog dccore.set -c %k text $dccore.sw.dcxrect($gettok(%r,3-6,32)) nowrap noprefix noformat
+      if (%v) {
+        dccore.dcx xdid dccore.set %k -C +t %grey
+        dccore.dcx xdid dccore.set %k -t $gettok(%r,11-,32)
+        dccore.dcx xdialog dccore.set -c %v text $dccore.sw.dcxrect($gettok(%r,7-10,32)) nowrap noprefix noformat endellipsis
+      }
+      else { dccore.dcx xdid dccore.set %k -f + default 8 Lucida Console }
+      inc %j
+    }
+    inc %i
+  }
+}
+; the figures filled from what the bot sends for the side panel (dccore.live,
+; st.*): when the start page shows, and on every status burst while it does
+alias dccore.sw.home.fill {
+  if (!$dialog(dccore.set)) || (!$dccore.sw.s(dcx)) || ($dccore.sw.s(side) != 0) { return }
+  var %i = 1
+  while (%i <= $dccore.sw.m(home.f.n)) {
+    var %f = $dccore.sw.m(home.f. $+ %i)
+    dccore.sw.home.frame %i $gettok(%f,2,32) $gettok(%f,12-,32)
+    inc %i
+  }
+}
+; $1 a frame's number, $2 its title's DCX id, $3- its title: its rows filled
+alias dccore.sw.home.frame {
+  if ($3 == Bot) {
+    dccore.sw.home.row $1 1 $iif($dccore.bot,$dccore.bot,-)
+    dccore.sw.home.row $1 2 $iif($network,$network,$iif($server,$server,-))
+    var %since = $dccore.st(st.started)
+    dccore.sw.home.row $1 3 $iif(%since > 0,$asctime(%since,ddd d mmm HH:nn) ( $+ $dccore.dur($calc($ctime - %since)) $+ ),-)
+    dccore.sw.home.row $1 4 $iif($dccore.st(state) == in,connected $iif($dccore.st(mode) == structured,(structured console),(plain console)),$iif($dccore.st(state),$dccore.st(state),not connected))
+    return
+  }
+  if ($3 == Sending) {
+    var %used = $dccore.st(st.used), %slots = $dccore.st(st.slots)
+    dccore.dcx xdid dccore.set $2 -t Sending $iif(%slots != $null,%used $+ / $+ %slots)
+    var %j = 1
+    while (%j <= $dccore.sw.m($+(home.f.,$1,.n))) {
+      var %l = $dccore.st(slot. $+ %j), %line
+      if (%l != $null) {
+        ; <nick> <sent> <total> <bps> <name>, as the side panel draws it
+        var %pct = $iif($gettok(%l,3,32) > 0,$int($calc($gettok(%l,2,32) * 100 / $gettok(%l,3,32))),0)
+        %line = > $dccore.fit($gettok(%l,1,32),9) $dccore.rfit($dccore.bytes($gettok(%l,3,32)),7) $dccore.rfit(%pct $+ $chr(37),4) $dccore.rfit($dccore.speed($gettok(%l,4,32)),9) $gettok(%l,5-,32)
+      }
+      elseif (%slots != $null) && (%j == $calc(%used + 1)) && (%used < %slots) { %line = ( $+ $calc(%slots - %used) free) }
+      dccore.sw.home.row $1 %j %line
+      inc %j
+    }
+    return
+  }
+  if ($3 == Today) {
+    dccore.sw.home.row $1 1 $iif($dccore.st(st.sent) != $null,$dccore.st(st.sent) files / $dccore.bytes($dccore.st(st.bytes)),-)
+    dccore.sw.home.row $1 2 $iif($dccore.st(st.qusers) == $null,-,$iif($dccore.st(st.qusers) == 0,(empty),$dccore.st(st.qusers) users with $dccore.st(st.qfiles) files))
+    dccore.sw.home.row $1 3 $iif($dccore.st(st.record) != $null,$dccore.speed($dccore.st(st.record)),-)
+    var %failed = $iif($dccore.st(st.failed) != $null,$dccore.st(st.failed),$dccore.st(failed))
+    var %searches = $iif($dccore.st(st.searches) != $null,$dccore.st(st.searches),$dccore.st(searches))
+    dccore.sw.home.row $1 4 $iif(%failed != $null,%failed,0)
+    dccore.sw.home.row $1 5 $iif(%searches != $null,%searches,0)
+    return
+  }
+  if ($3 == Library) {
+    dccore.sw.home.row $1 1 $dccore.sw.home.lists
+    dccore.sw.home.row $1 2 $iif($dccore.st(rebuild) != $null,$dccore.rebuild.short,idle)
+    dccore.sw.home.row $1 3 $iif($dccore.st(packing) != $null,$gettok($dccore.st(packing),5-,32) for $gettok($dccore.st(packing),1,32),none)
+  }
+}
+; $1 a frame's number, $2 a row's, $3- the text: into the row's value, or
+; its line; nothing becomes a blank, which the dll takes where no text is
+alias dccore.sw.home.row {
+  var %r = $dccore.sw.m($+(home.f.,$1,.r.,$2)), %id = $iif($gettok(%r,2,32),$gettok(%r,2,32),$gettok(%r,1,32))
+  dccore.dcx xdid dccore.set %id -t $iif($3 == $null,$dccore.nbsp,$3-)
+}
+; the lists' names, (primary) after the primary one - asked for from the
+; bot once, as the Lists page asks, the first time the start page shows
+alias dccore.sw.home.lists {
+  if (!$dccore.sw.s(srv.ok)) {
+    if (!$dccore.sw.s(asked.served)) && ($dccore.sw.can(served)) { dccore.sw.ask served }
+    return $iif($dccore.sw.s(live),loading...,-)
+  }
+  var %order = $dccore.sw.s(srv.order), %i = 1, %out
+  while (%i <= $numtok(%order,32)) {
+    var %id = $gettok(%order,%i,32), %name = $dccore.sw.srv.listname(%id) $iif($gettok($dccore.sw.s(srv.l. $+ %id),1,32) == 1,(primary))
+    %out = $iif(%out == $null,%name,%out $+ $chr(44) %name)
+    inc %i
+  }
+  return $iif(%out == $null,none,%out)
 }
 ; $1 a side: 0 the start page, 1 the bot's settings, 2 this mIRC's. The
 ; start page's pills and the way back swap places; the bot's tabs show on
@@ -2548,7 +2654,7 @@ alias dccore.sw.side {
   var %pills = $+($gettok($dccore.sw.m(home.1),1,32),-,$calc($gettok(%h,1,32) + 3))
   var %way = $+($gettok(%b,1,32),-,$gettok($dccore.sw.m(dcxcrumb),1,32))
   var %tabs = $+($gettok(%t,1,32),-,$calc($gettok(%t,1,32) + $gettok(%t,2,32) * $gettok(%t,6,32) - 1))
-  var %list = $gettok($dccore.sw.m(dcxpages),1,32), %title = $gettok($dccore.sw.m(dcxtitle),1,32)
+  var %list = $gettok($dccore.sw.m(dcxpages),1,32), %title = $gettok($dccore.sw.m(dcxtitle),1,32), %figures = $dccore.sw.m(home.f.ids)
   if ($1 == 0) {
     if ($dccore.sw.s(page)) { dccore.sw.showpage $dccore.sw.s(page) -h | hdel dccore.sws page }
     dccore.dcx xdid dccore.set %way -h
@@ -2557,9 +2663,12 @@ alias dccore.sw.side {
     dccore.dcx xdid dccore.set %title -h
     did -h dccore.set 1012
     dccore.dcx xdid dccore.set %pills -s
+    dccore.dcx xdid dccore.set %figures -s
+    dccore.sw.home.fill
     return
   }
   dccore.dcx xdid dccore.set %pills -h
+  dccore.dcx xdid dccore.set %figures -h
   dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxcrumb),1,32) -t $iif($1 == 1,Bot,mIRC)
   dccore.dcx xdid dccore.set %way -s
   dccore.dcx xdid dccore.set %list -s
@@ -2935,6 +3044,7 @@ alias dccore.sw.line {
     hdel dccore.sws srv.dirty
     hadd dccore.sws srv.sig0 $dccore.sw.srv.sig
     dccore.sw.srv.draw
+    dccore.sw.home.fill
     ; no lists.json: the one implied list's folders are the served folders,
     ; which the folders command edits without making the list real
     if ($dccore.sw.s(srv.src) == implied) { dccore.sw.reask folders }
@@ -4806,6 +4916,34 @@ alias dccore.sw.data {
   hadd dccore.swm home.1.s The bot's settings, sent with Apply
   hadd dccore.swm home.2.t mIRC
   hadd dccore.swm home.2.s This mIRC's own: window, link, chat
+  hadd dccore.swm home.f.n 4
+  hadd dccore.swm home.f.ids 300-337
+  hadd dccore.swm home.f.1 300 301 12 66 228 46 18 62 15 9 kv Bot
+  hadd dccore.swm home.f.1.n 4
+  hadd dccore.swm home.f.1.r.1 302 303 18 72 52 8 74 72 160 8 Nick
+  hadd dccore.swm home.f.1.r.2 304 305 18 81 52 8 74 81 160 8 Network
+  hadd dccore.swm home.f.1.r.3 306 307 18 90 52 8 74 90 160 8 Up since
+  hadd dccore.swm home.f.1.r.4 308 309 18 99 52 8 74 99 160 8 Connection
+  hadd dccore.swm home.f.2 310 311 248 66 228 64 254 62 50 9 full Sending
+  hadd dccore.swm home.f.2.n 6
+  hadd dccore.swm home.f.2.r.1 312 0 254 72 216 8 0 0 0 0
+  hadd dccore.swm home.f.2.r.2 313 0 254 81 216 8 0 0 0 0
+  hadd dccore.swm home.f.2.r.3 314 0 254 90 216 8 0 0 0 0
+  hadd dccore.swm home.f.2.r.4 315 0 254 99 216 8 0 0 0 0
+  hadd dccore.swm home.f.2.r.5 316 0 254 108 216 8 0 0 0 0
+  hadd dccore.swm home.f.2.r.6 317 0 254 117 216 8 0 0 0 0
+  hadd dccore.swm home.f.3 318 319 12 122 228 55 18 118 24 9 kv Today
+  hadd dccore.swm home.f.3.n 5
+  hadd dccore.swm home.f.3.r.1 320 321 18 128 52 8 74 128 160 8 Sent
+  hadd dccore.swm home.f.3.r.2 322 323 18 137 52 8 74 137 160 8 Queue
+  hadd dccore.swm home.f.3.r.3 324 325 18 146 52 8 74 146 160 8 Speed record
+  hadd dccore.swm home.f.3.r.4 326 327 18 155 52 8 74 155 160 8 Failed
+  hadd dccore.swm home.f.3.r.5 328 329 18 164 52 8 74 164 160 8 Searches
+  hadd dccore.swm home.f.4 330 331 248 140 228 37 254 136 26 9 kv Library
+  hadd dccore.swm home.f.4.n 3
+  hadd dccore.swm home.f.4.r.1 332 333 254 146 52 8 310 146 160 8 Lists
+  hadd dccore.swm home.f.4.r.2 334 335 254 155 52 8 310 155 160 8 Rebuild
+  hadd dccore.swm home.f.4.r.3 336 337 254 164 52 8 310 164 160 8 Packing
   hadd dccore.swm tab.1 50 35
   hadd dccore.swm tab.2 86 34
   hadd dccore.swm tab.3 121 45

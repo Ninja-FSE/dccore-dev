@@ -421,21 +421,91 @@ class TheMockupLayout(unittest.TestCase):
         # region set does not redraw and what was drawn outside the new one
         # would stay on screen
         steps = statements(sel)
-        hide = steps.index("dccore.dcx xdid dccore.set $+(%id,-,$calc(%id + 1)) -h")
-        self.assertEqual(steps[hide + 1:hide + 7], [
+        # all three of a tab, the text too: the start page hides them all,
+        # and a tab shown again without its name was the operator's first find
+        hide = steps.index("dccore.dcx xdid dccore.set $+(%id,-,$calc(%id + 2)) -h")
+        self.assertEqual(steps[hide + 1:hide + 9], [
             "dccore.dcx xdid dccore.set %id -p %x %y %w %h",
             "dccore.dcx xdid dccore.set %id -R +p $dccore.sw.dcxpoly(%w,%h,o,2)",
             "dccore.dcx xdid dccore.set $calc(%id + 1) -p %x %y %w %h",
             "dccore.dcx xdid dccore.set $calc(%id + 1) -R +p $dccore.sw.dcxpoly(%w,%h,i,2)",
             "dccore.dcx xdid dccore.set $calc(%id + 1) -C +b %face",
-            "dccore.dcx xdid dccore.set $+(%id,-,$calc(%id + 1)) -s"])
-        # the text a line of dialog text tall, in the middle of the tab: the
-        # dll the script ships has no vcenter
+            # the text a line of dialog text tall, in the middle of the tab:
+            # the dll the script ships has no vcenter
+            "dccore.dcx xdid dccore.set $calc(%id + 2) -p $calc(%x + 2) $calc(%y + 1 + $int($calc((%h - 1 - %th) / 2))) "
+            "$calc(%w - 4) %th",
+            "dccore.dcx xdid dccore.set $calc(%id + 2) -C +b %face",
+            "dccore.dcx xdid dccore.set $+(%id,-,$calc(%id + 2)) -s"])
         self.assertIn("%th = $gettok($dccore.sw.dcxrect(0 8 0 0),2,32)", sel)
-        self.assertIn("xdid dccore.set $calc(%id + 2) -p $calc(%x + 2) $calc(%y + 1 + $int($calc((%h - 1 - %th) / 2))) "
-                      "$calc(%w - 4) %th", sel)
-        self.assertIn("xdid dccore.set $calc(%id + 2) -C +b %face", sel)
         self.assertNotIn("vcenter", code())
+
+    def test_the_start_page_shows_the_bots_figures_from_what_the_side_panel_has(self):
+        """Frames under the pills - Bot, Sending, Today, Library - with rows
+        of a key and a value, or lines of fixed-width text, filled from the
+        status the bot sends for the side panel, and again on every burst."""
+        b = self.builder
+        self.assertEqual(int(self.data["home.f.n"]), len(b.STATS))
+        first, last = (int(n) for n in self.data["home.f.ids"].split("-"))
+        self.assertEqual(first, b.STATS_DCX_FIRST)
+        self.assertLess(last, b.TAB_DCX_FIRST)
+        boxes = len([c for c in self.controls if c[0] == "box"])
+        self.assertLessEqual(b.FRAME_DCX_FIRST + boxes * b.FRAME_DCX_STRIDE, first)
+        ids, bottoms = [], []
+        for number, (column, title, kind, rows) in enumerate(b.STATS, start=1):
+            f = self.data["home.f.%d" % number].split()
+            ring, tid = int(f[0]), int(f[1])
+            rx, ry, rw, rh = (int(n) for n in f[2:6])
+            tx, ty, tw, th = (int(n) for n in f[6:10])
+            self.assertEqual((f[10], " ".join(f[11:])), (kind, title))
+            self.assertEqual(rx, b.STATS_X + column * (b.STATS_W + b.STATS_GAP))
+            self.assertEqual((rw, tx, ty, th), (b.STATS_W, rx + b.TITLE_X, ry - b.LINE_DROP, b.TITLE_H))
+            self.assertGreaterEqual(ry - b.LINE_DROP, b.HOME_PILL_Y + b.HOME_PILL_H)
+            ids += [ring, tid]
+            bottoms.append(ry + rh)
+            count = int(self.data["home.f.%d.n" % number])
+            self.assertEqual(count, len(rows) if kind == "kv" else rows)
+            for row_number in range(1, count + 1):
+                r = self.data["home.f.%d.r.%d" % (number, row_number)].split()
+                key_id, value_id = int(r[0]), int(r[1])
+                kx, ky, kw, kh = (int(n) for n in r[2:6])
+                self.assertEqual((kx, kh), (rx + b.BOX_PAD, b.LINE_DBU))
+                self.assertEqual(ky, ry - b.LINE_DROP + b.BOX_TOP + (row_number - 1) * b.STATS_ROW)
+                ids.append(key_id)
+                if kind == "kv":
+                    vx, vy, vw, vh = (int(n) for n in r[6:10])
+                    self.assertEqual((kw, " ".join(r[10:])), (b.STATS_KEY_W, rows[row_number - 1]))
+                    self.assertEqual((vx, vy), (kx + kw + 4, ky))
+                    self.assertEqual(vx + vw, rx + rw - b.BOX_PAD)
+                    ids.append(value_id)
+                else:
+                    self.assertEqual((value_id, kw, r[6:10]), (0, rw - 2 * b.BOX_PAD, ["0", "0", "0", "0"]))
+                    self.assertEqual(len(r), 10)
+        self.assertEqual(ids, sorted(ids))
+        self.assertEqual((ids[0], ids[-1]), (first, last))
+        self.assertLessEqual(max(bottoms), b.TABS[1] + b.TABS[3] - 4)
+        # made with the start page, hidden and shown with it, filled when it
+        # shows and on every status burst while it does; the lists asked for
+        # once, as the Lists page asks
+        self.assertEqual(statements(alias("dccore.sw.dcxhome"))[-1], "dccore.sw.dcxstats")
+        stats = alias("dccore.sw.dcxstats")
+        self.assertIn("dccore.sw.dcxring $gettok(%f,1,32) $dccore.sw.dcxrect($gettok(%f,3-6,32))", stats)
+        self.assertIn("-c %v text $dccore.sw.dcxrect($gettok(%r,7-10,32)) nowrap noprefix noformat endellipsis", stats)
+        self.assertIn("else { dccore.dcx xdid dccore.set %k -f + default 8 Lucida Console }", stats)
+        side = statements(alias("dccore.sw.side"))
+        self.assertIn("dccore.dcx xdid dccore.set %figures -s", side)
+        self.assertIn("dccore.dcx xdid dccore.set %figures -h", side)
+        self.assertLess(side.index("dccore.dcx xdid dccore.set %figures -s"), side.index("dccore.sw.home.fill"))
+        fill = statements(alias("dccore.sw.home.fill"))
+        self.assertEqual(fill[0], "if (!$dialog(dccore.set)) || (!$dccore.sw.s(dcx)) || ($dccore.sw.s(side) != 0) { return }")
+        frame = alias("dccore.sw.home.frame")
+        for title in ("Bot", "Sending", "Today", "Library"):
+            self.assertIn("if ($3 == %s) {" % title, frame)
+        self.assertIn("dccore.dcx xdid dccore.set $2 -t Sending $iif(%slots != $null,%used $+ / $+ %slots)", frame)
+        self.assertIn("dccore.sw.home.row $1 1 $dccore.sw.home.lists", frame)
+        self.assertIn("if ($dialog(dccore.set)) { .timerdccoreSwHome -m 1 300 dccore.sw.home.fill }", alias("dccore.panel.soon"))
+        lists = alias("dccore.sw.home.lists")
+        self.assertIn("if (!$dccore.sw.s(asked.served)) && ($dccore.sw.can(served)) { dccore.sw.ask served }", lists)
+        self.assertIn("dccore.sw.home.fill", handwritten().split("hadd dccore.sws srv.ok 1")[1][:400])
 
     def test_the_window_opens_on_a_start_page_with_a_side_to_choose_and_a_way_back(self):
         """With DCX: a pill for each side, Bot (the groups with tabs) and mIRC

@@ -945,9 +945,12 @@ sent at all: what is off there never reaches the script.
 
 `/dccore settings` (or right-click -> **Control Panel**, the one entry in every
 menu) opens the control panel (dccore.mrc 1.19 or later, mIRC 6.17 or later).
-With DCX it opens on a start page with two choices, **Bot** and **mIRC**; a
-side has a back arrow at the top left and the side's name beside it, and the
-window opens on the start page every time. **Bot** is the bot's own settings,
+With DCX it opens on a start page with two choices, **Bot** and **mIRC**, and
+under them the bot's figures - nick, network, up since and the connection;
+the running sends; today's sent, queue, speed record, failed and searches;
+the lists, the rebuild and the pack running - from the same status the side
+panel draws, refreshed with it. A side has a back arrow at the top left and
+the side's name beside it, and the window opens on the start page every time. **Bot** is the bot's own settings,
 as the dashboard's Settings page has them, over the console commands above:
 six groups - **General**,
 **Sharing**, **Downloads**, **Security**, **Dashboard & Console**, **Advanced** -

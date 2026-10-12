@@ -196,6 +196,22 @@ TAB_START = CRUMB[0] + CRUMB[2] + 2
 HOME_PILL_W, HOME_PILL_H, HOME_PILL_GAP = 140, 24, 12
 HOME_PILL_Y = TABS[1] + TAB_HEADER_H + 12
 HOME = (("Bot", "The bot's settings, sent with Apply"), ("mIRC", "This mIRC's own: window, link, chat"))
+# The start page's figures, under the pills: frames like a page's, in two
+# columns, with rows of a key and a value ("kv") or lines of fixed-width
+# text ("full"), filled by the script from what the bot sends for the side
+# panel. (column, title, kind, the keys or the number of lines); the
+# Sending frame's title grows to "Sending n/m". DCX ids from
+# STATS_DCX_FIRST: a ring and a title a frame, then two texts a row.
+STATS_DCX_FIRST = 300
+STATS_X, STATS_W, STATS_GAP = TABS[0] + 8, 228, 8
+STATS_Y = HOME_PILL_Y + HOME_PILL_H + 10
+STATS_ROW, STATS_DOWN, STATS_KEY_W = 9, 6, 52
+STATS = (
+    (0, "Bot", "kv", ("Nick", "Network", "Up since", "Connection")),
+    (1, "Sending", "full", 6),
+    (0, "Today", "kv", ("Sent", "Queue", "Speed record", "Failed", "Searches")),
+    (1, "Library", "kv", ("Lists", "Rebuild", "Packing")),
+)
 
 
 def dbu_for(px):
@@ -916,6 +932,44 @@ def render(builder):
     if not (BACK_DCX_FIRST + 3 <= CRUMB_DCX < HOME_DCX_FIRST
             and HOME_DCX_FIRST + len(HOME) * PILL_STRIDE <= DCX_PAGES_ID and BODY_DCX_FIRST + 1 <= BACK_DCX_FIRST):
         raise LayoutError("the DCX ids of the way back, the side's name and the start page collide")
+    # the start page's figures: a frame's place in its column, its rows' places
+    stats = []
+    next_id = STATS_DCX_FIRST
+    column_y = [STATS_Y, STATS_Y]
+    for column, title, kind, rows in STATS:
+        keys = list(rows) if kind == "kv" else [""] * rows
+        x = STATS_X + column * (STATS_W + STATS_GAP)
+        y = column_y[column]
+        h = BOX_TOP + len(keys) * STATS_ROW + BOX_BOTTOM
+        column_y[column] = y + h + STATS_DOWN
+        room = title + " 99/99" if kind == "full" else title
+        if set(room + "".join(keys)) - set(CHAR_PX):
+            raise LayoutError("the figures' frame %r has characters the width table lacks" % title)
+        if TITLE_X + dbu_for(text_px(room)) + 2 * TITLE_PAD > STATS_W - TITLE_X or any(
+                dbu_for(text_px(key)) > STATS_KEY_W for key in keys):
+            raise LayoutError("the figures' frame %r or a key of it does not fit" % title)
+        frame = {"ring": next_id, "title": next_id + 1, "name": title, "kind": kind,
+                 "ring_rect": (x, y + LINE_DROP, STATS_W, h - LINE_DROP),
+                 "title_rect": (x + TITLE_X, y, dbu_for(text_px(room)) + 2 * TITLE_PAD, TITLE_H), "rows": []}
+        next_id += 2
+        for number, key in enumerate(keys):
+            row_y = y + BOX_TOP + number * STATS_ROW
+            if kind == "kv":
+                frame["rows"].append((next_id, next_id + 1, key,
+                                      (x + BOX_PAD, row_y, STATS_KEY_W, LINE_DBU),
+                                      (x + BOX_PAD + STATS_KEY_W + 4, row_y, STATS_W - 2 * BOX_PAD - STATS_KEY_W - 4,
+                                       LINE_DBU)))
+                next_id += 2
+            else:
+                frame["rows"].append((next_id, 0, "", (x + BOX_PAD, row_y, STATS_W - 2 * BOX_PAD, LINE_DBU),
+                                      (0, 0, 0, 0)))
+                next_id += 1
+        stats.append(frame)
+    if max(column_y) - STATS_DOWN > TABS[1] + TABS[3] - 4 or STATS_X + 2 * STATS_W + STATS_GAP > TABS[0] + TABS[2] - 4:
+        raise LayoutError("the start page's figures do not fit the body")
+    boxes = sum(1 for c in builder.controls if c["kind"] == "box")
+    if not (FRAME_DCX_FIRST + boxes * FRAME_DCX_STRIDE <= STATS_DCX_FIRST and next_id <= TAB_DCX_FIRST):
+        raise LayoutError("the DCX ids of the start page's figures collide with the frames' or the tabs'")
     frames = [c for c in builder.controls if c["kind"] == "box"]
     for index, control in enumerate(frames):
         missing = sorted(set(control["text"]) - set(CHAR_PX))
@@ -989,6 +1043,18 @@ def render(builder):
         data.append(("home.%d.t" % number, name))
         data.append(("home.%d.s" % number, line))
         pill_x += HOME_PILL_W + HOME_PILL_GAP
+    # the figures: every frame's ring and title (ids, rectangles, kind,
+    # title) and every row's texts (ids, rectangles, the key); and the one
+    # range of ids that shows or hides them all
+    data.append(("home.f.n", str(len(stats))))
+    data.append(("home.f.ids", "%d-%d" % (STATS_DCX_FIRST, next_id - 1)))
+    for number, frame in enumerate(stats, start=1):
+        data.append(("home.f.%d" % number, "%d %d %d %d %d %d %d %d %d %d %s %s" % (
+            (frame["ring"], frame["title"]) + frame["ring_rect"] + frame["title_rect"] + (frame["kind"], frame["name"]))))
+        data.append(("home.f.%d.n" % number, str(len(frame["rows"]))))
+        for row_number, (key_id, value_id, key, key_rect, value_rect) in enumerate(frame["rows"], start=1):
+            data.append(("home.f.%d.r.%d" % (number, row_number), ("%d %d %d %d %d %d %d %d %d %d %s" % (
+                (key_id, value_id) + key_rect + value_rect + (key,))).rstrip()))
     # the tables: each native list, the DCX listview over its rectangle, and
     # that listview's columns and extra styles
     data.insert(12 + len(HOME), ("lvs", " ".join(str(c["id"]) for c in lists)))
