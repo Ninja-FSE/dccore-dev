@@ -778,6 +778,13 @@ DCC_BLOCK_SIZE: int = 65536      # 64 KB - one of 4096/8192/16384/32768/65536/13
 # there 0 sets 4 MB. It is here to be experimented with on a link the operator
 # knows, not to be set hopefully.
 DCC_SEND_BUFFER: int = 0         # 0 = per-platform default (4MB on Windows, OS auto-tuning on Linux)
+
+# Speed caps (#1352), in KB/s, 0 = no limit: one pace per direction, shared by
+# every transfer that way - see speed_cap.py. Waiting on the download cap moves
+# a fetch's FETCH_TRANSFER_TIMEOUT along by as long as it waited.
+MAX_UPLOAD_KB: int = 0
+MAX_DOWNLOAD_KB: int = 0
+
 DCC_PORT_START: int = 55000      # First port the bot listens on for outgoing DCC sends; forward this range if you are behind NAT
 DCC_PORT_END: int   = 55010      # Last port of that range; sends, passive fetches and a listen-mode admin console share it, so keep at least MAX_DCC_SLOTS + MAX_FETCH_SLOTS + 1
 
@@ -1223,6 +1230,8 @@ recent_departures = runtime.recent_departures
 recent_departure_bases = runtime.recent_departure_bases
 # #926: who else asked which bot for its list - list_grab.py.
 list_grab_others_asked = runtime.list_grab_others_asked
+# #1352: speed_cap.py's clocks, one per direction - see runtime.py.
+speed_cap_clocks = runtime.speed_cap_clocks
 nick_aliases = runtime.nick_aliases
 # #376 option B - see runtime.py.
 bot_idents = runtime.bot_idents

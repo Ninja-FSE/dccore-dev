@@ -571,6 +571,8 @@
   "settings.field.MAX_LIST_TEXT_SIZE": "Largest list text accepted from a peer",
   "settings.field.DCC_BLOCK_SIZE": "Packet size",
   "settings.field.DCC_SEND_BUFFER": "Socket send buffer (0 = the default for your platform)",
+  "settings.field.MAX_UPLOAD_KB": "Max upload speed (KB/s, 0 = no limit)",
+  "settings.field.MAX_DOWNLOAD_KB": "Max download speed (KB/s, 0 = no limit)",
   "settings.field.REHASH_TRANSFER_WAIT": "Seconds a rehash waits for transfers to finish",
   "settings.field.AUTO_REFETCH_LISTS": "Re-fetch a held list when its bot advertises a new one",
   "settings.field.AUTO_REFETCH_INTERVAL_HOURS": "Least time between re-fetches of one bot (hours)",

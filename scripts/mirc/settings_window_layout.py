@@ -107,6 +107,11 @@ GROUPS = (
             ("During a rebuild", ("PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE", "REHASH_TRANSFER_WAIT")),
         )),
         ("Transfers", (
+            ("Speed limits", (
+                {"note": "Upload is your sends to people; download is everything the bot fetches. "
+                         "Each is one limit shared by all transfers that way."},
+                "MAX_UPLOAD_KB", "MAX_DOWNLOAD_KB",
+            )),
             ("Buffers & packet size", ("DCC_BLOCK_SIZE", "DCC_SEND_BUFFER")),
             ("Ports & reliability", ("DCC_PORT_START", "DCC_PORT_END", "DCC_ACCEPT_TIMEOUT",
                                      "MAX_SEND_FAILS")),
