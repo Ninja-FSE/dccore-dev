@@ -5289,11 +5289,94 @@
       refreshThemePreview();
     }
     var count = Object.keys(state.settingsDirty).length;
+    // #1354: Save & rehash does not save the folder or list editor, so the
+    // bar says so rather than "All changes saved" over an unsaved one.
+    var editor = servedDraftUnsaved();
+    var editorText = editor === "lists" ? t("settings.savebarListsNotSaved")
+      : editor === "folders" ? t("settings.savebarFoldersNotSaved") : "";
     el.settingsSaveBtn.disabled = count === 0;
-    el.settingsSavebarText.classList.toggle("is-dirty", count > 0);
-    el.settingsSavebarText.textContent = count === 0
-      ? t("settings.allChangesSaved")
+    el.settingsSavebarText.classList.toggle("is-dirty", count > 0 || editorText !== "");
+    var text = count === 0
+      ? (editorText || t("settings.allChangesSaved"))
       : t(count === 1 ? "settings.oneUnsavedChange" : "settings.manyUnsavedChanges").replace("{count}", count);
+    if (count > 0 && editorText) { text += " \u00b7 " + editorText; }
+    el.settingsSavebarText.textContent = text;
+  }
+
+  // #1354: AN EDITED FOLDER OR LIST EDITOR IS NOT A SAVED ONE. Removing a row
+  // only edits the draft; Save folders / Save lists is what writes it, and
+  // the page's own Save & rehash never does. The summary above the rows used
+  // to count the draft and the save bar watched only the settings, so an
+  // operator who removed twenty folders read "Serving 0 folders" and "All
+  // changes saved" - and the next rebuild scanned all twenty.
+  //
+  // Compared as what the save would send, so a blank row added and not yet
+  // filled is not an edit.
+  function draftFolderShape(rows) {
+    return JSON.stringify((rows || []).filter(function (f) {
+      return String(f.path || "").trim() !== "";
+    }).map(function (f) {
+      return [String(f.name || "").trim(), String(f.path || "").trim()];
+    }));
+  }
+
+  function draftListShape(lists) {
+    return JSON.stringify((lists || []).map(function (entry) {
+      var channels = (entry.channels || []).map(function (c) {
+        return String(c).toLowerCase();
+      }).sort();
+      var modes = {};
+      Object.keys(entry.modes || {}).forEach(function (name) {
+        var mode = entry.modes[name];
+        if (mode && mode !== "normal" && channels.indexOf(name.toLowerCase()) >= 0) {
+          modes[name.toLowerCase()] = mode;
+        }
+      });
+      var exclude = entry.exclude || [];
+      if (typeof exclude === "string") { exclude = exclude.split(/[\s,]+/); }
+      return {
+        name: String(entry.name || "").trim(),
+        primary: !!entry.primary,
+        channels: channels,
+        modes: Object.keys(modes).sort().map(function (k) { return [k, modes[k]]; }),
+        exclude: exclude.map(function (x) { return String(x).trim().toLowerCase(); })
+          .filter(function (x) { return x !== ""; }),
+        folders: JSON.parse(draftFolderShape(entry.folders))
+      };
+    }));
+  }
+
+  // "lists", "folders" or "" - which editor on Your list holds unsaved edits.
+  function servedDraftUnsaved() {
+    if (state.listsSource === "file") {
+      return state.listsDraft && draftListShape(state.listsDraft) !== draftListShape(state.lists)
+        ? "lists" : "";
+    }
+    return state.foldersDraft && draftFolderShape(state.foldersDraft) !== draftFolderShape(state.folders)
+      ? "folders" : "";
+  }
+
+  function servedDraftNoteText() {
+    var unsaved = servedDraftUnsaved();
+    if (unsaved === "lists") { return t("settings.listsNotSaved"); }
+    if (unsaved !== "folders") { return ""; }
+    if (state.foldersSource === "file") {
+      return t((state.folders || []).length === 1 ? "settings.foldersNotSavedOne" : "settings.foldersNotSavedMany")
+        .replace("{count}", (state.folders || []).length);
+    }
+    return t("settings.foldersNotSavedDirectory");
+  }
+
+  // Called on every edit as well as every render: typing does not re-render
+  // (it would take the caret), so the note is updated in place.
+  function refreshServedDraftNote() {
+    var note = el.settingsFields.querySelector(".served-draft-unsaved");
+    if (note) {
+      var text = servedDraftNoteText();
+      note.textContent = text;
+      note.hidden = text === "";
+    }
+    updateSettingsSaveBar();
   }
 
   // The served-folder editor. Markup only - NO VALUES - for the reason the
@@ -5481,7 +5564,7 @@
       '<div class="served-folder-actions">' +
         '<button type="button" class="btn served-list-add">' + t("settings.addList") + '</button>' +
         '<button type="button" class="btn btn-accent served-list-save">' + t("settings.saveLists") + '</button>' +
-      "</div>" + note + "</div>";
+      "</div>" + '<p class="served-folder-note is-error served-draft-unsaved" hidden></p>' + note + "</div>";
   }
 
   // PICK FROM THE CHANNELS ALREADY CONFIGURED, rather than typing them a
@@ -5631,6 +5714,7 @@
 
       nameInput.addEventListener("input", function () {
         draft[index].name = nameInput.value;
+        refreshServedDraftNote();
       });
 
       // Sent as typed; the server spells it (#1295).
@@ -5639,6 +5723,7 @@
         excludeInput.value = entry.exclude || "";
         excludeInput.addEventListener("input", function () {
           draft[index].exclude = excludeInput.value;
+          refreshServedDraftNote();
         });
       }
 
@@ -5656,12 +5741,14 @@
           modeSelect.value = ((entry.modes || {})[name.toLowerCase()]) || "normal";
           modeSelect.addEventListener("change", function () {
             draft[index].modes = channelModes(block);
+            refreshServedDraftNote();
           });
         }
         box.addEventListener("change", function () {
           draft[index].channels = tickedChannels(block);
           if (modeSelect) { modeSelect.disabled = !box.checked; }
           draft[index].modes = channelModes(block);
+          refreshServedDraftNote();
         });
       });
       primaryInput.addEventListener("change", function () {
@@ -5670,6 +5757,7 @@
         draft.forEach(function (other, otherIndex) {
           other.primary = otherIndex === index;
         });
+        refreshServedDraftNote();
       });
     });
 
@@ -5686,9 +5774,11 @@
       pathInput.value = folder.path || "";
       nameInput.addEventListener("input", function () {
         folder.name = nameInput.value;
+        refreshServedDraftNote();
       });
       pathInput.addEventListener("input", function () {
         folder.path = pathInput.value;
+        refreshServedDraftNote();
       });
     });
   }
@@ -5835,9 +5925,12 @@
     }
 
     var summary;
+    // What is SAVED (#1354): the rows below are the draft, and until Save
+    // folders the bot serves the saved list, not them.
+    var served = (state.folders || []).length;
     if (state.foldersSource === "file") {
-      summary = t(draft.length === 1 ? "settings.servingOneFolder" : "settings.servingManyFolders")
-        .replace("{count}", draft.length);
+      summary = t(served === 1 ? "settings.servingOneFolder" : "settings.servingManyFolders")
+        .replace("{count}", served);
     } else if (state.foldersSource === "file_directory") {
       summary = t("settings.noFolderListYet");
     } else {
@@ -5898,7 +5991,7 @@
       '<div class="served-folder-actions">' +
         '<button type="button" class="btn served-folder-add">' + t("settings.addFolder") + '</button>' +
         '<button type="button" class="btn btn-accent served-folder-save">' + t("settings.saveFolders") + '</button>' +
-      "</div>" + note + "</div>";
+      "</div>" + '<p class="served-folder-note is-error served-draft-unsaved" hidden></p>' + note + "</div>";
   }
 
   // Assigns every row's values as properties and keeps the draft in step with
@@ -5915,9 +6008,11 @@
       pathInput.value = entry.path || "";
       nameInput.addEventListener("input", function () {
         draft[index].name = nameInput.value;
+        refreshServedDraftNote();
       });
       pathInput.addEventListener("input", function () {
         draft[index].path = pathInput.value;
+        refreshServedDraftNote();
       });
     });
   }
@@ -6112,6 +6207,7 @@
     applySettingsFlash();
     if (category.id === SERVED_FOLDERS_CATEGORY) {
       if (state.listsSource === "file") { attachListRows(); } else { attachFolderRows(); }
+      refreshServedDraftNote();
     }
     if (category.id === ON_CONNECT_CATEGORY) {
       attachOnConnectRows();
