@@ -150,22 +150,26 @@ DCX_TITLE_ID = 901
 # (#1288): Windows draws the tab strip and the frames in light greys of its
 # own, the first tab with no left edge at all, and none of it can be
 # recoloured. So in DCX mode the native tabs and frames are hidden, and in
-# their place: the tab strip - an outline panel and a text for each tab,
-# side by side from the tab control's left edge, the chosen one from the
+# their place: the tab strip - an outline panel, a panel on the face and a
+# text for each tab, side by side from ROUND in from the tab control's left
+# edge (clear of the body frame's rounded corner), the chosen one from the
 # strip's top down onto the body frame's top line, the others TAB_LIFT lower
-# and ending above it; the body frame, four lines a pixel wide round the tab
-# control's area under the tabs; and every section's frame, four lines
-# LINE_DROP under the frame's top (through the middle of its title) and
-# the title over the top one, from TITLE_X, TITLE_H tall, TITLE_PAD of face
-# either side of its text. The colours are the system's, so a theme is
+# and ending above it; the body frame, a ring a pixel wide round the tab
+# control's area under the tabs; and every section's frame, a ring LINE_DROP
+# under the frame's top (through the middle of its title) and the title over
+# its top line, from TITLE_X, TITLE_H tall, TITLE_PAD of face either side of
+# its text. A ring is one panel shaped by its window region, so nothing
+# else of it is drawn or clicked; its corners, and the tabs' top ones, are
+# round, ROUND units across. The colours are the system's, so a theme is
 # followed: the lines COLOR_3DSHADOW, the faces COLOR_3DFACE and 3DLIGHT.
-# DCX ids: the frames from FRAME_DCX_FIRST, FRAME_DCX_STRIDE each (the four
-# lines, then the title), a page's frames consecutive so one id range shows
-# or hides them; the tabs from TAB_DCX_FIRST, two each (the outline, the
-# text); the body frame BODY_DCX_FIRST, four. All below the page list's.
-FRAME_DCX_FIRST, FRAME_DCX_STRIDE = 100, 5
-TAB_DCX_FIRST, TAB_DCX_STRIDE = 800, 2
-BODY_DCX_FIRST = 820
+# DCX ids: the frames from FRAME_DCX_FIRST, FRAME_DCX_STRIDE each (the ring,
+# the title), a page's frames consecutive so one id range shows or hides
+# them; the tabs from TAB_DCX_FIRST, three each (the outline, the face, the
+# text); the body frame BODY_DCX_FIRST. All below the page list's.
+FRAME_DCX_FIRST, FRAME_DCX_STRIDE = 100, 2
+TAB_DCX_FIRST, TAB_DCX_STRIDE = 800, 3
+BODY_DCX_FIRST = 830
+ROUND = 5
 TAB_PAD = 5
 TAB_LIFT = 2
 LINE_DROP = 4
@@ -834,7 +838,7 @@ def render(builder):
     # the lines the script draws with DCX: the tab strip, side by side from
     # the tab control's left edge; every frame, its DCX ids in page order
     tabs = []
-    x = TABS[0]
+    x = TABS[0] + ROUND
     for group in groups:
         tabs.append((x, dbu_for(text_px(group)) + 2 * TAB_PAD))
         x += tabs[-1][1]
@@ -850,7 +854,7 @@ def render(builder):
         if TITLE_X + dbu_for(text_px(control["text"])) + 2 * TITLE_PAD > control["w"] - TITLE_X:
             raise LayoutError("the frame title %r does not fit its frame" % control["text"])
     if (FRAME_DCX_FIRST + len(frames) * FRAME_DCX_STRIDE > TAB_DCX_FIRST
-            or TAB_DCX_FIRST + len(groups) * TAB_DCX_STRIDE > BODY_DCX_FIRST or BODY_DCX_FIRST + 4 > DCX_PAGES_ID):
+            or TAB_DCX_FIRST + len(groups) * TAB_DCX_STRIDE > BODY_DCX_FIRST or BODY_DCX_FIRST + 1 > DCX_PAGES_ID):
         raise LayoutError("the DCX ids of the frames (%d), the tabs, the body frame and the page list collide"
                           % len(frames))
     # every table has its columns, and every set of columns its table
@@ -890,13 +894,15 @@ def render(builder):
     data.insert(3, ("dcxpages", "%d %d %d %d %d" % ((DCX_PAGES_ID,) + DCX_PAGES)))
     data.insert(4, ("dcxtitle", "%d %d %d %d %d" % ((DCX_TITLE_ID,) + DCX_TITLE)))
     # the tab strip (first id, stride, top, height, lift; each tab's x and
-    # width) and the body frame (first id, rectangle), in dialog units
+    # width), the body frame (id, rectangle) and the corners' roundness, in
+    # dialog units
     data.insert(5, ("dcxtabs", "%d %d %d %d %d" % (TAB_DCX_FIRST, TAB_DCX_STRIDE, TABS[1], TAB_HEADER_H, TAB_LIFT)))
     data.insert(6, ("dcxbody", "%d %d %d %d %d" % (BODY_DCX_FIRST, TABS[0], TABS[1] + TAB_HEADER_H, TABS[2],
                                                    TABS[3] - TAB_HEADER_H)))
+    data.insert(7, ("dcxround", str(ROUND)))
     # the tables: each native list, the DCX listview over its rectangle, and
     # that listview's columns and extra styles
-    data.insert(7, ("lvs", " ".join(str(c["id"]) for c in lists)))
+    data.insert(8, ("lvs", " ".join(str(c["id"]) for c in lists)))
     for number, (tab_x, tab_w) in enumerate(tabs, start=1):
         data.append(("tab.%d" % number, "%d %d" % (tab_x, tab_w)))
     # every frame: its DCX ids' first, the rectangle of its lines, the
