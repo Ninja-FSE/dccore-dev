@@ -342,23 +342,29 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("while (%i <= $dccore.sw.m(groups)) { did -h dccore.set $calc(1000 + %i) | inc %i }", body)
         lines = statements(body)
         # the chosen tab stands on the body frame's top line: made after it
-        self.assertLess(lines.index("dccore.sw.dcxring $gettok(%b,1,32) $dccore.sw.dcxrect($gettok(%b,2-5,32))"),
+        self.assertLess(lines.index("dccore.sw.dcxframe $gettok(%b,1,32) $dccore.sw.dcxrect($gettok(%b,2-5,32))"),
                         lines.index("dccore.sw.dcxtabs"))
         self.assertIn("while (%i <= $dccore.sw.m(pages)) { dccore.sw.dcxframes %i | inc %i }", lines)
-        line = alias("dccore.sw.dcxline")
-        self.assertIn("-c $1 panel $2 $3 $4 $5", line)
-        self.assertIn("-C +b $dccore.sw.s(line)", line)
-        # a frame is one panel shaped as a ring with rounded corners: its
-        # region the inside first (an octagon a pixel in), then the rounded
-        # rectangle less that - a combined region is the new one less the old
-        ring = statements(alias("dccore.sw.dcxring"))
-        self.assertEqual(ring[0], "dccore.sw.dcxline $1 $2 $3 $4 $5")
-        inside = [s for s in ring if " -R +p " in s]
+        # a frame is a DCX box with the rounded style - its edge drawn by
+        # FrameRgn, so the curve holds together - in the line colour, on the
+        # face; by its window region a band three pixels wide along its edge
+        # (the inside first, then the whole rectangle less that - a combined
+        # region is the new one less the old), so the controls inside stay
+        # Windows' own; the band's top under the title's line
+        frame = statements(alias("dccore.sw.dcxframe"))
+        self.assertEqual(frame[0], "dccore.dcx xdialog dccore.set -c $1 box $2 $3 $4 $5 rounded")
+        self.assertIn("dccore.dcx xdid dccore.set $1 -C +b $dccore.sw.s(face)", frame)
+        self.assertIn("dccore.dcx xdid dccore.set $1 -C +r $dccore.sw.s(line)", frame)
+        inside = [s for s in frame if " -R +p " in s]
         self.assertEqual(len(inside), 1)
-        self.assertEqual(inside[0].count("$dccore.sw.dcxpt("), 8)
-        self.assertLess(ring.index(inside[0]), ring.index("dccore.dcx xdid dccore.set $1 -R +ir $dccore.sw.dcxround"))
-        self.assertEqual(self.data["dcxround"], str(b.ROUND))
-        self.assertIn("$dccore.sw.dcxrect($dccore.sw.m(dcxround) 0 0 0)", alias("dccore.sw.dcxround"))
+        self.assertIn("$dccore.sw.dcxpt(3,%t) $dccore.sw.dcxpt(%r,%t) $dccore.sw.dcxpt(%r,%b) $dccore.sw.dcxpt(3,%b)", inside[0])
+        self.assertIn("%t = $calc($round($calc($gettok($dccore.sw.dcxrect(0 8 0 0),2,32) / 2),0) + 3)", frame[3])
+        whole = [s for s in frame if " -R +ip " in s]
+        self.assertEqual(len(whole), 1)
+        self.assertIn("$dccore.sw.dcxpt(0,0) $dccore.sw.dcxpt($4,0) $dccore.sw.dcxpt($4,$5) $dccore.sw.dcxpt(0,$5)", whole[0])
+        self.assertLess(frame.index(inside[0]), frame.index(whole[0]))
+        self.assertEqual(frame[-1], "if ($6 != $null) { dccore.dcx xdid dccore.set $1 -t $6- }")
+        self.assertNotIn("dcxround", self.data)
         # the body frame: the tab control's area under the tabs
         first, x, y, w, h = (int(n) for n in self.data["dcxbody"].split())
         self.assertEqual((first, x, y, w, h),
@@ -366,7 +372,7 @@ class TheMockupLayout(unittest.TestCase):
         self.assertTrue(b.BODY_DCX_FIRST + 1 <= b.DCX_PAGES_ID)
         # nothing of it in the native form, where the tabs still take the focus
         table = block("dialog dccore.set {", raw())
-        for key in ("dcxbody", "dcxtabs", "dcxline"):
+        for key in ("dcxbody", "dcxtabs", "dcxframe", "rounded"):
             self.assertNotIn(key, table)
         self.assertIn("if (!$dccore.sw.s(dcx)) { did -f dccore.set $calc(1000 + %g) }", alias("dccore.sw.goto"))
         stay = statements(alias("dccore.sw.stay"))
@@ -384,36 +390,33 @@ class TheMockupLayout(unittest.TestCase):
             tab_x, tab_w = (int(n) for n in self.data["tab.%d" % number].split())
             self.assertEqual(tab_x, x, group)
             self.assertGreaterEqual(tab_w * b.PX_PER_DBU, b.text_px(group) + 2 * b.TAB_PAD * b.PX_PER_DBU, group)
-            x += tab_w
-        self.assertLessEqual(x, b.TABS[0] + b.TABS[2])
+            x += tab_w + b.TAB_GAP
+        self.assertLessEqual(x - b.TAB_GAP, b.TABS[0] + b.TABS[2])
         self.assertLessEqual(first + stride * len(groups), b.BODY_DCX_FIRST)
-        self.assertEqual(stride, 3)
+        self.assertEqual(stride, 2)
+        # a tab is a rounded DCX box, its edge in the line colour, and a text
         make = alias("dccore.sw.dcxtabs")
-        self.assertIn("dccore.sw.dcxline %id 0 0 1 1", make)
-        self.assertIn("-c $calc(%id + 1) panel 0 0 1 1", make)
-        self.assertIn("-c $calc(%id + 2) text 0 0 1 1 nowrap center noprefix noformat", make)
-        self.assertIn("xdid dccore.set $calc(%id + 2) -t $dccore.sw.m(g. $+ %i)", make)
+        self.assertIn("-c %id box 0 0 1 1 rounded", make)
+        self.assertIn("xdid dccore.set %id -C +r $dccore.sw.s(line)", make)
+        self.assertIn("-c $calc(%id + 1) text 0 0 1 1 nowrap center noprefix noformat", make)
+        self.assertIn("xdid dccore.set $calc(%id + 1) -t $dccore.sw.m(g. $+ %i)", make)
         sel = alias("dccore.sw.dcxtabsel")
-        # the chosen tab reaches down over the line, the others end above it;
-        # a tab's right edge is the next one's left
+        # the chosen tab reaches down over the line, the others end above it
         self.assertIn("%h = $calc(%line - %y + %sel)", sel)
-        self.assertIn("%w = $calc($gettok(%r,3,32) - %x + 1)", sel)
-        self.assertIn("xdid dccore.set $calc(%id + 1) -C +b %face", sel)
+        self.assertIn("%w = $calc($gettok(%r,3,32) - %x)", sel)
         self.assertIn("%face = $iif(%sel,$dccore.sw.s(face),$dccore.sw.s(light))", sel)
-        # the top corners round: the outline and the face reach under the
-        # strip by the corners' size, their regions cut that part off
-        self.assertIn("xdid dccore.set %id -p %x %y %w $calc(%h + %R)", sel)
-        self.assertIn("dccore.sw.dcxtop %id %w %h %R %R", sel)
-        self.assertIn("dccore.sw.dcxtop $calc(%id + 1) $calc(%w - 2) $calc(%h - 1) %R $calc(%R - 2)", sel)
-        top = statements(alias("dccore.sw.dcxtop"))
-        self.assertTrue(top[0].endswith("$dccore.sw.dcxpt(0,$3) $dccore.sw.dcxpt($2,$3) $dccore.sw.dcxpt($2,$calc($3 + $4)) "
-                                        "$dccore.sw.dcxpt(0,$calc($3 + $4))"))
-        self.assertEqual(top[1], "dccore.dcx xdid dccore.set $1 -R +ir $5")
+        self.assertIn("xdid dccore.set %id -C +b %face", sel)
+        # the box reaches under the strip, past its bottom corners' curve,
+        # and its region cuts that off: round top corners, straight sides
+        self.assertIn("xdid dccore.set %id -p %x %y %w $calc(%h + 8)", sel)
+        self.assertIn("xdid dccore.set %id -R +p $dccore.sw.dcxpt(0,0) $dccore.sw.dcxpt(%w,0) $dccore.sw.dcxpt(%w,%h) "
+                      "$dccore.sw.dcxpt(0,%h)", sel)
         # the text a line of dialog text tall, in the middle of the tab: the
         # dll the script ships has no vcenter
         self.assertIn("%th = $gettok($dccore.sw.dcxrect(0 8 0 0),2,32)", sel)
-        self.assertIn("xdid dccore.set $calc(%id + 2) -p $calc(%x + 1) $calc(%y + 1 + $int($calc((%h - 1 - %th) / 2))) "
-                      "$calc(%w - 2) %th", sel)
+        self.assertIn("xdid dccore.set $calc(%id + 1) -p $calc(%x + 2) $calc(%y + 1 + $int($calc((%h - 1 - %th) / 2))) "
+                      "$calc(%w - 4) %th", sel)
+        self.assertIn("xdid dccore.set $calc(%id + 1) -C +b %face", sel)
         self.assertNotIn("vcenter", code())
         self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.dcxpages %pages | dccore.sw.dcxtabsel }", alias("dccore.sw.tab"))
         # a click on a tab, its outline or its text, goes through dccore.sw.go
@@ -429,12 +432,11 @@ class TheMockupLayout(unittest.TestCase):
             f = self.data["fr.%d" % cid].split()
             self.assertEqual(int(f[0]), expect, cid)
             expect += b.FRAME_DCX_STRIDE
-            self.assertEqual([int(n) for n in f[1:5]], [x, y + b.LINE_DROP, w, h - b.LINE_DROP], cid)
-            tx, ty, tw, th = (int(n) for n in f[5:9])
-            self.assertEqual((tx, ty, th), (x + b.TITLE_X, y, b.TITLE_H), cid)
-            self.assertGreaterEqual(tw * b.PX_PER_DBU, b.text_px(title) + 2 * b.TITLE_PAD * b.PX_PER_DBU, cid)
-            self.assertLessEqual(tx + tw, x + w - b.TITLE_X, cid)
-            self.assertEqual(" ".join(f[9:]), title, cid)
+            # over the native box's rectangle, with its title; the title fits
+            # where the DCX box puts it, TITLE_SPACING_PX in from the edge
+            self.assertEqual([int(n) for n in f[1:5]], [x, y, w, h], cid)
+            self.assertEqual(" ".join(f[5:]), title, cid)
+            self.assertLessEqual(2 * b.TITLE_SPACING_PX + b.text_px(title), w * b.PX_PER_DBU, cid)
         self.assertLessEqual(expect, b.TAB_DCX_FIRST)
         for page in self.pages:
             ids = [c[2] for c in boxes if self.page_of(c[2]) == page]
@@ -445,13 +447,9 @@ class TheMockupLayout(unittest.TestCase):
             first, last = (int(n) for n in self.data["p.%d.fr" % page].split("-"))
             self.assertEqual(first, int(self.data["fr.%d" % ids[0]].split()[0]))
             self.assertEqual(last, int(self.data["fr.%d" % ids[-1]].split()[0]) + b.FRAME_DCX_STRIDE - 1)
-        frames = alias("dccore.sw.dcxframes")
-        self.assertIn("%title = $calc(%base + 1)", frames)
-        self.assertIn("dccore.sw.dcxring %base $dccore.sw.dcxrect($gettok(%f,2-5,32))", frames)
-        self.assertIn("-c %title text $dccore.sw.dcxrect($gettok(%f,6-9,32)) nowrap center noprefix noformat", frames)
-        self.assertIn("-C +b $dccore.sw.s(face)", frames)
-        self.assertIn("-t $gettok(%f,10-,32)", frames)
-        self.assertIn("xdid dccore.set $+(%base,-,%title) -h", frames)
+        frames = statements(alias("dccore.sw.dcxframes"))
+        self.assertIn("dccore.sw.dcxframe $gettok(%f,1,32) $dccore.sw.dcxrect($gettok(%f,2-5,32)) $gettok(%f,6-,32)", frames)
+        self.assertIn("dccore.dcx xdid dccore.set $gettok(%f,1,32) -h", frames)
         show = statements(alias("dccore.sw.showpage"))
         self.assertIn("if (%bx != $null) { did -h dccore.set %bx | dccore.dcx xdid dccore.set "
                       "$dccore.sw.m(p. $+ $1 $+ .fr) $iif($2 == -v,-s,-h) }", show)

@@ -2373,7 +2373,7 @@ alias dccore.sw.dcx {
   ; the body frame under the tabs, every page's frames, then the tab strip
   ; - after the frame, since the chosen tab stands on its top line
   var %b = $dccore.sw.m(dcxbody)
-  dccore.sw.dcxring $gettok(%b,1,32) $dccore.sw.dcxrect($gettok(%b,2-5,32))
+  dccore.sw.dcxframe $gettok(%b,1,32) $dccore.sw.dcxrect($gettok(%b,2-5,32))
   %i = 1
   while (%i <= $dccore.sw.m(pages)) { dccore.sw.dcxframes %i | inc %i }
   dccore.sw.dcxtabs
@@ -2390,84 +2390,69 @@ alias dccore.sw.dcx {
   %i = 1
   while (%i <= $numtok(%lvs,32)) { dccore.sw.lv.make $gettok(%lvs,%i,32) | inc %i }
 }
-; $1 a DCX id, $2- a rectangle in pixels: a panel there in the line colour
-alias dccore.sw.dcxline {
-  dccore.dcx xdialog dccore.set -c $1 panel $2 $3 $4 $5
-  dccore.dcx xdid dccore.set $1 -C +b $dccore.sw.s(line)
-}
-; $1 a DCX id, $2- a rectangle in pixels: a panel there in the line colour,
-; shaped by its window region - so nothing else of it is drawn or clicked -
-; as a ring a pixel wide with rounded corners: first the inside, an octagon
-; a pixel in with its corners cut to follow the curve, then the rounded
-; rectangle less that (a region combined is the new one less the old)
-alias dccore.sw.dcxring {
-  dccore.sw.dcxline $1 $2 $3 $4 $5
-  var %k = $dccore.sw.dcxcut, %r = $calc($4 - 1), %b = $calc($5 - 1)
-  dccore.dcx xdid dccore.set $1 -R +p $dccore.sw.dcxpt($calc(1 + %k),1) $dccore.sw.dcxpt($calc(%r - %k),1) $dccore.sw.dcxpt(%r,$calc(1 + %k)) $dccore.sw.dcxpt(%r,$calc(%b - %k)) $dccore.sw.dcxpt($calc(%r - %k),%b) $dccore.sw.dcxpt($calc(1 + %k),%b) $dccore.sw.dcxpt(1,$calc(%b - %k)) $dccore.sw.dcxpt(1,$calc(1 + %k))
-  dccore.dcx xdid dccore.set $1 -R +ir $dccore.sw.dcxround
+; $1 a DCX id, $2-5 a rectangle in pixels, $6- a title or none: a DCX box
+; there with the "rounded" style, which draws a rounded rectangle a pixel
+; wide in the line colour (GDI's FrameRgn, so the curve holds together - a
+; ring cut from a region did not) with the title over its top line, as
+; Windows draws a group box. By its window region it exists only as a band
+; three pixels wide along its edge, so nothing of it is drawn or clicked
+; inside and the controls there stay Windows' own: the band's top reaches
+; under the title's line, half a line of dialog text down, where the box
+; draws it. A region combined is the new one less the old: the inside first,
+; then the whole rectangle less that
+alias dccore.sw.dcxframe {
+  dccore.dcx xdialog dccore.set -c $1 box $2 $3 $4 $5 rounded
+  dccore.dcx xdid dccore.set $1 -C +b $dccore.sw.s(face)
+  dccore.dcx xdid dccore.set $1 -C +r $dccore.sw.s(line)
+  var %t = $calc($round($calc($gettok($dccore.sw.dcxrect(0 8 0 0),2,32) / 2),0) + 3), %r = $calc($4 - 3), %b = $calc($5 - 3)
+  dccore.dcx xdid dccore.set $1 -R +p $dccore.sw.dcxpt(3,%t) $dccore.sw.dcxpt(%r,%t) $dccore.sw.dcxpt(%r,%b) $dccore.sw.dcxpt(3,%b)
+  dccore.dcx xdid dccore.set $1 -R +ip $dccore.sw.dcxpt(0,0) $dccore.sw.dcxpt($4,0) $dccore.sw.dcxpt($4,$5) $dccore.sw.dcxpt(0,$5)
+  if ($6 != $null) { dccore.dcx xdid dccore.set $1 -t $6- }
 }
 alias dccore.sw.dcxpt { return $+($1,$chr(44),$2) }
-; the corners' roundness in pixels (the diameter of their curve), and how
-; much a ring's inside is cut at a corner to follow it
-alias dccore.sw.dcxround { return $gettok($dccore.sw.dcxrect($dccore.sw.m(dcxround) 0 0 0),1,32) }
-alias dccore.sw.dcxcut { return $round($calc(0.586 * ($dccore.sw.dcxround / 2 - 1)),0) }
-; $1 a DCX id, $2 its width, $3 the height shown, $4 how far it reaches
-; under that, $5 the corners' roundness: the region a rounded rectangle less
-; its part under $3, so only the top corners are round
-alias dccore.sw.dcxtop {
-  dccore.dcx xdid dccore.set $1 -R +p $dccore.sw.dcxpt(0,$3) $dccore.sw.dcxpt($2,$3) $dccore.sw.dcxpt($2,$calc($3 + $4)) $dccore.sw.dcxpt(0,$calc($3 + $4))
-  dccore.dcx xdid dccore.set $1 -R +ir $5
-}
-; $1 a page: each of its frames drawn - the ring, and over its top line the
-; title on the window's face - hidden until the page is shown, when the
-; native box under it is hidden instead (dccore.sw.showpage)
+; $1 a page: each of its frames drawn over its native box - hidden until the
+; page is shown, when the native box is hidden instead (dccore.sw.showpage)
 alias dccore.sw.dcxframes {
   var %bx = $dccore.sw.m(p. $+ $1 $+ .bx), %i = 1
   while (%i <= $numtok(%bx,44)) {
-    var %f = $dccore.sw.m(fr. $+ $gettok(%bx,%i,44)), %base = $gettok(%f,1,32), %title = $calc(%base + 1)
-    dccore.sw.dcxring %base $dccore.sw.dcxrect($gettok(%f,2-5,32))
-    dccore.dcx xdialog dccore.set -c %title text $dccore.sw.dcxrect($gettok(%f,6-9,32)) nowrap center noprefix noformat
-    dccore.dcx xdid dccore.set %title -C +b $dccore.sw.s(face)
-    dccore.dcx xdid dccore.set %title -t $gettok(%f,10-,32)
-    dccore.dcx xdid dccore.set $+(%base,-,%title) -h
+    var %f = $dccore.sw.m(fr. $+ $gettok(%bx,%i,44))
+    dccore.sw.dcxframe $gettok(%f,1,32) $dccore.sw.dcxrect($gettok(%f,2-5,32)) $gettok(%f,6-,32)
+    dccore.dcx xdid dccore.set $gettok(%f,1,32) -h
     inc %i
   }
 }
-; the tab strip: for each tab an outline panel in the line colour, a panel
-; on the face inside it and a text with the tab's name - laid out by
-; dccore.sw.dcxtabsel
+; the tab strip: for each tab a rounded DCX box, its edge in the line colour,
+; and a text with the tab's name over it - laid out by dccore.sw.dcxtabsel
 alias dccore.sw.dcxtabs {
   var %t = $dccore.sw.m(dcxtabs), %i = 1
   while (%i <= $dccore.sw.m(groups)) {
     var %id = $calc($gettok(%t,1,32) + $gettok(%t,2,32) * (%i - 1))
-    dccore.sw.dcxline %id 0 0 1 1
-    dccore.dcx xdialog dccore.set -c $calc(%id + 1) panel 0 0 1 1
-    dccore.dcx xdialog dccore.set -c $calc(%id + 2) text 0 0 1 1 nowrap center noprefix noformat
-    dccore.dcx xdid dccore.set $calc(%id + 2) -t $dccore.sw.m(g. $+ %i)
+    dccore.dcx xdialog dccore.set -c %id box 0 0 1 1 rounded
+    dccore.dcx xdid dccore.set %id -C +r $dccore.sw.s(line)
+    dccore.dcx xdialog dccore.set -c $calc(%id + 1) text 0 0 1 1 nowrap center noprefix noformat
+    dccore.dcx xdid dccore.set $calc(%id + 1) -t $dccore.sw.m(g. $+ %i)
     inc %i
   }
 }
 ; the tabs laid out for the tab chosen: that one from the strip's top down
 ; onto the body frame's top line, on the window's face, so the two join; the
-; others a little lower, ending above the line, on the lighter face. Side by
-; side, a tab's right edge the next one's left. The top corners round: the
-; outline and the face reach under the strip by the corners' size, and their
-; regions cut that part off (dccore.sw.dcxtop). The text a line of dialog
-; text tall, in the middle - the dll has no vcenter
+; others a little lower, ending above the line, on the lighter face. Each box
+; reaches eight pixels under the strip, past its bottom corners' curve, and
+; its window region cuts that off: the top corners round, the sides straight
+; down, no bottom edge. The text a line of dialog text tall, in the middle -
+; the dll has no vcenter
 alias dccore.sw.dcxtabsel {
   var %t = $dccore.sw.m(dcxtabs), %first = $gettok(%t,1,32), %stride = $gettok(%t,2,32), %top = $gettok(%t,3,32), %lift = $gettok(%t,5,32)
-  var %line = $gettok($dccore.sw.dcxrect($gettok($dccore.sw.m(dcxbody),2-5,32)),2,32), %R = $dccore.sw.dcxround, %th = $gettok($dccore.sw.dcxrect(0 8 0 0),2,32), %i = 1
+  var %line = $gettok($dccore.sw.dcxrect($gettok($dccore.sw.m(dcxbody),2-5,32)),2,32), %th = $gettok($dccore.sw.dcxrect(0 8 0 0),2,32), %i = 1
   while (%i <= $dccore.sw.m(groups)) {
     var %id = $calc(%first + %stride * (%i - 1)), %tab = $dccore.sw.m(tab. $+ %i), %sel = $iif(%i == $dccore.sw.s(tab),1,0)
     var %r = $dccore.sw.dcxrect($gettok(%tab,1,32) $calc(%top + $iif(%sel,0,%lift)) $calc($gettok(%tab,1,32) + $gettok(%tab,2,32)) 1)
-    var %x = $gettok(%r,1,32), %y = $gettok(%r,2,32), %w = $calc($gettok(%r,3,32) - %x + 1), %h = $calc(%line - %y + %sel), %face = $iif(%sel,$dccore.sw.s(face),$dccore.sw.s(light))
-    dccore.dcx xdid dccore.set %id -p %x %y %w $calc(%h + %R)
-    dccore.sw.dcxtop %id %w %h %R %R
-    dccore.dcx xdid dccore.set $calc(%id + 1) -p $calc(%x + 1) $calc(%y + 1) $calc(%w - 2) $calc(%h - 1 + %R)
-    dccore.sw.dcxtop $calc(%id + 1) $calc(%w - 2) $calc(%h - 1) %R $calc(%R - 2)
+    var %x = $gettok(%r,1,32), %y = $gettok(%r,2,32), %w = $calc($gettok(%r,3,32) - %x), %h = $calc(%line - %y + %sel), %face = $iif(%sel,$dccore.sw.s(face),$dccore.sw.s(light))
+    dccore.dcx xdid dccore.set %id -p %x %y %w $calc(%h + 8)
+    dccore.dcx xdid dccore.set %id -R +p $dccore.sw.dcxpt(0,0) $dccore.sw.dcxpt(%w,0) $dccore.sw.dcxpt(%w,%h) $dccore.sw.dcxpt(0,%h)
+    dccore.dcx xdid dccore.set %id -C +b %face
+    dccore.dcx xdid dccore.set $calc(%id + 1) -p $calc(%x + 2) $calc(%y + 1 + $int($calc((%h - 1 - %th) / 2))) $calc(%w - 4) %th
     dccore.dcx xdid dccore.set $calc(%id + 1) -C +b %face
-    dccore.dcx xdid dccore.set $calc(%id + 2) -p $calc(%x + 1) $calc(%y + 1 + $int($calc((%h - 1 - %th) / 2))) $calc(%w - 2) %th
-    dccore.dcx xdid dccore.set $calc(%id + 2) -C +b %face
     inc %i
   }
 }
@@ -4666,9 +4651,8 @@ alias dccore.sw.data {
   hadd dccore.swm size 488 364
   hadd dccore.swm dcxpages 900 10 24 88 286
   hadd dccore.swm dcxtitle 901 110 26 370 10
-  hadd dccore.swm dcxtabs 800 3 2 14 2
+  hadd dccore.swm dcxtabs 800 2 2 14 2
   hadd dccore.swm dcxbody 830 4 16 480 324
-  hadd dccore.swm dcxround 5
   hadd dccore.swm lvs 1520 1540 1580 1595
   hadd dccore.swm g.1 General
   hadd dccore.swm g.1.pages 1 2 3 4 5 6
@@ -4684,78 +4668,78 @@ alias dccore.sw.data {
   hadd dccore.swm g.6.pages 22 23
   hadd dccore.swm g.7 Script
   hadd dccore.swm g.7.pages 24 25 26 27
-  hadd dccore.swm tab.1 9 35
+  hadd dccore.swm tab.1 8 35
   hadd dccore.swm tab.2 44 34
-  hadd dccore.swm tab.3 78 45
-  hadd dccore.swm tab.4 123 36
-  hadd dccore.swm tab.5 159 79
-  hadd dccore.swm tab.6 238 42
-  hadd dccore.swm tab.7 280 28
-  hadd dccore.swm fr.1100 100 110 42 370 102 116 38 40 9 Connection
-  hadd dccore.swm fr.1101 102 110 152 370 56 116 148 48 9 Reconnection
-  hadd dccore.swm fr.1102 104 110 216 370 87 116 212 41 9 On connect
-  hadd dccore.swm fr.1104 106 110 57 370 43 116 53 118 9 Open when mIRC starts (minimised)
-  hadd dccore.swm fr.1105 108 110 108 370 21 116 104 40 9 Connection
-  hadd dccore.swm fr.1106 110 110 137 370 32 116 133 58 9 Sharing & search
-  hadd dccore.swm fr.1107 112 110 177 370 43 116 173 80 9 Messaging & dashboard
-  hadd dccore.swm fr.1108 114 110 228 370 21 116 224 31 9 Updates
-  hadd dccore.swm fr.1109 116 110 42 370 52 116 38 54 9 Admin channels
-  hadd dccore.swm fr.1111 118 110 102 370 209 116 98 58 9 Serving channels
-  hadd dccore.swm fr.1113 120 110 42 370 33 116 38 24 9 Admin
-  hadd dccore.swm fr.1114 122 110 42 370 53 116 38 78 9 What the channel sees
-  hadd dccore.swm fr.1115 124 110 103 370 98 116 99 112 9 Custom override - surface colours
-  hadd dccore.swm fr.1117 126 110 209 370 79 116 205 102 9 Custom override - text colours
-  hadd dccore.swm fr.1118 128 110 42 370 33 116 38 26 9 Advert
-  hadd dccore.swm fr.1119 130 110 83 370 56 116 79 60 9 Broadcast search
-  hadd dccore.swm fr.1120 132 110 147 370 56 116 143 24 9 Timing
-  hadd dccore.swm fr.1122 134 110 73 370 95 116 69 18 9 Lists
-  hadd dccore.swm fr.1124 136 110 65 370 225 116 61 58 9 Channel bindings
-  hadd dccore.swm fr.1125 138 110 42 181 110 116 38 26 9 Library
-  hadd dccore.swm fr.1126 140 110 160 181 75 116 156 44 9 Film & series
-  hadd dccore.swm fr.1127 142 299 42 181 129 305 38 42 9 !rar packing
-  hadd dccore.swm fr.1128 144 299 179 181 67 305 175 40 9 List banner
-  hadd dccore.swm fr.1129 146 110 42 370 79 116 38 60 9 Automatic rebuild
-  hadd dccore.swm fr.1130 148 110 129 370 79 116 125 45 9 Performance
-  hadd dccore.swm fr.1131 150 110 42 370 56 116 38 72 9 Buffers & packet size
-  hadd dccore.swm fr.1132 152 110 106 370 102 116 102 58 9 Ports & reliability
-  hadd dccore.swm fr.1133 154 110 42 370 79 116 38 30 9 Sending
-  hadd dccore.swm fr.1134 156 110 129 370 86 116 125 52 9 Search (@find)
-  hadd dccore.swm fr.1136 158 110 223 370 55 116 219 54 9 During a rebuild
-  hadd dccore.swm fr.1137 160 110 42 370 90 116 38 37 9 Auto-grab
-  hadd dccore.swm fr.1138 162 110 140 370 44 116 136 46 9 Discover lists
-  hadd dccore.swm fr.1139 164 110 42 181 98 116 38 54 9 Slots & re-fetch
-  hadd dccore.swm fr.1140 166 110 148 181 157 116 144 33 9 Timeouts
-  hadd dccore.swm fr.1141 168 299 42 181 110 305 38 34 9 Size limits
-  hadd dccore.swm fr.1142 170 299 160 181 56 305 156 27 9 History
-  hadd dccore.swm fr.1143 172 110 42 370 102 116 38 44 9 Fetch queue
-  hadd dccore.swm fr.1144 174 110 152 370 33 116 148 45 9 List requests
-  hadd dccore.swm fr.1145 176 110 42 370 102 116 38 56 9 Flood protection
-  hadd dccore.swm fr.1146 178 110 42 370 117 116 38 68 9 Temporary (by nick)
-  hadd dccore.swm fr.1148 180 110 167 370 125 116 163 112 9 Permanent (by hostmask pattern)
-  hadd dccore.swm fr.1150 182 110 42 370 79 116 38 38 9 Auto-reply
-  hadd dccore.swm fr.1151 184 110 129 370 56 116 125 34 9 Rate limit
-  hadd dccore.swm fr.1152 186 110 42 370 56 116 38 26 9 Access
-  hadd dccore.swm fr.1153 188 110 106 370 32 116 102 36 9 Behaviour
-  hadd dccore.swm fr.1154 190 110 42 370 79 116 38 26 9 Server
-  hadd dccore.swm fr.1155 192 110 129 370 55 116 125 64 9 Console & browser
-  hadd dccore.swm fr.1156 194 110 42 370 65 116 38 84 9 What shows in @DCCore
-  hadd dccore.swm fr.1157 196 110 115 370 21 116 111 52 9 Debug channel
-  hadd dccore.swm fr.1158 198 110 42 370 43 116 38 25 9 Debug
-  hadd dccore.swm fr.1159 200 110 93 370 102 116 89 29 9 Logging
-  hadd dccore.swm fr.1160 202 110 203 370 56 116 199 61 9 Window & project
-  hadd dccore.swm fr.1161 204 110 42 181 86 116 38 47 9 Library & lists
-  hadd dccore.swm fr.1162 206 110 136 181 34 116 132 30 9 Security
-  hadd dccore.swm fr.1163 208 110 178 181 46 116 174 44 9 Stats & bots
-  hadd dccore.swm fr.1164 210 110 232 181 42 116 228 52 9 Search & audio
-  hadd dccore.swm fr.1165 212 299 42 181 54 305 38 46 9 Fetch history
-  hadd dccore.swm fr.1166 214 299 104 181 54 305 100 32 9 List build
-  hadd dccore.swm fr.1167 216 299 166 181 102 305 162 72 9 Console & messaging
-  hadd dccore.swm fr.1168 218 110 42 370 129 116 38 62 9 Show in @DCCore
-  hadd dccore.swm fr.1169 220 110 179 370 118 116 175 28 9 Colours
-  hadd dccore.swm fr.1171 222 110 42 370 95 116 38 30 9 Window
-  hadd dccore.swm fr.1172 224 110 145 370 48 116 141 56 9 Settings window
-  hadd dccore.swm fr.1174 226 110 42 370 74 116 38 15 9 Bot
-  hadd dccore.swm fr.1176 228 110 42 370 32 116 38 72 9 DCCore Chat (public)
+  hadd dccore.swm tab.3 79 45
+  hadd dccore.swm tab.4 125 36
+  hadd dccore.swm tab.5 162 79
+  hadd dccore.swm tab.6 242 42
+  hadd dccore.swm tab.7 285 28
+  hadd dccore.swm fr.1100 100 110 38 370 106 Connection
+  hadd dccore.swm fr.1101 101 110 148 370 60 Reconnection
+  hadd dccore.swm fr.1102 102 110 212 370 91 On connect
+  hadd dccore.swm fr.1104 103 110 53 370 47 Open when mIRC starts (minimised)
+  hadd dccore.swm fr.1105 104 110 104 370 25 Connection
+  hadd dccore.swm fr.1106 105 110 133 370 36 Sharing & search
+  hadd dccore.swm fr.1107 106 110 173 370 47 Messaging & dashboard
+  hadd dccore.swm fr.1108 107 110 224 370 25 Updates
+  hadd dccore.swm fr.1109 108 110 38 370 56 Admin channels
+  hadd dccore.swm fr.1111 109 110 98 370 213 Serving channels
+  hadd dccore.swm fr.1113 110 110 38 370 37 Admin
+  hadd dccore.swm fr.1114 111 110 38 370 57 What the channel sees
+  hadd dccore.swm fr.1115 112 110 99 370 102 Custom override - surface colours
+  hadd dccore.swm fr.1117 113 110 205 370 83 Custom override - text colours
+  hadd dccore.swm fr.1118 114 110 38 370 37 Advert
+  hadd dccore.swm fr.1119 115 110 79 370 60 Broadcast search
+  hadd dccore.swm fr.1120 116 110 143 370 60 Timing
+  hadd dccore.swm fr.1122 117 110 69 370 99 Lists
+  hadd dccore.swm fr.1124 118 110 61 370 229 Channel bindings
+  hadd dccore.swm fr.1125 119 110 38 181 114 Library
+  hadd dccore.swm fr.1126 120 110 156 181 79 Film & series
+  hadd dccore.swm fr.1127 121 299 38 181 133 !rar packing
+  hadd dccore.swm fr.1128 122 299 175 181 71 List banner
+  hadd dccore.swm fr.1129 123 110 38 370 83 Automatic rebuild
+  hadd dccore.swm fr.1130 124 110 125 370 83 Performance
+  hadd dccore.swm fr.1131 125 110 38 370 60 Buffers & packet size
+  hadd dccore.swm fr.1132 126 110 102 370 106 Ports & reliability
+  hadd dccore.swm fr.1133 127 110 38 370 83 Sending
+  hadd dccore.swm fr.1134 128 110 125 370 90 Search (@find)
+  hadd dccore.swm fr.1136 129 110 219 370 59 During a rebuild
+  hadd dccore.swm fr.1137 130 110 38 370 94 Auto-grab
+  hadd dccore.swm fr.1138 131 110 136 370 48 Discover lists
+  hadd dccore.swm fr.1139 132 110 38 181 102 Slots & re-fetch
+  hadd dccore.swm fr.1140 133 110 144 181 161 Timeouts
+  hadd dccore.swm fr.1141 134 299 38 181 114 Size limits
+  hadd dccore.swm fr.1142 135 299 156 181 60 History
+  hadd dccore.swm fr.1143 136 110 38 370 106 Fetch queue
+  hadd dccore.swm fr.1144 137 110 148 370 37 List requests
+  hadd dccore.swm fr.1145 138 110 38 370 106 Flood protection
+  hadd dccore.swm fr.1146 139 110 38 370 121 Temporary (by nick)
+  hadd dccore.swm fr.1148 140 110 163 370 129 Permanent (by hostmask pattern)
+  hadd dccore.swm fr.1150 141 110 38 370 83 Auto-reply
+  hadd dccore.swm fr.1151 142 110 125 370 60 Rate limit
+  hadd dccore.swm fr.1152 143 110 38 370 60 Access
+  hadd dccore.swm fr.1153 144 110 102 370 36 Behaviour
+  hadd dccore.swm fr.1154 145 110 38 370 83 Server
+  hadd dccore.swm fr.1155 146 110 125 370 59 Console & browser
+  hadd dccore.swm fr.1156 147 110 38 370 69 What shows in @DCCore
+  hadd dccore.swm fr.1157 148 110 111 370 25 Debug channel
+  hadd dccore.swm fr.1158 149 110 38 370 47 Debug
+  hadd dccore.swm fr.1159 150 110 89 370 106 Logging
+  hadd dccore.swm fr.1160 151 110 199 370 60 Window & project
+  hadd dccore.swm fr.1161 152 110 38 181 90 Library & lists
+  hadd dccore.swm fr.1162 153 110 132 181 38 Security
+  hadd dccore.swm fr.1163 154 110 174 181 50 Stats & bots
+  hadd dccore.swm fr.1164 155 110 228 181 46 Search & audio
+  hadd dccore.swm fr.1165 156 299 38 181 58 Fetch history
+  hadd dccore.swm fr.1166 157 299 100 181 58 List build
+  hadd dccore.swm fr.1167 158 299 162 181 106 Console & messaging
+  hadd dccore.swm fr.1168 159 110 38 370 133 Show in @DCCore
+  hadd dccore.swm fr.1169 160 110 175 370 122 Colours
+  hadd dccore.swm fr.1171 161 110 38 370 99 Window
+  hadd dccore.swm fr.1172 162 110 141 370 52 Settings window
+  hadd dccore.swm fr.1174 163 110 38 370 78 Bot
+  hadd dccore.swm fr.1176 164 110 38 370 36 DCCore Chat (public)
   hadd dccore.swm lv.1520 910 116 135 250 168
   hadd dccore.swm lvc.1520 0 Channel
   hadd dccore.swm lvx.1520 noheader
@@ -4771,7 +4755,7 @@ alias dccore.sw.data {
   hadd dccore.swm p.1.n 1
   hadd dccore.swm p.1.1 1100,2000,2001,2004,2005,2008,2009,2012,2013,1101,2016,2017,2020,2021,1102,1500,1501,1502,1503,1506,1505
   hadd dccore.swm p.1.bx 1100,1101,1102
-  hadd dccore.swm p.1.fr 100-105
+  hadd dccore.swm p.1.fr 100-102
   hadd dccore.swm p.1.w onconnect
   hadd dccore.swm p.1.ask onconnect
   hadd dccore.swm p.2 General Settings
@@ -4779,41 +4763,41 @@ alias dccore.sw.data {
   hadd dccore.swm p.2.n 1
   hadd dccore.swm p.2.1 1103,1104,2025,2029,2033,1105,2037,1106,2041,2045,1107,2049,2053,2057,1108,2061
   hadd dccore.swm p.2.bx 1104,1105,1106,1107,1108
-  hadd dccore.swm p.2.fr 106-115
+  hadd dccore.swm p.2.fr 103-107
   hadd dccore.swm p.3 Channels
   hadd dccore.swm p.3.layout roomy 1
   hadd dccore.swm p.3.n 1
   hadd dccore.swm p.3.1 1109,1110,2064,2065,1111,1112,1520,1521,1522,1523
   hadd dccore.swm p.3.lv 1520
   hadd dccore.swm p.3.bx 1109,1111
-  hadd dccore.swm p.3.fr 116-119
+  hadd dccore.swm p.3.fr 108-109
   hadd dccore.swm p.3.w channels
   hadd dccore.swm p.4 Operator
   hadd dccore.swm p.4.layout roomy 1
   hadd dccore.swm p.4.n 1
   hadd dccore.swm p.4.1 1113,2068,2069
   hadd dccore.swm p.4.bx 1113
-  hadd dccore.swm p.4.fr 120-121
+  hadd dccore.swm p.4.fr 110-110
   hadd dccore.swm p.5 Appearance
   hadd dccore.swm p.5.layout roomy 1
   hadd dccore.swm p.5.n 1
   hadd dccore.swm p.5.1 1114,2072,2073,1610,1611,1115,1116,2076,2077,2078,2080,2081,2082,2084,2085,2086,1117,2088,2089,2090,2092,2093,2094,2096,2097,2098
   hadd dccore.swm p.5.bx 1114,1115,1117
-  hadd dccore.swm p.5.fr 122-127
+  hadd dccore.swm p.5.fr 111-113
   hadd dccore.swm p.5.w preview
   hadd dccore.swm p.6 Advertising
   hadd dccore.swm p.6.layout roomy 1
   hadd dccore.swm p.6.n 1
   hadd dccore.swm p.6.1 1118,2100,2101,1119,2104,2105,2108,2109,1120,2112,2113,2116,2117
   hadd dccore.swm p.6.bx 1118,1119,1120
-  hadd dccore.swm p.6.fr 128-133
+  hadd dccore.swm p.6.fr 114-116
   hadd dccore.swm p.7 Lists
   hadd dccore.swm p.7.layout roomy 1
   hadd dccore.swm p.7.n 1
   hadd dccore.swm p.7.1 1121,1122,1540,1551,1554,1555,1557
   hadd dccore.swm p.7.lv 1540
   hadd dccore.swm p.7.bx 1122
-  hadd dccore.swm p.7.fr 134-135
+  hadd dccore.swm p.7.fr 117-117
   hadd dccore.swm p.7.w srvlists
   hadd dccore.swm p.7.ask served
   hadd dccore.swm p.8 Channel bindings
@@ -4822,7 +4806,7 @@ alias dccore.sw.data {
   hadd dccore.swm p.8.1 1123,1124,1700,1701,1702,1703,1704,1705,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747
   hadd dccore.swm p.8.2 1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1567,1568
   hadd dccore.swm p.8.bx 1124
-  hadd dccore.swm p.8.fr 136-137
+  hadd dccore.swm p.8.fr 118-118
   hadd dccore.swm p.8.w srvchans srvsaveb
   hadd dccore.swm p.8.ask served
   hadd dccore.swm p.9 List settings
@@ -4830,56 +4814,56 @@ alias dccore.sw.data {
   hadd dccore.swm p.9.n 1
   hadd dccore.swm p.9.1 1125,2120,2121,2122,2124,2125,2128,2129,2132,2133,1126,2137,2140,2141,2144,2145,1127,2149,2152,2153,2156,2157,2158,2160,2161,2164,2165,1128,2168,2169,2170,2172,2173,2177
   hadd dccore.swm p.9.bx 1125,1126,1127,1128
-  hadd dccore.swm p.9.fr 138-145
+  hadd dccore.swm p.9.fr 119-122
   hadd dccore.swm p.10 Rebuild
   hadd dccore.swm p.10.layout roomy 1
   hadd dccore.swm p.10.n 1
   hadd dccore.swm p.10.1 1129,2180,2181,2184,2185,2188,2189,1130,2192,2193,2196,2197,2200,2201
   hadd dccore.swm p.10.bx 1129,1130
-  hadd dccore.swm p.10.fr 146-149
+  hadd dccore.swm p.10.fr 123-124
   hadd dccore.swm p.11 Transfers
   hadd dccore.swm p.11.layout roomy 1
   hadd dccore.swm p.11.n 1
   hadd dccore.swm p.11.1 1131,2204,2205,2208,2209,1132,2212,2213,2216,2217,2220,2221,2224,2225
   hadd dccore.swm p.11.bx 1131,1132
-  hadd dccore.swm p.11.fr 150-153
+  hadd dccore.swm p.11.fr 125-126
   hadd dccore.swm p.12 Search
   hadd dccore.swm p.12.layout roomy 1
   hadd dccore.swm p.12.n 1
   hadd dccore.swm p.12.1 1133,2228,2229,2232,2233,2236,2237,1134,1135,2240,2241,2245,2248,2249,1136,2253,2257,2260,2261
   hadd dccore.swm p.12.bx 1133,1134,1136
-  hadd dccore.swm p.12.fr 154-159
+  hadd dccore.swm p.12.fr 127-129
   hadd dccore.swm p.13 List discovery
   hadd dccore.swm p.13.layout roomy 1
   hadd dccore.swm p.13.n 1
   hadd dccore.swm p.13.1 1137,2265,2268,2269,2272,2273,2276,2277,1138,2281,2284,2285
   hadd dccore.swm p.13.bx 1137,1138
-  hadd dccore.swm p.13.fr 160-163
+  hadd dccore.swm p.13.fr 130-131
   hadd dccore.swm p.14 Fetch tuning
   hadd dccore.swm p.14.layout roomy 2
   hadd dccore.swm p.14.n 1
   hadd dccore.swm p.14.1 1139,2288,2289,2293,2296,2297,2300,2301,1140,2304,2305,2308,2309,2312,2313,2316,2317,2320,2321,1141,2324,2325,2328,2329,2332,2333,2336,2337,1142,2340,2341,2344,2345
   hadd dccore.swm p.14.bx 1139,1140,1141,1142
-  hadd dccore.swm p.14.fr 164-171
+  hadd dccore.swm p.14.fr 132-135
   hadd dccore.swm p.15 Queue
   hadd dccore.swm p.15.layout roomy 1
   hadd dccore.swm p.15.n 1
   hadd dccore.swm p.15.1 1143,2348,2349,2352,2353,2356,2357,2360,2361,1144,2364,2365
   hadd dccore.swm p.15.bx 1143,1144
-  hadd dccore.swm p.15.fr 172-175
+  hadd dccore.swm p.15.fr 136-137
   hadd dccore.swm p.16 Anti-flood
   hadd dccore.swm p.16.layout roomy 1
   hadd dccore.swm p.16.n 1
   hadd dccore.swm p.16.1 1145,2368,2369,2372,2373,2376,2377,2380,2381
   hadd dccore.swm p.16.bx 1145
-  hadd dccore.swm p.16.fr 176-177
+  hadd dccore.swm p.16.fr 138-138
   hadd dccore.swm p.17 Bans & ignores
   hadd dccore.swm p.17.layout roomy 1
   hadd dccore.swm p.17.n 1
   hadd dccore.swm p.17.1 1146,1147,1580,1583,1584,1585,1586,1587,1581,1582,1148,1149,1595,1597,1598,1596
   hadd dccore.swm p.17.lv 1580 1595
   hadd dccore.swm p.17.bx 1146,1148
-  hadd dccore.swm p.17.fr 178-181
+  hadd dccore.swm p.17.fr 139-140
   hadd dccore.swm p.17.w bantimed banperm
   hadd dccore.swm p.17.ask banlist
   hadd dccore.swm p.18 Private messages
@@ -4887,65 +4871,65 @@ alias dccore.sw.data {
   hadd dccore.swm p.18.n 1
   hadd dccore.swm p.18.1 1150,2384,2385,2388,2389,2392,2393,1151,2396,2397,2400,2401
   hadd dccore.swm p.18.bx 1150,1151
-  hadd dccore.swm p.18.fr 182-185
+  hadd dccore.swm p.18.fr 141-142
   hadd dccore.swm p.19 Admin console
   hadd dccore.swm p.19.layout roomy 1
   hadd dccore.swm p.19.n 1
   hadd dccore.swm p.19.1 1152,2404,2405,2408,2409,1153,2413,2417
   hadd dccore.swm p.19.bx 1152,1153
-  hadd dccore.swm p.19.fr 186-189
+  hadd dccore.swm p.19.fr 143-144
   hadd dccore.swm p.20 Web dashboard
   hadd dccore.swm p.20.layout roomy 1
   hadd dccore.swm p.20.n 1
   hadd dccore.swm p.20.1 1154,2420,2421,2424,2425,2428,2429,1155,2432,2433,2437,2441
   hadd dccore.swm p.20.bx 1154,1155
-  hadd dccore.swm p.20.fr 190-193
+  hadd dccore.swm p.20.fr 145-146
   hadd dccore.swm p.21 Console feed
   hadd dccore.swm p.21.layout roomy 1
   hadd dccore.swm p.21.n 1
   hadd dccore.swm p.21.1 1156,2445,2449,2453,2457,2461,1157,2465
   hadd dccore.swm p.21.bx 1156,1157
-  hadd dccore.swm p.21.fr 194-197
+  hadd dccore.swm p.21.fr 147-148
   hadd dccore.swm p.22 Debug & logging
   hadd dccore.swm p.22.layout roomy 1
   hadd dccore.swm p.22.n 1
   hadd dccore.swm p.22.1 1158,2469,2473,2477,1159,2480,2481,2484,2485,2486,2488,2489,2492,2493,1160,2496,2497,2500,2501
   hadd dccore.swm p.22.bx 1158,1159,1160
-  hadd dccore.swm p.22.fr 198-203
+  hadd dccore.swm p.22.fr 149-151
   hadd dccore.swm p.23 File locations
   hadd dccore.swm p.23.layout compact 2
   hadd dccore.swm p.23.n 2
   hadd dccore.swm p.23.1 1161,2504,2505,2506,2508,2509,2510,2512,2513,2514,2516,2517,2518,2520,2521,2522,1162,2524,2525,2526,2528,2529,2530,1163,2532,2533,2534,2536,2537,2538,2540,2541,2542,1164,2544,2545,2546,2548,2549,2550,1165,2552,2553,2554,2556,2557,2558,2560,2561,2562
   hadd dccore.swm p.23.2 1166,2564,2565,2566,2568,2569,2570,2572,2573,2574,1167,2576,2577,2578,2580,2581,2582,2584,2585,2586,2588,2589,2590,2592,2593,2594
   hadd dccore.swm p.23.bx 1161,1162,1163,1164,1165,1166,1167
-  hadd dccore.swm p.23.fr 204-217
+  hadd dccore.swm p.23.fr 152-158
   hadd dccore.swm p.24 @DCCore window
   hadd dccore.swm p.24.layout roomy 1
   hadd dccore.swm p.24.n 1
   hadd dccore.swm p.24.1 1168,1620,1621,1622,1623,1624,1625,1626,1627,1628,1629,1630,1631,1632,1633,1634,1635,1636,1637,1638,1169,1170,1660,1640,1661,1641,1662,1642,1663,1643,1664,1644,1665,1645
   hadd dccore.swm p.24.bx 1168,1169
-  hadd dccore.swm p.24.fr 218-221
+  hadd dccore.swm p.24.fr 159-160
   hadd dccore.swm p.24.w showin showcolours
   hadd dccore.swm p.25 Window
   hadd dccore.swm p.25.layout roomy 1
   hadd dccore.swm p.25.n 1
   hadd dccore.swm p.25.1 1171,2597,2601,2605,2609,1670,1671,1672,1673,1674,1675,1172,1173,2613
   hadd dccore.swm p.25.bx 1171,1172
-  hadd dccore.swm p.25.fr 222-225
+  hadd dccore.swm p.25.fr 161-162
   hadd dccore.swm p.25.w winlook
   hadd dccore.swm p.26 Connection
   hadd dccore.swm p.26.layout roomy 1
   hadd dccore.swm p.26.n 1
   hadd dccore.swm p.26.1 1174,1175,1680,1681,1682,1683,1684,1685
   hadd dccore.swm p.26.bx 1174
-  hadd dccore.swm p.26.fr 226-227
+  hadd dccore.swm p.26.fr 163-163
   hadd dccore.swm p.26.w botlink
   hadd dccore.swm p.27 Chat
   hadd dccore.swm p.27.layout roomy 1
   hadd dccore.swm p.27.n 1
   hadd dccore.swm p.27.1 1176,2617,2621
   hadd dccore.swm p.27.bx 1176
-  hadd dccore.swm p.27.fr 228-229
+  hadd dccore.swm p.27.fr 164-164
   hadd dccore.swm keys.n 10
   hadd dccore.swm keys.1 SERVER PORT NICKNAME ALT_NICKNAME REJOIN_ATTEMPTS ON_CONNECT_CHECK_MINUTES SEARCH_ENABLED ANNOUNCE_TRANSFERS PRIVATE_MESSAGES_ENABLED WEBUI_ENABLED CTCP_VERSION_REPLY CHECK_FOR_UPDATES DEBUG_CHANNEL CHANNEL ADMIN_NICK
   hadd dccore.swm keys.2 THEME CUSTOM_THEME_BORDER CUSTOM_THEME_SEPARATOR CUSTOM_THEME_TEXTBOX CUSTOM_THEME_VALUE CUSTOM_THEME_ALERT CUSTOM_THEME_ACCENT ANNOUNCE_INTERVAL BROADCAST_SEARCH_CHANNEL BROADCAST_SEARCH_COOLDOWN MSG_DELAY DEBUG_MSG_DELAY FILE_DIRECTORY LIST_BASE_NAME LIST_FORMAT
