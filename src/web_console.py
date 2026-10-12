@@ -162,6 +162,9 @@ class _WebConsoleSession:
     # then raised before showing it.
     structured = False
     draws_dlqueue = False
+    # `library` subscribes a structured session to its lines (#1359); this
+    # one is never structured, so it reads the prose and never asks a burst.
+    reads_library = False
     client = "web"
     # Behind the dashboard login, which is the admin password itself - so
     # unlocked, like a console that logged in with the password (#1264).
@@ -174,6 +177,9 @@ class _WebConsoleSession:
 
     def send(self, text=""):
         self.lines.append(str(text))
+
+    def request_status(self):
+        """No status burst here: a web request has no feed."""
 
 
 def build_console_command_result(command_text, remote_addr=None):

@@ -57,7 +57,7 @@ import runtime
 # tell a bot that has these commands from one that answers "Unknown command",
 # and a later change that moves a field bumps the number of the part it moves.
 CAPS = (("settings", 1), ("preview", 1), ("served", 1), ("folders", 1),
-        ("onconnect", 1), ("banlist", 1), ("unlock", 1))
+        ("onconnect", 1), ("banlist", 1), ("unlock", 1), ("library", 1))
 
 # Wrong `unlock` passwords a session gets before it is closed - the login's
 # own allowance (adminchat.MAX_PASSWORD_ATTEMPTS), for the same guessing.

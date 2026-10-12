@@ -975,7 +975,56 @@ def packing_lines(now=None):
             f"{_num(pack['total'])} {_num(pack['elapsed'])} {_clean(pack['name'])}"]
 
 
-def status_lines(now=None, fetching=False, rebuild=False, reading=False, packing=False):
+def library_figures():
+    """[(ServedList, files, bytes, size text, summary)] for every list served,
+    and (rows, lists, state) for the search index (#1359). A list whose
+    figures cannot be read is left out and the reason logged."""
+    import library
+    import list as list_mod
+    import list_index
+    served = []
+    for entry in library.lists():
+        try:
+            files, _date, size_text, raw = list_mod.get_file_count_date_size_and_raw_bytes(entry.name)
+            served.append((entry, files, raw, size_text, list_mod.read_library_summary(entry.name)))
+        except Exception as err:
+            print(f"[ADMINCHAT] The figures of the list {entry.name!r} are unavailable: {err}")
+    return served, list_index.held_totals(getattr(config, "fetched_bot_lists", None))
+
+
+def library_lines():
+    """The library's totals (#1359), for the control panel's start page:
+
+        DCCORE LIBRARY <files> <folders> <bytes> <rebuilt_epoch> <rebuild_secs> <primary> <list>
+                                       one per list served, in the operator's order
+        DCCORE SEARCHINDEX <rows> <lists> <state>
+
+    <files> and <bytes> are the figures the advert uses: the request lines
+    of the list and its film list, and the byte total its last rebuild
+    wrote. <folders>, <rebuilt_epoch> and <rebuild_secs> are what that
+    rebuild recorded, 0 for a list no rebuild since has published. <primary>
+    is 1 for the primary list, 0 for the others; the list's name is last, so
+    it may hold spaces. SEARCHINDEX is the dashboard's index of the lists
+    held from other bots: their rows and how many lists, and `ok`, `filling`
+    (not every held list is searchable yet) or `none` (no list is held).
+
+    Sent only to a session that asked with `library`, once: an older script
+    would print a line it has no handler for in its window."""
+    try:
+        served, (rows, held, state) = library_figures()
+    except Exception as err:
+        print(f"[ADMINCHAT] The library's totals are unavailable: {err}")
+        return []
+    lines = [f"DCCORE LIBRARY {_num(files)} {_num(summary['folders'])} {_num(raw)} "
+             f"{_num(summary['finished_at'])} {_num(summary['seconds'])} "
+             f"{1 if entry.primary else 0} {_clean(entry.name) or '?'}"
+             for entry, files, raw, _size, summary in served]
+    lines.append(f"DCCORE SEARCHINDEX {_num(rows)} {_num(held)} {_clean(state, token=True)}")
+    return lines
+
+
+def status_lines(now=None, fetching=False, rebuild=False, reading=False, packing=False,
+                 library=False):
     """The STATUS burst (#550, step 3): what the client's title bar and side
     panel are drawn from, read from what the daemon already holds.
 
@@ -983,6 +1032,7 @@ def status_lines(now=None, fetching=False, rebuild=False, reading=False, packing
                       <started_epoch> <failed> <searches>      (the last three: since the bot started)
         DCCORE SLOT <nick> <sent> <total> <bps> <name>          one per active transfer
         DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>    one per queued user, first 20
+        DCCORE LIBRARY ... / DCCORE SEARCHINDEX ...              see library_lines(), when asked for
 
     Today's figures are the ROLLED ones (db.load_advanced_stats_rolled), for
     the reason announce.py gives: the daemon rotates the day only when a
@@ -1056,6 +1106,8 @@ def status_lines(now=None, fetching=False, rebuild=False, reading=False, packing
         lines.extend(rebuild_lines(now, reading=reading))
     if packing:
         lines.extend(packing_lines(now))
+    if library:
+        lines.extend(library_lines())
     return lines
 
 
@@ -1116,6 +1168,7 @@ class Session:
         self.draws_downloads = False  # ... and the Downloads window's rows (#1022)
         self.draws_dlqueue = False    # ... and the Download queues window's rows (#1217)
         self.reads_peers = False      # ... and PEERS and CONSOLEFEED lines (#1045)
+        self.reads_library = False    # it sent `library`: LIBRARY lines in every burst (#1359)
         self.downloads_finished = 0   # > 0 while that window is open: how many finished rows it wants
         self._downloads_sent_at = 0.0
         self._downloads_last = None   # the last snapshot sent, to send only a change
@@ -1244,7 +1297,8 @@ class Session:
                     lines.extend(status_lines(fetching=self.draws_fetching,
                                               rebuild=self.draws_rebuild,
                                               reading=self.draws_audio,
-                                              packing=self.draws_packing))
+                                              packing=self.draws_packing,
+                                              library=self.reads_library))
                 except Exception as err:
                     print(f"[ADMINCHAT] Status burst failed: {err}")
 
@@ -1279,6 +1333,11 @@ class Session:
         self._rebuild_sent_at = now
         self._rebuild_shown = bool(lines)
         self.send(lines[0] if lines else "DCCORE REBUILD end")
+        if not lines and self.reads_library:
+            # The new totals in a burst of their own, computed off this
+            # thread as every burst is (#1359): the first count of a list
+            # just published reads the whole file.
+            self.request_status()
 
     def send_packing_progress(self):
         """A PACKING line between bursts while a folder pack runs, and one
@@ -1725,6 +1784,35 @@ def _cmd_packing(session, args):
         return
     session.send("Packing " + _pack_progress_text(pack)
                  + (" - being cancelled" if pack.get("cancelled") else ""))
+
+
+def _cmd_library(session, args):
+    """The library's totals (#1359). A structured session gets the LIBRARY
+    lines in a burst now and in every burst after it; a person reads them."""
+    if session.structured:
+        session.reads_library = True
+        session.request_status()
+        return
+    try:
+        served, (rows, held, state) = library_figures()
+    except Exception as err:
+        session.send(f"The library's totals are unavailable: {err}")
+        return
+    for entry, files, _raw, size_text, summary in served:
+        line = (f"{entry.name}{' (primary)' if entry.primary and len(served) > 1 else ''}: "
+                f"{files:,} files")
+        if summary["folders"]:
+            line += f" in {summary['folders']:,} folders"
+        line += f", {size_text}"
+        if summary["finished_at"]:
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(summary["finished_at"]))
+            line += f"; rebuilt {when}, in {format_uptime(summary['seconds'])}"
+        session.send(line + ".")
+    session.send({"none": "Search index: no list held from other bots.",
+                  "filling": f"Search index: {rows:,} rows from {held:,} held list(s), "
+                             f"still being filled.",
+                  }.get(state, f"Search index: {rows:,} rows from {held:,} held list(s), "
+                               f"up to date."))
 
 
 def _cmd_packcancel(session, args):
@@ -2583,6 +2671,7 @@ COMMANDS = {
     "slots":      (_cmd_slots,      "what is sending right now",         "slots"),
     "packing":    (_cmd_packing,    "the folder pack that is running",   "packing"),
     "packcancel": (_cmd_packcancel, "stop the folder pack that is running", "packcancel"),
+    "library":    (_cmd_library,    "files, folders, size and last rebuild of each list", "library"),
     "bans":       (_cmd_bans,       "permanent and timed bans",          "bans"),
     "uptime":     (_cmd_uptime,     "how long the daemon has run",       "uptime"),
     "version":    (_cmd_version,    "build and platform",                "version"),
