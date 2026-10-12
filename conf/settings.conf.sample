@@ -192,9 +192,9 @@
 # Pause searching and sharing for the whole rebuild, not only the swap
 #PAUSE_FOR_WHOLE_UPDATE = false
 
-# The folder with the files you share. Used only if you have not added folders
-# on the Library page - if you have, those are used instead and this is
-# ignored.
+# The folder the setup chose for the files you share. On the Settings page it
+# is the first of the folders under Your list; once you save those, this is no
+# longer used.
 #
 # None, not a real path - a shipped literal path would let a copy-paste
 # install silently inherit somebody else's actual music folder path. Unlike

@@ -110,7 +110,7 @@ On Windows that command is **`py configure.py`**. A python.org install gives you
 4. **Admin nick** - who may run `!ban`, `!rehash`, `!update`, `!clearqueue`.
 5. **Your services host**, optional - blank skips it. On a re-run the hosts already configured are shown; blank keeps them all, and typing one you already have changes nothing. Locks the admin console (and the in-channel admin commands, once this is set) to your account rather than just your nick, which anyone can take while you are offline; see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md#how-the-host-proves-your-login) for how to read it off `/whois`.
 6. **Admin console password**, typed twice and never shown; only its hash is written.
-7. **Music directory** - optional here (see below). A pasted or dragged path in quotes (Explorer's *Copy as path*) is fine; a full path to a folder that does not exist yet offers to create it, and anything that is not a full path is asked again.
+7. **Music directory** - optional here (see below). It becomes the first folder under *Settings > Your list*, where you add more. A pasted or dragged path in quotes (Explorer's *Copy as path*) is fine; a full path to a folder that does not exist yet offers to create it, and anything that is not a full path is asked again.
 8. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.
 
 Then two offers, either of which you can decline: **generate the file list now** (when a music directory was given; a first start does it anyway), and **import your OmenServe or KeepTrack totals** from mIRC's `vars.ini` (in mIRC's folder, or `scripts\vars.ini` on older installs) if you are coming from there. When both counted your sends you pick which totals to keep - they counted the same sends, so they are never added together. The answers are written to `settings.conf`, with the password hash (and nothing else) in `admin_config.py`.
@@ -138,7 +138,7 @@ The daemon refuses to start until `NICKNAME`, `CHANNEL` and `ADMIN_NICK` have va
 Three things are deliberately *not* required:
 
 - **`SERVER`** and **`DEBUG_CHANNEL`** — their shipped values are already right for almost every install, so requiring them would only make you retype something correct. `DEBUG_CHANNEL` ships blank, and blank means no debug channel is joined.
-- **`FILE_DIRECTORY`** — requiring it would block the daemon from reaching the dashboard, which is the easiest place to set it. A blank one warns, at the pre-flight check and again at boot, and the bot serves nothing until it has one.
+- **`FILE_DIRECTORY`** — requiring it would block the daemon from reaching the dashboard, which is the easiest place to set it: add your folders under *Settings > Your list*. A blank one warns, at the pre-flight check and again at boot, and the bot serves nothing until it has one.
 
 ### Values that are refused
 
