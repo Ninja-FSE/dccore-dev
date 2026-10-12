@@ -421,7 +421,7 @@ class TheScript(unittest.TestCase):
 
     def test_the_options_dialog_keeps_the_finished_rows(self):
         self.assertIn("hadd dccore dlfinished", self.text)
-        self.assertIn("did -ra dccore.opt 310 $dccore.dl.rows", self.text)
+        self.assertIn("did -ra dccore.set 1675 $dccore.dl.rows", self.text)
 
     def test_the_fetch_feed_goes_to_the_downloads_window_and_no_longer_to_the_main_one(self):
         handler = self.text[self.text.index("if (%type == FETCH) {"):]

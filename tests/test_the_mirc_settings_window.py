@@ -98,7 +98,7 @@ def untext(text):
 
 
 CONTROL = re.compile(
-    r'^\s+(check|text|button|box|edit|combo|list|tab|radio) (?:"([^"]*)", )?(\d+)(?:, (\d+) (\d+) (\d+) (\d+))?(?:, (.*))?$',
+    r'^\s+(check|text|button|box|edit|combo|list|tab|radio|scroll) (?:"([^"]*)", )?(\d+)(?:, (\d+) (\d+) (\d+) (\d+))?(?:, (.*))?$',
     re.M)
 
 
@@ -129,7 +129,7 @@ def slot_ids():
     return set(range(1020, 1020 + int(generated_data()["slots"])))
 
 
-GLOBAL_IDS = set(range(1001, 1007)) | {1012, 1013, 1014, 1015, 1016, 1017, 1018} | slot_ids()
+GLOBAL_IDS = set(range(1001, 1008)) | {1012, 1013, 1014, 1015, 1016, 1017, 1018} | slot_ids()
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +407,14 @@ class ApplyIsOneTransaction(unittest.TestCase):
         ok_at = done.index("if ($1 == ok) {")
         error_at = done.index("if ($1 == error) {", ok_at)
         ok = done[ok_at:error_at]
-        self.assertIn("if ($dccore.sw.s(close)) { dccore.sys Settings: %said | dialog -x dccore.set | return }", ok)
+        # through maybeclose: the lists or the on-connect commands may still
+        # be saving (Apply sends them too, as transactions of their own)
+        self.assertIn("if ($dccore.sw.s(close)) { dccore.sys Settings: %said | dccore.sw.maybeclose | return }", ok)
+        self.assertEqual(statements(alias("dccore.sw.maybeclose")),
+                         ["if (!$dccore.sw.s(close)) { return }",
+                          "if ($dccore.sw.s(saving.srv)) || ($dccore.sw.s(saving.oc)) || "
+                          "($istok(apply confirm aborting,$dccore.sw.s(phase),32)) { return }",
+                          "dialog -x dccore.set"])
         error = done[error_at:]
         self.assertNotIn("dialog -x", error)
         self.assertIn("hdel dccore.sws close", error)
@@ -417,7 +424,7 @@ class ApplyIsOneTransaction(unittest.TestCase):
     def test_the_confirm_question_is_asked_from_a_timer_and_answered(self):
         self.assertIn(".timerdccoreSwAsk -m 1 0 dccore.sw.confirm", alias("dccore.sw.done"))
         confirm = alias("dccore.sw.confirm")
-        self.assertIn("if ($input(%q,yq,DCCore - Settings)) {", confirm)
+        self.assertIn("if ($input(%q,yq,DCCore - Control Panel)) {", confirm)
         self.assertIn("dccore.send setcommit confirm", confirm)
         self.assertIn("dccore.send setabort", confirm)
 
@@ -523,21 +530,23 @@ class TheDialog(unittest.TestCase):
         the init handler writes in (t.<id>) in place of their empty strings."""
         rows = []
         for kind, label, cid, _x, _y, w, h, _s in self.controls:
-            if kind not in ("check", "text", "button", "tab"):
+            if kind not in ("check", "text", "button", "tab", "box"):
                 continue
             if "t.%d" % cid in self.data:
                 label = untext(self.data["t.%d" % cid]).replace("&&", "&")
             rows.append((kind, label, cid, w, h))
         return rows
 
-    def test_the_size_is_about_the_mockups(self):
-        self.assertLessEqual(self.size[0], 420)
-        self.assertLessEqual(self.size[1], 300)
+    def test_the_size_is_the_mockups(self):
+        # 488 x 364 dialog units: the mockup's proportions at a size that
+        # fits a 1080p screen, with room for the frames, the labels above
+        # their fields and the page's name under the tabs (#1288, phase 3)
+        self.assertEqual(self.size, (488, 364))
 
     def test_ids_are_unique_and_clear_of_the_other_dialogs(self):
         ids = [c[2] for c in self.controls]
         self.assertEqual(len(ids), len(set(ids)))
-        others = {c[2] for c in dialog("dccore.opt")} | {c[2] for c in dialog("dccore.dq")}
+        others = {c[2] for c in dialog("dccore.dq")}
         self.assertEqual(set(ids) & others, set())
         self.assertGreater(min(ids), 1000)
 
@@ -565,9 +574,9 @@ class TheDialog(unittest.TestCase):
             if kind == "check":
                 if text_px(text) + CHECK_BOX_PX > available:
                     clipped.append("%d %r (check)" % (cid, text))
-            elif kind == "button":
+            elif kind in ("button", "box"):
                 if text_px(text) + 8 > available:
-                    clipped.append("%d %r (button)" % (cid, text))
+                    clipped.append("%d %r (%s)" % (cid, text, kind))
             elif wrapped_lines(text, w) * 8 > h:
                 clipped.append("%d %r needs %d lines in %d dbu" % (cid, text, wrapped_lines(text, w), h))
         self.assertEqual(clipped, [])
@@ -600,14 +609,33 @@ class TheDialog(unittest.TestCase):
                 for b in ids[n + 1:]:
                     A, B = box(a), box(b)
                     overlap = A[0] < B[2] and B[0] < A[2] and A[1] < B[3] and B[1] < A[3]
+                    frames = [c for c in (a, b) if where[c][0] == "box"]
+                    if len(frames) == 1:
+                        # a frame holds its section's controls: each is inside
+                        # it whole, or clear of it - never across its edge
+                        F, C = (A, B) if frames[0] == a else (B, A)
+                        inside = F[0] <= C[0] and C[2] <= F[2] and F[1] <= C[1] and C[3] <= F[3]
+                        self.assertTrue(inside or not overlap, "page %d: %d straddles the frame %d"
+                                        % (page, b if frames[0] == a else a, frames[0]))
+                        continue
                     self.assertFalse(overlap, "page %d: %d and %d overlap" % (page, a, b))
 
-    def test_the_tabs_are_a_strip_above_the_pages(self):
+    def test_the_tab_control_frames_the_body(self):
+        """Its page border runs under every tab and round the body: a strip
+        of tabs only had Windows draw that border cut off (#1288)."""
+        import build_settings_window as generator
         tabs = [c for c in self.controls if c[0] == "tab"]
         self.assertEqual([t[1] for t in tabs], ["General", "Sharing", "Downloads", "Security",
-                                                "Dashboard & Console", "Advanced"])
-        top = min(c[4] for c in self.controls if c[0] != "tab")
-        self.assertLessEqual(tabs[0][4] + tabs[0][6], top)
+                                                "Dashboard & Console", "Advanced", "mIRC"])
+        _kind, _label, _cid, tx, ty, tw, th, _style = tabs[0]
+        body = [c for c in self.controls if c[0] not in ("tab", "button") and c[2] not in (1013, 1018)]
+        self.assertGreaterEqual(min(c[4] for c in body), ty + generator.TAB_HEADER_H)
+        self.assertLessEqual(max(c[4] + (12 if c[0] == "combo" else c[6]) for c in body), ty + th)
+        self.assertGreater(min(c[3] for c in body), tx)
+        self.assertLess(max(c[3] + c[5] for c in body), tx + tw)
+        # the connection and status lines and the buttons sit under it
+        self.assertGreater(min(c[4] for c in self.controls if c[0] == "button" and c[2] in (1014, 1015, 1016, 1017)),
+                           ty + th)
 
     def test_the_footer_has_apply_ok_and_cancel(self):
         buttons = {c[2]: c[1] for c in self.controls if c[0] == "button"}
@@ -623,7 +651,7 @@ class TheDialog(unittest.TestCase):
         table = {c[2] for c in self.controls}
         used = set(int(i) for i in re.findall(r"\bdccore\.set (1[0-9]{3})\b", handwritten()))
         used |= set(int(i) for i in re.findall(r"%id == (1[0-9]{3})\b", handwritten()))
-        self.assertGreater(len(used), 30)
+        self.assertGreater(len(used), 20)
         self.assertEqual(used - table, set())
 
 
@@ -641,33 +669,41 @@ class TheWindowsBehaviour(unittest.TestCase):
         for match in re.finditer(r"\$input\(([^%][^)]*)\)", handwritten()):
             self.assertEqual(match.group(1).count(","), 2, match.group(0))
 
-    def test_this_mirc_window_page_opens_the_old_options(self):
-        self.assertIn("if (%id == 1616) { dccore.options | return }", alias("dccore.sw.click"))
-        self.assertIn('"@DCCore window options..."', block("dialog dccore.set {"))
-        # /dccore options is still the old dialog
+    def test_dccore_options_opens_the_window_on_its_mirc_side(self):
+        # /dccore options: the same window, on this mIRC's own settings
+        self.assertEqual(statements(alias("dccore.options")), ["dccore.settings mirc"])
         self.assertIn("if (%cmd == options) { dccore.options | return }", alias("dccore"))
         self.assertIn("if (%cmd == settings) { dccore.settings | return }", alias("dccore"))
+        settings = alias("dccore.settings")
+        self.assertIn("hadd dccore.live sw.open $iif($1 == mirc,mirc,start)", settings)
+        # a window already open goes there: the mIRC side with DCX, the mIRC
+        # tab (the last group) in the native form
+        self.assertIn("if ($1 == mirc) { dccore.sw.go $iif($dccore.sw.s(dcx),side 2,tab $dccore.sw.m(groups)) }", settings)
+        self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.side $iif($hget(dccore.live,sw.open) == mirc,2,0) }",
+                      alias("dccore.sw.init"))
+        self.assertNotIn("dialog dccore.opt {", code())
 
     def test_the_local_switches_are_this_mircs(self):
         data = generated_data()
-        self.assertEqual(data["locals"].split(), ["start.main", "start.chat", "start.downloads", "auto", "nodcx"])
+        self.assertEqual(data["locals"].split(), ["start.main", "start.chat", "start.downloads", "auto", "panel",
+                                          "titlebar", "separate", "beep", "nodcx", "chat.all", "chat.popup"])
         save = alias("dccore.sw.savelocal")
         self.assertIn("if (%state != $dccore.opt(%o)) { hadd dccore %o %state | inc %n }", save)
         self.assertIn("if (%n) { dccore.save }", save)
 
     def test_every_menu_with_options_has_settings_next_to_it(self):
         text = code()
+        # one entry, the control panel, where the two settings entries were:
+        # the window holds both sides now
         menus = re.findall(r"\nmenu [^\n]+ \{\n(.*?)\n\}", text, re.S)
-        with_options = 0
+        with_panel = 0
         for menu in menus:
-            lines = [line.strip() for line in menu.split("\n")]
-            for n, line in enumerate(lines):
-                if line.lstrip(".").startswith("Options...:"):
-                    with_options += 1
-                    dots = line[:len(line) - len(line.lstrip("."))]
-                    self.assertEqual(lines[n + 1], dots + "Settings...:dccore.settings")
-        self.assertEqual(with_options, 3)
-        self.assertIn("\n  Bot Settings:dccore.settings\n", block("menu @DCCore {"))
+            lines = [line.strip().lstrip(".") for line in menu.split("\n")]
+            with_panel += lines.count("Control Panel...:dccore.settings")
+        self.assertEqual(with_panel, 3)
+        self.assertIn("\n  Control Panel:dccore.settings\n", block("menu @DCCore {"))
+        self.assertNotIn("Script Settings", text)
+        self.assertNotIn("Bot Settings", text)
 
     def test_the_preview_window_draws_the_decoded_lines(self):
         body = alias("dccore.sw.line")
@@ -780,7 +816,7 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
         self.assertIn("hdel dccore.sws srv.dirty", lines["unchanged"])
         self.assertNotIn("srv.dirty", lines["error"])
         self.assertIn("Your changes are still here", lines["error"])
-        self.assertIn("if ($dccore.sw.s(srv.dirty)) { return Lists & channels }", alias("dccore.sw.unsaved"))
+        self.assertIn("if ($dccore.sw.s(srv.dirty)) { return Lists and Channel bindings }", alias("dccore.sw.unsaved"))
 
     # 2. The operator's data is compared case-sensitively.
     def test_a_case_only_rename_is_a_change(self):
@@ -809,7 +845,7 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
     # 3. The confirm question's wait starts once it is answered.
     def test_the_confirm_wait_starts_after_the_answer(self):
         body = alias("dccore.sw.confirm")
-        asked = body.index("$input(%q,yq,DCCore - Settings)")
+        asked = body.index("$input(%q,yq,DCCore - Control Panel)")
         self.assertEqual(body.count("dccore.sw.wait settings"), 2)
         self.assertGreater(body.index("dccore.sw.wait settings"), asked)
         for send in ("dccore.send setcommit confirm", "dccore.send setabort"):
@@ -845,18 +881,19 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
         self.assertNotIn("$dccore.sw.enc(", save)
 
     def test_what_the_operator_types_is_encoded_straight_from_the_control(self):
-        """Every name or path typed into Lists & channels is stored as
-        enc() or tok() of $did(...).text - never via a /var or a command's
-        parameters first."""
+        """Every name, label or path typed into the list window is stored
+        as enc() or tok() of $did(...).text - never via a /var or a
+        command's parameters first."""
         stored = 0
-        for name in ("dccore.sw.srv.addlist", "dccore.sw.srv.newfolder", "dccore.sw.srv.change"):
+        for name in ("dccore.sw.srv.lok", "dccore.sw.srv.lclick"):
             for line in statements(alias(name)):
-                if ("hadd dccore.sws srv." in line or "dccore.sw.srv.addfolder " in line) and "$did(" in line:
+                if (("hadd dccore.sws srv." in line or "hadd dccore.swl f." in line or "dccore.sw.srv.lfolder " in line)
+                        and "$did(" in line):
                     stored += 1
-                    for use in re.findall(r"(\$\w[\w.]*)\(\$did\(dccore\.set,15(?:42|49)\)\.text\)", line):
+                    for use in re.findall(r"(\$\w[\w.]*)\(\$did\(dccore\.setl,(?:2|7|9)\)\.text\)", line):
                         self.assertIn(use, ("$dccore.sw.enc", "$dccore.sw.tok"), line)
-                    self.assertNotRegex(line, r"(?<!\()\$did\(dccore\.set,15(?:42|49)\)\.text(?!\))", line)
-        self.assertGreaterEqual(stored, 4)
+                    self.assertNotRegex(line, r"(?<!\()\$did\(dccore\.setl,(?:2|7|9)\)\.text(?!\))", line)
+        self.assertGreaterEqual(stored, 3)
 
     def test_an_untouched_on_connect_line_goes_back_byte_for_byte(self):
         fill = alias("dccore.sw.oc.fill")
@@ -926,7 +963,7 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
     def test_every_question_is_asked_from_a_timer(self):
         section = handwritten()
         asking = sorted(name for name in re.findall(r"\nalias (\S+) \{", section) if "$input(" in alias(name))
-        self.assertEqual(asking, ["dccore.sw.confirm", "dccore.sw.riskyask", "dccore.sw.unlockask"])
+        self.assertEqual(asking, ["dccore.sw.confirm", "dccore.sw.leaveask", "dccore.sw.riskyask", "dccore.sw.unlockask"])
         for name in asking:
             timers = re.findall(r"\.timerdccoreSw(?:Ask|Unlock) -m 1 0 %s\b" % re.escape(name), section)
             self.assertTrue(timers, name)
@@ -973,7 +1010,7 @@ class ThePageButtons(unittest.TestCase):
 
     def test_there_is_no_page_list_any_more(self):
         self.assertNotIn("1010", code())
-        self.assertFalse([c for c in self.controls if c[0] == "list" and c[3] < 94])
+        self.assertFalse([c for c in self.controls if c[0] == "list" and c[3] < 106])
 
     def test_one_button_per_slot_enough_for_the_busiest_tab(self):
         import settings_window_layout as layout
@@ -982,13 +1019,18 @@ class ThePageButtons(unittest.TestCase):
         self.assertEqual([c[2] for c in buttons], sorted(slot_ids()))
         self.assertEqual([c[7] for c in buttons], ["push group"] + ["push"] * (self.slots - 1))
         for kind, _label, cid, x, y, w, h, _style in buttons:
-            self.assertEqual((x, w), (4, 84), cid)
+            self.assertEqual((x, w), (10, 88), cid)
             self.assertGreaterEqual(h, 14, cid)
         tops = [c[4] for c in buttons]
         self.assertTrue(all(b - a >= buttons[0][6] for a, b in zip(tops, tops[1:])), tops)
+        # air between the column and the page: the title beside the column's
+        # edge looked squeezed against it
+        import build_settings_window as generator
+        self.assertGreaterEqual(generator.CONTENT_X - (generator.PAGE_SLOT_X + generator.PAGE_SLOT_W), 12)
+        self.assertGreater(generator.DCX_TITLE[1], generator.DCX_PAGES[1])
 
     def test_every_page_name_fits_its_button(self):
-        width = 84 * PX_PER_DBU
+        width = 88 * PX_PER_DBU
         for page in range(1, int(self.data["pages"]) + 1):
             name = untext(self.data["p.%d" % page])
             self.assertLessEqual(text_px(name) + 8, width, name)
@@ -1006,7 +1048,7 @@ class ThePageButtons(unittest.TestCase):
         self.assertIn("if (%id >= 1020) && (%id < $calc(1020 + $dccore.sw.m(slots))) {", click)
         self.assertIn("var %p = $gettok($dccore.sw.m(g. $+ $dccore.sw.s(tab) $+ .pages),$calc(%id - 1019),32)",
                       click)
-        self.assertIn("if (%p) { dccore.sw.page %p }", click)
+        self.assertIn("if (%p) { dccore.sw.go page %p }", click)
 
     def test_a_tab_names_its_buttons_and_hides_the_spare_ones(self):
         body = statements(alias("dccore.sw.tab"))

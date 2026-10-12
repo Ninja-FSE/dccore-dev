@@ -54,9 +54,11 @@ class TheWindowMenu(unittest.TestCase):
             self.assertRegex(self.menu, r"(dccore\.send|dccore\.ask|dccore\.confirm|dccore) " + command + r"\b", command)
 
     def test_the_slash_commands_are_all_there(self):
-        for command in ("pair", "unpair", "trust", "connect", "disconnect", "options", "panel", "font", "lists", "fetch"):
+        for command in ("pair", "unpair", "trust", "connect", "disconnect", "panel", "font", "lists", "fetch"):
             self.assertIn(command, self.menu, command)
-        self.assertIn("dccore.options", self.menu)
+        # /dccore options opens the control panel on its mIRC side: the panel
+        # is the menu's entry
+        self.assertIn("dccore.settings", self.menu)
         self.assertIn("clear @DCCore", self.menu)
 
     def test_every_dccore_command_the_script_implements_has_an_entry(self):
@@ -91,7 +93,7 @@ class TheWindowMenu(unittest.TestCase):
             self.assertRegex(self.menu, r"\b" + command + r"\b", f"{command} is in the console but not the menu")
 
     def test_the_settings_are_one_click_from_the_top(self):
-        self.assertIn("\n  Script Settings:dccore.options\n", self.menu)
+        self.assertIn("\n  Control Panel:dccore.settings\n", self.menu)
 
     def test_the_command_list_is_reachable(self):
         self.assertIn("Command list:dccore\n", self.menu)
