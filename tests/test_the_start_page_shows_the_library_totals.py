@@ -94,6 +94,15 @@ class TheLibraryFrame(unittest.TestCase):
         self.assertIn("return $dccore.num($gettok(%x,1,32)) rows from $gettok(%x,2,32) lists $+ $chr(44) "
                       "$iif($gettok(%x,3,32) == filling,still filling,up to date)", lib)
 
+    def test_a_library_size_is_said_in_terabytes(self):
+        """21111GB read as a number, not a size (the operator): a TB tier,
+        binary like the others, above the GB one."""
+        lines = statements(alias("dccore.bytes"))
+        tb = "if (%n >= 1099511627776) { return $+($dccore.round($calc(%n / 1099511627776)),TB) }"
+        gb = "if (%n >= 1073741824) { return $+($dccore.round($calc(%n / 1073741824)),GB) }"
+        self.assertIn(tb, lines)
+        self.assertLess(lines.index(tb), lines.index(gb))
+
     def test_the_lists_row_names_each_list_with_its_files_when_the_lines_are_there(self):
         lists = alias("dccore.sw.home.lists")
         # primary is the sixth field, the name the rest

@@ -1087,6 +1087,8 @@ alias dccore.nickpal {
 alias dccore.bytes {
   var %n = $1
   if (%n !isnum) { %n = 0 }
+  ; a library's size runs to terabytes (#1359): 21111GB read as a number, not a size
+  if (%n >= 1099511627776) { return $+($dccore.round($calc(%n / 1099511627776)),TB) }
   if (%n >= 1073741824) { return $+($dccore.round($calc(%n / 1073741824)),GB) }
   if (%n >= 1048576) { return $+($dccore.round($calc(%n / 1048576)),MB) }
   if (%n >= 1024) { return $+($dccore.round($calc(%n / 1024)),KB) }
