@@ -1612,6 +1612,32 @@ def _neutralise_banner(text, log=print):
     return "\n".join(safe).rstrip("\n")
 
 
+def _write_library_summary(list_name, *row_sets, started):
+    """The list's folder count, when it was published and how long the run
+    took (#1359), for the console's LIBRARY line - the rest of what the
+    control panel's start page shows is in the size files and the list.
+
+    A folder is a heading the list has, music and film together, as a user
+    browsing it sees them. Written after the swap like the size files, and
+    never a reason to fail a list that is already published: a start page
+    without the figure is all that is lost."""
+    import db
+    import list as list_mod
+    try:
+        folders = set()
+        for rows in row_sets:
+            folders.update(row[0] for row in rows)
+        finished = time.time()
+        db._atomic_write(list_mod.library_summary_path(list_name), json.dumps({
+            "folders": len(folders),
+            "finished_at": int(finished),
+            "seconds": max(0, int(round(finished - started))),
+        }))
+    except Exception as err:
+        print(f"[LIST-GEN] Could not write {list_mod.LIBRARY_SUMMARY_FILE} ({err}); the "
+              f"console's start page will not show this list's folders or rebuild time.")
+
+
 def generate_master_list(list_name=None, reading_jobs=None):
     """Scan one list's folders, clear its old files first, and build its lists.
 
@@ -2466,6 +2492,7 @@ def generate_master_list(list_name=None, reading_jobs=None):
         # caller the file count and the list date as well as the size.
         db._atomic_write(SIZE_FILE_PATH, formatted_size)
         db._atomic_write(RAWBYTES_FILE_PATH, str(total_bytes))
+        _write_library_summary(list_name, all_files_data, video_files_data, started=scan_start)
         # #213: the artifacts just published are named after the CURRENT
         # LIST_BASE_NAME, so this is the moment that fact becomes true. Written
         # here rather than only in the migration, so a rename between two

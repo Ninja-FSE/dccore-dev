@@ -12,6 +12,7 @@ import oserve
 import dcc
 import announce
 import hashlib
+import json
 import platform_compat
 import theme
 import unicodedata
@@ -95,6 +96,38 @@ def size_file_path(name=None):
 
 def rawbytes_file_path(name=None):
     return os.path.join(list_dir(name), config.LIST_RAWBYTES_FILE)
+
+
+# What a rebuild knew and the list files do not say (#1359): how many folders
+# it listed, when it published and how long it took. Beside the size files,
+# one per list, written at the same point they are. Not a setting: nothing
+# outside the bot reads it, and an operator has no reason to rename it.
+LIBRARY_SUMMARY_FILE = "dccore.library.json"
+
+
+def library_summary_path(name=None):
+    return os.path.join(list_dir(name), LIBRARY_SUMMARY_FILE)
+
+
+def read_library_summary(name=None):
+    """{"folders", "finished_at", "seconds"} from the last rebuild of the
+    list, each a whole number, 0 when unknown: before the first rebuild that
+    wrote one, or a file that cannot be read. A wrong figure on a start page
+    is not worth an exception, so nothing here raises."""
+    summary = {"folders": 0, "finished_at": 0, "seconds": 0}
+    try:
+        with open(platform_compat.long_path(library_summary_path(name)), encoding="utf-8") as handle:
+            stored = json.load(handle)
+    except (OSError, ValueError):
+        return summary
+    if not isinstance(stored, dict):
+        return summary
+    for key in summary:
+        try:
+            summary[key] = max(0, int(stored.get(key) or 0))
+        except (TypeError, ValueError):
+            pass
+    return summary
 
 # NOTE: a second, shadowing definition of find_latest_list() used to sit here. Python keeps
 # the LAST definition, so this one never ran - and the two had drifted: this one did not
