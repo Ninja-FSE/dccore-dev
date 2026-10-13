@@ -21,6 +21,11 @@
 ;    operators in the channels your bot is in, relayed by the bot - see
 ;    its section near the end of this file.
 ;
+;    And a dark theme and icons (#1368): /dccore theme dark gives the
+;    dialogs dark colours, and /dccore icons puts an icon on every menu
+;    item of this script and every page of the control panel - see "Theme
+;    and icons" below. dll\ beside this file holds the two DLLs it uses.
+;
 ;    When mIRC starts, @DCCore opens by itself, minimised, and says what it
 ;    is waiting for until the console connects; Chat and Downloads can do
 ;    the same - "Open when mIRC starts" in /dccore options (#1201).
@@ -62,6 +67,12 @@
 ;    bot has already turned control characters into spaces, and the only
 ;    characters above 127 this script draws are the middle dot and the
 ;    non-breaking space, which every Windows ANSI code page has.
+;
+;    The dark theme and the icons (#1368) are extras on top of that: the
+;    dark dialogs and the menu icons need dll\dccore_ui.dll (mIRC 7.45 or
+;    later, 32-bit; Windows 10 for the dark title bars), the control
+;    panel's page icons DCX as well. Without them the script works and
+;    looks exactly as it did.
 ;
 ;    A bot that answers `hello` - the DCCore this script ships with, or a
 ;    later one. An older bot answers "Unknown command" and the script drops to plain mode,
@@ -183,6 +194,10 @@ alias dccore.init {
   ; The settings window draws with DCX when it can (#1288); on forces the
   ; built-in window.
   dccore.default nodcx 0
+  ; The theme and the icons (#1368): auto follows mIRC's own dark mode;
+  ; icons puts them in the menus (drawn by DCX) and the control panel.
+  dccore.default theme auto
+  dccore.default icons 1
 }
 alias dccore.default { if ($hget(dccore,$1) == $null) { hadd dccore $1 $2- } }
 alias dccore.save { hsave -o dccore $dccore.ini }
@@ -192,6 +207,7 @@ alias dccore.forget { hdel dccore $1 | dccore.save }
 on *:START: {
   dccore.init
   dccore.atstart
+  dccore.theme.start
 }
 ; The windows ticked under "Open when mIRC starts" (#1201): each minimised,
 ; its button at the end of the switchbar, so they are there without taking
@@ -209,9 +225,11 @@ alias dccore.atstart {
 on *:LOAD: {
   dccore.init
   echo 14 -a DCCore window script $dccore.ver loaded. Type /dccore pair <botnick> to connect for the first time, /dccore for help.
+  dccore.theme.start
 }
 on *:UNLOAD: {
   dccore.timers.off
+  dccore.theme.stop
   if ($hget(dccore)) { dccore.save | hfree dccore }
   if ($hget(dccore.live)) { hfree dccore.live }
 }
@@ -276,6 +294,19 @@ alias dccore {
     else { dccore.dcx.status }
     return
   }
+  ; The theme and the icons (#1368): change, or say how they stand
+  if (%cmd == theme) {
+    if ($istok(auto dark light,$2,32)) { dccore.set theme $2 | dccore.theme.refresh }
+    elseif ($2 != $null) { dccore.sys Use: /dccore theme auto, dark or light. | return }
+    dccore.theme.status
+    return
+  }
+  if (%cmd == icons) {
+    if ($istok(on off,$2,32)) { dccore.set icons $iif($2 == on,1,0) | dccore.theme.refresh }
+    elseif ($2 != $null) { dccore.sys Use: /dccore icons on or off. | return }
+    dccore.theme.status
+    return
+  }
   if (%cmd == lists) { dccore.send lists | return }
   if (%cmd == fetch) { dccore.send fetch $2- | return }
   if (%cmd == window) { dccore.window | window -a $dccore.win | return }
@@ -316,6 +347,8 @@ alias dccore {
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore options $+ $str($dccore.nbsp,14) what to show, colours, panel, title bar, beep, windows at start
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore settings $+ $str($dccore.nbsp,13) the bot's settings, as its dashboard's Settings page has them
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore dcx [check] $+ $str($dccore.nbsp,9) whether the settings window can use DCX, and why not; check tests it here
+  echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore theme <mode> $+ $str($dccore.nbsp,9) auto, dark or light: the dialogs, and colours readable on dark
+  echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore icons on|off $+ $str($dccore.nbsp,9) icons in this script's menus and the control panel's page list
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore window $+ $str($dccore.nbsp,15) open or focus @DCCore
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore downloads $+ $str($dccore.nbsp,10) open the downloads window: coming in, waiting, finished
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore weburl [addr] $+ $str($dccore.nbsp,7) where the bot's dashboard is, for the window's menu
@@ -1031,7 +1064,7 @@ alias dccore.tag {
   var %t = $+($chr(91),$1,$chr(93))
   return $+($chr(2),$chr(3),$dccore.col($2),%t,$chr(15),$str($dccore.nbsp,$calc(10 - $len(%t))))
 }
-alias dccore.col { return $base($dccore.opt(col. $+ $1),10,10,2) }
+alias dccore.col { return $base($dccore.theme.legible($dccore.opt(col. $+ $1),win),10,10,2) }
 alias dccore.name { return $+($chr(3),$dccore.col(name),",$1-,",$chr(15)) }
 ; The nick, the channel and the search term of a feed line (#1259), each in
 ; its own colour from Options. Every line that names a nick or a channel
@@ -1045,7 +1078,7 @@ alias dccore.name { return $+($chr(3),$dccore.col(name),",$1-,",$chr(15)) }
 ; theirs: the rest of the line has no colour of its own to return to.
 alias dccore.paint {
   if ($1 !isnum 0-15) { return $2 }
-  return $+($chr(3),$base($1,10,10,2),$2,$chr(15))
+  return $+($chr(3),$base($dccore.theme.legible($1,win),10,10,2),$2,$chr(15))
 }
 alias dccore.nick {
   var %c = $dccore.opt(col.nick)
@@ -1076,6 +1109,8 @@ alias dccore.pernick {
 ; and written here: the test re-computes it from dccore.rgb.
 alias dccore.nickpal {
   var %bg = $dccore.opt(bg)
+  ; mIRC's dark mode (#1368) draws on black, whatever $color says
+  if (%bg !isnum 0-15) && ($dccore.theme.mircdark) { %bg = 1 }
   if (%bg !isnum 0-15) { %bg = $color(background) }
   if (%bg !isnum 0-15) { %bg = 0 }
   return $gettok(02 03 04 05 06 10 12 13 14/03 04 07 08 09 10 11 13 14 15/03 04 07 08 09 10 11 13 14 15/02 08 11/02 08 11/07 08 09 11 13 15/08 09 11 15/02 05 12/02 03 04 05 06 10 12 14/02 05 06 12/02 08/02 03 04 05 06 12 14/07 08 09 11 15/02 05/02 08 11/02 05 06 12,$calc(%bg + 1),47)
@@ -1230,7 +1265,7 @@ alias dccore.panel {
     dccore.relight %lit
     return
   }
-  var %head = $dccore.opt(col.head)
+  var %head = $dccore.lcol(head)
   var %used = $dccore.st(st.used), %slots = $dccore.st(st.slots)
   aline -l %head $dccore.win Sending %used $+ / $+ %slots
   var %i = 1
@@ -1238,7 +1273,7 @@ alias dccore.panel {
     var %l = $dccore.st(slot. $+ %i)
     ; <nick> <sent> <total> <bps> <name>
     var %pct = $iif($gettok(%l,3,32) > 0,$int($calc($gettok(%l,2,32) * 100 / $gettok(%l,3,32))),0)
-    aline -l $dccore.opt(col.sends) $dccore.win > $dccore.fit($gettok(%l,1,32),9) $dccore.rfit($dccore.bytes($gettok(%l,3,32)),7) $dccore.rfit(%pct $+ $chr(37),4) $dccore.rfit($dccore.speed($gettok(%l,4,32)),9)
+    aline -l $dccore.lcol(sends) $dccore.win > $dccore.fit($gettok(%l,1,32),9) $dccore.rfit($dccore.bytes($gettok(%l,3,32)),7) $dccore.rfit(%pct $+ $chr(37),4) $dccore.rfit($dccore.speed($gettok(%l,4,32)),9)
     inc %i
   }
   if (%used < %slots) { aline -l 14 $dccore.win $dccore.nbsp $+ $dccore.nbsp ( $+ $calc(%slots - %used) free) }
@@ -1254,7 +1289,7 @@ alias dccore.panel {
       var %l = $dccore.st(fetch. $+ %i)
       ; <bot> <received> <total> <bps> <name>
       var %pct = $iif($gettok(%l,3,32) > 0,$int($calc($gettok(%l,2,32) * 100 / $gettok(%l,3,32))),0)
-      aline -l $dccore.opt(col.sends) $dccore.win < $dccore.fit($gettok(%l,1,32),9) $dccore.rfit($dccore.bytes($gettok(%l,3,32)),7) $dccore.rfit(%pct $+ $chr(37),4) $dccore.rfit($dccore.speed($gettok(%l,4,32)),9)
+      aline -l $dccore.lcol(sends) $dccore.win < $dccore.fit($gettok(%l,1,32),9) $dccore.rfit($dccore.bytes($gettok(%l,3,32)),7) $dccore.rfit(%pct $+ $chr(37),4) $dccore.rfit($dccore.speed($gettok(%l,4,32)),9)
       inc %i
     }
     aline -l 14 $dccore.win $dccore.nbsp
@@ -1267,15 +1302,15 @@ alias dccore.panel {
     ; own from the Library menu - files read of files to read, and the rate.
     if ($istok(reading rewriting finding,$gettok(%r,1,32),32)) {
       aline -l %head $dccore.win Audio info
-      if ($gettok(%r,1,32) == rewriting) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp writing the list }
-      elseif ($gettok(%r,1,32) == finding) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp finding what to read }
-      elseif ($gettok(%r,4,32) > 0) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,2,32)) $+ / $+ $dccore.num($gettok(%r,3,32)) read $dccore.dot $dccore.num($gettok(%r,4,32)) $+ /s }
-      else { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,2,32)) $+ / $+ $dccore.num($gettok(%r,3,32)) read }
+      if ($gettok(%r,1,32) == rewriting) { aline -l $dccore.lcol(sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp writing the list }
+      elseif ($gettok(%r,1,32) == finding) { aline -l $dccore.lcol(sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp finding what to read }
+      elseif ($gettok(%r,4,32) > 0) { aline -l $dccore.lcol(sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,2,32)) $+ / $+ $dccore.num($gettok(%r,3,32)) read $dccore.dot $dccore.num($gettok(%r,4,32)) $+ /s }
+      else { aline -l $dccore.lcol(sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,2,32)) $+ / $+ $dccore.num($gettok(%r,3,32)) read }
     }
     else {
       aline -l %head $dccore.win Rebuilding $gettok(%r,1,32)
-      if ($gettok(%r,3,32) > 0) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp folder $gettok(%r,2,32) $+ / $+ $gettok(%r,3,32) $dccore.dot $dccore.num($gettok(%r,4,32)) files }
-      else { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,4,32)) files }
+      if ($gettok(%r,3,32) > 0) { aline -l $dccore.lcol(sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp folder $gettok(%r,2,32) $+ / $+ $gettok(%r,3,32) $dccore.dot $dccore.num($gettok(%r,4,32)) files }
+      else { aline -l $dccore.lcol(sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,4,32)) files }
     }
     if ($gettok(%r,5,32) > 0) { aline -l 14 $dccore.win $dccore.nbsp $+ $dccore.nbsp running $dccore.dur($gettok(%r,5,32)) }
     aline -l 14 $dccore.win $dccore.nbsp
@@ -1285,9 +1320,9 @@ alias dccore.panel {
   if ($dccore.st(packing) != $null) {
     var %pk = $dccore.st(packing)
     aline -l %head $dccore.win Packing
-    aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $gettok(%pk,5-,32)
-    if ($gettok(%pk,3,32) > 0) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp for $gettok(%pk,1,32) $dccore.dot $dccore.bytes($gettok(%pk,2,32)) of $dccore.bytes($gettok(%pk,3,32)) $dccore.dot $int($calc(100 * $gettok(%pk,2,32) / $gettok(%pk,3,32))) $+ $chr(37) }
-    else { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp for $gettok(%pk,1,32) $dccore.dot $dccore.bytes($gettok(%pk,2,32)) }
+    aline -l $dccore.lcol(sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $gettok(%pk,5-,32)
+    if ($gettok(%pk,3,32) > 0) { aline -l $dccore.lcol(sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp for $gettok(%pk,1,32) $dccore.dot $dccore.bytes($gettok(%pk,2,32)) of $dccore.bytes($gettok(%pk,3,32)) $dccore.dot $int($calc(100 * $gettok(%pk,2,32) / $gettok(%pk,3,32))) $+ $chr(37) }
+    else { aline -l $dccore.lcol(sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp for $gettok(%pk,1,32) $dccore.dot $dccore.bytes($gettok(%pk,2,32)) }
     if ($gettok(%pk,4,32) > 0) { aline -l 14 $dccore.win $dccore.nbsp $+ $dccore.nbsp running $dccore.dur($gettok(%pk,4,32)) }
     aline -l 14 $dccore.win $dccore.nbsp
   }
@@ -1297,7 +1332,7 @@ alias dccore.panel {
     var %l = $dccore.st(queue. $+ %i)
     ; <nick> <files> <frozen_secs_left>
     var %files = $gettok(%l,2,32)
-    if ($gettok(%l,3,32) > 0) { aline -l $dccore.opt(col.fail) $dccore.win $dccore.rfit(%i,2) $dccore.fit($gettok(%l,1,32),9) frozen $dccore.dur($gettok(%l,3,32)) }
+    if ($gettok(%l,3,32) > 0) { aline -l $dccore.lcol(fail) $dccore.win $dccore.rfit(%i,2) $dccore.fit($gettok(%l,1,32),9) frozen $dccore.dur($gettok(%l,3,32)) }
     else { aline -l $dccore.win $dccore.rfit(%i,2) $dccore.fit($gettok(%l,1,32),9) %files $iif(%files == 1,file,files) }
     inc %i
   }
@@ -1448,7 +1483,7 @@ alias dccore.dl.draw {
   var %w = $dccore.dl.win
   if ($dccore.st(mode) != structured) { aline -l 14 %w $iif($dccore.st(state) == in,(no downloads in plain mode),(not connected)) | return }
   if (!$dccore.st(dlend)) { aline -l 14 %w (asking the bot...) | return }
-  var %head = $dccore.opt(col.head)
+  var %head = $dccore.lcol(head)
   var %n = $calc($dccore.st(dln) - 1)
   var %nd = 0, %i = 1
   while (%i <= %n) {
@@ -1477,36 +1512,36 @@ alias dccore.dl.draw {
       else { dccore.dl.add %head - Failed $iif(%nx > $dccore.dl.rows,(last $dccore.dl.rows of %nx),( $+ %nx $+ )) }
     }
     ; a nick once, its downloads under it
-    if (%bot != %lastbot) { %lastbot = %bot | dccore.dl.add $dccore.opt(col.name) - %bot }
+    if (%bot != %lastbot) { %lastbot = %bot | dccore.dl.add $dccore.lcol(name) - %bot }
     if (%k == d) {
       var %got = $gettok(%l,5,32), %total = $gettok(%l,6,32)
       var %pct = $iif(%total > 0,$int($calc(%got * 100 / %total)),0)
-      dccore.dl.add $dccore.opt(col.sends) %map %ind $+ %name
+      dccore.dl.add $dccore.lcol(sends) %map %ind $+ %name
       dccore.dl.add 14 %map %ind $+ $dccore.dl.bar(%pct) $dccore.rfit($iif(%total > 0,%pct $+ $chr(37),?),4) $dccore.rfit($dccore.speed($gettok(%l,7,32)),9) $dccore.rfit($dccore.bytes($iif(%total > 0,%total,%got)),7)
     }
     elseif (%k == w) {
       dccore.dl.add 14 %map %ind $+ %name
-      dccore.dl.add $dccore.opt(col.queued) %map %ind $+ %note
+      dccore.dl.add $dccore.lcol(queued) %map %ind $+ %note
     }
     elseif (%k == c) {
-      dccore.dl.add $dccore.opt(col.sends) %map %ind $+ $dccore.fit(%name,44) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
+      dccore.dl.add $dccore.lcol(sends) %map %ind $+ $dccore.fit(%name,44) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
     }
     else {
-      dccore.dl.add $dccore.opt(col.fail) %map %ind $+ $dccore.fit(%name,44) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
-      dccore.dl.add $dccore.opt(col.fail) %map %ind $+ %note
+      dccore.dl.add $dccore.lcol(fail) %map %ind $+ $dccore.fit(%name,44) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
+      dccore.dl.add $dccore.lcol(fail) %map %ind $+ %note
     }
     inc %i
   }
 }
 
 menu @DCCore-Downloads {
-  $iif($gettok($dccore.dl.pick,1,58) == w,Cancel this request):dccore.dl.do dlcancel
-  $iif($gettok($dccore.dl.pick,2,58) == failed,Download again):dccore.dl.do dlagain
-  Clear the finished ones...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
+  $iif($gettok($dccore.dl.pick,1,58) == w,$dccore.mi(cancel) Cancel this request):dccore.dl.do dlcancel
+  $iif($gettok($dccore.dl.pick,2,58) == failed,$dccore.mi(again) Download again):dccore.dl.do dlagain
+  $dccore.mi(purge) Clear the finished ones...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
   -
-  Open the dashboard in the browser:dccore.dl.web
-  Control Panel...:dccore.settings
-  Close:window -c @DCCore-Downloads
+  $dccore.mi(dashboard) Open the dashboard in the browser:dccore.dl.web
+  $dccore.mi(settings) Control Panel...:dccore.settings
+  $dccore.mi(cancel) Close:window -c @DCCore-Downloads
 }
 
 ; ---------------------------------------------------------------------
@@ -1585,7 +1620,7 @@ dialog dccore.dq {
   button "Refresh", 5, 125 181 40 12
   button "Close", 6, 285 181 40 12, cancel
 }
-on *:dialog:dccore.dq:init:0: { dccore.dq.ask }
+on *:dialog:dccore.dq:init:0: { dccore.dq.ask | dccore.theme.dialog dccore.dq init }
 on *:dialog:dccore.dq:sclick:3: { dccore.dq.remove }
 on *:dialog:dccore.dq:sclick:4: {
   if ($dccore.st(dqcount) == 0) || (!$dccore.st(dqend)) { return }
@@ -1687,89 +1722,442 @@ alias dccore.askfont {
 
 ; Every /dccore command, and every console command worth a click, is here.
 menu @DCCore {
-  $iif($dccore.st(packing) != $null,Cancel the running pack...):dccore.packcancel
-  Control Panel:dccore.settings
-  Console command:dccore.askraw
+  $iif($dccore.st(packing) != $null,$dccore.mi(cancel) Cancel the running pack...):dccore.packcancel
+  $dccore.mi(settings) Control Panel:dccore.settings
+  $dccore.mi(console) Console command:dccore.askraw
   -
-  Info
-  .Status:dccore.send status
-  .Slots:dccore.send slots
-  .Queue:dccore.send queue
-  .Download queues...:dccore.queues
-  .Uptime:dccore.send uptime
-  .Version:dccore.send version
+  $dccore.mi(version) Info
+  .$dccore.mi(status) Status:dccore.send status
+  .$dccore.mi(slots) Slots:dccore.send slots
+  .$dccore.mi(queue) Queue:dccore.send queue
+  .$dccore.mi(dlqueue) Download queues...:dccore.queues
+  .$dccore.mi(uptime) Uptime:dccore.send uptime
+  .$dccore.mi(version) Version:dccore.send version
   .-
-  .Command list:dccore
-  Lists
-  .Show the lists:dccore lists
-  .Fetch the changed lists:dccore fetch
-  .Ask a bot for its list...:dccore.ask fetch Ask which bot for its list
-  .Purge every held list...:if ($input(Forget every held bot list? Each rebuilds on its own - a changed advert or your next fetch - with its channel resolved fresh. Nothing of yours is touched.,yq,DCCore)) { dccore.send purgealllists confirm }
-  Library
-  .Find duplicate filenames:dccore.send verify
-  .Rebuild the list...:dccore.confirm update Rebuild the list? It walks the whole library and can take minutes.
-  .Read audio info:dccore.send audioinfo
-  User control
-  .Bans:dccore.send bans
-  .Ban...:dccore.ask ban Ban pattern (for example *!*@host.example)
-  .Unban...:dccore.ask unban Pattern to remove
-  .Clear a queue...:dccore.ask clearqueue Clear the queue of which nick
-  .Ignore a nick...:dccore.ask ignore Which nick and for how many minutes - for example someone 30
-  .Stop ignoring a nick...:dccore.ask unignore Stop ignoring which nick
-  .Move in the queue...:dccore.ask queuemove Nick then up or down - or nick then file number then up or down
-  .Remove one queued file...:dccore.ask queueremove Nick then the file number from Queue of the nick
-  Control
-  .Check for a new version:dccore.send checkversion
-  .Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
-  .Console feed $iif($dccore.st(consolefeed) == on,off,on):dccore.send consolefeed $iif($dccore.st(consolefeed) == on,off,on)
+  .$dccore.mi(help) Command list:dccore
+  $dccore.mi(lists) Lists
+  .$dccore.mi(lists) Show the lists:dccore lists
+  .$dccore.mi(fetch) Fetch the changed lists:dccore fetch
+  .$dccore.mi(ask) Ask a bot for its list...:dccore.ask fetch Ask which bot for its list
+  .$dccore.mi(purge) Purge every held list...:if ($input(Forget every held bot list? Each rebuilds on its own - a changed advert or your next fetch - with its channel resolved fresh. Nothing of yours is touched.,yq,DCCore)) { dccore.send purgealllists confirm }
+  $dccore.mi(library) Library
+  .$dccore.mi(search) Find duplicate filenames:dccore.send verify
+  .$dccore.mi(rebuild) Rebuild the list...:dccore.confirm update Rebuild the list? It walks the whole library and can take minutes.
+  .$dccore.mi(audio) Read audio info:dccore.send audioinfo
+  $dccore.mi(user) User control
+  .$dccore.mi(ban) Bans:dccore.send bans
+  .$dccore.mi(ban) Ban...:dccore.ask ban Ban pattern (for example *!*@host.example)
+  .$dccore.mi(unban) Unban...:dccore.ask unban Pattern to remove
+  .$dccore.mi(clear) Clear a queue...:dccore.ask clearqueue Clear the queue of which nick
+  .$dccore.mi(ignore) Ignore a nick...:dccore.ask ignore Which nick and for how many minutes - for example someone 30
+  .$dccore.mi(unban) Stop ignoring a nick...:dccore.ask unignore Stop ignoring which nick
+  .$dccore.mi(moveup) Move in the queue...:dccore.ask queuemove Nick then up or down - or nick then file number then up or down
+  .$dccore.mi(clear) Remove one queued file...:dccore.ask queueremove Nick then the file number from Queue of the nick
+  $dccore.mi(rehash) Control
+  .$dccore.mi(update) Check for a new version:dccore.send checkversion
+  .$dccore.mi(update) Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
+  .$dccore.mi(console) Console feed $iif($dccore.st(consolefeed) == on,off,on):dccore.send consolefeed $iif($dccore.st(consolefeed) == on,off,on)
   .-
-  .Reload the bot (rehash)...:dccore.confirm rehash Reload the bot's code and settings?
-  .Stop the bot...:if ($input(Stop the bot? It leaves IRC and ends; start it again with start-dccore.,yq,DCCore)) { dccore.send shutdown now }
+  .$dccore.mi(rehash) Reload the bot (rehash)...:dccore.confirm rehash Reload the bot's code and settings?
+  .$dccore.mi(stop) Stop the bot...:if ($input(Stop the bot? It leaves IRC and ends; start it again with start-dccore.,yq,DCCore)) { dccore.send shutdown now }
   -
-  $iif($dccore.selq,Queue of $dccore.selq):dccore.send queue $dccore.selq
-  $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
-  $iif($dccore.selq,Ignore $dccore.selq for...):dccore.ignorefor $dccore.selq
-  $iif($dccore.selq,Clear the queue of $dccore.selq and ignore for...):dccore.clearignore $dccore.selq
-  $iif($dccore.selq,Move $dccore.selq earlier in line):dccore.send queuemove $dccore.selq up
-  $iif($dccore.selq,Move $dccore.selq later in line):dccore.send queuemove $dccore.selq down
-  $iif($dccore.sels,Queue of $dccore.sels):dccore.send queue $dccore.sels
+  $iif($dccore.selq,$dccore.mi(queue) Queue of $dccore.selq):dccore.send queue $dccore.selq
+  $iif($dccore.selq,$dccore.mi(clear) Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
+  $iif($dccore.selq,$dccore.mi(ignore) Ignore $dccore.selq for...):dccore.ignorefor $dccore.selq
+  $iif($dccore.selq,$dccore.mi(ban) Clear the queue of $dccore.selq and ignore for...):dccore.clearignore $dccore.selq
+  $iif($dccore.selq,$dccore.mi(moveup) Move $dccore.selq earlier in line):dccore.send queuemove $dccore.selq up
+  $iif($dccore.selq,$dccore.mi(movedown) Move $dccore.selq later in line):dccore.send queuemove $dccore.selq down
+  $iif($dccore.sels,$dccore.mi(queue) Queue of $dccore.sels):dccore.send queue $dccore.sels
   -
-  Connection
-  .$iif($chat($dccore.bot),Disconnect,Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
-  .Pair with the bot:dccore pair $dccore.bot
-  .Forget the token (unpair):dccore unpair
-  .Trust the bot's host:dccore trust
-  Window
-  .DCCore Chat:dccore chat
-  .Downloads window:dccore downloads
+  $dccore.mi(connect) Connection
+  .$iif($chat($dccore.bot),$dccore.mi(disconnect) Disconnect,$dccore.mi(connect) Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
+  .$dccore.mi(pair) Pair with the bot:dccore pair $dccore.bot
+  .$dccore.mi(unpair) Forget the token (unpair):dccore unpair
+  .$dccore.mi(trust) Trust the bot's host:dccore trust
+  $dccore.mi(panel) Window
+  .$dccore.mi(chat) DCCore Chat:dccore chat
+  .$dccore.mi(downloads) Downloads window:dccore downloads
   .-
-  .Panel $iif($dccore.opt(panel),off,on):dccore panel $iif($dccore.opt(panel),off,on)
-  .Font size...:dccore.askfont
-  .Dashboard address...:dccore weburl
-  .Clear window:clear @DCCore
-  Clear finished...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
+  .$dccore.mi(panel) Panel $iif($dccore.opt(panel),off,on):dccore panel $iif($dccore.opt(panel),off,on)
+  .$dccore.mi(font) Font size...:dccore.askfont
+  .$dccore.mi(dashboard) Dashboard address...:dccore weburl
+  .$dccore.mi(clear) Clear window:clear @DCCore
+  .-
+  .$dccore.mi(palette) Theme
+  ..$iif($dccore.theme.mode == auto,$style(1)) Follow mIRC:dccore theme auto
+  ..$iif($dccore.theme.mode == dark,$style(1)) Dark:dccore theme dark
+  ..$iif($dccore.theme.mode == light,$style(1)) Light:dccore theme light
+  ..-
+  ..$iif($dccore.opt(icons),$style(1)) Icons in the menus and the control panel:dccore icons $iif($dccore.opt(icons),off,on)
+  $dccore.mi(purge) Clear finished...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
 }
 
 menu nicklist {
-  DCCore
-  .Queue of $1:dccore.send queue $1
-  .Clear the queue of $1:dccore.send clearqueue $1
-  .Ignore $1 for...:dccore.ignorefor $1
-  .Clear the queue of $1 and ignore for...:dccore.clearignore $1
-  .Stop ignoring $1:dccore.send unignore $1
+  $dccore.mi(app) DCCore
+  .$dccore.mi(queue) Queue of $1:dccore.send queue $1
+  .$dccore.mi(clear) Clear the queue of $1:dccore.send clearqueue $1
+  .$dccore.mi(ignore) Ignore $1 for...:dccore.ignorefor $1
+  .$dccore.mi(ban) Clear the queue of $1 and ignore for...:dccore.clearignore $1
+  .$dccore.mi(unban) Stop ignoring $1:dccore.send unignore $1
 }
 
 menu status,channel {
-  DCCore
-  .Open the window:dccore window
-  .Open DCCore Chat:dccore chat
-  .Open the Downloads window:dccore downloads
-  .Download queues...:dccore.queues
-  .Show the lists:dccore lists
-  .Fetch the changed lists:dccore fetch
-  .Command list:dccore
-  .$iif($chat($dccore.bot),Disconnect,Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
-  .Control Panel...:dccore.settings
+  $dccore.mi(app) DCCore
+  .$dccore.mi(console) Open the window:dccore window
+  .$dccore.mi(chat) Open DCCore Chat:dccore chat
+  .$dccore.mi(downloads) Open the Downloads window:dccore downloads
+  .$dccore.mi(dlqueue) Download queues...:dccore.queues
+  .$dccore.mi(lists) Show the lists:dccore lists
+  .$dccore.mi(fetch) Fetch the changed lists:dccore fetch
+  .$dccore.mi(help) Command list:dccore
+  .$iif($chat($dccore.bot),$dccore.mi(disconnect) Disconnect,$dccore.mi(connect) Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
+  .$dccore.mi(settings) Control Panel...:dccore.settings
+}
+
+; ---------------------------------------------------------------------
+;  Theme and icons (#1368): the dark theme of the dialogs and the menus,
+;  readable colours on a dark background, and icons in the menus and in
+;  the control panel's page list
+; ---------------------------------------------------------------------
+;
+;  /dccore theme auto|dark|light. auto follows mIRC's own dark mode -
+;  $darkmode, mIRC 7.79 and later; an older mIRC has none, so there auto
+;  is light and dark is chosen by hand. light leaves everything exactly as
+;  it was before the theme existed: every call below does nothing then.
+;
+;  What dark changes
+;    - The dialogs (the control panel, the list window, download queues):
+;      the title bar, the background and mIRC's own controls, through
+;      dll\dccore_ui.dll (dccore.theme.dialog). Not while mIRC itself is in
+;      dark mode: it draws its dialogs dark already, and two hands on the
+;      same controls is one too many. A dialog DCX has marked is passed with
+;      "x": DCX paints its background and its own controls, and those take
+;      their colours here instead - dccore.theme.sys for the lines, frames
+;      and tabs as dccore.sw.dcx makes them, and the texts, the lists and
+;      the background just after (dccore.theme.dcxset).
+;    - Not the right-click menus. Windows draws every menu of a program in
+;      one style, so a dark menu here would be every menu in mIRC dark, and
+;      other scripts' are not this script's to change. mIRC's own dark mode
+;      (Options, Display - mIRC 7.79 and later) is exactly that, and auto
+;      follows it.
+;    - The colours in @DCCore, its panel, DCCore Chat and the Downloads
+;      window, on a dark background - mIRC's dark mode, a dark colour scheme
+;      (Alt+K) or a dark Background chosen in the mIRC settings: the colours
+;      meant for a white one (navy, blue, maroon, purple, the dark green)
+;      are drawn as their light neighbours (dccore.theme.legible). The
+;      windows themselves keep mIRC's colours: mIRC has no per-window text,
+;      listbox or editbox colour, so a dark window is mIRC's to give.
+;
+;  /dccore icons on|off: an icon in front of each of this script's menu
+;  items, and of each page in the control panel's DCX page list
+;  (dll\dccore_icons.dll). Only this script's items: dll\dccore_ui.dll hooks
+;  the opening of a menu (MenuIcons), finds the items that begin with the
+;  mark $dccore.mi gives them, takes the mark off and puts the icon beside
+;  the text - as a plain menu bitmap, so the menu is still Windows' and
+;  mIRC's own, every other item and every other script's menu untouched.
+;
+;  An item gets its icon from $dccore.mi(<name>) in front of its text: "<N>"
+;  and $chr(11), N the icon's number counted from 1, while the hook is on -
+;  and nothing otherwise, so a menu reads as it always did without it. A
+;  checked item ($style(1)) has none: the check mark is its picture.
+;
+;  dccore_ui.dll is checked against the build it was shipped as before it
+;  is loaded, as dcx.dll is: a file that is not that one is not run.
+;  dccore_icons.dll holds pictures only and is never run.
+
+alias dccore.theme.dir { return $scriptdir $+ dll\ }
+alias dccore.theme.uifile { return $dccore.theme.dir $+ dccore_ui.dll }
+alias dccore.theme.iconfile { return $dccore.theme.dir $+ dccore_icons.dll }
+alias dccore.theme.uisha256 { return 4b29be657370837c7d7b5af9d089371d252167a8b8d67b7d098f5ffec9c2401f }
+
+alias dccore.theme.mode {
+  var %m = $dccore.opt(theme)
+  return $iif($istok(dark light,%m,32),%m,auto)
+}
+; mIRC's own dark mode. $darkmode is mIRC 7.79's; before it, no dark mode.
+alias dccore.theme.mircdark {
+  if ($version < 7.79) { return $false }
+  return $iif($darkmode == $true,$true,$false)
+  :error
+  reseterror
+  return $false
+}
+alias dccore.theme.dark {
+  var %m = $dccore.theme.mode
+  if (%m == dark) { return $true }
+  if (%m == light) { return $false }
+  return $dccore.theme.mircdark
+}
+; Why dll\dccore_ui.dll is not used, or nothing when it is. Its hash is
+; worked out once a session ($sha256 needs mIRC 7.45, as DCX does).
+alias dccore.theme.uiwhy {
+  if (!$isfile($dccore.theme.uifile)) { return dll\dccore_ui.dll is missing }
+  if ($version < 7.45) { return it needs mIRC 7.45 or later }
+  if ($dccore.st(ui.sha) == $null) { hadd dccore.live ui.sha $sha256($dccore.theme.uifile,2) }
+  if ($dccore.st(ui.sha) != $dccore.theme.uisha256) { return dll\dccore_ui.dll is not the build this script was shipped with }
+}
+alias dccore.theme.ui { return $iif($dccore.theme.uiwhy == $null,$true,$false) }
+
+; The colours of dark, as $rgb gives them: bg the dialogs, face the DCX
+; frames and the tab chosen, light the pills and the other tabs, line the
+; DCX lines, panel the lists, fg the text, grey the quieter text.
+alias dccore.theme.rgb {
+  if ($1 == bg) || ($1 == face) { return $rgb(32,32,32) }
+  if ($1 == light) { return $rgb(45,45,48) }
+  if ($1 == line) { return $rgb(85,85,85) }
+  if ($1 == panel) { return $rgb(43,45,48) }
+  if ($1 == fg) { return $rgb(238,238,238) }
+  if ($1 == grey) { return $rgb(150,150,150) }
+}
+; The control panel's DCX colours (#1288): dark, the theme's; light, the
+; system's, exactly what the window always used.
+alias dccore.theme.sys {
+  if ($dccore.theme.dark) { return $dccore.theme.rgb($1) }
+  if ($1 == line) { return $dccore.dcx(GetSystemColor,COLOR_3DSHADOW) }
+  if ($1 == face) { return $dccore.dcx(GetSystemColor,COLOR_3DFACE) }
+  if ($1 == light) { return $dccore.dcx(GetSystemColor,COLOR_3DLIGHT) }
+  return $dccore.dcx(GetSystemColor,COLOR_GRAYTEXT)
+}
+; $1 a dialog: dark or back to the system's look, through dccore_ui.dll.
+; $2 init: the dialog is just made, and only a dark one needs anything.
+; The control panel is "x" when DCX has marked it, the DCX check always.
+alias dccore.theme.dialog {
+  var %d = $1
+  if (!$dialog(%d)) { return }
+  if ($dccore.theme.mircdark) { return }
+  if ($2 == init) && (!$dccore.theme.dark) { return }
+  if (!$dccore.theme.ui) { return }
+  var %x = -
+  if (%d == dccore.dcxcheck) { %x = x }
+  elseif (%d == dccore.set) && ($hget(dccore.sws,dcx)) { %x = x }
+  noop $dll($dccore.theme.uifile,ApplyTheme,$dialog(%d).hwnd $iif($dccore.theme.dark,1,0) %x)
+}
+
+; ---- colours in the windows ------------------------------------------
+
+; The background a colour is drawn on, as a palette number: $1 win for a
+; window's text, list for a side listbox. The window's own Background from
+; the mIRC settings first, then mIRC's dark mode (black), then mIRC's own
+; colour for it.
+alias dccore.theme.bgidx {
+  if ($1 != list) && ($dccore.opt(bg) isnum 0-15) { return $dccore.opt(bg) }
+  if ($dccore.theme.mircdark) { return 1 }
+  var %c = $color($iif($1 == list,listbox,background))
+  return $iif(%c isnum 0-15,%c,0)
+}
+; $1 a colour number, $2 win or list: the same colour, or on a dark
+; background (black, navy, maroon, purple) the light neighbour of one that
+; would not be seen there. Anything that is not a colour number - -1,
+; "name", "per" - and everything in the light theme, unchanged.
+alias dccore.theme.legible {
+  if ($1 !isnum 0-15) { return $1 }
+  if ($dccore.theme.mode == light) { return $1 }
+  if (!$istok(1 2 5 6,$int($dccore.theme.bgidx($2)),32)) { return $1 }
+  var %at = $findtok(1 2 3 5 6 12,$int($1),1,32)
+  return $iif(%at,$gettok(0 11 9 4 13 11,%at,32),$1)
+}
+; A colour from the mIRC settings for a side listbox line (the panel, the
+; Downloads list)
+alias dccore.lcol { return $dccore.theme.legible($dccore.opt(col. $+ $1),list) }
+
+; ---- menus -----------------------------------------------------------
+
+; The icons in dll\dccore_icons.dll, in its order: the Nth name is icon N-1
+; in the file, N in a menu's or a listview's image list.
+alias dccore.ico.names { return app console settings script status slots queue dlqueue uptime version help lists fetch ask purge library rebuild audio ban unban clear ignore moveup movedown update rehash stop connect disconnect pair unpair trust chat downloads panel font dashboard cancel again user speed search pack folder hash palette megaphone mail bug key home shield }
+; $1 an icon's name: what goes in front of a menu item's text
+alias dccore.mi {
+  if (!$dccore.st(mi.on)) { return }
+  var %n = $findtok($dccore.ico.names,$1,1,32)
+  if (%n) { return %n $+ $chr(11) }
+}
+
+; The menu icons on or off, as /dccore icons says, through dccore_ui.dll's
+; hook (MenuIcons).
+alias dccore.theme.menus {
+  var %on = 0
+  if ($dccore.opt(icons)) && ($isfile($dccore.theme.iconfile)) { %on = 1 }
+  if (%on) && ($dccore.theme.ui) {
+    hadd dccore.live mi.on $iif($dll($dccore.theme.uifile,MenuIcons,$dccore.theme.iconfile) == OK,1,0)
+    return
+  }
+  dccore.theme.menusoff
+}
+; the hook off - only through a dccore_ui.dll this script has loaded already,
+; never by loading it for that
+alias dccore.theme.menusoff {
+  if ($dccore.st(mi.on)) && ($dccore.theme.uiloaded) { noop $dll($dccore.theme.uifile,MenuIcons,off) }
+  hdel dccore.live mi.on
+}
+; Whether mIRC holds dll\dccore_ui.dll loaded now: $dll(N) names the Nth
+; dll it has loaded, $dll(0) how many (the dll asks to be kept, mKeep, so
+; mIRC does not drop it after ten idle minutes as it does others)
+alias dccore.theme.uiloaded {
+  var %i = 1
+  while (%i <= $dll(0)) {
+    if ($nopath($dll(%i)) == dccore_ui.dll) { return $true }
+    inc %i
+  }
+  return $false
+}
+
+; ---- the control panel's DCX parts ------------------------------------
+
+; Just after the control panel is made (its init): the page list's icons,
+; and in the dark theme the background, the texts and the lists. Each in a
+; timer of its own: a DCX command that fails halts what called it, and so
+; it halts only that part, never the window being made.
+alias dccore.theme.dcxset {
+  if (!$hget(dccore.sws,dcx)) { return }
+  if ($dccore.opt(icons)) && ($isfile($dccore.theme.iconfile)) { .timerdccoreThemeIcons -m 1 0 dccore.theme.pageicons }
+  if (!$dccore.theme.dark) { return }
+  .timerdccoreThemeBg -m 1 0 dccore.theme.dcxbg
+  .timerdccoreThemeText -m 1 0 dccore.theme.dcxtexts
+  .timerdccoreThemeLists -m 1 0 dccore.theme.dcxlists
+  .timerdccoreThemeFonts -m 1 0 dccore.theme.dcxfonts
+}
+alias dccore.theme.dcxbg { if ($dialog(dccore.set)) { dccore.dcx xdialog dccore.set -g +b $dccore.theme.rgb(bg) } }
+; $1 a DCX text, $2 1 when it has no background of its own: light text, on
+; the face
+alias dccore.theme.dcxtext {
+  dccore.dcx xdid dccore.set $1 -C +t $dccore.theme.rgb(fg)
+  if ($2) { dccore.dcx xdid dccore.set $1 -C +b $dccore.theme.rgb(face) }
+}
+; Every DCX text of the window, from the layout's own ids (dccore.sw.data).
+; The quieter texts keep the grey dccore.sw.dcxhome and dcxstats gave them.
+alias dccore.theme.dcxtexts {
+  if (!$dialog(dccore.set)) || (!$hget(dccore.swm)) { return }
+  ; the tabs' names: the third control of each tab
+  var %t = $dccore.sw.m(dcxtabs), %i = 1
+  while (%i <= $gettok(%t,6,32)) {
+    dccore.theme.dcxtext $calc($gettok(%t,1,32) + $gettok(%t,2,32) * (%i - 1) + 2)
+    inc %i
+  }
+  ; the page's name and the side's name, over the window's background
+  dccore.theme.dcxtext $gettok($dccore.sw.m(dcxtitle),1,32) 1
+  dccore.theme.dcxtext $gettok($dccore.sw.m(dcxcrumb),1,32) 1
+  ; the frames' titles: the control after each frame's ring
+  %i = 1
+  while (%i <= $hfind(dccore.swm,fr.*,0,w)) {
+    dccore.theme.dcxtext $calc($gettok($dccore.sw.m($hfind(dccore.swm,fr.*,%i,w)),1,32) + 1)
+    inc %i
+  }
+  ; the pills' names, and the arrow of the way back
+  %i = 1
+  while (%i <= $dccore.sw.m(home.n)) {
+    dccore.theme.dcxtext $calc($gettok($dccore.sw.m(home. $+ %i),1,32) + 2)
+    inc %i
+  }
+  dccore.theme.dcxtext $calc($gettok($dccore.sw.m(dcxback),1,32) + 2)
+  ; the start page's figures: each frame's title, each value (its key stays
+  ; grey) or each line of fixed-width text
+  %i = 1
+  while (%i <= $dccore.sw.m(home.f.n)) {
+    dccore.theme.dcxtext $gettok($dccore.sw.m(home.f. $+ %i),2,32)
+    var %j = 1
+    while (%j <= $dccore.sw.m($+(home.f.,%i,.n))) {
+      var %r = $dccore.sw.m($+(home.f.,%i,.r.,%j))
+      if ($gettok(%r,2,32)) {
+        dccore.dcx xdid dccore.set $gettok(%r,1,32) -C +b $dccore.theme.rgb(face)
+        dccore.theme.dcxtext $gettok(%r,2,32) 1
+      }
+      else { dccore.theme.dcxtext $gettok(%r,1,32) 1 }
+      inc %j
+    }
+    inc %i
+  }
+}
+; DCX's texts and tables without ClearType. ClearType tints the edges of
+; each letter red and blue, and light letters on the dark background look
+; blurred by it. dccore_ui.dll gives mIRC's own controls a font without it;
+; DCX draws with the font xdid -f gave it, so each DCX text and table gets
+; its own font again with the flag a (anti-aliased, no ClearType). Only
+; where the DLL darkens the window: in mIRC's own dark mode mIRC's controls
+; keep ClearType, and DCX's keep it with them.
+alias dccore.theme.dcxfonts {
+  if (!$dialog(dccore.set)) || ($dccore.theme.mircdark) || ($dccore.theme.uiwhy != $null) { return }
+  var %n = $dccore.dcx(_xdialog,dccore.set id 0), %i = 1, %id, %f, %fl
+  if (%n !isnum 1-) { return }
+  while (%i <= %n) {
+    %id = $dccore.dcx(_xdialog,dccore.set id %i)
+    ; nested: an if evaluates all of its conditions, and DCX halts on a bad id
+    if (%id isnum) {
+      if ($istok(text listview,$dccore.dcx(_xdid,dccore.set %id type),32)) {
+        ; +flags charset size name
+        %f = $dccore.dcx(_xdid,dccore.set %id font)
+        %fl = $gettok(%f,1,32)
+        if ($left(%fl,1) == +) && (a !isincs %fl) && ($gettok(%f,4,32) != $null) {
+          dccore.dcx xdid dccore.set %id -f $+(+a,$remove($mid(%fl,2),d)) $gettok(%f,2-,32)
+        }
+      }
+    }
+    inc %i
+  }
+  ; xdid -f does not redraw: the DLL once more, which redraws the whole window
+  dccore.theme.dialog dccore.set
+}
+; The page list and the tables: a listview's colours are -i, not -C
+alias dccore.theme.dcxlists {
+  if (!$dialog(dccore.set)) || (!$hget(dccore.swm)) { return }
+  var %ids = $gettok($dccore.sw.m(dcxpages),1,32), %lvs = $dccore.sw.m(lvs), %i = 1
+  while (%i <= $numtok(%lvs,32)) { %ids = %ids $gettok($dccore.sw.m(lv. $+ $gettok(%lvs,%i,32)),1,32) | inc %i }
+  %i = 1
+  while (%i <= $numtok(%ids,32)) {
+    dccore.dcx xdid dccore.set $gettok(%ids,%i,32) -i +bk $dccore.theme.rgb(panel)
+    dccore.dcx xdid dccore.set $gettok(%ids,%i,32) -i +t $dccore.theme.rgb(fg)
+    inc %i
+  }
+  ; the tables enabled, as dccore.sw.enable keeps them in the dark theme
+  if ($dccore.theme.dark) {
+    %i = 2
+    while (%i <= $numtok(%ids,32)) { dccore.dcx xdid dccore.set $gettok(%ids,%i,32) -e | inc %i }
+  }
+}
+; The page list's icons: the whole file into its image list, so a page's
+; icon is its number among dccore.ico.names - then its rows again, now
+; with their pictures, as dccore.sw.tab fills them
+alias dccore.theme.pageicons {
+  if (!$dialog(dccore.set)) || (!$hget(dccore.swm)) { return }
+  dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxpages),1,32) -w +n -1 $dccore.theme.iconfile
+  hadd dccore.sws theme.icons 1
+  var %g = $dccore.sw.s(tab)
+  if (!%g) { return }
+  dccore.sw.dcxpages $dccore.sw.m(g. $+ %g $+ .pages)
+  if ($dccore.sw.s(page)) { dccore.sw.dcxshow $dccore.sw.s(page) }
+}
+; $1 a page's number: its icon in the page list, 0 for none - a page the
+; layout gains later simply has none until it is named here
+alias dccore.theme.pageicon {
+  if (!$dccore.sw.s(theme.icons)) { return 0 }
+  var %pair = $wildtok($dccore.theme.pagemap,$dccore.sw.untext($dccore.sw.m(p. $+ $1)) $+ =*,1,44)
+  if (%pair == $null) { return 0 }
+  return $findtok($dccore.ico.names,$gettok(%pair,2,61),1,32)
+}
+alias dccore.theme.pagemap { return IRC Server=connect,General Settings=settings,Channels=hash,Operator=user,Appearance=palette,Advertising=megaphone,Lists=lists,Channel bindings=pair,List settings=library,Rebuild=rebuild,Transfers=slots,Search=search,List discovery=fetch,Fetch tuning=speed,Queue=queue,Anti-flood=shield,Bans & ignores=ban,Private messages=mail,Admin console=key,Web dashboard=dashboard,Console feed=status,Debug & logging=bug,File locations=folder,@DCCore window=console,Window=panel,Connection=pair,Chat=chat }
+
+; ---- start, stop, change ---------------------------------------------
+
+alias dccore.theme.start { dccore.theme.menus }
+alias dccore.theme.stop { dccore.theme.menusoff }
+; After /dccore theme or icons: what is open drawn again. The control panel
+; is drawn once, when it opens, so it takes a change the next time.
+alias dccore.theme.refresh {
+  dccore.theme.menus
+  var %w = dccore.dq dccore.setl dccore.dcxcheck, %i = 1
+  while (%i <= $numtok(%w,32)) {
+    if ($dialog($gettok(%w,%i,32))) { dccore.theme.dialog $gettok(%w,%i,32) }
+    inc %i
+  }
+  if ($dialog(dccore.set)) { dccore.sys The control panel takes the change the next time it opens. }
+  if ($window($dccore.win)) { dccore.panel }
+  if ($window($dccore.dl.win)) { dccore.dl.draw }
+}
+alias dccore.theme.status {
+  var %ui = $dccore.theme.uiwhy
+  dccore.sys Theme: $dccore.theme.mode $+ , now $iif($dccore.theme.dark,dark,light) $+ $iif($dccore.theme.mircdark,$chr(44) as mIRC's own dark mode) $+ . $iif(($dccore.theme.dark) && (!$dccore.theme.mircdark) && (%ui != $null),The dialogs stay light: %ui $+ .) $iif(($dccore.theme.dark) && (!$dccore.theme.mircdark),The menus follow mIRC: its own dark mode is under Options - Display.) /dccore theme auto|dark|light
+  if (!$dccore.opt(icons)) { dccore.sys Icons: off. /dccore icons on | return }
+  if (!$isfile($dccore.theme.iconfile)) { dccore.sys Icons: dll\dccore_icons.dll is missing. | return }
+  dccore.sys Icons: $iif($dccore.st(mi.on),on in this script's menus,not in the menus - $iif(%ui != $null,%ui,the menu hook would not start)) $+ ; the control panel's page list has them when DCX draws it. /dccore icons off
 }
 
 ; ---------------------------------------------------------------------
@@ -1817,6 +2205,13 @@ alias dccore.sw.opt.fill {
   did -ra dccore.set 1671 $dccore.fontsize
   dccore.fillbg 1673
   did -ra dccore.set 1675 $dccore.dl.rows
+  ; the theme (#1368): auto, dark, light on lines 1 to 3, and the icons
+  did -r dccore.set 1691
+  did -a dccore.set 1691 Follow mIRC
+  did -a dccore.set 1691 Dark
+  did -a dccore.set 1691 Light
+  did -c dccore.set 1691 $findtok(auto dark light,$dccore.theme.mode,1,32)
+  if ($dccore.opt(icons)) { did -c dccore.set 1692 }
   if ($dccore.bot) { did -ra dccore.set 1681 $dccore.bot }
   did -ra dccore.set 1682 $iif($dccore.opt(token),Paired $dccore.opt(paired) (token in dccore.ini),Not paired: the bot will ask for the password)
   ; The bot's own setting, not a local pref (#572 follow-up): nothing is
@@ -1834,7 +2229,7 @@ alias dccore.sw.opt.sig {
   while (%i <= 8) { %s = %s $did(dccore.set,$calc(1618 + 2 * %i)).state $did(dccore.set,$calc(1619 + 2 * %i)).sel | inc %i }
   %i = 1640
   while (%i <= 1645) { %s = %s $did(dccore.set,%i).sel | inc %i }
-  return %s $did(dccore.set,1637).text $did(dccore.set,1670).state $did(dccore.set,1671).text $did(dccore.set,1673).sel $did(dccore.set,1675).text $did(dccore.set,1681).text $did(dccore.set,1685).state
+  return %s $did(dccore.set,1637).text $did(dccore.set,1670).state $did(dccore.set,1671).text $did(dccore.set,1673).sel $did(dccore.set,1675).text $did(dccore.set,1681).text $did(dccore.set,1685).state $did(dccore.set,1691).sel $did(dccore.set,1692).state
 }
 alias dccore.sw.opt.dirty { return $iif($dccore.sw.opt.sig === $dccore.sw.s(opt.sig),$false,$true) }
 ; Apply: this mIRC's switches (the locals) and the pages above into
@@ -1860,6 +2255,11 @@ alias dccore.sw.opt.save {
   hadd dccore bg $calc($did(dccore.set,1673).sel - 2)
   hadd dccore dlfinished $iif($did(dccore.set,1675).text isnum 1-15,$int($did(dccore.set,1675).text),15)
   if ($did(dccore.set,1681).text != $null) { hadd dccore bot $did(dccore.set,1681).text }
+  ; the theme and the icons (#1368): saved as /dccore theme and /dccore
+  ; icons save them, and what is open drawn again only when one changed
+  var %theme = $gettok(auto dark light,$did(dccore.set,1691).sel,32), %icons = $iif($did(dccore.set,1692).state == 1,1,0), %retheme = 0
+  if (%theme != $null) && (%theme != $dccore.theme.mode) { hadd dccore theme %theme | %retheme = 1 }
+  if (%icons != $iif($dccore.opt(icons),1,0)) { hadd dccore icons %icons | %retheme = 1 }
   dccore.save
   ; consolefeed is the bot's own (#1006 follow-up): sent only when the
   ; check disagrees with what the bot last told us, so an Apply that did
@@ -1876,6 +2276,7 @@ alias dccore.sw.opt.save {
     dccore.title
     dccore.panel
   }
+  if (%retheme) { dccore.theme.refresh }
   hadd dccore.sws opt.sig $dccore.sw.opt.sig
   return %n
 }
@@ -2058,7 +2459,7 @@ dialog dccore.dcxcheck {
   text "Click the button and an item in the tree, then read @DCCore.", 3, 4 22 100 40
   button "Close", 4, 190 102 46 13, cancel
 }
-on *:dialog:dccore.dcxcheck:init:0: { dccore.dcx.checkinit }
+on *:dialog:dccore.dcxcheck:init:0: { dccore.dcx.checkinit | dccore.theme.dialog dccore.dcxcheck init }
 on *:dialog:dccore.dcxcheck:sclick:1: { dccore.sys DCX check: mIRC's own button raised its click in the DCX-marked window. }
 alias dccore.dcx.check {
   var %why = $dccore.dcx.why
@@ -2191,7 +2592,7 @@ alias dccore.sw.can {
   return $iif($wildtok($dccore.sw.s(caps),$1 $+ :*,1,32),$true,$false)
 }
 
-on *:dialog:dccore.set:init:0: { dccore.sw.init }
+on *:dialog:dccore.set:init:0: { dccore.sw.init | dccore.theme.dialog dccore.set init | dccore.theme.dcxset }
 on *:dialog:dccore.set:close:0: { dccore.sw.closed | if ($dialog(dccore.setl)) { dialog -x dccore.setl } }
 on *:dialog:dccore.set:sclick:*: { dccore.sw.click $did }
 on *:dialog:dccore.set:edit:*: { dccore.sw.touched $did }
@@ -2295,8 +2696,11 @@ alias dccore.sw.enable {
     while (%i <= %n) { did -b dccore.set $gettok($hfind(dccore.swm,br.*,%i,w),2,46) | inc %i }
   }
   if ($dccore.sw.s(dcx)) {
-    var %lvs = $dccore.sw.m(lvs), %i = 1
-    while (%i <= $numtok(%lvs,32)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) $iif($1,-e,-b) | inc %i }
+    ; a disabled listview is drawn light grey whatever its colours, so in
+    ; the dark theme the tables stay enabled: their rows do nothing by
+    ; themselves, the buttons that act on them are what is disabled
+    var %lvs = $dccore.sw.m(lvs), %i = 1, %e = $iif(($1) || ($dccore.theme.dark),-e,-b)
+    while (%i <= $numtok(%lvs,32)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) %e | inc %i }
   }
 }
 
@@ -2385,9 +2789,9 @@ alias dccore.sw.dcx {
   ; system's, so a theme is followed: Windows draws its tabs and frames in
   ; light greys, and the first tab with no left edge. The native tabs and
   ; page buttons go; the frames are hidden page by page (dccore.sw.showpage)
-  hadd dccore.sws line $dccore.dcx(GetSystemColor,COLOR_3DSHADOW)
-  hadd dccore.sws face $dccore.dcx(GetSystemColor,COLOR_3DFACE)
-  hadd dccore.sws light $dccore.dcx(GetSystemColor,COLOR_3DLIGHT)
+  hadd dccore.sws line $dccore.theme.sys(line)
+  hadd dccore.sws face $dccore.theme.sys(face)
+  hadd dccore.sws light $dccore.theme.sys(light)
   var %i = 1
   while (%i <= $dccore.sw.m(groups)) { did -h dccore.set $calc(1000 + %i) | inc %i }
   %i = 1
@@ -2548,7 +2952,7 @@ alias dccore.sw.dcxhome {
     dccore.sw.dcxpill %id %r
     dccore.sw.dcxlabel $calc(%id + 2) %x %y %w 1 $dccore.sw.m(home. $+ %i $+ .t)
     dccore.sw.dcxlabel $calc(%id + 3) %x $calc(%y + %th) %w 0 $dccore.sw.m(home. $+ %i $+ .s)
-    dccore.dcx xdid dccore.set $calc(%id + 3) -C +t $dccore.dcx(GetSystemColor,COLOR_GRAYTEXT)
+    dccore.dcx xdid dccore.set $calc(%id + 3) -C +t $dccore.theme.sys(grey)
     inc %i
   }
   dccore.sw.dcxstats
@@ -2557,7 +2961,7 @@ alias dccore.sw.dcxhome {
 ; value, or lines of fixed-width text (the running sends, as the side panel
 ; has them) - made here, filled by dccore.sw.home.fill
 alias dccore.sw.dcxstats {
-  var %i = 1, %grey = $dccore.dcx(GetSystemColor,COLOR_GRAYTEXT)
+  var %i = 1, %grey = $dccore.theme.sys(grey)
   while (%i <= $dccore.sw.m(home.f.n)) {
     var %f = $dccore.sw.m(home.f. $+ %i), %title = $gettok(%f,2,32)
     dccore.sw.dcxring $gettok(%f,1,32) $dccore.sw.dcxrect($gettok(%f,3-6,32))
@@ -2738,7 +3142,7 @@ alias dccore.sw.dcxpages {
   hadd dccore.sws dcxquiet 1
   dccore.dcx xdid dccore.set %id -r
   while (%i <= $numtok($1-,32)) {
-    dccore.dcx xdid dccore.set %id -a 0 0 + 0 0 0 0 0 0 $dccore.sw.untext($dccore.sw.m(p. $+ $gettok($1-,%i,32)))
+    dccore.dcx xdid dccore.set %id -a 0 0 + $dccore.theme.pageicon($gettok($1-,%i,32)) 0 0 0 0 0 $dccore.sw.untext($dccore.sw.m(p. $+ $gettok($1-,%i,32)))
     inc %i
   }
   hdel dccore.sws dcxquiet
@@ -4214,7 +4618,7 @@ dialog dccore.setl {
   button "OK", 15, 196 150 46 13
   button "Cancel", 16, 246 150 46 13, cancel
 }
-on *:dialog:dccore.setl:init:0: { dccore.sw.srv.linit }
+on *:dialog:dccore.setl:init:0: { dccore.sw.srv.linit | dccore.theme.dialog dccore.setl init }
 on *:dialog:dccore.setl:sclick:*: { dccore.sw.srv.lclick $did }
 ; $1 a list's id, or "new"
 alias dccore.sw.srv.open {
@@ -4918,18 +5322,23 @@ dialog dccore.set {
   combo 1673, 250 105 96 80, drop
   text "Finished downloads to show", 1674, 116 120 120 8
   edit "", 1675, 250 118 24 11, autohs
-  box "Settings window", 1174, 110 141 370 52
-  text "Drawn with DCX (scripts\mirc\dcx) when this mIRC can load it, with mIRC's own controls when not - /dccore dcx says which and why. Takes effect the next time the window opens.", 1175, 116 151 358 24
-  check "Use the built-in settings window, not DCX", 2617, 116 178 358 10
-  box "Bot", 1176, 110 38 370 78
-  text "The bot this mIRC is paired with. Reconnecting and logging in by itself when it comes back is under General > General Settings.", 1177, 116 48 358 16
+  box "Theme", 1174, 110 141 370 78
+  text "Dark colours for the script's windows - the control panel, the list window, the download queues - and an icon beside each of the script's menu items and pages. Follow mIRC takes mIRC's own dark mode (7.79 and later). The control panel takes a change the next time it opens; /dccore theme says what applies and why.", 1175, 116 151 358 32
+  text "Theme", 1690, 116 188 120 8
+  combo 1691, 250 186 96 80, drop
+  check "Icons in the menus and the control panel's page list", 1692, 116 201 358 10
+  box "Settings window", 1176, 110 223 370 52
+  text "Drawn with DCX (scripts\mirc\dcx) when this mIRC can load it, with mIRC's own controls when not - /dccore dcx says which and why. Takes effect the next time the window opens.", 1177, 116 233 358 24
+  check "Use the built-in settings window, not DCX", 2617, 116 260 358 10
+  box "Bot", 1178, 110 38 370 78
+  text "The bot this mIRC is paired with. Reconnecting and logging in by itself when it comes back is under General > General Settings.", 1179, 116 48 358 16
   text "Bot nick", 1680, 116 69 36 8
   edit "", 1681, 156 67 80 11, autohs
   text "", 1682, 242 69 232 8
   button "Pair again...", 1683, 116 81 56 13
   button "Forget token", 1684, 175 81 56 13
   check "Console feed on (also requests and sends - not just status)", 1685, 116 98 358 10
-  box "DCCore Chat (public)", 1178, 110 38 370 36
+  box "DCCore Chat (public)", 1180, 110 38 370 36
   check "Listen on every channel the bot is in, not only the ticked ones", 2621, 116 48 358 10
   check "Open the chat window when a line arrives", 2625, 116 59 358 10
 }
@@ -5070,9 +5479,10 @@ alias dccore.sw.data {
   hadd dccore.swm fr.1170 220 110 42 370 129 116 38 62 9 Show in @DCCore
   hadd dccore.swm fr.1171 222 110 179 370 118 116 175 28 9 Colours
   hadd dccore.swm fr.1173 224 110 42 370 95 116 38 30 9 Window
-  hadd dccore.swm fr.1174 226 110 145 370 48 116 141 56 9 Settings window
-  hadd dccore.swm fr.1176 228 110 42 370 74 116 38 15 9 Bot
-  hadd dccore.swm fr.1178 230 110 42 370 32 116 38 72 9 DCCore Chat (public)
+  hadd dccore.swm fr.1174 226 110 145 370 74 116 141 26 9 Theme
+  hadd dccore.swm fr.1176 228 110 227 370 48 116 223 56 9 Settings window
+  hadd dccore.swm fr.1178 230 110 42 370 74 116 38 15 9 Bot
+  hadd dccore.swm fr.1180 232 110 42 370 32 116 38 72 9 DCCore Chat (public)
   hadd dccore.swm lv.1520 910 116 135 250 168
   hadd dccore.swm lvc.1520 0 Channel
   hadd dccore.swm lvx.1520 noheader
@@ -5246,23 +5656,23 @@ alias dccore.sw.data {
   hadd dccore.swm p.25 Window
   hadd dccore.swm p.25.layout roomy 1
   hadd dccore.swm p.25.n 1
-  hadd dccore.swm p.25.1 1173,2601,2605,2609,2613,1670,1671,1672,1673,1674,1675,1174,1175,2617
-  hadd dccore.swm p.25.bx 1173,1174
-  hadd dccore.swm p.25.fr 224-227
-  hadd dccore.swm p.25.w winlook
+  hadd dccore.swm p.25.1 1173,2601,2605,2609,2613,1670,1671,1672,1673,1674,1675,1174,1175,1690,1691,1692,1176,1177,2617
+  hadd dccore.swm p.25.bx 1173,1174,1176
+  hadd dccore.swm p.25.fr 224-229
+  hadd dccore.swm p.25.w winlook theme
   hadd dccore.swm p.26 Connection
   hadd dccore.swm p.26.layout roomy 1
   hadd dccore.swm p.26.n 1
-  hadd dccore.swm p.26.1 1176,1177,1680,1681,1682,1683,1684,1685
-  hadd dccore.swm p.26.bx 1176
-  hadd dccore.swm p.26.fr 228-229
+  hadd dccore.swm p.26.1 1178,1179,1680,1681,1682,1683,1684,1685
+  hadd dccore.swm p.26.bx 1178
+  hadd dccore.swm p.26.fr 230-231
   hadd dccore.swm p.26.w botlink
   hadd dccore.swm p.27 Chat
   hadd dccore.swm p.27.layout roomy 1
   hadd dccore.swm p.27.n 1
-  hadd dccore.swm p.27.1 1178,2621,2625
-  hadd dccore.swm p.27.bx 1178
-  hadd dccore.swm p.27.fr 230-231
+  hadd dccore.swm p.27.1 1180,2621,2625
+  hadd dccore.swm p.27.bx 1180
+  hadd dccore.swm p.27.fr 232-233
   hadd dccore.swm keys.n 10
   hadd dccore.swm keys.1 SERVER PORT NICKNAME ALT_NICKNAME REJOIN_ATTEMPTS ON_CONNECT_CHECK_MINUTES SEARCH_ENABLED ANNOUNCE_TRANSFERS PRIVATE_MESSAGES_ENABLED WEBUI_ENABLED CTCP_VERSION_REPLY CHECK_FOR_UPDATES DEBUG_CHANNEL CHANNEL ADMIN_NICK
   hadd dccore.swm keys.2 THEME CUSTOM_THEME_BORDER CUSTOM_THEME_SEPARATOR CUSTOM_THEME_TEXTBOX CUSTOM_THEME_VALUE CUSTOM_THEME_ALERT CUSTOM_THEME_ACCENT ANNOUNCE_INTERVAL BROADCAST_SEARCH_CHANNEL BROADCAST_SEARCH_COOLDOWN MSG_DELAY DEBUG_MSG_DELAY LIST_BASE_NAME LIST_FORMAT LIST_IGNORED_EXTENSIONS
@@ -6533,18 +6943,18 @@ alias dccore.chat.pickpeer {
 
 menu @DCCore-Chat {
   dclick:dccore.chat.pickpeer $1
-  $iif(!$dccore.st(chat.chans),(connect to the bot to see its channels)):dccore connect
-  Send to
+  $iif(!$dccore.st(chat.chans),$dccore.mi(connect) (connect to the bot to see its channels)):dccore connect
+  $dccore.mi(chat) Send to
   .$iif((!$dccore.opt(chat.to)) || ($dccore.opt(chat.to) == *),$style(1)) Every channel with other DCCore bots:dccore.chat.to.all
   .-
   .$submenu($dccore.chat.sendrow($1))
-  Listen on
+  $dccore.mi(hash) Listen on
   .$submenu($dccore.chat.listenrow($1))
   $iif($dccore.opt(chat.all),$style(1)) Listen on all the bot's channels:dccore.chat.all
-  $iif($sline($dccore.chat.win,1),Message this bot privately):dccore.chat.pickpeer $sline($dccore.chat.win,1).ln
+  $iif($sline($dccore.chat.win,1),$dccore.mi(mail) Message this bot privately):dccore.chat.pickpeer $sline($dccore.chat.win,1).ln
   -
-  Clear window:clear $dccore.chat.win
-  Control Panel...:dccore.settings
+  $dccore.mi(clear) Clear window:clear $dccore.chat.win
+  $dccore.mi(settings) Control Panel...:dccore.settings
 }
 
 ; A PEERS line: the DCCore bots WHO found in one channel, right now - kept

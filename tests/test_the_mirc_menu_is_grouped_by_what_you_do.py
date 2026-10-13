@@ -22,12 +22,14 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+from tests.support import without_menu_icons  # noqa: E402
+
 SEPARATOR = "-"
 
 
 def menu_lines():
     with io.open(os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc"), encoding="ascii", newline="") as handle:
-        text = handle.read().replace("\r\n", "\n")
+        text = without_menu_icons(handle.read().replace("\r\n", "\n"))
     start = text.index("menu @DCCore {")
     return text[start:text.index("\n}\n", start)].split("\n")[1:]
 
@@ -113,9 +115,14 @@ class TheGroups(unittest.TestCase):
         self.assertEqual(dict(self.groups["Info"])["Command list"], "dccore")
 
     def test_window_holds_the_two_windows_then_the_look_of_this_one(self):
+        # then the theme (#1368), a menu of its own with the current one ticked
         self.assertEqual(names(self.groups["Window"]),
                          ["DCCore Chat", "Downloads window", SEPARATOR, "Panel $iif($dccore.opt(panel),off,on)",
-                          "Font size...", "Dashboard address...", "Clear window"])
+                          "Font size...", "Dashboard address...", "Clear window", SEPARATOR, "Theme",
+                          ".$iif($dccore.theme.mode == auto,$style(1)) Follow mIRC",
+                          ".$iif($dccore.theme.mode == dark,$style(1)) Dark",
+                          ".$iif($dccore.theme.mode == light,$style(1)) Light", ".-",
+                          ".$iif($dccore.opt(icons),$style(1)) Icons in the menus and the control panel"])
         self.assertNotIn("Options...", names(self.groups["Window"]))
 
     def test_user_control_holds_the_bans_and_queues_of_nicks(self):
@@ -159,7 +166,7 @@ class ClearFinishedAsksFirst(unittest.TestCase):
 
     def test_the_main_menu_and_the_downloads_window_ask_before_forgetting_the_list(self):
         with io.open(os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc"), encoding="ascii", newline="") as handle:
-            text = handle.read()
+            text = without_menu_icons(handle.read())
         asks = "dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted."
         self.assertIn("\n  Clear finished...:" + asks + "\r\n", text)
         self.assertIn("\n  Clear the finished ones...:" + asks + "\r\n", text)

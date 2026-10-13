@@ -247,6 +247,13 @@ GROUPS = (
                 {"local": "beep", "label": "Beep on a failed transfer"},
                 {"widget": "winlook"},
             )),
+            ("Theme", (
+                {"note": "Dark colours for the script's windows - the control panel, the list window, the "
+                         "download queues - and an icon beside each of the script's menu items and pages. "
+                         "Follow mIRC takes mIRC's own dark mode (7.79 and later). The control panel takes a "
+                         "change the next time it opens; /dccore theme says what applies and why."},
+                {"widget": "theme"},
+            )),
             ("Settings window", (
                 {"note": "Drawn with DCX (scripts\\mirc\\dcx) when this mIRC can load it, with mIRC's own "
                          "controls when not - /dccore dcx says which and why. Takes effect the next time "

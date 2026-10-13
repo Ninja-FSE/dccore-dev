@@ -220,8 +220,9 @@ class ThePageList(unittest.TestCase):
         self.assertIn("if ($dccore.sw.s(dcx)) { dccore.sw.dcxpages %pages | dccore.sw.dcxtabsel }", alias("dccore.sw.tab"))
         lines = statements(alias("dccore.sw.dcxpages"))
         self.assertIn("dccore.dcx xdid dccore.set %id -r", lines)
-        self.assertIn("dccore.dcx xdid dccore.set %id -a 0 0 + 0 0 0 0 0 0 $dccore.sw.untext($dccore.sw.m(p. $+ "
-                      "$gettok($1-,%i,32)))", lines)
+        # each row with its page's icon (#1368): 0, none, without the icon file
+        self.assertIn("dccore.dcx xdid dccore.set %id -a 0 0 + $dccore.theme.pageicon($gettok($1-,%i,32)) 0 0 0 0 0 "
+                      "$dccore.sw.untext($dccore.sw.m(p. $+ $gettok($1-,%i,32)))", lines)
         # refilled quietly: emptying and filling the list is not a click
         self.assertLess(lines.index("hadd dccore.sws dcxquiet 1"), lines.index("dccore.dcx xdid dccore.set %id -r"))
         self.assertEqual(lines[-1], "hdel dccore.sws dcxquiet")
@@ -340,8 +341,13 @@ class TheMockupLayout(unittest.TestCase):
         the native tabs and frames. The native form keeps Windows' look."""
         b = self.builder
         body = alias("dccore.sw.dcx")
+        # through dccore.theme.sys (#1368): the system's colours in the light
+        # theme, exactly as before, the theme's own in the dark one
+        system = alias("dccore.theme.sys")
         for name, attribute in (("line", "COLOR_3DSHADOW"), ("face", "COLOR_3DFACE"), ("light", "COLOR_3DLIGHT")):
-            self.assertIn("hadd dccore.sws %s $dccore.dcx(GetSystemColor,%s)" % (name, attribute), body)
+            self.assertIn("hadd dccore.sws %s $dccore.theme.sys(%s)" % (name, name), body)
+            self.assertIn("if ($1 == %s) { return $dccore.dcx(GetSystemColor,%s) }" % (name, attribute), system)
+        self.assertEqual(statements(system)[0], "if ($dccore.theme.dark) { return $dccore.theme.rgb($1) }")
         self.assertIn("while (%i <= $dccore.sw.m(groups)) { did -h dccore.set $calc(1000 + %i) | inc %i }", body)
         lines = statements(body)
         # the chosen tab stands on the body frame's top line: made after it
@@ -543,7 +549,8 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("-c $gettok(%c,1,32) text $dccore.sw.dcxrect($gettok(%c,2-5,32)) nowrap noprefix noformat", home)
         self.assertIn("dccore.sw.dcxlabel $calc(%id + 2) %x %y %w 1 $dccore.sw.m(home. $+ %i $+ .t)", home)
         self.assertIn("dccore.sw.dcxlabel $calc(%id + 3) %x $calc(%y + %th) %w 0 $dccore.sw.m(home. $+ %i $+ .s)", home)
-        self.assertIn("-C +t $dccore.dcx(GetSystemColor,COLOR_GRAYTEXT)", home)
+        self.assertIn("-C +t $dccore.theme.sys(grey)", home)        # COLOR_GRAYTEXT in the light theme
+        self.assertIn("return $dccore.dcx(GetSystemColor,COLOR_GRAYTEXT)", alias("dccore.theme.sys"))
         pill = statements(alias("dccore.sw.dcxpill"))
         self.assertEqual(pill[0], "dccore.sw.dcxline $1 $2 $3 $4 $5")
         self.assertIn("dccore.dcx xdid dccore.set $1 -R +p $dccore.sw.dcxpoly($4,$5,o,4)", pill)
@@ -742,8 +749,12 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("var %lvs = $dccore.sw.m(p. $+ $1 $+ .lv), %i = 1", show)
         self.assertIn("did -h dccore.set $gettok(%lvs,%i,32)", show)
         self.assertIn("dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) $iif($2 == -v,-s,-h)", show)
-        self.assertIn("dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) $iif($1,-e,-b)",
-                      alias("dccore.sw.enable"))
+        # a disabled listview is drawn light grey whatever its colours, so in
+        # the dark theme (#1368) the tables stay enabled: their rows do
+        # nothing by themselves, the buttons that act on them are disabled
+        enable = alias("dccore.sw.enable")
+        self.assertIn("%e = $iif(($1) || ($dccore.theme.dark),-e,-b)", enable)
+        self.assertIn("dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) %e", enable)
         # made after every page was hidden, before the first is shown
         init = statements(alias("dccore.sw.init"))
         self.assertLess(init.index("dccore.sw.enable 0"), init.index("dccore.sw.dcx"))

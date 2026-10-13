@@ -149,14 +149,17 @@ class TheHelpers(unittest.TestCase):
 
     def test_a_colour_is_always_two_digits(self):
         """^C3 then "3bot" reads as colour 33: the number is padded to two."""
+        # the colour made legible on a dark background first (#1368): still
+        # a number 0-15, still padded
         self.assertEqual(statements(alias("dccore.paint"))[1],
-                         "return $+($chr(3),$base($1,10,10,2),$2,$chr(15))")
+                         "return $+($chr(3),$base($dccore.theme.legible($1,win),10,10,2),$2,$chr(15))")
 
     def test_every_colour_code_in_the_new_helpers_is_padded(self):
         for name in ("dccore.paint", "dccore.nick", "dccore.chan", "dccore.term", "dccore.pernick"):
             body = alias(name)
             for match in re.finditer(r"\$chr\(3\),", body):
-                self.assertRegex(body[match.end():], r"^(\$base\(\$1,10,10,2\)|\$dccore\.col\()", name)
+                self.assertRegex(body[match.end():],
+                                 r"^(\$base\((\$1|\$dccore\.theme\.legible\(\$1,win\)),10,10,2\)|\$dccore\.col\()", name)
 
     def test_the_palette_is_written_in_two_digits(self):
         for entry in nick_palettes():
@@ -253,8 +256,10 @@ class PerNick(unittest.TestCase):
             self.assertNotIn("01", entry)
 
     def test_the_background_is_the_windows_or_mircs_own(self):
-        self.assertEqual(statements(alias("dccore.nickpal"))[:3], [
+        # mIRC's own dark mode draws on black whatever $color says (#1368)
+        self.assertEqual(statements(alias("dccore.nickpal"))[:4], [
             "var %bg = $dccore.opt(bg)",
+            "if (%bg !isnum 0-15) && ($dccore.theme.mircdark) { %bg = 1 }",
             "if (%bg !isnum 0-15) { %bg = $color(background) }",
             "if (%bg !isnum 0-15) { %bg = 0 }",
         ])

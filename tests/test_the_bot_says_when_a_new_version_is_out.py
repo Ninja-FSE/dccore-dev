@@ -30,7 +30,7 @@ import runtime  # noqa: E402
 import version_check  # noqa: E402
 import webserver  # noqa: E402
 
-from tests.support import DCCoreTestCase, silence_debug  # noqa: E402
+from tests.support import DCCoreTestCase, silence_debug, without_menu_icons  # noqa: E402
 from tests.test_admin_console_commands import FakeSession  # noqa: E402
 
 
@@ -326,7 +326,7 @@ class TheConsole(VersionCase):
 
     def test_the_mirc_menu_offers_it(self):
         with io.open(os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc"), encoding="ascii", newline="") as handle:
-            self.assertIn("  .Check for a new version:dccore.send checkversion\r\n", handle.read())
+            self.assertIn("  .Check for a new version:dccore.send checkversion\r\n", without_menu_icons(handle.read()))
 
 
 class TheSetupPage(VersionCase):
