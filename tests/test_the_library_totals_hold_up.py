@@ -108,7 +108,7 @@ class FillingMeansABackfillIsRunning(DCCoreTestCase):
         self.assertEqual(list_index.held_totals(self.held)[2], "ok")
 
     def test_a_repair_after_the_startup_backfill_is_not_filling_for_days(self):
-        """Neo's case: damaged at startup, every held list indexed, the
+        """The review's case: damaged at startup, every held list indexed, the
         flag still up because nobody typed in the filter bar."""
         list_index._rebuild_pending = True
         with mock.patch.object(list_index, "_backfill_missing", return_value=1):
