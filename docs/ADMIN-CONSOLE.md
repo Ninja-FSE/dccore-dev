@@ -949,7 +949,11 @@ With DCX it opens on a start page with two choices, **Bot** and **mIRC**, and
 under them the bot's figures - nick, network, up since and the connection;
 the running sends; today's sent, queue, speed record, failed and searches;
 the lists, the rebuild and the pack running - from the same status the side
-panel draws, refreshed with it. A side has a back arrow at the top left and
+panel draws, refreshed with it; and, from a bot that has `library:1` in its
+CAPS, the library's totals (#1359): each list's files, the files and folders
+and size of them all, the newest rebuild and how long it took, and the search
+index of the lists held from other bots. The window sends `library` once, and
+the `LIBRARY` and `SEARCHINDEX` lines then come in every burst. A side has a back arrow at the top left and
 the side's name beside it, and the window opens on the start page every time. **Bot** is the bot's own settings,
 as the dashboard's Settings page has them, over the console commands above:
 six groups - **General**,

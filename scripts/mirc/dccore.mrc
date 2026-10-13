@@ -718,6 +718,12 @@ alias dccore.structured {
   ; <bot> <received> <total> <bps> <name>: one file the bot is leeching now
   ; (#1019), part of the same burst as SLOT; the panel's Downloading section.
   if (%type == FETCHING) { hadd dccore.live fetch. $+ $dccore.st(nfetch) $2- | hinc dccore.live nfetch | dccore.panel.soon | return }
+  ; <files> <folders> <bytes> <rebuilt_at> <rebuild_secs> <primary> <name>: one
+  ; list's totals (#1359), in every burst once `library` was sent, the name
+  ; last as it may hold spaces; SEARCHINDEX <rows> <lists> <state> after
+  ; them. For the control panel's start page; cleared by every STATUS.
+  if (%type == LIBRARY) { if ($dccore.st(nlib) == $null) { hadd dccore.live nlib 1 } | hadd dccore.live lib. $+ $dccore.st(nlib) $2- | hinc dccore.live nlib | return }
+  if (%type == SEARCHINDEX) { hadd dccore.live libindex $2- | dccore.panel.soon | return }
   ; <phase> <folder_index> <folder_count> <files> <elapsed>: a list rebuild is
   ; running (#1024), however it was started; `end` when it stops. Kept in
   ; dccore.live and cleared by every STATUS, so a missed `end` lasts one burst.
@@ -893,8 +899,11 @@ alias dccore.status {
   hdel -w dccore.live fetch.*
   hdel dccore.live rebuild
   hdel dccore.live packing
+  hdel -w dccore.live lib.*
+  hdel dccore.live libindex
   hadd dccore.live nslots 1
   hadd dccore.live nfetch 1
+  hadd dccore.live nlib 1
   dccore.title
   dccore.panel.soon
   ; Not while the side panel is shown (#1013): it carries the same figures,
@@ -2572,6 +2581,9 @@ alias dccore.sw.dcxstats {
 ; st.*): when the start page shows, and on every status burst while it does
 alias dccore.sw.home.fill {
   if (!$dialog(dccore.set)) || (!$dccore.sw.s(dcx)) || ($dccore.sw.s(side) != 0) { return }
+  ; the library's totals come in every burst once asked for (#1359), from
+  ; a bot that has them; asked once a window
+  if (!$dccore.sw.s(asked.library)) && ($dccore.sw.can(library)) { hadd dccore.sws asked.library 1 | dccore.send library }
   var %i = 1
   while (%i <= $dccore.sw.m(home.f.n)) {
     var %f = $dccore.sw.m(home.f. $+ %i)
@@ -2618,9 +2630,37 @@ alias dccore.sw.home.frame {
   }
   if ($3 == Library) {
     dccore.sw.home.row $1 1 $dccore.sw.home.lists
-    dccore.sw.home.row $1 2 $iif($dccore.st(rebuild) != $null,$dccore.rebuild.short,idle)
-    dccore.sw.home.row $1 3 $iif($dccore.st(packing) != $null,$gettok($dccore.st(packing),5-,32) for $gettok($dccore.st(packing),1,32),none)
+    dccore.sw.home.row $1 2 $dccore.sw.home.lib(files)
+    dccore.sw.home.row $1 3 $dccore.sw.home.lib(size)
+    dccore.sw.home.row $1 4 $dccore.sw.home.lib(rebuilt)
+    dccore.sw.home.row $1 5 $dccore.sw.home.lib(index)
+    dccore.sw.home.row $1 6 $iif($dccore.st(rebuild) != $null,$dccore.rebuild.short,idle)
+    dccore.sw.home.row $1 7 $iif($dccore.st(packing) != $null,$gettok($dccore.st(packing),5-,32) for $gettok($dccore.st(packing),1,32),none)
   }
+}
+; $1 files, size, rebuilt or index: the library's totals from the LIBRARY
+; and SEARCHINDEX lines of the last burst (#1359) - every list's files,
+; folders and bytes added up, the newest rebuild and how long it took, the
+; search index of the lists held from other bots - or - from a bot that
+; has sent none (not asked yet, or an older bot)
+alias dccore.sw.home.lib {
+  if ($dccore.st(lib.1) == $null) { return - }
+  var %i = 1, %files = 0, %folders = 0, %bytes = 0, %at = 0, %secs = 0
+  while ($dccore.st(lib. $+ %i) != $null) {
+    var %l = $dccore.st(lib. $+ %i)
+    inc %files $gettok(%l,1,32)
+    inc %folders $gettok(%l,2,32)
+    inc %bytes $gettok(%l,3,32)
+    if ($gettok(%l,4,32) > %at) { %at = $gettok(%l,4,32) | %secs = $gettok(%l,5,32) }
+    inc %i
+  }
+  if ($1 == files) { return $dccore.num(%files) files $iif(%folders > 0,in $dccore.num(%folders) folders) }
+  if ($1 == size) { return $dccore.bytes(%bytes) }
+  if ($1 == rebuilt) { return $iif(%at > 0,$asctime(%at,ddd d mmm HH:nn) $+ $chr(44) took $dccore.dur(%secs),not since the bot was updated) }
+  var %x = $dccore.st(libindex)
+  if (%x == $null) { return - }
+  if ($gettok(%x,3,32) == none) { return no list held }
+  return $dccore.num($gettok(%x,1,32)) rows from $gettok(%x,2,32) lists $+ $chr(44) $iif($gettok(%x,3,32) == filling,still filling,up to date)
 }
 ; $1 a frame's number, $2 a row's, $3- the text: into the row's value, or
 ; its line; nothing becomes a blank, which the dll takes where no text is
@@ -2631,6 +2671,17 @@ alias dccore.sw.home.row {
 ; the lists' names, (primary) after the primary one - asked for from the
 ; bot once, as the Lists page asks, the first time the start page shows
 alias dccore.sw.home.lists {
+  ; from the LIBRARY lines when a bot sends them (#1359): the name, the
+  ; primary marked, and each list's files
+  if ($dccore.st(lib.1) != $null) {
+    var %i = 1, %out
+    while ($dccore.st(lib. $+ %i) != $null) {
+      var %l = $dccore.st(lib. $+ %i), %name = $gettok(%l,7-,32) $iif($gettok(%l,6,32) == 1,(primary)) $dccore.num($gettok(%l,1,32)) files
+      %out = $iif(%out == $null,%name,%out $+ $chr(44) %name)
+      inc %i
+    }
+    return %out
+  }
   if (!$dccore.sw.s(srv.ok)) {
     if (!$dccore.sw.s(asked.served)) && ($dccore.sw.can(served)) { dccore.sw.ask served }
     return $iif($dccore.sw.s(live),loading...,-)
@@ -4914,7 +4965,7 @@ alias dccore.sw.data {
   hadd dccore.swm home.2.t mIRC
   hadd dccore.swm home.2.s This mIRC's own: window, link, chat
   hadd dccore.swm home.f.n 4
-  hadd dccore.swm home.f.ids 300-337
+  hadd dccore.swm home.f.ids 300-345
   hadd dccore.swm home.f.1 300 301 12 66 228 46 18 62 15 9 kv Bot
   hadd dccore.swm home.f.1.n 4
   hadd dccore.swm home.f.1.r.1 302 303 18 72 52 8 74 72 160 8 Nick
@@ -4936,11 +4987,15 @@ alias dccore.sw.data {
   hadd dccore.swm home.f.3.r.3 324 325 18 146 52 8 74 146 160 8 Speed record
   hadd dccore.swm home.f.3.r.4 326 327 18 155 52 8 74 155 160 8 Failed
   hadd dccore.swm home.f.3.r.5 328 329 18 164 52 8 74 164 160 8 Searches
-  hadd dccore.swm home.f.4 330 331 248 140 228 37 254 136 26 9 kv Library
-  hadd dccore.swm home.f.4.n 3
+  hadd dccore.swm home.f.4 330 331 248 140 228 73 254 136 26 9 kv Library
+  hadd dccore.swm home.f.4.n 7
   hadd dccore.swm home.f.4.r.1 332 333 254 146 52 8 310 146 160 8 Lists
-  hadd dccore.swm home.f.4.r.2 334 335 254 155 52 8 310 155 160 8 Rebuild
-  hadd dccore.swm home.f.4.r.3 336 337 254 164 52 8 310 164 160 8 Packing
+  hadd dccore.swm home.f.4.r.2 334 335 254 155 52 8 310 155 160 8 Files
+  hadd dccore.swm home.f.4.r.3 336 337 254 164 52 8 310 164 160 8 Size
+  hadd dccore.swm home.f.4.r.4 338 339 254 173 52 8 310 173 160 8 Last rebuild
+  hadd dccore.swm home.f.4.r.5 340 341 254 182 52 8 310 182 160 8 Search index
+  hadd dccore.swm home.f.4.r.6 342 343 254 191 52 8 310 191 160 8 Rebuild
+  hadd dccore.swm home.f.4.r.7 344 345 254 200 52 8 310 200 160 8 Packing
   hadd dccore.swm tab.1 50 35
   hadd dccore.swm tab.2 86 34
   hadd dccore.swm tab.3 121 45
