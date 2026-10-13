@@ -976,20 +976,41 @@ def packing_lines(now=None):
 
 
 def library_figures():
-    """[(ServedList, files, bytes, size text, summary)] for every list served,
-    and (rows, lists, state) for the search index (#1359). A list whose
-    figures cannot be read is left out and the reason logged."""
+    """([(ServedList, files, bytes, size text, summary, built)], [ServedList],
+    (rows, lists, state)) (#1359): the figures of every list served whose
+    figures could be read, the lists whose figures could not, and the
+    search index.
+
+    A list not built yet is in the first, with nothing in it: that is what
+    it holds. One whose count failed is in the second, and the reason
+    logged (#1367): get_file_count_date_size_and_raw_bytes() answers a
+    failure as 'Error' and zeros, which would have read as an empty library.
+
+    Every list's directory is resolved once for the whole call
+    (list.list_dirs_held(), #1367): each figure asks for it, and each ask
+    read lists.json again."""
     import library
     import list as list_mod
     import list_index
-    served = []
-    for entry in library.lists():
-        try:
-            files, _date, size_text, raw = list_mod.get_file_count_date_size_and_raw_bytes(entry.name)
-            served.append((entry, files, raw, size_text, list_mod.read_library_summary(entry.name)))
-        except Exception as err:
-            print(f"[ADMINCHAT] The figures of the list {entry.name!r} are unavailable: {err}")
-    return served, list_index.held_totals(getattr(config, "fetched_bot_lists", None))
+    served, unreadable = [], []
+    with list_mod.list_dirs_held():
+        for entry in library.lists():
+            try:
+                files, date, size_text, raw = list_mod.get_file_count_date_size_and_raw_bytes(entry.name)
+                if date == "Error":
+                    raise ValueError("the list could not be counted")
+                served.append((entry, files, raw, size_text, list_mod.read_library_summary(entry.name),
+                               date != "No List"))
+            except Exception as err:
+                print(f"[ADMINCHAT] The figures of the list {entry.name!r} are unavailable: {err}")
+                unreadable.append(entry)
+    # Apart from the lists (#1367): the index failing costs its own line.
+    try:
+        index = list_index.held_totals(getattr(config, "fetched_bot_lists", None))
+    except Exception as err:
+        print(f"[ADMINCHAT] The search index's totals are unavailable: {err}")
+        index = None
+    return served, unreadable, index
 
 
 def library_lines():
@@ -1006,20 +1027,26 @@ def library_lines():
     is 1 for the primary list, 0 for the others; the list's name is last, so
     it may hold spaces. SEARCHINDEX is the dashboard's index of the lists
     held from other bots: their rows and how many lists, and `ok`, `filling`
-    (not every held list is searchable yet) or `none` (no list is held).
+    (a backfill is indexing held lists now) or `none` (no list is held).
+
+    A list whose figures could not be read has no LIBRARY line (#1367), and
+    an index whose totals could not be read no SEARCHINDEX line: no figure
+    rather than a zero that reads as an empty library.
 
     Sent only to a session that asked with `library`, once: an older script
     would print a line it has no handler for in its window."""
     try:
-        served, (rows, held, state) = library_figures()
+        served, _unreadable, index = library_figures()
     except Exception as err:
         print(f"[ADMINCHAT] The library's totals are unavailable: {err}")
         return []
     lines = [f"DCCORE LIBRARY {_num(files)} {_num(summary['folders'])} {_num(raw)} "
              f"{_num(summary['finished_at'])} {_num(summary['seconds'])} "
              f"{1 if entry.primary else 0} {_clean(entry.name) or '?'}"
-             for entry, files, raw, _size, summary in served]
-    lines.append(f"DCCORE SEARCHINDEX {_num(rows)} {_num(held)} {_clean(state, token=True)}")
+             for entry, files, raw, _size, summary, _built in served]
+    if index is not None:
+        rows, held, state = index
+        lines.append(f"DCCORE SEARCHINDEX {_num(rows)} {_num(held)} {_clean(state, token=True)}")
     return lines
 
 
@@ -1176,7 +1203,7 @@ class Session:
         self._reported_dropped = 0
         self._status_sent_at = 0.0
         self._status_due = False      # set by event_sink, acted on by the writer
-        self._status_job = None       # (thread, lines) while a burst is being computed
+        self._status_job = None       # (thread, lines, library) while a burst is being computed
         # The DCCORE CHANNELS line this session was last sent (#371): sent
         # again with a status burst when the bot's channels change, so a
         # chat window's channel list does not go stale (#958 review).
@@ -1280,8 +1307,12 @@ class Session:
         point: a login every ~100 s while the bot itself was fine. If the
         figures are not in within STATUS_WAIT, `DCCORE PING` stands in for
         the burst - any line resets the script's timer - and the helper is
-        left to finish; while it is still running no second one is started,
-        and its lines go out on the pass that finds them ready in time.
+        left to finish; while it is still running no second one is started.
+        Its lines go out the moment it finishes (send_finished_status(), on
+        the writer's next half-second pass), not with the next timer burst
+        (#1367): the burst asked for at a rebuild's end is the slow one, the
+        first count of the list just published, and it is the one whose
+        totals the start page waits for.
         """
         if self.closed or not self.authenticated or not self.structured:
             return
@@ -1291,6 +1322,7 @@ class Session:
         job = self._status_job
         if job is None or not job[0].is_alive():
             lines = []
+            library = self.reads_library
 
             def compute():
                 try:
@@ -1298,21 +1330,44 @@ class Session:
                                               rebuild=self.draws_rebuild,
                                               reading=self.draws_audio,
                                               packing=self.draws_packing,
-                                              library=self.reads_library))
+                                              library=library))
                 except Exception as err:
                     print(f"[ADMINCHAT] Status burst failed: {err}")
 
-            job = (threading.Thread(target=compute, daemon=True), lines)
+            job = (threading.Thread(target=compute, daemon=True), lines, library)
             self._status_job = job
             job[0].start()
         job[0].join(STATUS_WAIT)
         if job[0].is_alive():
             self.send("DCCORE PING")
             return
+        self._send_status_lines(job)
+
+    def send_finished_status(self):
+        """The lines of a burst that missed STATUS_WAIT, once its helper is
+        done (#1367). On the writer thread, every pass; nothing when no late
+        burst is waiting."""
+        job = self._status_job
+        if job is None or job[0].is_alive():
+            return
+        if self.closed or not self.authenticated or not self.structured:
+            return
+        self._status_sent_at = time.time()
+        self._send_status_lines(job)
+
+    def _send_status_lines(self, job):
         self._status_job = None
         for line in job[1]:
             self.send(line)
-        self._rebuild_shown = any(line.startswith("DCCORE REBUILD ") for line in job[1])
+        # `library` sent while a burst begun without the LIBRARY lines was
+        # still being computed joined that burst (#1367): one more, with them.
+        if self.reads_library and not job[2]:
+            self.request_status()
+        if self.draws_rebuild:
+            # Only for a script that draws them: a session that reads the
+            # library but not REBUILD lines never has one in a burst, and
+            # send_rebuild_progress() keeps its own count of the rebuild.
+            self._rebuild_shown = any(line.startswith("DCCORE REBUILD ") for line in job[1])
         self._rebuild_sent_at = time.time()
         self._packing_shown = any(line.startswith("DCCORE PACKING ") for line in job[1])
         self._packing_sent_at = time.time()
@@ -1321,8 +1376,14 @@ class Session:
         """A REBUILD line between bursts while a rebuild runs, and one
         `DCCORE REBUILD end` when it stops, so the panel does not wait up to a
         whole status interval to say the rebuild is over (#1024). Reads the
-        progress file only - no lock - so it is safe on the writer thread."""
-        if not (self.draws_rebuild and self.structured and self.authenticated):
+        progress file only - no lock - so it is safe on the writer thread.
+
+        A session that reads the library watches too, whether or not its
+        script draws REBUILD lines (#1367): the end of a rebuild is when its
+        totals change, so it asks for a burst then - and is sent no REBUILD
+        line it has no handler for."""
+        draws = self.draws_rebuild
+        if not ((draws or self.reads_library) and self.structured and self.authenticated):
             return
         now = time.time()
         if now - self._rebuild_sent_at < REBUILD_INTERVAL:
@@ -1332,7 +1393,8 @@ class Session:
             return
         self._rebuild_sent_at = now
         self._rebuild_shown = bool(lines)
-        self.send(lines[0] if lines else "DCCORE REBUILD end")
+        if draws:
+            self.send(lines[0] if lines else "DCCORE REBUILD end")
         if not lines and self.reads_library:
             # The new totals in a burst of their own, computed off this
             # thread as every burst is (#1359): the first count of a list
@@ -1415,6 +1477,9 @@ class Session:
             # fills silence only.
             if self._status_due and self.structured and self.authenticated:
                 self.send_status()
+            # A burst that missed STATUS_WAIT goes out as soon as it is done
+            # (#1367), not with the next one.
+            self.send_finished_status()
             if not self._outbox:
                 # The STATUS timer rides on the writer's own half-second
                 # wake rather than a thread of its own: one thread per
@@ -1794,25 +1859,46 @@ def _cmd_library(session, args):
         session.request_status()
         return
     try:
-        served, (rows, held, state) = library_figures()
+        served, unreadable, index = library_figures()
     except Exception as err:
         session.send(f"The library's totals are unavailable: {err}")
         return
-    for entry, files, _raw, size_text, summary in served:
-        line = (f"{entry.name}{' (primary)' if entry.primary and len(served) > 1 else ''}: "
-                f"{files:,} files")
+    several = len(served) + len(unreadable) > 1
+    for entry, files, _raw, size_text, summary, built in served:
+        line = f"{entry.name}{' (primary)' if entry.primary and several else ''}: "
+        if not built:
+            session.send(line + "no list built yet.")
+            continue
+        line += f"{files:,} files"
         if summary["folders"]:
             line += f" in {summary['folders']:,} folders"
         line += f", {size_text}"
         if summary["finished_at"]:
             when = time.strftime("%Y-%m-%d %H:%M", time.localtime(summary["finished_at"]))
-            line += f"; rebuilt {when}, in {format_uptime(summary['seconds'])}"
+            line += f"; rebuilt {when}, in {_rebuild_time(summary['seconds'])}"
         session.send(line + ".")
+    for entry in unreadable:
+        session.send(f"{entry.name}{' (primary)' if entry.primary and several else ''}: "
+                     f"its figures could not be read; the log says why.")
+    if index is None:
+        session.send("Search index: its totals could not be read; the log says why.")
+        return
+    rows, held, state = index
     session.send({"none": "Search index: no list held from other bots.",
                   "filling": f"Search index: {rows:,} rows from {held:,} held list(s), "
                              f"still being filled.",
                   }.get(state, f"Search index: {rows:,} rows from {held:,} held list(s), "
                                f"up to date."))
+
+
+def _rebuild_time(seconds):
+    """How long a rebuild took, in the reply to `library` (#1367):
+    format_uptime() counts whole minutes, and a rebuild of a small list
+    under one read as "0 Min"."""
+    seconds = int(max(0, seconds))
+    if seconds < 60:
+        return f"{seconds} Sec"
+    return format_uptime(seconds)
 
 
 def _cmd_packcancel(session, args):
