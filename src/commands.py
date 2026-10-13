@@ -2715,6 +2715,13 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
                     if reading is not None:
                         finish_audio_reading(reading)
 
+            elif process.returncode == update_list.REBUILD_STOPPED_EXIT:
+                # Asked to stop, by this bot's shutdown (#1365): not a failure,
+                # and nothing for the operator to act on.
+                print("[UPDATE] The list rebuild stopped with the bot; the published list stays as it is.")
+                config.last_list_update_ok = False
+                config.last_list_update_error = "stopped with the bot before it published"
+                config.last_list_update_seconds = int(time.time() - started)
             else:
                 error_msg = subprocess_failure_message(process.stderr, process.stdout)
                 # A rebuild that failed is still failed tomorrow: the list
@@ -2834,6 +2841,8 @@ def audio_run_env():
     env = dict(os.environ)
     env[update_list.RUN_TOKEN_ENV] = token
     env[update_list.DAEMON_PID_ENV] = str(os.getpid())
+    # Kept, so the shutdown can stop this run by its token (#1365).
+    runtime.run_tokens = (tuple(runtime.run_tokens) + (token,))[-runtime.RUN_TOKENS_KEPT:]
     return token, env
 
 
@@ -3069,34 +3078,70 @@ def stop_orphaned_reading():
 
 def stop_rebuild(wait=10.0, poll=0.25, sleep=None, clock=None):
     """At shutdown: the rebuild this bot is running is asked to stop before it
-    publishes (#1356), and waited for, up to `wait` seconds, to let go of the
-    list lock. True if one was running.
+    publishes (#1356), and waited for, up to `wait` seconds, to end. True if
+    one was running.
 
     It used to run on: update_list.py is a process of its own, and it scanned
     on for half an hour after Tools > Stop, holding the lock, so the restarted
     bot's Update list was refused. The rebuild also stops by itself when this
-    process is gone; this makes it prompt. The stop file is cleared only once
-    the lock is free, so a rebuild still finishing its directory sees it."""
+    process is gone; this makes it prompt.
+
+    ASKED BY ITS TOKEN (#1365), the one audio_run_env() gave it, never through
+    the reading's stop file: a rebuild a terminal holds the lock with goes
+    through, and the bot's own child is asked wherever it is - still waiting
+    behind a reading for the lock, scanning, or reading audio lengths once it
+    has published. Done when the bot's rebuild has ended (`update_inprogress`
+    is down) and no run of this bot holds the lock; only then is the request
+    cleared, so a run still finishing a directory sees it."""
     import time
     import update_list
 
-    if not getattr(config, "update_inprogress", False):
+    if not getattr(config, "update_inprogress", False) or not runtime.run_tokens:
         return False
-    holder = update_list.list_lock_holder()
-    if not holder or holder[1] != "rebuild":
-        return False
+    tokens = list(runtime.run_tokens)
+    if not update_list.request_run_stop(tokens):
+        # Nothing to wait for: it was never asked (#1365). It still stops by
+        # itself, once this process is gone.
+        print("[LIST-GEN] Could not ask the list rebuild to stop (the stop request could not "
+              "be written); it stops by itself within seconds of the bot.")
+        return True
+    owner = update_list.list_lock_owner()
+    print(f"[LIST-GEN] Asking the list rebuild (pid {(owner and owner[0]) or '?'}) to stop; "
+          f"the published list stays as it is.")
     sleep = sleep or time.sleep
     clock = clock or time.monotonic
-    update_list.request_stop()
-    print(f"[LIST-GEN] Asking the list rebuild (pid {holder[0] or '?'}) to stop; "
-          f"the published list stays as it is.")
     deadline = clock() + wait
     while clock() < deadline:
-        current = update_list.list_lock_holder()
-        if not current or current[1] != "rebuild":
-            update_list.clear_stop_request()
+        owner = update_list.list_lock_owner()
+        if (not getattr(config, "update_inprogress", False)
+                and not (owner and owner[2] in tokens)):
+            update_list.clear_run_stop_request()
             return True
         sleep(poll)
+    return True
+
+
+def stop_orphaned_rebuild():
+    """At startup: a rebuild an earlier run of this bot started, still going
+    because that bot ended without its shutdown, is asked to stop (#1365). It
+    publishes nothing. True when one was found.
+
+    Told apart from a terminal's by the token in the list lock: a run the bot
+    starts carries one, a run from a terminal does not, and only one bot runs
+    from a folder, so a token held at startup is never this process's. Such a
+    rebuild stops by itself once its bot's pid is gone - but on Windows a pid
+    is reused soon and one that cannot be opened counts as alive, so it could
+    go on scanning, and refuse this bot's Update list, for as long as that
+    lasted."""
+    import update_list
+
+    owner = update_list.list_lock_owner()
+    if not owner or owner[1] != "rebuild" or not owner[2] or owner[2] in runtime.run_tokens:
+        return False
+    if not update_list.request_run_stop([owner[2]]):
+        return False
+    print(f"[LIST-GEN] A list rebuild left running by the bot's last run (pid "
+          f"{owner[0] or '?'}) was asked to stop; it publishes nothing.")
     return True
 
 

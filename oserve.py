@@ -290,6 +290,14 @@ def startup(setup_page=None):
         _commands_orphan.stop_orphaned_reading()
     except Exception as orphan_err:
         print(f"[AUDIO-INFO] Could not look for a reading left running: {orphan_err}")
+    # And a rebuild it started (#1365), told apart from a terminal's by the
+    # token in the list lock: it would stop by itself once that bot's pid is
+    # gone, but a pid is soon reused.
+    try:
+        import commands as _commands_orphan
+        _commands_orphan.stop_orphaned_rebuild()
+    except Exception as orphan_err:
+        print(f"[LIST-GEN] Could not look for a rebuild left running: {orphan_err}")
 
     # The hard backstop for #170's RFC: scripts/setup_check.py's pre-flight
     # report is a friendlier, EARLIER warning an operator can choose to run
@@ -736,9 +744,15 @@ def _shut_down():
         # A rebuild (#1356) and a background audio reading (#1182) run in
         # update_list.py's own process and would outlive the bot. Asked to
         # stop, a rebuild publishes nothing and a reading saves what it read.
+        # Each in its own try (#1365): a rebuild that could not be asked must
+        # not leave the reading running.
         try:
             import commands as _commands_stop
             _commands_stop.stop_rebuild(wait=10.0)
+        except Exception:
+            pass
+        try:
+            import commands as _commands_stop
             _commands_stop.stop_audio_reading(wait=10.0)
         except Exception:
             pass
