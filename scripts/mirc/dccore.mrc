@@ -2969,7 +2969,10 @@ alias dccore.sw.line {
     }
     hadd dccore.sws live 1
     dccore.sw.load
-    dccore.sw.page $dccore.sw.s(page)
+    ; the start page asks for the lists and the library's totals now
+    ; that it can, not at the next burst (#1359); a page shown again
+    if ($dccore.sw.s(side) == 0) { dccore.sw.home.fill }
+    else { dccore.sw.page $dccore.sw.s(page) }
     return
   }
   ; settings: SETBEGIN <n>, SETF <KEY> <type> [value], SETEND <n>

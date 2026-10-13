@@ -49,6 +49,14 @@ class TheStartPageAsksOnce(unittest.TestCase):
         # after the guard that keeps the fill to the start page shown with DCX
         self.assertEqual(lines[0], "if (!$dialog(dccore.set)) || (!$dccore.sw.s(dcx)) || ($dccore.sw.s(side) != 0) { return }")
 
+    def test_the_start_page_is_filled_as_soon_as_the_window_is_live(self):
+        # the CAPS line makes the window live: the start page asks then, not
+        # at the next burst up to 30 s later; a page shown is shown again
+        lines = statements(alias("dccore.sw.line"))
+        live = lines.index("hadd dccore.sws live 1")
+        self.assertIn("if ($dccore.sw.s(side) == 0) { dccore.sw.home.fill }", lines[live:live + 5])
+        self.assertIn("else { dccore.sw.page $dccore.sw.s(page) }", lines[live:live + 6])
+
 
 class TheLibraryFrame(unittest.TestCase):
 
