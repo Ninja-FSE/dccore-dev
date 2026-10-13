@@ -1817,6 +1817,8 @@ def generate_master_list(list_name=None, reading_jobs=None):
                        folder_count=len(scan_folders),
                        files=len(all_files_data) + len(video_files_data),
                        force=True)
+        if rebuild_stop_reason(force=True):
+            break
 
         # A folder that is not there RIGHT NOW is skipped, not fatal: an
         # unplugged drive or an unmounted share should cost its own contents,
@@ -1843,13 +1845,18 @@ def generate_master_list(list_name=None, reading_jobs=None):
         # the measurement. Traversal ORDER differs from os.walk's and cannot
         # matter - all_files_data is sorted by (folder, filename) below before
         # anything is written.
-        for root, files in walk_with_sizes(scan_root, onerror=_on_walk_error):
+        walk = walk_with_sizes(scan_root, onerror=_on_walk_error)
+        for root, files in walk:
             # Throttled inside write_progress(), so this costs a clock read
             # per directory rather than a file write.
             write_progress("scanning", folder=scan_folder.name,
                            folder_index=folder_number,
                            folder_count=len(scan_folders),
                            files=len(all_files_data) + len(video_files_data))
+            # Throttled too: a clock read per directory, the stop file at
+            # most once a second (#1356).
+            if rebuild_stop_reason():
+                break
 
             # ONCE PER DIRECTORY, NOT ONCE PER FILE (#463).
             #
@@ -1977,6 +1984,20 @@ def generate_master_list(list_name=None, reading_jobs=None):
                                        (root, file), file_bytes)
             if packable_here:
                 packable_folders.add(rel_dir)
+        # Closed here rather than whenever it is collected: an early stop
+        # leaves it mid-walk, and closing it shuts its scan threads down.
+        walk.close()
+        if rebuild_stop_reason():
+            break
+
+    # Asked once more with the walk over, before anything is written (#1356).
+    stopped = rebuild_stop_reason(force=True)
+    if stopped:
+        print(f"[LIST-GEN] Stopped before publishing: {stopped}. The previous "
+              "list was left untouched and is still in use.")
+        if audio is not None:
+            audio.close()
+        return False
 
     if walk_errors:
         print(f"[LIST-GEN ERROR] {len(walk_errors)} part(s) of the library could not be "
@@ -2444,6 +2465,12 @@ def generate_master_list(list_name=None, reading_jobs=None):
         # the swap and the prune of what it replaced - the daemon refuses new
         # searches and file requests, since on Windows a file somebody is
         # reading cannot be renamed or removed.
+        #
+        # The last moment a stop is honoured (#1356): the swap below is the
+        # point of no return.
+        stopped = rebuild_stop_reason(force=True)
+        if stopped:
+            raise RebuildStopped(f"stopped before publishing: {stopped}")
         write_progress("publishing", force=True)
         _publish_artifacts(swaps)
 
@@ -2717,6 +2744,7 @@ def take_list_lock(kind, log=print, wait=None, clock=time.monotonic, sleep=time.
         # Nobody else holds the list, so a stop request lying about was meant
         # for a run that has ended: it must not stop this one at its start.
         clear_stop_request()
+        reset_rebuild_stop()
         return None
     except platform_compat.AlreadyRunning:
         holder = platform_compat.file_lock_note(path)
@@ -2748,6 +2776,55 @@ def mark_list_lock(kind):
 def release_list_lock():
     platform_compat.release_file_lock(_list_lock[0])
     _list_lock[0] = None
+
+
+# A REBUILD STOPS WITH THE BOT THAT STARTED IT (#1356), before it publishes.
+# It ran on after the bot had stopped - Tools > Stop, Ctrl-C, a closed window -
+# scanning for half an hour with nobody to report to, and held the list lock
+# the whole time: the restarted bot's Update list was refused with "Another
+# list rebuild is already running". The same two signals the reading uses: the
+# stop file, which the bot writes when it stops, and the bot's pid, for a bot
+# that ended without its shutdown. Asked at most once a second during the scan,
+# and once more before the lists are written and before they are published;
+# never after, since from the swap on the new list is the one in use.
+#
+# ONLY A RUN THAT HOLDS THE LIST LOCK is stopped - rebuild_main(), the run the
+# bot starts and a terminal's. That run cleared any stop file left lying about
+# when it took the lock; a caller building a list some other way never took it,
+# and a stop file meant for somebody's reading must not end its build.
+REBUILD_STOP_CHECK_SECONDS = 1.0
+_rebuild_stop = {"at": None, "reason": None}
+
+
+class RebuildStopped(Exception):
+    """Raised inside generate_master_list()'s try, so the temporary lists are
+    discarded and the previous list is said to be still in use."""
+
+
+def reset_rebuild_stop():
+    _rebuild_stop.update(at=None, reason=None)
+
+
+def rebuild_stop_reason(clock=time.monotonic, force=False, should_stop=None):
+    """Why this rebuild must stop now, or None. Once it has an answer it keeps
+    it, so a multi-list run does not start the next list."""
+    if _list_lock[0] is None:
+        return None
+    if _rebuild_stop["reason"]:
+        return _rebuild_stop["reason"]
+    now = clock()
+    if (not force and _rebuild_stop["at"] is not None
+            and now - _rebuild_stop["at"] < REBUILD_STOP_CHECK_SECONDS):
+        return None
+    _rebuild_stop["at"] = now
+    if stop_requested():
+        reason = "the bot is stopping and asked it to stop"
+    elif (should_stop or reading_should_stop)():
+        reason = "the bot that started it is no longer running"
+    else:
+        return None
+    _rebuild_stop["reason"] = reason
+    return reason
 
 
 def reading_should_stop(clock=time.monotonic, _state={"checked": 0.0, "gone": False}):
@@ -3251,6 +3328,13 @@ def _generate_all_lists(log, reading_jobs=None):
 
     failed = []
     for entry in every:
+        # A stopped run builds no further list (#1356); the ones not reached
+        # go on serving what they last built, like a failed one.
+        stopped = rebuild_stop_reason()
+        if stopped:
+            log(f"[LIST-GEN] Stopped: {stopped}. Not building {entry.name!r}.")
+            failed.append(entry.name)
+            continue
         log(f"[LIST-GEN] Building {entry.name!r} ({len(entry.folders)} folder(s))...")
         try:
             if not generate_master_list(entry.name, **extra):
