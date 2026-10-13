@@ -4190,6 +4190,10 @@
     var parts = [];
     if (progress.phase === "writing") {
       parts.push(t("tools.writingList"));
+    } else if (progress.phase === "starting") {
+      // Its own words (#1366): a rebuild checking its folders before the
+      // scan, which on a mount that stopped answering is where it waits.
+      parts.push(t("tools.checkingFolders"));
     } else if (progress.folder_count) {
       parts.push(t("tools.scanningFolder")
         .replace("{index}", progress.folder_index).replace("{total}", progress.folder_count));

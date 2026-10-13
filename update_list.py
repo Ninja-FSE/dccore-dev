@@ -1258,14 +1258,14 @@ def write_progress(phase, folder="", folder_index=0, folder_count=0,
 # and the rewrite of its rows (#1182) - "reading" and "rewriting". Anything
 # else - "packing" and "publishing", which cover building the archive and the
 # swap, or no phase at all - is a moment searches and file requests wait out.
-PHASES_BEFORE_THE_SWAP = ("starting", "scanning", "writing", "reading", "rewriting")
-
 # What a rebuild reports first (#1361), before it touches a single folder.
 STARTING_PHASE = "starting"
 
 # The phase of the background audio reading (#1182), after the list is
 # published. The daemon hands a rebuild over to it on seeing this.
 READING_PHASE = "reading"
+
+PHASES_BEFORE_THE_SWAP = (STARTING_PHASE, "scanning", "writing", READING_PHASE, "rewriting")
 
 
 def read_progress():
@@ -3389,6 +3389,18 @@ def rebuild_main(log=print):
     """`update_list.py` with no argument: rebuild every list, then - started
     by the bot - read the audio lengths left. Returns the exit code."""
     log("--- Starting the scheduled weekly file-list update ---")
+    # NOTHING CONFIGURED is refused before the lock (#1366): it looks at no
+    # folder, so it cannot block, and taking the lock first would stop a
+    # running audio reading and wait for it only to refuse. Across EVERY
+    # list, not just the primary: with several lists there is something to
+    # build if any one of them has somewhere to look. No report to clear -
+    # none is written before the lock, and one there is another run's.
+    configured = [folder for entry in library.lists() for folder in entry.folders]
+    if not configured:
+        log("[CRITICAL] No music folder configured yet - add one under Your list "
+            "on the web dashboard's Settings page, or set FILE_DIRECTORY in "
+            "settings.conf, before running this.")
+        return 1
     # ONE AT A TIME (#1182 audit): a reading holding the list - the bot's, a
     # terminal's, or one whose bot died - is asked to stop and waited for; a
     # second rebuild is not started at all. Two of them wrote the same
@@ -3406,8 +3418,8 @@ def rebuild_main(log=print):
     # generate_all_lists() clears the progress file in its own finally, so a
     # crash inside it still leaves nothing behind for the dashboard to read.
     try:
-        # THE FIRST REPORT, before any folder is looked at (#1361). The checks
-        # below stat every configured folder, and a mount that stopped
+        # THE FIRST REPORT, before any folder is looked at (#1361). The check
+        # below stats every configured folder, and a mount that stopped
         # answering blocks right there: with nothing reported the bot could
         # not tell a stall from a slow start and never ended it, and with no
         # phase to read it paused every search and file request meanwhile. A
@@ -3415,26 +3427,12 @@ def rebuild_main(log=print):
         # is a phase that pauses nothing. After the lock, so it never writes
         # over the report of a rebuild that holds it.
         write_progress(STARTING_PHASE, force=True)
-        # FILE_DIRECTORY is not in settings_file.REQUIRED (see its own comment) -
-        # a blank value is a supported "not chosen yet" state the daemon itself
-        # boots fine with, so os.path.exists(None) here (a TypeError, not a
-        # clean failure) must be guarded against explicitly rather than assuming
-        # a real string ever reaches this point.
-        # Across EVERY list, not just the primary. The two guards below ask
-        # "is there anything to build at all", and with several lists the
-        # answer is yes if any one of them has somewhere to look - a single
-        # list pointed at an unplugged drive is generate_all_lists()'s
-        # problem to report, not a reason to refuse the whole run.
-        configured = [folder for entry in library.lists() for folder in entry.folders]
-        if not configured:
-            log("[CRITICAL] No music folder configured yet - add one under Your list "
-                "on the web dashboard's Settings page, or set FILE_DIRECTORY in "
-                "settings.conf, before running this.")
-            clear_progress()
-            return 1
         # Every one missing, not any one: a single unavailable folder is skipped
         # during the scan with a warning, and only a library with nothing readable
-        # in it at all is worth refusing to run for.
+        # in it at all is worth refusing to run for. After the lock and the
+        # first report, unlike the check above, because it stats the folders;
+        # a bot's rebuild has stopped its own reading before it starts the
+        # child anyway (#1366).
         if not any(os.path.isdir(platform_compat.long_path(f.path)) for f in configured):
             log("[CRITICAL] None of the configured music folders exist: "
                 + ", ".join(f.path for f in configured))
