@@ -956,6 +956,44 @@ def indexed_bots():
             return set()
 
 
+def held_totals(held):
+    """(rows, lists, state) for the console's start page (#1359), from what
+    the held lists recorded when they were fetched - never from the index:
+    a COUNT(*) over an FTS5 table reads every row, 3.3 GB on a live bot.
+
+    `rows` is what the lists' fetches counted, which is what each indexed;
+    `lists` how many lists are held. `state`:
+      none     - no list is held, so the index has nothing to hold;
+      filling  - the startup backfill, or the one after a repair, has not
+                 finished, so some held lists are not searchable yet;
+      ok       - neither.
+    """
+    rows = count = 0
+    for entry in (held or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        # The lists _held_lists() indexes: every one in "lists", and the main
+        # one from the entry itself when "lists" does not have it (an entry
+        # from before an archive could hold more than one).
+        lists = entry.get("lists") if isinstance(entry.get("lists"), dict) else {}
+        infos = [info for info in lists.values() if isinstance(info, dict) and info.get("list_path")]
+        if "" not in lists and entry.get("list_path"):
+            infos.insert(0, entry)
+        for info in infos:
+            try:
+                rows += max(0, int(info.get("entry_count") or 0))
+            except (TypeError, ValueError):
+                pass
+            count += 1
+    if not count:
+        state = "none"
+    elif _rebuild_pending or not runtime.list_index_backfill_done.is_set():
+        state = "filling"
+    else:
+        state = "ok"
+    return rows, count, state
+
+
 def bots_with_a_match(terms, bots):
     """Which of `bots` have at least one row matching, and which have none.
 
