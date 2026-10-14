@@ -1074,15 +1074,18 @@ whether the block is up to date.
 
 The script's windows can be dark: `/dccore theme dark`, or the **Theme** menu
 on the control panel's mIRC side (**Window** page). *Follow mIRC* (`auto`, the
-default) takes mIRC's own dark mode, which mIRC 7.79 and later have under
-Options → Display; *Dark* darkens the control panel, the list window and the
+default) takes mIRC's own dark mode, which follows Windows' in mIRC 7.79 and
+later and is under Options → Display in mIRC 7.81 and later; *Dark* darkens the control panel, the list window and the
 download queues whatever mIRC does - the title bar, the background and the
 controls - through a small DLL of DCCore's own, `dll\dccore_ui.dll` beside
 the script (its source is `dll\src\dccore_ui.c`; the script checks its hash
 before loading it, as it does DCX's). In mIRC's own dark mode the DLL is not
-used: mIRC draws its dialogs dark already. On a dark window background the
-line colours meant for a white one (black, navy, maroon, purple) are drawn
-as their light neighbours, so nothing disappears into it.
+used: mIRC draws its dialogs dark already. Without the DLL (or on a 64-bit
+mIRC, which cannot load it) *Dark* leaves the dialogs light, the control
+panel's DCX parts included, so nothing is half dark. On a dark window
+background (black, navy, maroon or purple) the line colours meant for a white
+one - black, navy, green, maroon, purple and blue - are drawn as their light
+neighbours, so nothing disappears into it.
 
 `/dccore icons on` (or the tickbox under the theme) puts an icon beside each
 of the script's own menu items and each page in the control panel's page

@@ -1788,7 +1788,7 @@ menu @DCCore {
   ..$iif($dccore.theme.mode == dark,$style(1)) Dark:dccore theme dark
   ..$iif($dccore.theme.mode == light,$style(1)) Light:dccore theme light
   ..-
-  ..$iif($dccore.opt(icons),$style(1)) Icons in the menus and the control panel:dccore icons $iif($dccore.opt(icons),off,on)
+  ..$iif($dccore.theme.icons,$style(1)) Icons in the menus and the control panel:dccore icons $iif($dccore.theme.icons,off,on)
   $dccore.mi(purge) Clear finished...:dccore.confirm dlclear Clear the list of finished downloads? Only the list is cleared and no files are deleted.
 }
 
@@ -1875,9 +1875,11 @@ alias dccore.theme.mode {
   return $iif($istok(dark light,%m,32),%m,auto)
 }
 ; mIRC's own dark mode. $darkmode is mIRC 7.79's; before it, no dark mode.
+; Asked as a condition, not compared with $true, so it is right whether it
+; answers $true or 1.
 alias dccore.theme.mircdark {
   if ($version < 7.79) { return $false }
-  return $iif($darkmode == $true,$true,$false)
+  return $iif($darkmode,$true,$false)
   :error
   reseterror
   return $false
@@ -1888,15 +1890,44 @@ alias dccore.theme.dark {
   if (%m == light) { return $false }
   return $dccore.theme.mircdark
 }
-; Why dll\dccore_ui.dll is not used, or nothing when it is. Its hash is
-; worked out once a session ($sha256 needs mIRC 7.45, as DCX does).
+; Why dll\dccore_ui.dll is not used, or nothing when it is ($sha256 needs
+; mIRC 7.45, as DCX does; the dll is 32-bit, as dcx.dll is). Its hash is
+; worked out again for as long as mIRC does not hold the dll - a file put
+; right is taken without a restart, a file swapped is caught before it is
+; loaded - and kept once mIRC holds it, which a file changed on disk cannot
+; change.
 alias dccore.theme.uiwhy {
   if (!$isfile($dccore.theme.uifile)) { return dll\dccore_ui.dll is missing }
   if ($version < 7.45) { return it needs mIRC 7.45 or later }
-  if ($dccore.st(ui.sha) == $null) { hadd dccore.live ui.sha $sha256($dccore.theme.uifile,2) }
+  if ($bits == 64) { return this mIRC is 64-bit and dll\dccore_ui.dll is 32-bit }
+  if ($dccore.st(ui.sha) == $null) || (!$dccore.theme.uiloaded) { hadd dccore.live ui.sha $sha256($dccore.theme.uifile,2) }
   if ($dccore.st(ui.sha) != $dccore.theme.uisha256) { return dll\dccore_ui.dll is not the build this script was shipped with }
 }
 alias dccore.theme.ui { return $iif($dccore.theme.uiwhy == $null,$true,$false) }
+; Every call into dll\dccore_ui.dll goes through here: $1 the function, $2-
+; what it is given. Nothing unless the file is the build the script pins,
+; asked here and not by each caller, so no call can come before the check.
+; A dll that cannot be opened all the same is an error that would stop the
+; script, so it is caught, as dccore.dcx.version does.
+alias dccore.theme.call {
+  if (!$dccore.theme.ui) { return }
+  return $dll($dccore.theme.uifile,$1,$2-)
+  :error
+  reseterror
+  return
+}
+; Whether the dialogs are drawn dark: the theme is dark and something draws
+; them so - mIRC's own dark mode, or dccore_ui.dll. Without either they stay
+; light, the control panel's DCX parts too, so nothing is half dark.
+alias dccore.theme.dialogsdark {
+  if (!$dccore.theme.dark) { return $false }
+  if ($dccore.theme.mircdark) { return $true }
+  return $dccore.theme.ui
+}
+; The icons option: on unless it is set to 0, so a script reloaded over an
+; older one (/reload -rs runs neither on LOAD nor on START, and so sets no
+; default) has them as a fresh one does.
+alias dccore.theme.icons { return $iif($dccore.opt(icons) == 0,$false,$true) }
 
 ; The colours of dark, as $rgb gives them: bg the dialogs, face the DCX
 ; frames and the tab chosen, light the pills and the other tabs, line the
@@ -1910,9 +1941,10 @@ alias dccore.theme.rgb {
   if ($1 == grey) { return $rgb(150,150,150) }
 }
 ; The control panel's DCX colours (#1288): dark, the theme's; light, the
-; system's, exactly what the window always used.
+; system's, exactly what the window always used. Dark only where its
+; dialogs are drawn dark too (dccore.theme.dialogsdark).
 alias dccore.theme.sys {
-  if ($dccore.theme.dark) { return $dccore.theme.rgb($1) }
+  if ($dccore.theme.dialogsdark) { return $dccore.theme.rgb($1) }
   if ($1 == line) { return $dccore.dcx(GetSystemColor,COLOR_3DSHADOW) }
   if ($1 == face) { return $dccore.dcx(GetSystemColor,COLOR_3DFACE) }
   if ($1 == light) { return $dccore.dcx(GetSystemColor,COLOR_3DLIGHT) }
@@ -1926,11 +1958,13 @@ alias dccore.theme.dialog {
   if (!$dialog(%d)) { return }
   if ($dccore.theme.mircdark) { return }
   if ($2 == init) && (!$dccore.theme.dark) { return }
-  if (!$dccore.theme.ui) { return }
+  ; light: only through a dll that has darkened something, never by loading
+  ; one to draw a dialog the way it already is
+  if (!$dccore.theme.dark) && (!$dccore.theme.uiloaded) { return }
   var %x = -
   if (%d == dccore.dcxcheck) { %x = x }
   elseif (%d == dccore.set) && ($hget(dccore.sws,dcx)) { %x = x }
-  noop $dll($dccore.theme.uifile,ApplyTheme,$dialog(%d).hwnd $iif($dccore.theme.dark,1,0) %x)
+  noop $dccore.theme.call(ApplyTheme,$dialog(%d).hwnd $iif($dccore.theme.dark,1,0) %x)
 }
 
 ; ---- colours in the windows ------------------------------------------
@@ -1967,6 +2001,9 @@ alias dccore.lcol { return $dccore.theme.legible($dccore.opt(col. $+ $1),list) }
 alias dccore.ico.names { return app console settings script status slots queue dlqueue uptime version help lists fetch ask purge library rebuild audio ban unban clear ignore moveup movedown update rehash stop connect disconnect pair unpair trust chat downloads panel font dashboard cancel again user speed search pack folder hash palette megaphone mail bug key home shield }
 ; $1 an icon's name: what goes in front of a menu item's text
 alias dccore.mi {
+  ; a script reloaded with /reload -rs ran no on START: the first menu
+  ; drawn starts the hook, once
+  if (!$dccore.st(mi.tried)) { dccore.theme.menus }
   if (!$dccore.st(mi.on)) { return }
   var %n = $findtok($dccore.ico.names,$1,1,32)
   if (%n) { return %n $+ $chr(11) }
@@ -1975,10 +2012,11 @@ alias dccore.mi {
 ; The menu icons on or off, as /dccore icons says, through dccore_ui.dll's
 ; hook (MenuIcons).
 alias dccore.theme.menus {
+  hadd dccore.live mi.tried 1
   var %on = 0
-  if ($dccore.opt(icons)) && ($isfile($dccore.theme.iconfile)) { %on = 1 }
+  if ($dccore.theme.icons) && ($isfile($dccore.theme.iconfile)) { %on = 1 }
   if (%on) && ($dccore.theme.ui) {
-    hadd dccore.live mi.on $iif($dll($dccore.theme.uifile,MenuIcons,$dccore.theme.iconfile) == OK,1,0)
+    hadd dccore.live mi.on $iif($dccore.theme.call(MenuIcons,$dccore.theme.iconfile) == OK,1,0)
     return
   }
   dccore.theme.menusoff
@@ -1986,7 +2024,7 @@ alias dccore.theme.menus {
 ; the hook off - only through a dccore_ui.dll this script has loaded already,
 ; never by loading it for that
 alias dccore.theme.menusoff {
-  if ($dccore.st(mi.on)) && ($dccore.theme.uiloaded) { noop $dll($dccore.theme.uifile,MenuIcons,off) }
+  if ($dccore.st(mi.on)) && ($dccore.theme.uiloaded) { noop $dccore.theme.call(MenuIcons,off) }
   hdel dccore.live mi.on
 }
 ; Whether mIRC holds dll\dccore_ui.dll loaded now: $dll(N) names the Nth
@@ -2009,8 +2047,8 @@ alias dccore.theme.uiloaded {
 ; it halts only that part, never the window being made.
 alias dccore.theme.dcxset {
   if (!$hget(dccore.sws,dcx)) { return }
-  if ($dccore.opt(icons)) && ($isfile($dccore.theme.iconfile)) { .timerdccoreThemeIcons -m 1 0 dccore.theme.pageicons }
-  if (!$dccore.theme.dark) { return }
+  if ($dccore.theme.icons) && ($isfile($dccore.theme.iconfile)) { .timerdccoreThemeIcons -m 1 0 dccore.theme.pageicons }
+  if (!$dccore.theme.dialogsdark) { return }
   .timerdccoreThemeBg -m 1 0 dccore.theme.dcxbg
   .timerdccoreThemeText -m 1 0 dccore.theme.dcxtexts
   .timerdccoreThemeLists -m 1 0 dccore.theme.dcxlists
@@ -2108,7 +2146,7 @@ alias dccore.theme.dcxlists {
     inc %i
   }
   ; the tables enabled, as dccore.sw.enable keeps them in the dark theme
-  if ($dccore.theme.dark) {
+  if ($dccore.theme.dialogsdark) {
     %i = 2
     while (%i <= $numtok(%ids,32)) { dccore.dcx xdid dccore.set $gettok(%ids,%i,32) -e | inc %i }
   }
@@ -2154,8 +2192,8 @@ alias dccore.theme.refresh {
 }
 alias dccore.theme.status {
   var %ui = $dccore.theme.uiwhy
-  dccore.sys Theme: $dccore.theme.mode $+ , now $iif($dccore.theme.dark,dark,light) $+ $iif($dccore.theme.mircdark,$chr(44) as mIRC's own dark mode) $+ . $iif(($dccore.theme.dark) && (!$dccore.theme.mircdark) && (%ui != $null),The dialogs stay light: %ui $+ .) $iif(($dccore.theme.dark) && (!$dccore.theme.mircdark),The menus follow mIRC: its own dark mode is under Options - Display.) /dccore theme auto|dark|light
-  if (!$dccore.opt(icons)) { dccore.sys Icons: off. /dccore icons on | return }
+  dccore.sys Theme: $dccore.theme.mode $+ , now $iif($dccore.theme.dark,dark,light) $+ $iif($dccore.theme.mircdark,$chr(44) as mIRC's own dark mode) $+ . $iif(($dccore.theme.dark) && (!$dccore.theme.mircdark) && (%ui != $null),The dialogs stay light: %ui $+ .) $iif(($dccore.theme.dark) && (!$dccore.theme.mircdark),The menus follow mIRC: its own dark mode follows Windows in mIRC 7.79 and later and is under Options - Display in mIRC 7.81 and later.) /dccore theme auto|dark|light
+  if (!$dccore.theme.icons) { dccore.sys Icons: off. /dccore icons on | return }
   if (!$isfile($dccore.theme.iconfile)) { dccore.sys Icons: dll\dccore_icons.dll is missing. | return }
   dccore.sys Icons: $iif($dccore.st(mi.on),on in this script's menus,not in the menus - $iif(%ui != $null,%ui,the menu hook would not start)) $+ ; the control panel's page list has them when DCX draws it. /dccore icons off
 }
@@ -2211,7 +2249,7 @@ alias dccore.sw.opt.fill {
   did -a dccore.set 1691 Dark
   did -a dccore.set 1691 Light
   did -c dccore.set 1691 $findtok(auto dark light,$dccore.theme.mode,1,32)
-  if ($dccore.opt(icons)) { did -c dccore.set 1692 }
+  if ($dccore.theme.icons) { did -c dccore.set 1692 }
   if ($dccore.bot) { did -ra dccore.set 1681 $dccore.bot }
   did -ra dccore.set 1682 $iif($dccore.opt(token),Paired $dccore.opt(paired) (token in dccore.ini),Not paired: the bot will ask for the password)
   ; The bot's own setting, not a local pref (#572 follow-up): nothing is
@@ -2259,7 +2297,7 @@ alias dccore.sw.opt.save {
   ; icons save them, and what is open drawn again only when one changed
   var %theme = $gettok(auto dark light,$did(dccore.set,1691).sel,32), %icons = $iif($did(dccore.set,1692).state == 1,1,0), %retheme = 0
   if (%theme != $null) && (%theme != $dccore.theme.mode) { hadd dccore theme %theme | %retheme = 1 }
-  if (%icons != $iif($dccore.opt(icons),1,0)) { hadd dccore icons %icons | %retheme = 1 }
+  if (%icons != $iif($dccore.theme.icons,1,0)) { hadd dccore icons %icons | %retheme = 1 }
   dccore.save
   ; consolefeed is the bot's own (#1006 follow-up): sent only when the
   ; check disagrees with what the bot last told us, so an Apply that did
@@ -2699,7 +2737,7 @@ alias dccore.sw.enable {
     ; a disabled listview is drawn light grey whatever its colours, so in
     ; the dark theme the tables stay enabled: their rows do nothing by
     ; themselves, the buttons that act on them are what is disabled
-    var %lvs = $dccore.sw.m(lvs), %i = 1, %e = $iif(($1) || ($dccore.theme.dark),-e,-b)
+    var %lvs = $dccore.sw.m(lvs), %i = 1, %e = $iif(($1) || ($dccore.theme.dialogsdark),-e,-b)
     while (%i <= $numtok(%lvs,32)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) %e | inc %i }
   }
 }

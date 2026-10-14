@@ -98,7 +98,7 @@ class TheSettingIsFilledAndSaved(unittest.TestCase):
             "did -a dccore.set 1691 Light",
             "did -c dccore.set 1691 $findtok(auto dark light,$dccore.theme.mode,1,32)",
         ])
-        self.assertIn("if ($dccore.opt(icons)) { did -c dccore.set 1692 }", lines)
+        self.assertIn("if ($dccore.theme.icons) { did -c dccore.set 1692 }", lines)
 
     def test_the_mode_is_one_of_three_whatever_the_file_says(self):
         self.assertIn("return $iif($istok(dark light,%m,32),%m,auto)", alias_body("dccore.theme.mode"))
@@ -111,7 +111,7 @@ class TheSettingIsFilledAndSaved(unittest.TestCase):
         self.assertIn("var %theme = $gettok(auto dark light,$did(dccore.set,1691).sel,32), "
                       "%icons = $iif($did(dccore.set,1692).state == 1,1,0), %retheme = 0", save)
         theme = "if (%theme != $null) && (%theme != $dccore.theme.mode) { hadd dccore theme %theme | %retheme = 1 }"
-        icons = "if (%icons != $iif($dccore.opt(icons),1,0)) { hadd dccore icons %icons | %retheme = 1 }"
+        icons = "if (%icons != $iif($dccore.theme.icons,1,0)) { hadd dccore icons %icons | %retheme = 1 }"
         redraw = "if (%retheme) { dccore.theme.refresh }"
         for line in (theme, icons, redraw):
             self.assertIn(line, save)
@@ -125,6 +125,15 @@ class TheSettingIsFilledAndSaved(unittest.TestCase):
         text = raw()
         self.assertIn("  dccore.default theme auto\n", text)
         self.assertIn("  dccore.default icons 1\n", text)
+
+    def test_icons_unset_read_as_on(self):
+        # /reload -rs runs neither on LOAD nor on START, so a script
+        # reloaded over an older one has no "icons" at all: on, as the
+        # default is, and off only when set to 0
+        self.assertIn("\nalias dccore.theme.icons { return $iif($dccore.opt(icons) == 0,$false,$true) }\n", raw())
+        # and nothing reads the raw option but that
+        text = raw()
+        self.assertEqual(text.count("$dccore.opt(icons)"), 1, "read $dccore.theme.icons, not the raw option")
 
 
 class TheCommandsAndTheMenu(unittest.TestCase):
@@ -152,8 +161,8 @@ class TheCommandsAndTheMenu(unittest.TestCase):
         self.assertIn("..$iif($dccore.theme.mode == auto,$style(1)) Follow mIRC:dccore theme auto", lines)
         self.assertIn("..$iif($dccore.theme.mode == dark,$style(1)) Dark:dccore theme dark", lines)
         self.assertIn("..$iif($dccore.theme.mode == light,$style(1)) Light:dccore theme light", lines)
-        self.assertIn("..$iif($dccore.opt(icons),$style(1)) Icons in the menus and the control panel:"
-                      "dccore icons $iif($dccore.opt(icons),off,on)", lines)
+        self.assertIn("..$iif($dccore.theme.icons,$style(1)) Icons in the menus and the control panel:"
+                      "dccore icons $iif($dccore.theme.icons,off,on)", lines)
 
     def test_a_change_is_drawn_on_what_is_open(self):
         refresh = alias_body("dccore.theme.refresh")
@@ -176,8 +185,15 @@ class TheMenuMarks(unittest.TestCase):
 
     def test_a_mark_is_nothing_without_the_icons(self):
         lines = statements(alias_body("dccore.mi"))
-        self.assertEqual(lines[0], "if (!$dccore.st(mi.on)) { return }")
+        self.assertEqual(lines[:2], ["if (!$dccore.st(mi.tried)) { dccore.theme.menus }",
+                                     "if (!$dccore.st(mi.on)) { return }"])
         self.assertIn("if (%n) { return %n $+ $chr(11) }", lines)
+
+    def test_the_first_menu_after_a_reload_starts_the_hook_once(self):
+        # /reload -rs runs no on START: the first mark asked for starts the
+        # hook, and the attempt is remembered whatever it gave
+        menus = statements(alias_body("dccore.theme.menus"))
+        self.assertEqual(menus[0], "hadd dccore.live mi.tried 1")
 
     def test_the_marks_are_all_the_theme_adds_to_a_menu(self):
         # so the tests that read the menus read them without the marks
@@ -186,12 +202,12 @@ class TheMenuMarks(unittest.TestCase):
 
     def test_the_hook_goes_on_with_the_pinned_dll_and_off_without_loading_one(self):
         on = statements(alias_body("dccore.theme.menus"))
-        self.assertIn("if ($dccore.opt(icons)) && ($isfile($dccore.theme.iconfile)) { %on = 1 }", on)
+        self.assertIn("if ($dccore.theme.icons) && ($isfile($dccore.theme.iconfile)) { %on = 1 }", on)
         self.assertIn("if (%on) && ($dccore.theme.ui) {", on)
-        self.assertIn("hadd dccore.live mi.on $iif($dll($dccore.theme.uifile,MenuIcons,$dccore.theme.iconfile) == OK,1,0)",
+        self.assertIn("hadd dccore.live mi.on $iif($dccore.theme.call(MenuIcons,$dccore.theme.iconfile) == OK,1,0)",
                       on)
         off = alias_body("dccore.theme.menusoff")
-        self.assertIn("if ($dccore.st(mi.on)) && ($dccore.theme.uiloaded) { noop $dll($dccore.theme.uifile,MenuIcons,off) }",
+        self.assertIn("if ($dccore.st(mi.on)) && ($dccore.theme.uiloaded) { noop $dccore.theme.call(MenuIcons,off) }",
                       off)
         loaded = statements(alias_body("dccore.theme.uiloaded"))
         self.assertIn("while (%i <= $dll(0)) {", loaded)
@@ -206,8 +222,14 @@ class TheMenuMarks(unittest.TestCase):
         text = raw()
         self.assertIn("alias dccore.theme.start { dccore.theme.menus }", text)
         self.assertIn("alias dccore.theme.stop { dccore.theme.menusoff }", text)
-        self.assertRegex(text, r"(?m)^on \*:START: \{(?:.|\n)*?dccore\.theme\.start")
-        self.assertGreaterEqual(text.count("dccore.theme.stop"), 2, "nothing calls dccore.theme.stop")
+        # each event's own statements, so a call elsewhere cannot stand in
+        self.assertIn("dccore.theme.start", statements(block("on *:START: {")))
+        self.assertIn("dccore.theme.start", statements(block("on *:LOAD: {")))
+        unload = statements(block("on *:UNLOAD: {"))
+        self.assertIn("dccore.theme.stop", unload)
+        # off before the tables it reads are freed
+        self.assertLess(unload.index("dccore.theme.stop"),
+                        unload.index("if ($hget(dccore.live)) { hfree dccore.live }"))
 
 
 class ThePageIcons(unittest.TestCase):
@@ -230,7 +252,7 @@ class ThePageIcons(unittest.TestCase):
 
     def test_the_list_gets_them_in_a_timer_of_its_own_after_the_window_is_made(self):
         # a DCX command that fails halts what called it: never the window
-        self.assertIn("if ($dccore.opt(icons)) && ($isfile($dccore.theme.iconfile)) "
+        self.assertIn("if ($dccore.theme.icons) && ($isfile($dccore.theme.iconfile)) "
                       "{ .timerdccoreThemeIcons -m 1 0 dccore.theme.pageicons }", alias_body("dccore.theme.dcxset"))
         self.assertIn("on *:dialog:dccore.set:init:0: { dccore.sw.init | dccore.theme.dialog dccore.set init | "
                       "dccore.theme.dcxset }", raw())
@@ -246,17 +268,74 @@ class TheDarkDialogs(unittest.TestCase):
 
     def test_it_stands_aside_where_mirc_draws_dark_or_the_dll_is_not_the_one(self):
         lines = statements(alias_body("dccore.theme.dialog"))
-        self.assertIn("if ($dccore.theme.mircdark) { return }", lines)
-        self.assertIn("if ($2 == init) && (!$dccore.theme.dark) { return }", lines)
-        self.assertIn("if (!$dccore.theme.ui) { return }", lines)
-        self.assertEqual(statements(alias_body("dccore.theme.mircdark"))[0], "if ($version < 7.79) { return $false }")
+        self.assertEqual(lines[1:5], [
+            "if (!$dialog(%d)) { return }",
+            "if ($dccore.theme.mircdark) { return }",
+            "if ($2 == init) && (!$dccore.theme.dark) { return }",
+            # light: only through a dll already loaded, never by loading one
+            "if (!$dccore.theme.dark) && (!$dccore.theme.uiloaded) { return }",
+        ])
+        self.assertEqual(lines[-1], "noop $dccore.theme.call(ApplyTheme,$dialog(%d).hwnd $iif($dccore.theme.dark,1,0) %x)")
+        self.assertEqual(statements(alias_body("dccore.theme.mircdark")), [
+            "if ($version < 7.79) { return $false }",
+            # a condition, right whether $darkmode answers $true or 1
+            "return $iif($darkmode,$true,$false)",
+            ":error",
+            "reseterror",
+            "return $false",
+        ])
 
     def test_the_dll_is_checked_before_it_is_loaded(self):
-        why = alias_body("dccore.theme.uiwhy")
-        self.assertIn("if (!$isfile($dccore.theme.uifile)) { return dll\\dccore_ui.dll is missing }", why)
-        self.assertIn("if ($version < 7.45) { return it needs mIRC 7.45 or later }", why)
-        self.assertIn("hadd dccore.live ui.sha $sha256($dccore.theme.uifile,2)", why)
+        # in this order, every step reached: missing, too old, 64-bit, the
+        # hash taken again until mIRC holds the dll, then compared
+        self.assertEqual(statements(alias_body("dccore.theme.uiwhy")), [
+            "if (!$isfile($dccore.theme.uifile)) { return dll\\dccore_ui.dll is missing }",
+            "if ($version < 7.45) { return it needs mIRC 7.45 or later }",
+            "if ($bits == 64) { return this mIRC is 64-bit and dll\\dccore_ui.dll is 32-bit }",
+            "if ($dccore.st(ui.sha) == $null) || (!$dccore.theme.uiloaded) "
+            "{ hadd dccore.live ui.sha $sha256($dccore.theme.uifile,2) }",
+            "if ($dccore.st(ui.sha) != $dccore.theme.uisha256) "
+            "{ return dll\\dccore_ui.dll is not the build this script was shipped with }",
+        ])
         self.assertIn("alias dccore.theme.ui { return $iif($dccore.theme.uiwhy == $null,$true,$false) }", raw())
+
+    def test_every_call_into_the_dll_goes_through_the_pin(self):
+        # one place calls dccore_ui.dll, and it asks first: no caller can
+        # reach the dll before the check, whatever order it puts things in
+        self.assertEqual(statements(alias_body("dccore.theme.call")), [
+            "if (!$dccore.theme.ui) { return }",
+            "return $dll($dccore.theme.uifile,$1,$2-)",
+            # a dll that cannot be opened would stop the script
+            ":error",
+            "reseterror",
+            "return",
+        ])
+        code = "\n".join(line for line in raw().split("\n") if not line.lstrip().startswith(";"))
+        # every $dll that calls a function - a file, a function, its data -
+        # names DCX or goes through here; $dll(N) and $dll(0) only ask what
+        # mIRC has loaded
+        called = re.findall(r"\$dll\(([^,()]*(?:\([^()]*\))?[^,()]*),", code)
+        self.assertEqual(sorted(set(called)), ["$dccore.dcx.path", "$dccore.theme.uifile"])
+        self.assertEqual(called.count("$dccore.theme.uifile"), 1)
+        # and the /dll command form is DCX's alone
+        commands = re.findall(r"(?m)(?:^|[|{])\s*dll\s+(\S+)", code)
+        self.assertEqual(set(commands), {"$qt($dccore.dcx.path)"})
+
+    def test_without_the_dll_the_dark_theme_leaves_the_control_panel_light(self):
+        # the DCX parts follow the dialogs: dark only where they are drawn
+        # dark, by mIRC's own dark mode or by dccore_ui.dll
+        self.assertEqual(statements(alias_body("dccore.theme.dialogsdark")), [
+            "if (!$dccore.theme.dark) { return $false }",
+            "if ($dccore.theme.mircdark) { return $true }",
+            "return $dccore.theme.ui",
+        ])
+        self.assertEqual(statements(alias_body("dccore.theme.sys"))[0],
+                         "if ($dccore.theme.dialogsdark) { return $dccore.theme.rgb($1) }")
+        self.assertIn("if (!$dccore.theme.dialogsdark) { return }", statements(alias_body("dccore.theme.dcxset")))
+        self.assertIn("if ($dccore.theme.dialogsdark) {", statements(alias_body("dccore.theme.dcxlists")))
+        # nothing else of the control panel's DCX parts asks the theme alone
+        for name in ("dccore.theme.sys", "dccore.theme.dcxset", "dccore.theme.dcxlists", "dccore.sw.enable"):
+            self.assertNotIn("$dccore.theme.dark)", alias_body(name), name)
 
     def test_a_colour_is_left_alone_unless_it_would_vanish(self):
         lines = statements(alias_body("dccore.theme.legible"))
