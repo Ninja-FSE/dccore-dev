@@ -351,6 +351,13 @@ audio_reading_last = None
 # True while commands.retry_audio_rewrite_when_free() waits for the list
 # downloads to finish, so one wait at a time (#1182 audit).
 audio_retry_waiting = False
+# The tokens this bot gave the update_list.py runs it started (#1365), newest
+# last, at most RUN_TOKENS_KEPT: the shutdown asks those runs, and only those,
+# to stop. Here so a !rehash does not forget a rebuild that is still going. A
+# tuple, rebound as a whole by commands.audio_run_env(): nothing else keeps a
+# reference to it, so it is not one of the containers defaults.py shares.
+run_tokens = ()
+RUN_TOKENS_KEPT = 16
 
 # Automatic list grabbing (#926 item 5), list_grab.py. Here for the same
 # reasons: a start guard a rehash cannot reset, and a wait in progress that a
