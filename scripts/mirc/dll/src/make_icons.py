@@ -1,14 +1,58 @@
 #!/usr/bin/env python3
 """Draws the DCCore icon set: rounded colour badge + white glyph, 16/20/24/32/48 px,
 one .ico per icon, a .rc, and a preview sheet. Order of NAMES == resource order == icon index."""
-import math, os, sys
+import argparse, math, os, sys
 from PIL import Image, ImageDraw, ImageFont
 
-OUT = sys.argv[1] if len(sys.argv) > 1 else "."
 S = 512                      # supersampled canvas
 SIZES = [16, 20, 24, 32, 48]
 W = (255, 255, 255, 255)
-BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+# The bold font of the letter glyphs (help, ask, font, app, hash). The shipped
+# icons were drawn with DejaVu Sans Bold, so it comes first wherever it is; the
+# others draw those five letters a little differently.
+DEJAVU = "DejaVuSans-Bold.ttf"
+
+def font_dirs():
+    # Linux and the BSDs: fonts/ under each XDG data dir (the spec's default
+    # when XDG_DATA_DIRS is unset), and the user's own
+    dirs = os.environ.get("XDG_DATA_DIRS")
+    dirs = dirs.split(os.pathsep) if dirs else ["/usr/local/share", "/usr/share"]
+    out = [os.path.join(d, "fonts") for d in dirs if d]
+    out.append(os.path.join(os.path.expanduser("~"), ".local", "share", "fonts"))
+    out.append(os.path.join(os.path.expanduser("~"), ".fonts"))
+    return out
+
+def font_candidates():
+    windir = os.environ.get("WINDIR") or "C:\\Windows"
+    return [
+        os.path.join(windir, "Fonts", DEJAVU),
+        os.path.join(windir, "Fonts", "arialbd.ttf"),
+        os.path.join(windir, "Fonts", "segoeuib.ttf"),
+        "/Library/Fonts/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    ]
+
+def find_font():
+    for top in font_dirs():
+        for root, _dirs, files in os.walk(top):
+            if DEJAVU in files:
+                return os.path.join(root, DEJAVU)
+    for path in font_candidates():
+        if os.path.isfile(path):
+            return path
+    sys.exit("make_icons.py: no bold font found. Looked for %s under %s, then for %s. "
+             "Name one with --font <path to a .ttf>."
+             % (DEJAVU, ", ".join(font_dirs()), ", ".join(font_candidates())))
+
+ap = argparse.ArgumentParser(description="Draws the DCCore icon set into a folder.")
+ap.add_argument("out", nargs="?", default=".", help="the folder to write to (default: the current one)")
+ap.add_argument("--font", help="the bold .ttf for the letter glyphs (default: DejaVu Sans Bold, else Arial Bold or Segoe UI Bold)")
+ARGS = ap.parse_args()
+OUT = ARGS.out
+if ARGS.font and not os.path.isfile(ARGS.font):
+    sys.exit("make_icons.py: --font %s: no such file" % ARGS.font)
+BOLD = ARGS.font or find_font()
 
 COL = dict(
     slate=(79, 107, 237), grey=(100, 116, 139), sky=(14, 165, 233), green=(22, 163, 74),
@@ -293,5 +337,5 @@ for half, bg, fg in ((0, (248, 248, 248), (40, 40, 40)), (1, (32, 32, 32), (230,
         sm2 = im.resize((16, 16), Image.LANCZOS).resize((32, 32), Image.NEAREST)
         sheet.paste(sm2, (cx + 80, cy), sm2)
         d.text((cx, cy + 54), "%d %s" % (i, name), fill=fg, font=f)
-sheet.save(os.path.join(OUT, "preview.png"))
+sheet.save(os.path.join(OUT, "icons-preview.png"))
 print(len(ICONS), "icons")
