@@ -116,7 +116,7 @@ def resolves_to_a_stream(path, windows=None):
 
     The second gate behind names_a_hidden_part_of_a_file(): that one reads
     the request, this reads the path the lookup settled on, whichever of the
-    memories, the list scan or the walk produced it. On Windows a ':' after
+    memories or the list scan produced it. On Windows a ':' after
     the drive can only be an alternate data stream.
     """
     if windows is None:
@@ -129,7 +129,8 @@ def resolves_to_a_stream(path, windows=None):
 
 # A LIBRARY-WIDE LOOKUP IS THE EXPENSIVE THING A REQUEST CAN ASK FOR (#580).
 # A name that is not in the first folder's root makes handle_download_request()
-# read every published list and then walk every configured folder; each request
+# read every published list (until #1376 it then walked every configured folder
+# too); each request
 # runs on its own thread, and file requests no longer pass the flood gate (#888).
 # Two bounds, both cheap, and a third per nick below (#969): only a few scans at a time (the rest are told the bot
 # is busy, at once, without touching the disk), and a name that just missed is
@@ -3458,8 +3459,8 @@ def path_from_published_lists(list_paths, requested_file, requested_size_hint, w
         # [0], and the line starts with the separator - so [0]
         # is the empty string on every line here. The filename
         # is in [1]; the whole list lookup was dead code
-        # without it, leaving the os.walk() below to answer
-        # every request.
+        # without it, leaving the os.walk() that followed it
+        # (gone since #1376) to answer every request.
         parts_nick = line_clean.split(request_prefix, 1)
         rest_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
 
@@ -3972,7 +3973,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # Every configured folder, in the operator's order (#164). The
             # first is still where a bare filename is guessed to be, which is
             # what a single-folder install has always done; the rest are what
-            # the list lookup and the walk below fall through to.
+            # the list lookup below falls through to.
             search_roots = [os.path.abspath(folder.path)
                             for folder in library.folders(wanted_list)]
             base_directory = search_roots[0]
@@ -4013,9 +4014,9 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
 
         if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
             # THE EXPENSIVE PART, BOUNDED (#580). A name that is not in the first
-            # folder's root is looked up by streaming every published list and,
-            # failing that, walking every configured folder - a full-library
-            # metadata scan, on this request's own thread, for one ~40 byte line.
+            # folder's root is looked up by streaming every published list - on
+            # a large library tens of megabytes, on this request's own thread,
+            # for one ~40 byte line (until #1376 a walk of every folder followed).
             # The flood gate no longer counts file requests (#888), so the cost
             # is bounded here instead: a name that just missed is answered
             # from memory, only a few scans run at once, and one nick gets one
@@ -4089,18 +4090,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                             full_path = found_in_lists
                     except Exception as list_err:
                         print(f"[DCC-LOOKUP ERROR] {list_err}")
-                if not os.path.exists(platform_compat.long_path(full_path)):
-                    # Last resort, once the list lookup has not placed the file:
-                    # walk for it. Each configured folder in turn, in the
-                    # operator's order, so the same name in two of them resolves
-                    # the way the list's own ordering already does.
-                    for search_root in search_roots:
-                        for root, dirs, files in os.walk(search_root):
-                            if requested_file in files:
-                                full_path = os.path.join(root, requested_file)
-                                break
-                        if os.path.exists(platform_compat.long_path(full_path)):
-                            break
+                # NO WALK AFTER THE LISTS (#1376). A name the published lists
+                # do not place is not found. There used to be a last resort
+                # here, from OmenServe: os.walk() every configured folder for
+                # the name. It could only find a file no list names, which
+                # nobody can have got from this bot, and it had no time
+                # limit: over a network share it ran for minutes, holding a
+                # scan slot and this nick's turn, so every request of theirs
+                # was answered "busy" - and a minute after it ended, the next
+                # request for the same name walked again. A file added since
+                # the last rebuild is requestable after the next one.
             finally:
                 if recalled is None:
                     _library_scans.release()
@@ -4131,6 +4130,20 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             return
 
         if not os.path.exists(platform_compat.long_path(full_path)) or os.path.isdir(platform_compat.long_path(full_path)):
+            announce.send_dcc_error(user, "file_not_found", target_chan)
+            return
+
+        # WHAT THE LIST LEAVES OUT IS NOT SERVED (#1376). The list is what
+        # this bot serves, and a file type it leaves out - LIST_IGNORED_EXTENSIONS
+        # or the list's own exclusions (#1295) - is not in it. Two shortcuts
+        # above find a file without reading the list: the name in the first
+        # folder's root, and a folder a recent lookup resolved into (#886). So
+        # the file they found is held to the list's own rule here, the same
+        # update_list.is_listed_file() the build uses.
+        if not is_master_zip and not update_list.is_listed_file(
+                full_path, update_list.ignored_extensions(wanted_list)):
+            print(f"[DCC-LOOKUP] {user}'s request for {requested_file!r} refused: "
+                  f"the list leaves its file type out.")
             announce.send_dcc_error(user, "file_not_found", target_chan)
             return
 
