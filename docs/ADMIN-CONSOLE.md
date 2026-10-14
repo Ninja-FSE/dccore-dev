@@ -281,7 +281,7 @@ prefix.
 | `unlock <password>` | let a session that logged in with a paired token change settings: the admin password, checked as the login checks it, once per session. A session that logged in with the password is unlocked already. Three wrong passwords close the session, as at the login; the line is never logged |
 | `help` | the command list |
 | `hello <client> <version>` | switch this session to the structured feed (below) |
-| `pair <client> <version>` | mint a login token for a script (below) |
+| `pair <client> <version> [readonly]` | mint a login token for a script (below); with `readonly`, one that can look and change nothing ("Read-only tokens" below) |
 | `unpair [<client>]` | list the paired scripts, or revoke one |
 | `shutdown now` | stop the bot, the way Ctrl-C in its window does: it leaves IRC and ends (`shutdown` alone says how) |
 | `quit` | close the session |
@@ -678,7 +678,8 @@ bans, and drive the feed and the queue commands as before; changing a
 setting, the lists, the folders or the on-connect commands, reading or
 resending the on-connect commands (an X login among them holds a password),
 and pairing or revoking another script need the password, once per session:
-`unlock <password>` (see "Settings over the console"). A stolen token still
+`unlock <password>` (see "Settings over the console"). A token paired
+`readonly` does less still: see "Read-only tokens" below. A stolen token still
 costs you a console session, and one `unpair` ends it. For `dccore.mrc` the file that holds it is
 `dccore.ini` beside the script, and it is clear text: mIRC's hash-table save
 writes the token readable. The `.mrc` itself carries nothing. Keep `dccore.ini`
@@ -710,6 +711,48 @@ the password or with a token - to mint or revoke one. When the token file cannot
 be written, both say so (`NOT revoked: ...`, `Could not pair ...`) and nothing
 changes: an `unpair` that answers "Revoked" has really revoked the token. The file lives where
 **Settings → Advanced → Paired console scripts file** points.
+
+### Read-only tokens
+
+A token can be paired to look and change nothing (#1374): for a stats script,
+a status widget, or a client on a machine you trust less than your own.
+
+```
+pair widget 1.0 readonly
+```
+
+`readonly` may come anywhere after the name, in any case. A session that logs
+in with such a token may run `status`, `queue`, `slots`, `packing`, `library`,
+`bans`, `uptime`, `version`, `lists`, `dlqueue`, `downloads`, `hello`,
+`consolecaps`, `help` and `quit`. It may also run `consolefeed` and
+`checkupdates` with no argument, which report the setting, and `unpair` of
+its own name. It gets the feed like any other session. Everything else does
+not run: a ban, the queue commands, `fetch`, `chat`, `rehash`, `update`,
+`shutdown`, the settings window's commands. Each is answered
+`DCCORE LOCKED <command> <sentence>`, or the sentence on a plain session.
+That includes `unlock`, and the password given to it is never checked, so a
+read-only token never becomes more than that. To change something, log in with
+the password. The list is an allow-list: a command added to the console later
+is refused to a read-only session until it is decided that it only reads.
+`help` shows such a session only what it may run.
+
+The console is still one session, but a read-only login does not take it from
+a full one. While a session that logged in with the password or a full token
+holds the console, a read-only login is told "The console is in use" and
+closed; that is not counted as a wrong password. A full login replaces a
+read-only session as it replaces any other, and a read-only login replaces
+another read-only one. So a script that logs in now and then never closes your
+console: it gets in when the console is free. A full session whose client
+vanished without closing it holds the console until the bot notices it is gone.
+
+In `adminchat_tokens.json` a read-only token's hash is kept as `readonly_hash`
+instead of `hash`. A bot from before read-only tokens reads `hash` only, so if
+you ever go back to one, it refuses a read-only token rather than letting it in
+as a full one. `unpair` lists a read-only token with `, read-only` after it.
+Pairing the same name again without `readonly` replaces it with a full token.
+
+`dccore.mrc` pairs full tokens, as before; a read-only token is paired by
+typing `pair` at the console.
 
 ## Settings over the console
 
@@ -807,7 +850,7 @@ first field, and its last field is always a sentence to show.
 |---|---|---|
 | `DCCORE CAPS <name>:<version> ... machine:<name>` | `consolecaps` | today `settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1 unlock:1 library:1`, then `machine:` and this computer's name (spaces and colons as `-`), which a client compares with its own to know whether the bot is on the same machine - the console's address cannot tell, since a DCC chat to a bot on the same PC arrives from the public address. A bot without these commands answers `DCCORE OUT Unknown command: consolecaps. Type 'help'.` - say "update the bot" then. A version goes up when a field of that part moves; a part added later is a new name |
 | `DCCORE SETBEGIN <n>` / `DCCORE SETF <KEY> <type> <value>` / `DCCORE SETEND <n>` | `settings [<word>]` | one `SETF` per setting, in the Settings page's order; `type` is `str`, `int`, `float`, `bool` or `list`, the value last (empty: the line ends after the type - for `WEBUI_CONSOLE_ENABLED` that means "not set"). `ADMIN_PASSWORD_HASH` is never among them. Labels, help, units and choices are the dashboard's metadata, not sent here |
-| `DCCORE LOCKED <command> <sentence>` | any of the commands above that change something, on a session that logged in with a token and has not unlocked | `command` is what was refused, one or two words (`setcommit`, `set`, `served commit`, `folders commit`, `onconnect commit`, `onconnect resend`, `onconnect`, `pair`, `unpair`); the sentence says to unlock. Nothing was saved; an open transaction stays open |
+| `DCCORE LOCKED <command> <sentence>` | any of the commands above that change something, on a session that logged in with a token and has not unlocked; and any command at all that a read-only token may not run ("Read-only tokens" above) | `command` is what was refused, one or two words (`setcommit`, `set`, `served commit`, `folders commit`, `onconnect commit`, `onconnect resend`, `onconnect`, `pair`, `unpair`; on a read-only session, the command word, `unlock` included); the sentence says to unlock, or on a read-only session that only the password can do this. Nothing was saved or run; an open transaction stays open |
 | `DCCORE UNLOCKED` | `unlock <password>` | the session may change settings now (also the answer when it already could) |
 | `DCCORE UNLOCK error <message>` | `unlock` with a wrong password | still locked; the third wrong one closes the session instead |
 | `DCCORE SETOPEN <dropped>` | `setbegin` | `dropped`: changes buffered by a transaction that was still open, now gone (0 normally) |

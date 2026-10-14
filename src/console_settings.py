@@ -216,6 +216,16 @@ def is_locked(session):
     return not getattr(session, "unlocked", True)
 
 
+def refused_read_only(session, what):
+    """Refuse `what` on a session that logged in with a read-only token
+    (#1374), as a LOCKED line - a script that shows LOCKED shows this - or
+    the sentence. The password is the only way to more: such a session is
+    never unlocked, so there is nothing to type here that would help."""
+    sentence = ("This console logged in with a read-only token: it can look, not change "
+                "anything. Log in with the password to do that.")
+    _say(session, f"LOCKED {what} {sentence}", sentence)
+
+
 def refused_while_locked(session, what):
     """Refuse `what` on a locked session, saying how to unlock. True if
     refused. A transaction the session has open is left open, so the window
