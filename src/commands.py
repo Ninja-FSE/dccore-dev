@@ -2127,8 +2127,11 @@ def last_progress_at(token=None):
     killed for stalling, or ended by a crash or a reboot, never clears its
     file, and read as this child's it said "silent for hours" at the first
     tick - so the next rebuild was killed before it had written anything,
-    and the one after, every time. A report with no token at all (a run from
-    a terminal, or from before #1182) is read as before.
+    and the one after, every time. A report with NO token is not this child's
+    either (#1366): the bot always gives one and the child always stamps it,
+    so with a token given, a tokenless report is a terminal's run that
+    crashed - read as this child's, it killed the next `!update` the same way.
+    Without a token to compare, every report is read.
     """
     import json
     import platform_compat
@@ -2143,16 +2146,9 @@ def last_progress_at(token=None):
         theirs = str(loaded.get("token") or "")
     except Exception:
         return None
-    if token and theirs and theirs != token:
+    if token and theirs != token:
         return None
     return at
-
-
-def _forget_progress():
-    """A killed child never clears its own progress file (#1361): it would
-    show the dashboard a bar that never moves until the next rebuild."""
-    import update_list
-    update_list.clear_progress()
 
 
 def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=None, env=None):
@@ -2220,7 +2216,9 @@ def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=Non
         if ceiling and (now - begun) >= ceiling:
             process.kill()
             process.communicate()
-            _forget_progress()
+            # A killed child never clears its own progress file (#1361): the
+            # dashboard would show a bar that never moves until the next run.
+            update_list.clear_progress()
             raise subprocess.TimeoutExpired(argv, ceiling)
 
         reported_at = last_progress_at(token=(env or {}).get(update_list.RUN_TOKEN_ENV))
@@ -2231,7 +2229,7 @@ def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0, hand_over=Non
         if silent_for >= stall:
             process.kill()
             process.communicate()
-            _forget_progress()
+            update_list.clear_progress()
             raise ListUpdateStalled(silent_for)
 
 
@@ -2488,8 +2486,10 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
     # the same .new temp paths.
     #
     # Every path that returns after this point must put the flag back, or the
-    # bot refuses every future update until it restarts. There is exactly one
-    # such path today - the search-already-running denial below - and it does.
+    # bot refuses every future update until it restarts: the
+    # search-already-running denial below does, and so does
+    # _rebuild_did_not_start() for anything that raises before the thread's
+    # own finally exists (#1361, #1366).
     #
     # The search flag is checked and set inside the SAME gate (#607). It used
     # to be read and raised just below it, outside the lock - and every @find
@@ -2522,29 +2522,30 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
             config.search_inprogress = True
             paused_searches = True
 
-    if paused_searches:
-        print(f"[MAINTENANCE START] {user} ran !update. Searching and sharing are now PAUSED.")
-        announce.send_debug(f"System maintenance initiated by {user}. MasterList is rebuilding, file requests temporarily paused...", category="INFO")
-    elif getattr(config, 'PAUSE_ON_UPDATE', True) is True:
-        print(f"[UPDATE START] {user} ran !update. Searching and sharing continue from the current "
-              f"list and pause only while the new one is swapped in.")
-        announce.send_debug(f"List update triggered by {user} from {target_chan}. Searches and file "
-                            f"requests continue meanwhile.", category="INFO")
-    else:
-        print(f"[UPDATE START] {user} ran !update. The pause switch is False, so sharing continues meanwhile.")
-        announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory...", category="INFO")
-
-    # 1. Take the previous real file count from line 1
-    #
-    # Guarded, as the thread start below is (#1361): the flags are up, and
-    # until the thread's own finally exists nothing else would take them
-    # down - every search and file request refused as "rebuilding", and
-    # every later !update as "already running", for the life of the process.
+    # Guarded from the gate on, as the thread start below is (#1361, #1366):
+    # the flags are up, and until the thread's own finally exists nothing
+    # else would take them down - every search and file request refused as
+    # "rebuilding", and every later !update as "already running", for the
+    # life of the process. The announcements are inside too: a send_debug()
+    # that raises is as able to leave them up as the count is.
     try:
+        if paused_searches:
+            print(f"[MAINTENANCE START] {user} ran !update. Searching and sharing are now PAUSED.")
+            announce.send_debug(f"System maintenance initiated by {user}. MasterList is rebuilding, file requests temporarily paused...", category="INFO")
+        elif getattr(config, 'PAUSE_ON_UPDATE', True) is True:
+            print(f"[UPDATE START] {user} ran !update. Searching and sharing continue from the current "
+                  f"list and pause only while the new one is swapped in.")
+            announce.send_debug(f"List update triggered by {user} from {target_chan}. Searches and file "
+                                f"requests continue meanwhile.", category="INFO")
+        else:
+            print(f"[UPDATE START] {user} ran !update. The pause switch is False, so sharing continues meanwhile.")
+            announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory...", category="INFO")
+
+        # 1. Take the previous real file count from line 1
         old_counts = count_by_list()
         announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory, bot paused...", category="INFO")
-    except BaseException:
-        _release_update_flags(paused_searches)
+    except BaseException as err:
+        _rebuild_did_not_start(paused_searches, err)
         raise
 
     def async_list_updater():
@@ -2573,6 +2574,12 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
             import update_list
             stop_audio_reading()
             update_list.clear_stop_request()
+            # And a report left by a run that crashed or was killed (#1366):
+            # read as this child's before it writes its first, it was a
+            # rebuild "silent for hours" and killed at the first tick. Only
+            # when nothing holds the list: a run that does is reporting there.
+            if update_list.list_lock_holder() is None:
+                update_list.clear_progress()
 
             if not os.path.exists(script_path):
                 announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
@@ -2758,14 +2765,11 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
             config.last_list_update_error = str(e)
             config.last_list_update_seconds = int(time.time() - started)
         finally:
-            # Release the global pause lock again - but only if THIS request
-            # raised it. With PAUSE_ON_UPDATE off the flag belongs to whatever
-            # @find is running, and clearing it here let a second search in.
-            if paused_searches:
-                config.search_inprogress = False
-
-            # Clear the maintenance flag, so list.py knows the list is ready
-            config.update_inprogress = False
+            # The search flag only if THIS request raised it: with
+            # PAUSE_ON_UPDATE off it belongs to whatever @find is running,
+            # and clearing it here let a second search in. Then the
+            # maintenance flag, so list.py knows the list is ready.
+            _release_update_flags(paused_searches)
             print("[MAINTENANCE END] Sharing and searching have been restarted automatically.")
 
     # The maintenance flag was raised by the gate at the top of this function,
@@ -2777,17 +2781,35 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
     # the realistic failure, and its finally never runs then (#1361).
     try:
         threading.Thread(target=async_list_updater, daemon=True).start()
-    except BaseException:
-        _release_update_flags(paused_searches)
+    except BaseException as err:
+        _rebuild_did_not_start(paused_searches, err)
         raise
 
 
 def _release_update_flags(paused_searches):
-    """What async_list_updater()'s finally does, for a rebuild that never got
-    as far as running it (#1361)."""
+    """The flags a rebuild raised, put back: by async_list_updater()'s
+    finally, and for a rebuild that never got as far as running it (#1361)."""
     if paused_searches:
         config.search_inprogress = False
     config.update_inprogress = False
+
+
+def _rebuild_did_not_start(paused_searches, err):
+    """A rebuild that failed between the gate and its thread (#1366): the
+    flags go back, and what happened is recorded - the channel may already
+    have been told it started, and the dashboard would otherwise show the
+    last rebuild's result as this one's. Never raises; the caller re-raises."""
+    _release_update_flags(paused_searches)
+    config.last_list_update_ok = False
+    config.last_list_update_error = f"could not start: {err}"
+    config.last_list_update_seconds = 0
+    try:
+        print(f"[MAINTENANCE END] The list update could not start ({err}); sharing and "
+              f"searching go on from the current list.")
+        import announce
+        announce.send_debug(f"List update FAILED to start: {err}", category="INFO", notice="error")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -2883,8 +2905,26 @@ def start_audio_watch(process, kind, start=None, token=""):
         with runtime.audio_reading_lock:
             if runtime.audio_reading is job:
                 runtime.audio_reading = None
+        # And the child itself is ended (#1366): with nobody draining its
+        # pipes it blocks once they fill, holding the list lock, and every
+        # later rebuild is refused as "already running". What it read is
+        # saved as it goes.
+        _end_an_unwatched_child(process)
         raise
     return job
+
+
+def _end_an_unwatched_child(process):
+    """Kill a reading nothing will follow, and drop its report. A bounded
+    wait: a child a launcher started can hold the pipes after it is killed."""
+    import subprocess
+    import update_list
+    try:
+        process.kill()
+        process.communicate(timeout=10)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    update_list.clear_progress()
 
 
 def parse_audio_result(output):
@@ -2956,7 +2996,7 @@ def watch_audio_reading(job, tick=5.0):
                 elif now - last_line >= AUDIO_PROGRESS_SECONDS:
                     last_line = now
                     print(f"[AUDIO-INFO] {audio_progress_line(progress)}")
-            reported_at = last_progress_at()
+            reported_at = last_progress_at(token=job.token)
             if reported_at is not None and stall and now - reported_at >= stall:
                 process.kill()
                 process.communicate()

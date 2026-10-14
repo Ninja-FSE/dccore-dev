@@ -464,6 +464,7 @@
   "tools.writingList": "Écriture de la liste…",
   "tools.readingAudioInfo": "Lecture de la durée et de la qualité : {done} sur {total} fichiers",
   "tools.scanningFolder": "Analyse du dossier {index} sur {total}",
+  "tools.checkingFolders": "Vérification des dossiers de la bibliothèque…",
   "tools.scanningLibrary": "Analyse de la bibliothèque…",
   "tools.filesSoFar": "{count} fichiers jusqu'ici",
   "tools.inDuration": " en {duration}",
