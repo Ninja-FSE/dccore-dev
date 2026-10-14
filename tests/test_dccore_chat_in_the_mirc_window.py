@@ -18,10 +18,15 @@ what is left for it:
 import io
 import os
 import re
+import sys
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc")
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+from tests.support import without_menu_icons  # noqa: E402
 
 # A command that puts something on the wire, at the start of a statement.
 SENDS = re.compile(r"(?:^|[{|]\s*)\.?(?:notice|msg|ctcp|describe|say|raw|quote|amsg|ame|"
@@ -30,7 +35,7 @@ SENDS = re.compile(r"(?:^|[{|]\s*)\.?(?:notice|msg|ctcp|describe|say|raw|quote|a
 
 def script():
     with io.open(SCRIPT, encoding="ascii", newline="") as handle:
-        return handle.read().replace("\r\n", "\n")
+        return without_menu_icons(handle.read().replace("\r\n", "\n"))
 
 
 def block(text, header):

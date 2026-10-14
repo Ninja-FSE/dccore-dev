@@ -18,11 +18,12 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import adminchat  # noqa: E402
+from tests.support import without_menu_icons  # noqa: E402
 
 
 def script():
     with io.open(os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc"), encoding="ascii", newline="") as handle:
-        return handle.read().replace("\r\n", "\n")
+        return without_menu_icons(handle.read().replace("\r\n", "\n"))
 
 
 def block(header):

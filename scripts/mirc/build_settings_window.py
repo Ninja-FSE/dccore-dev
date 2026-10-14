@@ -374,6 +374,13 @@ WIDGETS = {
         (1674, "text", "Finished downloads to show", 0, 28, 120, 8, ""),
         (1675, "edit", "", 134, 26, 24, 11, "autohs"),
     ),
+    # The theme and the icons (#1368): auto / dark / light on the menu's
+    # lines 1 to 3, as dccore.sw.opt.fill fills it.
+    "theme": (
+        (1690, "text", "Theme", 0, 2, 120, 8, ""),
+        (1691, "combo", "", 134, 0, 96, 80, "drop"),
+        (1692, "check", "Icons in the menus and the control panel's page list", 0, 15, 358, 10, ""),
+    ),
     "botlink": (
         (1680, "text", "Bot nick", 0, 2, 36, 8, ""),
         (1681, "edit", "", 40, 0, 80, 11, "autohs"),
@@ -442,7 +449,7 @@ WIDGET_H = {name: max(y + (12 if kind == "combo" else h) for _i, kind, _t, _x, y
             for name, parts in WIDGETS.items()}
 # The widgets that talk to the bot (disabled with the settings when the bot
 # cannot be edited); these are this mIRC's own, editable whatever the bot says.
-LOCAL_WIDGETS = ("showin", "showcolours", "winlook", "botlink")
+LOCAL_WIDGETS = ("showin", "showcolours", "winlook", "theme", "botlink")
 # The command each structured page asks with, the first time it is shown.
 WIDGET_ASKS = {"onconnect": "onconnect", "srvlists": "served", "srvchans": "served", "srvsaveb": "served",
                "bantimed": "banlist", "banperm": "banlist"}

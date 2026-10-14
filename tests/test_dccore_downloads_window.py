@@ -24,12 +24,13 @@ import dcc_fetch  # noqa: E402
 import defaults as config  # noqa: E402
 import webserver  # noqa: E402
 
-from tests.support import DCCoreTestCase  # noqa: E402
+from tests.support import DCCoreTestCase, without_menu_icons  # noqa: E402
 
 
 def read(*parts):
     with io.open(os.path.join(REPO_ROOT, *parts), encoding="utf-8", newline="") as handle:
-        return handle.read().replace("\r\n", "\n")
+        text = handle.read().replace("\r\n", "\n")
+    return without_menu_icons(text) if parts[-1].endswith(".mrc") else text
 
 
 def row(state, bot="SomeBot", name="a.flac", at=1.0, **more):

@@ -13,6 +13,7 @@ headed - with nothing more than a Python install.
 import ast
 import gc
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -51,6 +52,17 @@ _PRISTINE = [
     (dcc, "start_dcc_send", dcc.start_dcc_send),
     (dcc, "check_queue_and_send", dcc.check_queue_and_send),
 ]
+
+
+# dccore.mrc's menus (#1368): with the icons on, an item's text starts with
+# `$dccore.mi(name) `, the mark the theme's menu hook turns into the icon
+# beside it - and nothing without the icons. The tests that read the menus
+# read them as they read without the marks.
+_MENU_ICON_MARK = re.compile(r"\$dccore\.mi\([a-z]+\) ")
+
+
+def without_menu_icons(text):
+    return _MENU_ICON_MARK.sub("", text)
 
 
 # Parsed source, shared by every source-reading test in the process (#1147).

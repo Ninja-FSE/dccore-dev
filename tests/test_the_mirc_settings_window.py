@@ -25,13 +25,14 @@ import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc")
-for path in (os.path.join(REPO_ROOT, "src"), os.path.join(REPO_ROOT, "tests"),
+for path in (REPO_ROOT, os.path.join(REPO_ROOT, "src"), os.path.join(REPO_ROOT, "tests"),
              os.path.join(REPO_ROOT, "scripts", "mirc")):
     if path not in sys.path:
         sys.path.insert(0, path)
 
 import adminchat  # noqa: E402
 import console_settings  # noqa: E402
+from tests.support import without_menu_icons  # noqa: E402
 from test_the_options_dialog_labels_fit_their_controls import CHAR_PX, CHECK_BOX_PX, PX_PER_DBU  # noqa: E402
 
 BEGIN = "; ==== BEGIN GENERATED settings window"
@@ -40,7 +41,7 @@ END = "; ==== END GENERATED settings window"
 
 def raw():
     with io.open(SCRIPT, encoding="ascii", newline="") as handle:
-        return handle.read().replace("\r\n", "\n")
+        return without_menu_icons(handle.read().replace("\r\n", "\n"))
 
 
 def code(text=None):

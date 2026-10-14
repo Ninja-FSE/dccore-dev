@@ -79,7 +79,8 @@ class TheDefaults(unittest.TestCase):
 class StartOpensEachWindowBehindItsSetting(unittest.TestCase):
 
     def test_start_loads_the_settings_then_opens_the_windows(self):
-        self.assertEqual(code("on *:START: {"), ["dccore.init", "dccore.atstart"])
+        # then the theme's menu hook (#1368), which needs no window
+        self.assertEqual(code("on *:START: {"), ["dccore.init", "dccore.atstart", "dccore.theme.start"])
 
     def test_each_window_is_behind_its_own_setting(self):
         start = alias("dccore.atstart")

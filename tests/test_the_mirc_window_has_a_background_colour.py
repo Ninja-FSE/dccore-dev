@@ -210,7 +210,9 @@ class ThePanelHeadingColour(unittest.TestCase):
 
     def test_the_headings_are_drawn_in_the_saved_colour(self):
         panel = alias_body(script(), "dccore.panel")
-        self.assertIn("var %head = $dccore.opt(col.head)", panel)
+        # the saved colour, made legible on a dark background first (#1368)
+        self.assertIn("var %head = $dccore.lcol(head)", panel)
+        self.assertIn("alias dccore.lcol { return $dccore.theme.legible($dccore.opt(col. $+ $1),list) }", script())
         self.assertGreaterEqual(panel.count("aline -l %head"), 4)
 
     def test_the_menu_is_filled_and_saved_like_the_others(self):

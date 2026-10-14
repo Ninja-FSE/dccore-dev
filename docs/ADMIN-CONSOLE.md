@@ -931,8 +931,10 @@ DCX they are the window's **mIRC** tab.
   sixteen, or "none" to leave the window as mIRC has it; mIRC has no
   per-window colour setting, so the script writes a one-pixel picture of the
   colour beside itself, `dccore-bg-<n>.bmp`, and tiles it behind the text),
-  how many finished downloads the Downloads window shows, and whether the
-  settings window itself is drawn with DCX.
+  how many finished downloads the Downloads window shows, the theme (dark,
+  light, or following mIRC's own dark mode - see *Dark theme and icons*
+  below) with the icons in the menus and the control panel's page list, and
+  whether the settings window itself is drawn with DCX.
 - **Connection**: the bot's nick, the pairing state with **Pair again...**
   and **Forget token**, and whether the console feed is on (the bot's own
   state, never saved here). Reconnecting by itself is under **General →
@@ -1068,6 +1070,32 @@ setting added to the bot fails a test until it has a place in the window, or a
 reason not to; run the script after changing either, and `--check` says
 whether the block is up to date.
 
+### Dark theme and icons
+
+The script's windows can be dark: `/dccore theme dark`, or the **Theme** menu
+on the control panel's mIRC side (**Window** page). *Follow mIRC* (`auto`, the
+default) takes mIRC's own dark mode, which follows Windows' in mIRC 7.79 and
+later and is under Options → Display in mIRC 7.81 and later; *Dark* darkens the control panel, the list window and the
+download queues whatever mIRC does - the title bar, the background and the
+controls - through a small DLL of DCCore's own, `dll\dccore_ui.dll` beside
+the script (its source is `dll\src\dccore_ui.c`; the script checks its hash
+before loading it, as it does DCX's). In mIRC's own dark mode the DLL is not
+used: mIRC draws its dialogs dark already. Without the DLL (or on a 64-bit
+mIRC, which cannot load it) *Dark* leaves the dialogs light, the control
+panel's DCX parts included, so nothing is half dark. On a dark window
+background (black, navy, maroon or purple) the line colours meant for a white
+one - black, navy, green, maroon, purple and blue - are drawn as their light
+neighbours, so nothing disappears into it.
+
+`/dccore icons on` (or the tickbox under the theme) puts an icon beside each
+of the script's own menu items and each page in the control panel's page
+list, from `dll\dccore_icons.dll` - pictures only, nothing in it runs. Only
+the script's items get one; the rest of mIRC's menus are left as they are.
+
+Without the two files the script looks and works as before, and `/dccore
+theme` alone says what applies and why. The control panel takes a change of
+theme the next time it opens; the other windows change at once.
+
 ### Commands
 
 ```
@@ -1076,9 +1104,11 @@ whether the block is up to date.
 /dccore disconnect           close the chat and stop reconnecting
 /dccore unpair               forget the token here and revoke it on the bot
 /dccore trust                accept the bot's current host as the one to send the token to
-/dccore options              this mIRC's own settings: the settings window on its Script tab
+/dccore options              this mIRC's own settings: the control panel's mIRC side
 /dccore settings             the bot's own settings, as its dashboard's Settings page has them
 /dccore dcx [check]          whether the settings window can draw with DCX, and why not; check tests it in this mIRC
+/dccore theme [auto|dark|light]  the script's windows dark, light, or following mIRC's own dark mode; alone, says what applies and why
+/dccore icons [on|off]       icons beside the script's menu items and the control panel's pages; alone, says how they stand
 /dccore window               open or focus @DCCore
 /dccore chat [text]          open DCCore Chat, or say something in it (public)
 /dccore downloads            open @DCCore-Downloads: what the bot is fetching from other bots (needs 1.10)
