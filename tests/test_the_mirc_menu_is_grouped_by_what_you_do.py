@@ -122,7 +122,7 @@ class TheGroups(unittest.TestCase):
                           ".$iif($dccore.theme.mode == auto,$style(1)) Follow mIRC",
                           ".$iif($dccore.theme.mode == dark,$style(1)) Dark",
                           ".$iif($dccore.theme.mode == light,$style(1)) Light", ".-",
-                          ".$iif($dccore.opt(icons),$style(1)) Icons in the menus and the control panel"])
+                          ".$iif($dccore.theme.icons,$style(1)) Icons in the menus and the control panel"])
         self.assertNotIn("Options...", names(self.groups["Window"]))
 
     def test_user_control_holds_the_bans_and_queues_of_nicks(self):

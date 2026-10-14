@@ -347,7 +347,7 @@ class TheMockupLayout(unittest.TestCase):
         for name, attribute in (("line", "COLOR_3DSHADOW"), ("face", "COLOR_3DFACE"), ("light", "COLOR_3DLIGHT")):
             self.assertIn("hadd dccore.sws %s $dccore.theme.sys(%s)" % (name, name), body)
             self.assertIn("if ($1 == %s) { return $dccore.dcx(GetSystemColor,%s) }" % (name, attribute), system)
-        self.assertEqual(statements(system)[0], "if ($dccore.theme.dark) { return $dccore.theme.rgb($1) }")
+        self.assertEqual(statements(system)[0], "if ($dccore.theme.dialogsdark) { return $dccore.theme.rgb($1) }")
         self.assertIn("while (%i <= $dccore.sw.m(groups)) { did -h dccore.set $calc(1000 + %i) | inc %i }", body)
         lines = statements(body)
         # the chosen tab stands on the body frame's top line: made after it
@@ -753,7 +753,7 @@ class TheMockupLayout(unittest.TestCase):
         # the dark theme (#1368) the tables stay enabled: their rows do
         # nothing by themselves, the buttons that act on them are disabled
         enable = alias("dccore.sw.enable")
-        self.assertIn("%e = $iif(($1) || ($dccore.theme.dark),-e,-b)", enable)
+        self.assertIn("%e = $iif(($1) || ($dccore.theme.dialogsdark),-e,-b)", enable)
         self.assertIn("dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) %e", enable)
         # made after every page was hidden, before the first is shown
         init = statements(alias("dccore.sw.init"))
