@@ -223,8 +223,8 @@ static int hide_focus(HWND h)  { return (SendMessageW(h, WM_QUERYUISTATE, 0, 0) 
  * mIRC's controls share one twin per font (kept until the DLL unloads).
  * A DCX control gets a twin of its own: DCX deletes the font a control has
  * when it changes or ends it, so its twin is DCX's to delete then - or ours,
- * when the control gets its own font back. When DCX changes it, the font the
- * control had before the twin is nobody's: FontProc deletes it then.
+ * when the control gets its own font back. When DCX changes it, DCX deletes
+ * the font the control had before the twin as well: FontProc only lets go.
  */
 #define MAX_FONTS 32
 static struct { LOGFONTW lf; HFONT f; } g_fonts[MAX_FONTS];
@@ -262,18 +262,15 @@ static void untwin_font(HWND c, BOOL redraw);
 static LRESULT CALLBACK FontProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR ref) {
     if (m == WM_NCDESTROY) untwin_font(h, FALSE);   /* its own font back before it ends */
     else if (m == WM_SETFONT && GetPropW(h, P_OWN) && (HANDLE)w != GetPropW(h, P_TWIN)) {
-        /* DCX replaces its control's font (xdid -f): it deletes the font the
-           control has - the twin - and sets the new one, so the font the
-           control had before is nobody's now. It is deleted here, and the
-           control let go of: untwin_font then finds no twin, and neither the
-           new font nor the twin is touched again. A WM_SETFONT of the twin
-           itself (twin_font's own), or on a control whose twin is a shared
-           plain font (no P_OWN), changes nothing; nor is the old font
-           deleted when it is the one being set again. */
-        HFONT orig = (HFONT)GetPropW(h, P_FONT);
+        /* DCX replaces its control's font (xdid -f). Its setControlFont()
+           deletes both fonts itself: the one the control has (the twin) and
+           the one it keeps (the font from before the twin). Neither is ours
+           to delete again, so the control is only let go of: untwin_font then
+           finds no twin and touches nothing. A WM_SETFONT of the twin itself
+           (twin_font's own), or on a control whose twin is a shared plain
+           font (no P_OWN), changes nothing. */
         RemovePropW(h, P_FONT); RemovePropW(h, P_TWIN); RemovePropW(h, P_OWN);
         RemoveWindowSubclass(h, FontProc, FONT_ID);
-        if (orig && (HFONT)w != orig) DeleteObject(orig);
     }
     return DefSubclassProc(h, m, w, l);
 }

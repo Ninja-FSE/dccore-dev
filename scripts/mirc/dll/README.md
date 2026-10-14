@@ -9,7 +9,7 @@
 | What | Dark title bar, background and controls for the script's dialogs; the icons beside the script's own menu items | 52 icons (16, 20, 24, 32 and 48 px), resources only - no code is run |
 | Source | `src/dccore_ui.c` | `src/make_icons.py` (draws them; `icons-preview.png` shows all of them) |
 | Build | 32-bit (x86), mingw-w64 | 32-bit (x86), mingw-w64 `windres` |
-| SHA-256 | `28f78712d7986b851e3ed04edda6afa8bf3697df584e1c7751398eaa26e15db6` | `9b3d5002aa24a44309038501686ae74292c550f8158c99fcf93fdcabee69e4ee` |
+| SHA-256 | `3927391c2c3bfd1ed7a64cdbd806c45b758dce53665d6c7bcde54ae276d14e1c` | `9b3d5002aa24a44309038501686ae74292c550f8158c99fcf93fdcabee69e4ee` |
 
 The script checks `dccore_ui.dll` against its hash (`dccore.theme.uisha256`) before it loads it, as it checks `dcx.dll`: a file that is not this build is not run. `dccore_icons.dll` is only read for its pictures, by DCX and by Windows.
 
@@ -43,7 +43,7 @@ i686-w64-mingw32-gcc -O2 -Wall -shared -s -o dccore_ui.dll dccore_ui.c \
 - `dwmapi.dll` is no longer imported: `DwmSetWindowAttribute` is looked up when the DLL first needs it, and without it the title bar stays light.
 - The first `ApplyTheme` or `MenuIcons` pins the DLL in memory, so a `/dll -u` from inside a dialog event cannot unmap it under its own code. `UnloadDll` still takes the hook and every subclass off. The price: once the DLL has been used, mIRC holds the file until it exits, so replacing `dccore_ui.dll` needs a restart of mIRC.
 - `ApplyTheme` answers `ERR ...` when it cannot make a dialog dark (too many dark dialogs at once, or the subclass failed), and refuses a window of another thread.
-- A DCX control whose font DCX replaces (`xdid -f`) no longer leaks the font it had before; going light takes every control's subclass off whatever its style is now; the two background brushes are deleted when the last dark dialog goes light, and at unload.
+- A DCX control whose font DCX replaces (`xdid -f`) is let go of (DCX deletes both its fonts itself); going light takes every control's subclass off whatever its style is now; the two background brushes are deleted when the last dark dialog goes light, and at unload.
 - `MenuIcons` reads the icon file's path as UTF-8 first, so a script folder with letters outside the ANSI code page works.
 - The anti-aliased drawing of glyphs and buttons is capped at 1024 x 256 pixels a control.
 

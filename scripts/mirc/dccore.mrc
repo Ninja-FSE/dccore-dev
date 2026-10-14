@@ -1883,7 +1883,7 @@ menu status,channel {
 alias dccore.theme.dir { return $scriptdir $+ dll\ }
 alias dccore.theme.uifile { return $dccore.theme.dir $+ dccore_ui.dll }
 alias dccore.theme.iconfile { return $dccore.theme.dir $+ dccore_icons.dll }
-alias dccore.theme.uisha256 { return 28f78712d7986b851e3ed04edda6afa8bf3697df584e1c7751398eaa26e15db6 }
+alias dccore.theme.uisha256 { return 3927391c2c3bfd1ed7a64cdbd806c45b758dce53665d6c7bcde54ae276d14e1c }
 
 alias dccore.theme.mode {
   var %m = $dccore.opt(theme)
