@@ -210,7 +210,7 @@ STATS = (
     (0, "Bot", "kv", ("Nick", "Network", "Up since", "Connection")),
     (1, "Sending", "full", 6),
     (0, "Today", "kv", ("Sent", "Queue", "Speed record", "Failed", "Searches")),
-    (1, "Library", "kv", ("Lists", "Rebuild", "Packing")),
+    (1, "Library", "kv", ("Lists", "Files", "Size", "Last rebuild", "Search index", "Rebuild", "Packing")),
 )
 
 
