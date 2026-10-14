@@ -158,6 +158,14 @@ _read_connection_path = None
 # Set by _connect() after it replaced a damaged file; consumed by the readers
 # through _prepare_to_read(). A flag and not a lock, so it lives here.
 _rebuild_pending = False
+# How many backfills are indexing held lists right now (#1367): the startup
+# one, and the one a repair owes, which a reader runs before it answers. The
+# console's start page says `filling` while one runs; _rebuild_pending says
+# only that one is owed, and stays set until somebody next types in the
+# dashboard's filter bar, which can be days. Changed under
+# runtime.list_index_backfills_lock. Kept across a reload: one running then
+# still ends, and would take the count below 0.
+_backfills_running = globals().get("_backfills_running", 0)
 
 
 def _index_path():
@@ -964,30 +972,35 @@ def held_totals(held):
     `rows` is what the lists' fetches counted, which is what each indexed;
     `lists` how many lists are held. `state`:
       none     - no list is held, so the index has nothing to hold;
-      filling  - the startup backfill, or the one after a repair, has not
-                 finished, so some held lists are not searchable yet;
-      ok       - neither.
+      filling  - a backfill is indexing held lists now: the startup one,
+                 or the one a repair owes, which the dashboard's filter runs
+                 before it answers - so some are not searchable yet;
+      ok       - none is running. A repair's backfill that is owed but not
+                 begun is not `filling` (#1367): nothing reads the index
+                 before running it, and nothing may run it for days.
     """
     rows = count = 0
-    for entry in (held or {}).values():
+    # A copy, as every other reader of the live config.fetched_bot_lists
+    # takes (#1367): this runs on the status burst's helper thread, and a
+    # fetch completing on the transfer thread changes the map, and an
+    # entry's "lists", under the loop.
+    for key, entry in dict(held or {}).items():
         if not isinstance(entry, dict):
             continue
-        # The lists _held_lists() indexes: every one in "lists", and the main
-        # one from the entry itself when "lists" does not have it (an entry
-        # from before an archive could hold more than one).
-        lists = entry.get("lists") if isinstance(entry.get("lists"), dict) else {}
-        infos = [info for info in lists.values() if isinstance(info, dict) and info.get("list_path")]
-        if "" not in lists and entry.get("list_path"):
-            infos.insert(0, entry)
-        for info in infos:
+        entry = dict(entry)
+        if isinstance(entry.get("lists"), dict):
+            entry["lists"] = dict(entry["lists"])
+        bot = str(entry.get("bot") or key).strip()
+        # The lists the backfill indexes, chosen by the same function.
+        for _name, info in _held_list_infos(bot, entry):
             try:
                 rows += max(0, int(info.get("entry_count") or 0))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 pass
             count += 1
     if not count:
         state = "none"
-    elif _rebuild_pending or not runtime.list_index_backfill_done.is_set():
+    elif _backfills_running > 0 or not runtime.list_index_backfill_done.is_set():
         state = "filling"
     else:
         state = "ok"
@@ -1214,15 +1227,22 @@ def _held_lists(bot, entry):
     showed a list that does match as holding nothing. An entry written before
     an archive could hold more than one list has no "lists", only its main
     list's "list_path"."""
+    return [(name, info["list_path"]) for name, info in _held_list_infos(bot, entry)]
+
+
+def _held_list_infos(bot, entry):
+    """[(index name, the dict recording the list)] - _held_lists()'s
+    choice, with what the fetch recorded of each list beside its name, so
+    held_totals() counts exactly the lists the backfill indexes (#1367)."""
     import list_fetch
     out = []
     lists = entry.get("lists")
     if isinstance(lists, dict):
         for marker, info in lists.items():
             if isinstance(info, dict) and info.get("list_path"):
-                out.append((list_fetch.index_key(bot, marker), info["list_path"]))
-    if not any(name == bot for name, _path in out) and entry.get("list_path"):
-        out.insert(0, (bot, entry["list_path"]))
+                out.append((list_fetch.index_key(bot, marker), info))
+    if not any(name == bot for name, _info in out) and entry.get("list_path"):
+        out.insert(0, (bot, entry))
     return out
 
 
@@ -1248,7 +1268,21 @@ def backfill_missing(held, log=print):
 
     Best-effort per bot: one unreadable list costs its own row in the filter
     and nothing else, which is the posture the whole module already takes.
+
+    Counted in _backfills_running while it runs (#1367), which is what
+    held_totals() calls `filling`.
     """
+    global _backfills_running
+    with runtime.list_index_backfills_lock:
+        _backfills_running += 1
+    try:
+        return _backfill_missing(held, log)
+    finally:
+        with runtime.list_index_backfills_lock:
+            _backfills_running -= 1
+
+
+def _backfill_missing(held, log):
     import list as list_mod
     import platform_compat
 

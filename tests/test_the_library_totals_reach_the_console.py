@@ -257,10 +257,11 @@ class TheSearchIndex(DCCoreTestCase):
         held = {"botalfa": {"bot": "BotAlfa", "list_path": "/x/a.txt", "entry_count": 9}}
         self.assertEqual(list_index.held_totals(held), (9, 1, "filling"))
 
-    def test_filling_while_a_repair_waits_for_its_backfill(self):
+    def test_a_repairs_backfill_owed_but_not_begun_is_not_filling(self):
+        """#1367: the flag says one is owed, and nothing may run it for days."""
         list_index._rebuild_pending = True
         held = {"botalfa": {"bot": "BotAlfa", "list_path": "/x/a.txt", "entry_count": 9}}
-        self.assertEqual(list_index.held_totals(held), (9, 1, "filling"))
+        self.assertEqual(list_index.held_totals(held), (9, 1, "ok"))
 
 
 class TheSessionAsksOnce(DCCoreTestCase):

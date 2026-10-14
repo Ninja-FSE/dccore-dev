@@ -280,6 +280,10 @@ list_index_read_lock = threading.Lock()
 list_index_backfill_done = threading.Event()
 list_index_backfill_done.set()
 
+# list_index's count of the backfills running now (#1367), changed under
+# this; read without it.
+list_index_backfills_lock = threading.Lock()
+
 # transfer_log.py's database (#1068). One writer at a time, so two transfers
 # ending together never meet a locked file; here, not in that module, for the
 # reason every other lock in this file is.

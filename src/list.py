@@ -11,8 +11,10 @@ import runtime
 import oserve
 import dcc
 import announce
+import contextlib
 import hashlib
 import json
+import threading
 import platform_compat
 import theme
 import unicodedata
@@ -72,6 +74,10 @@ def list_dir(name=None):
     """
     import library
 
+    held = getattr(_held_list_dirs, "dirs", None)
+    key = (str(name or "").strip().lower(), config.LOCAL_LIST_DIR)
+    if held is not None and key in held:
+        return held[key]
     root = config.LOCAL_LIST_DIR
     # No separate branch for `name is None`: list_by_name(None) is None, and
     # the test below already answers `root` for that. A mutation run showed
@@ -83,8 +89,36 @@ def list_dir(name=None):
         # directory for a list nobody configured: callers that look there find
         # nothing, which is the truthful outcome, and a build never writes to
         # a name it did not get from lists() in the first place.
-        return root
-    return os.path.join(root, list_slug(chosen.name))
+        found = root
+    else:
+        found = os.path.join(root, list_slug(chosen.name))
+    if held is not None:
+        held[key] = found
+    return found
+
+
+# list_dir() answers from here inside list_dirs_held(), on that thread only.
+_held_list_dirs = threading.local()
+
+
+@contextlib.contextmanager
+def list_dirs_held():
+    """Resolve each list's directory once for the length of the block, on
+    this thread (#1367).
+
+    list_dir() reads lists.json on every call, and the figures of one list -
+    its newest list, its film list, its two side files, its rebuild summary -
+    ask for it six times: the console's library totals, in every burst, read
+    the file six times per list. A block of reads that belong together asks
+    once. Nested blocks share the outer one's answers."""
+    if getattr(_held_list_dirs, "dirs", None) is not None:
+        yield
+        return
+    _held_list_dirs.dirs = {}
+    try:
+        yield
+    finally:
+        _held_list_dirs.dirs = None
 
 
 # Resolved per call rather than once at import. LOCAL_LIST_DIR is a config value,
@@ -113,19 +147,21 @@ def read_library_summary(name=None):
     """{"folders", "finished_at", "seconds"} from the last rebuild of the
     list, each a whole number, 0 when unknown: before the first rebuild that
     wrote one, or a file that cannot be read. A wrong figure on a start page
-    is not worth an exception, so nothing here raises."""
+    is not worth an exception, so nothing here raises: not a figure too big
+    for a whole number (1e999 is infinity to json, and int() of it raises
+    OverflowError, #1367), nor a file nested too deep to parse."""
     summary = {"folders": 0, "finished_at": 0, "seconds": 0}
     try:
         with open(platform_compat.long_path(library_summary_path(name)), encoding="utf-8") as handle:
             stored = json.load(handle)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return summary
     if not isinstance(stored, dict):
         return summary
     for key in summary:
         try:
             summary[key] = max(0, int(stored.get(key) or 0))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             pass
     return summary
 
