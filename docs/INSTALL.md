@@ -287,6 +287,8 @@ or `!update` from IRC, or the dashboard's **Update list** button. On a large lib
 
 Because everything is listed, **anything you leave in that directory is offered to anyone who asks.** It is the public face of the bot — keep out of it whatever should not leave.
 
+**The list is what the bot serves** (#1376). A request for a name the list does not have is answered "File not found" at once: the bot does not search the folders for it. A file you add is requestable after the next rebuild; run one (**Update list**, `!update`, or `update` at the console) to offer it straight away. A file type the list leaves out is not served either, even to someone who knows its exact name.
+
 Two settings decide how the result is split up:
 
 - **`SEPARATE_VIDEO_LIST`** — publishes film and series as their own list rather than mixing them in with the music. Both travel in the same archive people get by typing your bot's name, so there is no second command to learn. `LIST_VIDEO_EXTENSIONS` says which formats count, and `LIST_VIDEO_COMPANION_EXTENSIONS` (subtitles, `.nfo`, `.sfv`) says which files follow a film into its list when they sit in the same folder - so a release travels whole, while an album's `.nfo` stays with the album. Turn it off if your films and music are already in separate folders and you would rather split by folder.
