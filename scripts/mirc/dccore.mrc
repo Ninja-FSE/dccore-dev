@@ -172,13 +172,14 @@ alias dccore.init {
   dccore.default col.name 2
   dccore.default col.head 2
   ; The nick, the channel and the search term inside a feed line (#1259).
-  ; -1 is "same as the line": no colour codes at all, so nothing changes until
-  ; one is chosen. The term's "name" keeps it in the File names colour,
-  ; where it was before it had one of its own. The nick's "per" gives each
-  ; nick a colour of its own - see dccore.pernick.
-  dccore.default col.term name
-  dccore.default col.nick -1
-  dccore.default col.chan -1
+  ; -1 is "same as the line": no colour codes at all. The term's "name" is the
+  ; File names colour. The nick's "per" gives each nick a colour of its own -
+  ; see dccore.pernick. Each has a colour of its own by default (#1348): with
+  ; them all "same as the line", a busy window was nearly all black.
+  dccore.inlinecolours
+  dccore.default col.term 12
+  dccore.default col.nick 6
+  dccore.default col.chan 10
   ; DCCore Chat (#371): only the channels ticked in its window, until
   ; "all my channels" is chosen; the window opens by itself for a line
   ; Listening on every channel is the default (#958 follow-up): only lines
@@ -200,6 +201,20 @@ alias dccore.init {
   dccore.default icons 1
 }
 alias dccore.default { if ($hget(dccore,$1) == $null) { hadd dccore $1 $2- } }
+; #1348: the colours inside a line had no colour of their own until 1.20.0.
+; Every script before it saved them with the rest of the table, so a new
+; default alone would reach new installs only. Once, each of the three that
+; still holds its old default moves to the new one; a colour somebody picked
+; stays. The mark is saved with it, so "same as the line" picked again later
+; is never moved a second time.
+alias dccore.inlinecolours {
+  if ($hget(dccore,inlinecolours) != $null) { return }
+  if ($hget(dccore,col.term) == name) { hadd dccore col.term 12 }
+  if ($hget(dccore,col.nick) == -1) { hadd dccore col.nick 6 }
+  if ($hget(dccore,col.chan) == -1) { hadd dccore col.chan 10 }
+  hadd dccore inlinecolours 1
+  if ($isfile($dccore.ini)) { dccore.save }
+}
 alias dccore.save { hsave -o dccore $dccore.ini }
 alias dccore.set { hadd dccore $1 $2- | dccore.save }
 alias dccore.forget { hdel dccore $1 | dccore.save }
@@ -5336,7 +5351,7 @@ dialog dccore.set {
   edit "", 1637, 178 152 24 11, autohs
   text "min, 0 = off", 1638, 210 154 70 8
   box "Colours", 1171, 110 175 370 122
-  text "Search text is the term searched for, the same as File names until you choose. Nicks and Channels are the same as their line until you choose; Nicks can also be per nick, a colour of its own from the name.", 1172, 116 185 358 24
+  text "Search text is the term searched for. Each of the three can be the same as its line; Search text can be the same as File names, and Nicks can be per nick, a colour of its own from the name.", 1172, 116 185 358 24
   text "File names", 1660, 116 214 110 8
   combo 1640, 230 212 96 80, drop
   text "Console replies", 1661, 116 227 110 8

@@ -917,9 +917,11 @@ DCX they are the window's **mIRC** tab.
   bans, other log lines - and how often the `[STATUS]` line is written when
   the side panel is off (0 = never); then the colours of file names, of
   console replies and of the side panel's headings, and the colours inside a
-  line: **Search text** (the searched term; *same as File names* until you
-  choose), **Nicks** and **Channels** (both *same as the line*, no colour of
-  their own, until you choose). **Nicks** can also be *per nick*: each nick
+  line: **Search text** (the searched term), **Nicks** and **Channels**.
+  Since 1.20.0 they start blue, purple and teal; a script that ran before
+  moves them there once, unless you had picked a colour. Search text can
+  also be *same as File names*, and all three *same as the line*, no colour
+  of their own. **Nicks** can also be *per nick*: each nick
   gets a colour of its own from its name, the same every time whatever its
   case, out of the colours that can be read on the window's background. A
   new choice colours new lines; what is already in the window stays as it

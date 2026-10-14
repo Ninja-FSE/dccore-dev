@@ -233,9 +233,9 @@ GROUPS = (
         ("@DCCore window", (
             ("Show in @DCCore", ({"widget": "showin"},)),
             ("Colours", (
-                {"note": "Search text is the term searched for, the same as File names until you choose. "
-                         "Nicks and Channels are the same as their line until you choose; Nicks can also "
-                         "be per nick, a colour of its own from the name."},
+                {"note": "Search text is the term searched for. Each of the three can be the same as "
+                         "its line; Search text can be the same as File names, and Nicks can be per "
+                         "nick, a colour of its own from the name."},
                 {"widget": "showcolours"},
             )),
         )),
