@@ -1228,6 +1228,9 @@ class Session:
         self.unlocked = False
         self.paired_as = None
         self.unlock_failures = 0
+        # Logged in with a read-only token (#1374): it runs what
+        # READ_ONLY_COMMANDS allows and nothing else, `unlock` included.
+        self.read_only = False
 
     # A DCC CHAT session keeps state between its lines, so it can hold a
     # transaction; the dashboard Console's per-request stand-in cannot.
@@ -2584,13 +2587,18 @@ def _cmd_hello(session, args):
 
 
 def _cmd_pair(session, args):
-    """`pair <client> [version]`: mint a token this client can log in with.
+    """`pair <client> [version] [readonly]`: mint a token this client can log in with.
 
     Printed ONCE, here; only its hash is kept. Pairing the same name again
     replaces the old token, which is also how a lost one is rotated. For
     the script this is the first-run flow: the admin types the password by
     hand once, the script sends `pair dccore.mrc 1.0`, keeps the token, and
     logs in with it from then on. See docs/ADMIN-CONSOLE.md.
+
+    With `readonly` (#1374) the token can only look: see READ_ONLY_COMMANDS.
+    Its hash is kept as `readonly_hash`, never `hash`, so a bot from before
+    read-only tokens - after a downgrade - refuses it rather than letting it
+    in as a full one.
     """
     import datetime
     import secrets
@@ -2598,9 +2606,15 @@ def _cmd_pair(session, args):
     import console_settings
     if console_settings.refused_while_locked(session, "pair"):
         return
-    name = (args.split() or ["client"])[0]
+    words = args.split()
+    name = (words or ["client"])[0]
+    read_only = any(word.lower() == "readonly" for word in words[1:])
+    if name.lower() == "readonly":
+        # A client called "readonly" would be paired with a full token.
+        session.send("Name the client first: pair <client> [version] readonly")
+        return
     token = secrets.token_urlsafe(32)
-    entry = {"hash": make_password_hash(token),
+    entry = {("readonly_hash" if read_only else "hash"): make_password_hash(token),
              "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
              "by": session.nick}
     # Load, change and save as one step (runtime.admin_tokens_lock): a `pair`
@@ -2615,11 +2629,16 @@ def _cmd_pair(session, args):
         session.send(f"Could not pair {name}: the token store could not be written "
                      f"(see the bot's log). Nothing was changed.")
         return
-    print(f"[ADMINCHAT] {session.nick} paired a console client as {name!r}.")
+    print(f"[ADMINCHAT] {session.nick} paired a console client as {name!r}"
+          f"{', read-only' if read_only else ''}.")
     if session.structured:
         session.send(f"DCCORE TOKEN {name} {token}")
     else:
-        session.send(f"Paired {name}. Its token, shown once - it opens this chat and nothing else:")
+        if read_only:
+            session.send(f"Paired {name}, read-only. Its token, shown once - it opens this chat "
+                         f"to look, and changes nothing:")
+        else:
+            session.send(f"Paired {name}. Its token, shown once - it opens this chat and nothing else:")
         session.send(f"  {token}")
         session.send(f"Revoke it with: unpair {name}")
         if replaced:
@@ -2647,7 +2666,8 @@ def _cmd_unpair(session, args):
         session.send(f"{len(tokens)} paired client(s):")
         for key in sorted(tokens):
             entry = tokens[key] if isinstance(tokens[key], dict) else {}
-            session.send(f"  {key:<20} paired {entry.get('created', '?')} by {entry.get('by', '?')}")
+            session.send(f"  {key:<20} paired {entry.get('created', '?')} by {entry.get('by', '?')}"
+                         f"{', read-only' if 'readonly_hash' in entry else ''}")
         session.send("Revoke one with: unpair <name>")
         return
     _revoke_token(session, name)
@@ -2735,10 +2755,17 @@ _cmd_unlock = _settings_command("unlock")
 
 
 def _cmd_help(session, args):
+    read_only = getattr(session, "read_only", False)
     session.send("Available commands:")
     for name in sorted(COMMANDS):
+        if read_only and name not in READ_ONLY_COMMANDS | READ_ONLY_REPORTS:
+            continue
         _fn, summary, usage = COMMANDS[name]
         session.send(f"  {usage:<20} {summary}")
+    if read_only:
+        session.send("")
+        session.send("This console logged in with a read-only token: it can look, not change "
+                     "anything. Log in with the password for the rest.")
     session.send("")
     session.send("Channel commands still work as before; this console does not "
                  "replace them yet.")
@@ -2798,12 +2825,41 @@ COMMANDS = {
     "consolecaps": (_cmd_consolecaps, "which settings-window commands this bot has", "consolecaps"),
     "unlock":     (_cmd_unlock,     "let a token login change settings (once per session)", "unlock <password>"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
-    "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
+    "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version] [readonly]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),
     "shutdown":   (_cmd_shutdown,   "stop the bot",                      "shutdown now"),
     "help":       (_cmd_help,       "this list",                         "help"),
     "quit":       (_cmd_quit,       "close this session",                "quit"),
 }
+
+# What a session logged in with a read-only token may run (#1374). An
+# allow-list, not a block-list: a command added to COMMANDS later is refused
+# to such a session until someone decides that it only reads. The
+# READ_ONLY_REPORTS run with no argument only - with one they change a
+# setting. `unpair` of the session's own name is allowed as well (see
+# _refused_read_only()): giving up its own token harms nothing.
+READ_ONLY_COMMANDS = frozenset({
+    "status", "queue", "slots", "packing", "library", "bans", "uptime", "version",
+    "lists", "dlqueue", "downloads", "hello", "consolecaps", "help", "quit",
+})
+READ_ONLY_REPORTS = frozenset({"consolefeed", "checkupdates"})
+
+
+def _refused_read_only(session, command, args):
+    """Refuse `command` if this session logged in with a read-only token and
+    the command is not one it may run. True if refused."""
+    if not getattr(session, "read_only", False):
+        return False
+    if command in READ_ONLY_COMMANDS:
+        return False
+    if command in READ_ONLY_REPORTS and not args.strip():
+        return False
+    if command == "unpair" and args.split()[:1] == [session.paired_as]:
+        return False
+    import console_settings
+    console_settings.refused_read_only(session, command)
+    return True
+
 
 # What the admin handlers see as the "channel" a console command came from. It
 # is not a channel, and it must not look like one: announce.send_debug puts this
@@ -2864,6 +2920,8 @@ def handle_command(session, text):
     logged = _logged(command.lower(), stripped, args)
     if logged is not None:
         print(f"[ADMINCHAT] {session.nick} ran: {logged}")
+    if _refused_read_only(session, command.lower(), args):
+        return
     try:
         if getattr(getattr(session, "settings_txn", None), "implicit", False):
             import console_settings
@@ -2890,6 +2948,8 @@ def _forget(session):
 
 # What _promote() answers for a session that is no longer the pending one.
 _SUPERSEDED = object()
+# ... and for a read-only login while a full session holds the console.
+_IN_USE = object()
 
 
 def _promote(session):
@@ -2914,6 +2974,13 @@ def _promote(session):
         # and left no console at all.
         if session.closed or (_pending is not None and _pending is not session):
             return _SUPERSEDED
+        # A READ-ONLY LOGIN DOES NOT TAKE THE CONSOLE FROM A FULL ONE (#1374).
+        # A stats script logging in every few minutes would otherwise close
+        # the operator's console each time, and a stolen read-only token
+        # could do it at will. A full login still replaces anything.
+        if getattr(session, "read_only", False) and _session is not None \
+                and not _session.closed and not getattr(_session, "read_only", False):
+            return _IN_USE
         previous = _session
         _session = session
         if _pending is session:
@@ -3000,11 +3067,23 @@ def _token_matches(supplied):
     hashes in the same scheme as the password, so a stolen store is as
     useless as a stolen password hash; a handful of them per attempt is
     the cost, and attempts are already rate-limited."""
+    return _paired_token(supplied)[0]
+
+
+def _paired_token(supplied):
+    """_token_matches(), and whether the token is read-only: (name,
+    read_only), or (None, False). A read-only token's hash is
+    `readonly_hash` (#1374); an entry has one or the other, and
+    verify_password() answers an absent one at once."""
     import db
     for name, entry in db.load_admin_tokens().items():
-        if isinstance(entry, dict) and verify_password(entry.get("hash", ""), supplied):
-            return name
-    return None
+        if not isinstance(entry, dict):
+            continue
+        if verify_password(entry.get("readonly_hash", ""), supplied):
+            return name, True
+        if verify_password(entry.get("hash", ""), supplied):
+            return name, False
+    return None, False
 
 
 # A password sent as `DCCORE PASSWORD <value>` (#1273): the value encoded as
@@ -3046,14 +3125,16 @@ def _check_password(session, line):
     # The password, or a paired client's token (#550, step 3). A token opens
     # a chat and nothing else: the dashboard's login checks
     # ADMIN_PASSWORD_HASH alone and never sees the token store.
-    paired = _token_matches(supplied)
+    paired, read_only = _paired_token(supplied)
     if paired:
-        print(f"[ADMINCHAT] {session.nick} logged in with the token paired as {paired!r}.")
+        print(f"[ADMINCHAT] {session.nick} logged in with the {'read-only ' if read_only else ''}"
+              f"token paired as {paired!r}.")
     spaced = _spaced_password(supplied)
     if paired or verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied) or (
             spaced is not None and verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), spaced)):
         session.authenticated = True
         session.paired_as = paired
+        session.read_only = read_only
         session.unlocked = not paired
         session.last_activity = time.time()
         clear_bad_ip(session.peer_ip)
@@ -3062,6 +3143,15 @@ def _check_password(session, line):
             session.authenticated = False
             print(f"[ADMINCHAT] {session.nick} ({session.peer_ip}) gave the password after a newer "
                   f"connection had replaced it; not logged in.")
+            return
+        if replaced is _IN_USE:
+            # A right credential, so not a failed attempt: nothing is counted.
+            session.authenticated = False
+            print(f"[ADMINCHAT] {session.nick} ({session.peer_ip}) logged in with a read-only token "
+                  f"while a full session held the console; refused, that session stays.")
+            session.close(announce_text="The console is in use. A read-only token does not take "
+                                        "it over; try again when it is free.")
+            _forget(session)
             return
         session.send("")
         session.send("Entering DCC Chat Admin Interface")
