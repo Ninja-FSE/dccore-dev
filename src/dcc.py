@@ -1310,6 +1310,22 @@ class _ReceiverStalled(Exception):
         self.acked = acked
 
 
+class _SourceUnreadable(Exception):
+    """Our own file could not be opened or read mid-send (#1389).
+
+    Not an OSError on purpose. Since Python 3.10 socket.timeout IS
+    TimeoutError, and a network share that hiccups raises TimeoutError,
+    ConnectionResetError or ConnectionAbortedError from open() or read() -
+    the very types start_dcc_send() takes for the receiver timing out or
+    closing. Wrapped, a NAS hiccup is reported as the bot's failure and never
+    counts toward a downloader's DAILY_SEND_FAILS_LIMIT.
+    """
+
+    def __init__(self, err):
+        super().__init__(err)
+        self.err = err
+
+
 class _ShortSend(Exception):
     """Raised to skip the completion bookkeeping when a send ended early.
 
@@ -1518,6 +1534,201 @@ def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, 
 
     print("[DCC QUEUE] " + str(user) + ": " + outcome + ((" (" + reason + ")") if reason else "") + ".")
     return retained
+
+
+# ---------------------------------------------------------------------
+# A NICK WHOSE SENDS KEEP FAILING (#1389): DAILY_SEND_FAILS_LIMIT.
+# ---------------------------------------------------------------------
+# MAX_SEND_FAILS above is per queued file; this is per nick, per day. The
+# count is runtime.failed_transfers, under runtime.failed_transfers_lock,
+# keyed like dcc_queue. In memory only: a restart forgives, which a daily
+# limit can afford.
+#
+# WHAT COUNTS is decided where a send fails, not here: start_dcc_send() sets
+# receiver_failed in the handlers for a receiver that never connected,
+# stalled, let a write time out or closed the connection before it had the
+# whole file, and finish_send() counts it. Everything else that ends a send
+# short leaves it unset - a failure on our side (the file vanished or
+# shrank, the handshake could not be sent, no port), and a stop the bot
+# makes itself. A new way for the bot to stop a send gets its own handler
+# and does not set it. The pack cancels, the operator's and the user's own
+# remove, never reach a send at all.
+
+def _send_fails_today():
+    """Today, by the bot's local clock: the day a failure is counted in. A
+    function of its own so a test can move midnight."""
+    import datetime
+    return datetime.date.today()
+
+
+# "NEVER CONNECTED" IS OFTEN OUR SIDE. A stale MY_IP_OR_DOCK (an ISP's daily
+# reconnect), a port forward the router lost or a firewall in front of the
+# bot makes every offer go unanswered, and counting those would pause
+# everybody and empty every queue within minutes. Two rules, both reset by
+# the next send that connects (note_send_connected()):
+#   * before any send has connected since start-up, none counts;
+#   * a run of never-connected sends with no connect in between stops
+#     counting once it reaches NEVER_CONNECTED_STREAK sends to at least
+#     NEVER_CONNECTED_STREAK_NICKS different nicks - several downloaders
+#     failing the same way at once is the bot. One nick failing alone keeps
+#     counting: that is its own problem.
+NEVER_CONNECTED_STREAK = 3
+NEVER_CONNECTED_STREAK_NICKS = 2
+
+
+def note_send_connected():
+    """A DCC send's receiver connected: the bot's offers work, so the
+    never-connected streak starts again from nothing."""
+    with runtime.send_connected_lock:
+        runtime.send_connected_since_start = True
+        runtime.never_connected_streak = 0
+        runtime.never_connected_streak_nicks.clear()
+        runtime.never_connected_streak_logged = False
+
+
+def never_connected_counts(nick):
+    """Whether a send to `nick` whose receiver never connected may count
+    toward DAILY_SEND_FAILS_LIMIT; adds it to the streak either way. Not
+    before any send has connected since start-up, nor once the streak
+    (this send included) has reached NEVER_CONNECTED_STREAK sends to
+    NEVER_CONNECTED_STREAK_NICKS or more nicks. When it does not count, the
+    log says why - once per streak, not once per offer."""
+    with runtime.send_connected_lock:
+        runtime.never_connected_streak += 1
+        runtime.never_connected_streak_nicks.add(_send_fails_key(nick))
+        since_start = runtime.send_connected_since_start
+        broken = (runtime.never_connected_streak >= NEVER_CONNECTED_STREAK
+                  and len(runtime.never_connected_streak_nicks) >= NEVER_CONNECTED_STREAK_NICKS)
+        if since_start and not broken:
+            return True
+        say = not runtime.never_connected_streak_logged
+        runtime.never_connected_streak_logged = True
+        streak = runtime.never_connected_streak
+        nicks = len(runtime.never_connected_streak_nicks)
+    if say:
+        why = (f"no send has connected since start-up" if not since_start
+               else f"{streak} offers to {nicks} different nicks have gone unanswered "
+                    f"since the last send that connected")
+        print(f"[DCC PAUSE] Sends that never connected are not counted toward "
+              f"DAILY_SEND_FAILS_LIMIT until one connects: {why}, so it looks like "
+              f"the bot's own address (MY_IP_OR_DOCK) or port forwarding.")
+    return False
+
+
+def daily_send_fails_limit():
+    """DAILY_SEND_FAILS_LIMIT as a whole number; 0, off, for anything that
+    is not a positive one."""
+    try:
+        return max(0, int(getattr(config, "DAILY_SEND_FAILS_LIMIT", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _send_fails_key(nick):
+    """The dcc_queue key of `nick`: the count follows the queue it pauses."""
+    return str(nick or "").lower().strip()
+
+
+def _never_paused(key):
+    """An admin (ADMIN_NICK) is never counted or paused."""
+    import commands
+    return key in commands.admin_nicks()
+
+
+def send_fails_paused(nick):
+    """How many of `nick`'s sends failed today, when that has paused it; 0
+    when it is not paused - the limit off, an admin, under the limit, or the
+    count from a day that has ended."""
+    limit = daily_send_fails_limit()
+    key = _send_fails_key(nick)
+    if not limit or not key or _never_paused(key):
+        return 0
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        entry = runtime.failed_transfers.get(key)
+        fails = int(entry["fails"]) if entry and entry.get("day") == today else 0
+    return fails if fails >= limit else 0
+
+
+def paused_for_send_fails():
+    """{nick_key: failed sends today} for every nick paused right now."""
+    limit = daily_send_fails_limit()
+    if not limit:
+        return {}
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        counted = {key: int(entry["fails"]) for key, entry in runtime.failed_transfers.items()
+                   if entry.get("day") == today and int(entry["fails"]) >= limit}
+    return {key: fails for key, fails in counted.items() if not _never_paused(key)}
+
+
+def note_failed_send(nick):
+    """Count one failed send against `nick` (#1389) and return its count for
+    today; 0 when nothing is counted (the limit off, or an admin).
+
+    The first count of a new day finds yesterday's counts and drops them,
+    so midnight resets every nick and the dict never holds more than a day.
+    The failure that reaches the limit pauses the nick: its queued files are
+    removed and it is told why (_pause_for_send_fails). Once, not on every
+    failure after it; a limit raised past the count and lowered again
+    pauses it again.
+    """
+    limit = daily_send_fails_limit()
+    key = _send_fails_key(nick)
+    if not limit or not key or _never_paused(key):
+        return 0
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        for stale in [k for k, entry in runtime.failed_transfers.items() if entry.get("day") != today]:
+            del runtime.failed_transfers[stale]
+        entry = runtime.failed_transfers.setdefault(key, {"day": today, "fails": 0, "paused": False})
+        entry["fails"] += 1
+        fails = entry["fails"]
+        pause_now = fails >= limit and not entry["paused"]
+        entry["paused"] = fails >= limit
+    print(f"[DCC PAUSE] {nick}: {fails} failed send(s) today, of {limit} allowed.")
+    if pause_now:
+        _pause_for_send_fails(nick, key, fails)
+    return fails
+
+
+def _pause_for_send_fails(nick, key, fails):
+    """`nick` has reached DAILY_SEND_FAILS_LIMIT: drop its queued files, as
+    !clearqueue would, and say why - to the nick and to the operator."""
+    import db
+    with queue_lock:
+        rows = config.dcc_queue.get(key) or []
+        removed = len(rows)
+        if rows:
+            # Before the rows go: they are the only record of their archives.
+            for temp_path in discard_orphaned_temp_archives(key):
+                print(f"[DCC PAUSE] Removed orphaned temp archive: {temp_path}")
+            config.dcc_queue.pop(key, None)
+        getattr(config, "frozen_queues", {}).pop(key, None)
+    if removed:
+        try:
+            db.save_dcc_queue()
+        except Exception as save_err:
+            print("[DCC QUEUE ERROR] Could not persist the queue: " + str(save_err))
+    print(f"[DCC PAUSE] {nick} is paused until midnight after {fails} failed sends today; "
+          f"{removed} queued file(s) removed.")
+    announce.send_debug(f"{config.C_BOLD}{nick}{config.C_RESET} is paused until midnight: "
+                        f"{fails} failed sends today, {removed} queued file(s) removed. "
+                        f"unpause {nick} lifts it.", category="INFO")
+    oserve_mod = sys.modules.get("oserve")
+    if oserve_mod:
+        oserve_mod.queue_message(nick, f"NOTICE {nick} :{config.C_BOLD}"
+                                       f"{announce.send_fails_paused_text(fails, removed)}{config.C_RESET}\r\n")
+
+
+def unpause_send_fails(nick):
+    """Forget `nick`'s failed sends today, lifting a pause (the console's
+    `unpause`). Returns how many there were; 0 when there were none."""
+    key = _send_fails_key(nick)
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        entry = runtime.failed_transfers.pop(key, None)
+    return int(entry["fails"]) if entry and entry.get("day") == today else 0
 
 
 def get_total_queued_count():
@@ -3589,6 +3800,14 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 print(f"[DCC] {user}'s private request is a {routed!r} row; "
                       f"answering from that list rather than {wanted_list!r}.")
                 wanted_list = routed
+    # A nick paused by DAILY_SEND_FAILS_LIMIT (#1389) is refused here, before
+    # any lookup: the request is not queued, and the notice says why.
+    paused_fails = send_fails_paused(user)
+    if paused_fails:
+        print(f"[DCC PAUSE] Refused a request from {user}: {paused_fails} failed sends "
+              f"today, paused until midnight.")
+        announce.send_fails_paused_notice(user, paused_fails, target_chan)
+        return
     # ---------------------------------------------------------------------
     # The global maintenance gate:
     # ---------------------------------------------------------------------
@@ -4520,8 +4739,8 @@ SentFile = collections.namedtuple("SentFile", (
     "row", "user", "next_file", "file_path", "file_name", "file_size", "resume_offset", "bytes_sent",
     "transfer_completed", "already_held", "offered_at", "start_time", "transfer_finished_at",
     "channel", "irc_sock", "owns_packer", "outcome_identity", "outcome_status", "acked",
-    "never_connected", "assigned_port", "conn", "dcc_sock"),
-    defaults=(None, None, False, None, None, 0, False, None, None, None))
+    "never_connected", "assigned_port", "conn", "dcc_sock", "receiver_failed"),
+    defaults=(None, None, False, None, None, 0, False, None, None, None, False))
 SentFile.__doc__ = """What start_dcc_send() knows about a send once it has ended (#1328): the
 transfer row, the nick, the queue row, the file and its size, where it
 resumed, the bytes sent, whether the receiver acknowledged the whole file or
@@ -4530,7 +4749,10 @@ already held it, and when it was offered, started and finished.
 Since #1336 also what finish_send() needs to wind it up: the channel and the
 IRC socket, whether it owns the packer, the outcome's identity and status,
 the bytes the receiver acknowledged, whether it never connected, the port,
-and the two sockets. record_completed_send() leaves those at their defaults."""
+and the two sockets. record_completed_send() leaves those at their defaults.
+
+Since #1389 whether the receiver failed it, which counts toward the nick's
+DAILY_SEND_FAILS_LIMIT."""
 
 
 def record_completed_send(sent):
@@ -4773,6 +4995,20 @@ def finish_send(sent):
             reason=settled_reason)
     except Exception as pop_err:
         print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
+
+    # 4b. A send the receiver failed counts toward the nick's daily limit
+    #     (#1389) - after the row is settled, so a pause removes what is left
+    #     of the queue, a row kept for retry included. Under the nick the
+    #     send is filed under now: the queue moved with a /nick.
+    #     A never-connected one only while the bot's offers are not all
+    #     going unanswered (never_connected_counts()): else it is our address.
+    if sent.receiver_failed and daily_send_fails_limit():
+        try:
+            nick = (sent.row or {}).get('user') or sent.user
+            if not sent.never_connected or never_connected_counts(nick):
+                note_failed_send(nick)
+        except Exception as count_err:
+            print("[DCC PAUSE ERROR] Could not count the failed send: " + str(count_err))
 
     # 5. The RAR cache and the send lock
     try:
@@ -5026,12 +5262,23 @@ def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user)
     catches it still knows how far the send got. Each chunk also moves the
     transfer row's bytes_sent and the bot's total.
 
+    Raises _SourceUnreadable when the FILE fails - open, seek or read
+    (#1389): a timeout or a reset from a network share is an OSError of the
+    same type as the receiver's, and must not be taken for one.
+
     start_dcc_send()'s send loop until #1350, step 4 of splitting it
-    (docs/FUTURE.md). Moved unchanged.
+    (docs/FUTURE.md).
     """
-    with open(platform_compat.long_path(file_path), 'rb') as f:
+    try:
+        f = open(platform_compat.long_path(file_path), 'rb')
+    except OSError as err:
+        raise _SourceUnreadable(err) from err
+    with f:
         if resume_offset:
-            f.seek(resume_offset)
+            try:
+                f.seek(resume_offset)
+            except OSError as err:
+                raise _SourceUnreadable(err) from err
         # mIRC's "packet size", and the reason raising it there is
         # noticeable: mIRC defaults to 4 KB and this has always been 64.
         # Resolved once per transfer, not once per pass - the value cannot
@@ -5046,7 +5293,10 @@ def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user)
             # reaches a send already running: under a cap the chunk is a
             # tenth of a second of line, and it waits its turn behind
             # every other send's.
-            chunk = f.read(speed_cap.chunk_size(speed_cap.UPLOAD, block))
+            try:
+                chunk = f.read(speed_cap.chunk_size(speed_cap.UPLOAD, block))
+            except OSError as err:
+                raise _SourceUnreadable(err) from err
             if not chunk: break
             speed_cap.take(speed_cap.UPLOAD, len(chunk))
             acks.sending()
@@ -5236,6 +5486,13 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
     # Set by the accept branch below and read by the finally, so the notice
     # the user gets can say what happened rather than "did not complete".
     never_connected = False
+    # The receiver failed the send (#1389): counted toward the nick's
+    # DAILY_SEND_FAILS_LIMIT by finish_send(). Set only in the handlers below
+    # for a receiver that never connected, stalled, let a write time out or
+    # closed the connection before it had the whole file - never for a
+    # failure on our side or a stop the bot makes (see the #1389 block above
+    # _send_fails_today()).
+    receiver_failed = False
     # How the send ended when it did not complete (#1203); set where that is
     # known, and FAILED wherever nothing more is.
     outcome_status = transfer_log.STATUS_FAILED
@@ -5319,6 +5576,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             report_failure(user, file_name, never_connected_reason(accept_window),
                            acked=0, total=file_size)
             never_connected = True
+            receiver_failed = True
             oserve = sys.modules.get('oserve')
             if oserve: oserve.send_fails_count += 1
             return
@@ -5334,6 +5592,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         _apply_send_buffer(conn)
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         print(f"[DCC-CONNECT] {user} connected from {addr}!")
+        # The bot's offers reach people: never-connected sends count (#1389).
+        note_send_connected()
 
         start_time = time.time()
 
@@ -5424,6 +5684,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         already_held = bool(transfer_completed and resume_offset
                             and resume_offset >= file_size)
         if not transfer_completed and not short_read:
+            # Every byte went out and the receiver did not take them all:
+            # it closed, or stopped acknowledging (#1389).
+            receiver_failed = True
             if not acks.received_any:
                 report_failure(user, file_name,
                     "the receiver never acknowledged a single byte, so there "
@@ -5486,6 +5749,20 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             f"closed the connection mid-transfer, having acknowledged "
             f"{gone.acked:,} of {file_size:,} bytes.",
             acked=gone.acked, total=file_size)
+        # Counted toward the daily limit all the same (#1389): a user's Close
+        # and a client that drops every send halfway cannot be told apart on
+        # the wire - either closes with a FIN, or with a reset while data is
+        # still unread - and both hold a slot for a file that does not arrive.
+        receiver_failed = True
+        oserve = sys.modules.get('oserve')
+        if oserve: oserve.send_fails_count += 1
+    except _SourceUnreadable as unreadable:
+        # Our side (#1389): the file, not the receiver. Not counted against
+        # the nick, whatever type of OSError the share raised.
+        report_failure(user, file_name,
+            f"could not read the file being sent: {type(unreadable.err).__name__}: "
+            f"{unreadable.err}. The bot's side, not the receiver's.",
+            acked=acks.acked, total=file_size)
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except _ReceiverStalled as stalled:
@@ -5494,6 +5771,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             f"and made no progress for {int(ACK_STALL_SECONDS)}s; giving up on "
             f"a dead link.",
             acked=stalled.acked, total=file_size)
+        receiver_failed = True
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except socket.timeout:
@@ -5505,6 +5783,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         report_failure(user, file_name,
             "the send blocked for the whole socket timeout with the receiver "
             "not draining it.", acked=acks.acked, total=file_size)
+        receiver_failed = True
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except Exception as e:
@@ -5513,6 +5792,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         # to tell which one happened after the fact, especially once the temp archive is
         # already deleted and the queue row already gone.
         report_failure(user, file_name, f"{type(e).__name__}: {e}")
+        # A reset or a broken pipe is the receiver closing on us (#1389). Not
+        # anything else that lands here: a file that vanished or could not
+        # be read is our side's failure, not theirs.
+        if isinstance(e, ConnectionError):
+            receiver_failed = True
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     finally:
@@ -5530,4 +5814,4 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             outcome_identity=outcome_identity, outcome_status=outcome_status,
             acked=_here['acks'].acked if 'acks' in _here else 0,
             never_connected=never_connected, assigned_port=assigned_port,
-            conn=conn, dcc_sock=dcc_sock))
+            conn=conn, dcc_sock=dcc_sock, receiver_failed=receiver_failed))

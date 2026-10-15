@@ -133,7 +133,7 @@ GROUPS = (
             )),
             ("Buffers & packet size", ("DCC_BLOCK_SIZE", "DCC_SEND_BUFFER")),
             ("Ports & reliability", ("DCC_PORT_START", "DCC_PORT_END", "DCC_ACCEPT_TIMEOUT",
-                                     "MAX_SEND_FAILS")),
+                                     "MAX_SEND_FAILS", "DAILY_SEND_FAILS_LIMIT")),
         )),
         ("Search", (
             ("Sending", ("MAX_DCC_SLOTS", "MAX_USER_QUEUE", "MAX_GLOBAL_QUEUE")),

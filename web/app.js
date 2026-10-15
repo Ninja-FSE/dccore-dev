@@ -5018,6 +5018,7 @@
     FLOOD_BAN_SECONDS: "settings.field.FLOOD_BAN_SECONDS",
     DCC_ACCEPT_TIMEOUT: "settings.field.DCC_ACCEPT_TIMEOUT",
     MAX_SEND_FAILS: "settings.field.MAX_SEND_FAILS",
+    DAILY_SEND_FAILS_LIMIT: "settings.field.DAILY_SEND_FAILS_LIMIT",
     CHECK_FOR_UPDATES: "settings.field.CHECK_FOR_UPDATES",
     RAR_TIMEOUT: "settings.field.RAR_TIMEOUT",
     LIST_UPDATE_TIMEOUT: "settings.field.LIST_UPDATE_TIMEOUT",

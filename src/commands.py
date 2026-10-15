@@ -37,21 +37,17 @@ def is_admin(user, host=None):
     (the default) nothing changes: the check is the nick, as it always was, and the
     channel commands can be switched off with ADMIN_CHANNEL_COMMANDS.
     """
-    import defaults as config
-
-    # The fallback is '' and not a nick, deliberately. This function's own
-    # docstring above records removing `or user.lower() == "sysop"` because it
+    # admin_nicks()'s fallback is '' and not a nick, deliberately. This
+    # function's own docstring above records removing `or user.lower() == "sysop"` because it
     # "made the literal nick sysop an admin regardless of what config.ADMIN_NICK
     # was set to - an undocumented second account nobody could turn off". A
-    # default of 'SysOp' four lines later was the same account through a
+    # default of 'SysOp' there was the same account through a
     # different door: with the setting absent for any reason, that nick - which
     # anyone on Undernet can simply take - would hold every admin command.
     #
     # An authorisation check has one safe direction when it does not know the
     # answer, and it is to refuse.
-    raw = getattr(config, 'ADMIN_NICK', '') or ''
-    allowed = {n.strip().lower() for n in str(raw).split(',') if n.strip()}
-    if str(user).lower() not in allowed:
+    if str(user).lower() not in admin_nicks():
         return False
 
     import adminchat
@@ -61,6 +57,20 @@ def is_admin(user, host=None):
     if host and "@" not in str(host):
         host = "x@" + str(host)
     return adminchat.is_admin_host(host)
+
+
+def admin_nicks():
+    """The nicks in ADMIN_NICK, lowercased: is_admin()'s nick half.
+
+    On its own, without the host check, for an exemption keyed by nick and
+    nothing else (#1389: DAILY_SEND_FAILS_LIMIT never pauses an admin). A
+    pause by nick is escaped by changing nick, so a host check there would
+    guard nothing - and with ADMIN_HOSTMASKS set it would pause the real
+    admin, whose request carries no host that far.
+    """
+    import defaults as config
+    raw = getattr(config, 'ADMIN_NICK', '') or ''
+    return {n.strip().lower() for n in str(raw).split(',') if n.strip()}
 
 
 def _silent_in(user, target):
@@ -742,7 +752,7 @@ PRESERVE_RUNTIME = (
     'muted_until',        # flood mutes released
     'whois_status',
     'user_requests',      # flood history, so a flooder gets a clean slate
-    'failed_transfers',   # per-file retry counters
+    'failed_transfers',   # failed sends per nick today (#1389)
     'kicked_channels',    # losing this restarts the rejoin count at zero on every
                           # rehash, so a channel that has refused us three times
                           # gets tried three more for each setting the operator saves

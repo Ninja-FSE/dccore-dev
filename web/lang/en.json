@@ -663,6 +663,7 @@
   "settings.field.FLOOD_BAN_SECONDS": "Ban after flooding while muted (seconds)",
   "settings.field.DCC_ACCEPT_TIMEOUT": "Wait for the receiver to connect (seconds)",
   "settings.field.MAX_SEND_FAILS": "Max send failures",
+  "settings.field.DAILY_SEND_FAILS_LIMIT": "Failed sends in a day before a nick is paused (0 = off)",
   "settings.field.CHECK_FOR_UPDATES": "Tell me when a new version is out",
   "settings.field.RAR_TIMEOUT": "RAR pack timeout (seconds)",
   "settings.field.LIST_UPDATE_TIMEOUT": "List rebuild hard cap (seconds, 0 = none)",

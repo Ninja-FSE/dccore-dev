@@ -120,7 +120,22 @@ dcc_address_detected = ""
 dcc_address_found_at = None
 
 # Per-user bookkeeping -------------------------------------------------------
-failed_transfers = {}    # Failed-transfer counter, per user
+# Failed sends per nick today (#1389, DAILY_SEND_FAILS_LIMIT), keyed like
+# dcc_queue: {nick_key: {"day": date, "fails": n, "paused": bool}}. Only
+# dcc.py's send-fail functions touch it, under failed_transfers_lock.
+failed_transfers = {}    # Failed sends per nick today (#1389)
+failed_transfers_lock = threading.Lock()
+# The DAILY_SEND_FAILS_LIMIT circuit breaker (#1389), all under
+# send_connected_lock: whether any DCC send has connected since start-up; the
+# never-connected sends in a row since the last one that did, and the nicks
+# they were for (dcc.never_connected_counts()); and whether this streak's
+# "not counted" line has been logged. dcc.note_send_connected() resets the
+# streak. Here so a !rehash keeps them.
+send_connected_lock = threading.Lock()
+send_connected_since_start = False
+never_connected_streak = 0
+never_connected_streak_nicks = set()
+never_connected_streak_logged = False
 channel_users    = {}    # Users currently seen in the channels
 banned_users     = {}    # Currently banned users, in memory
 user_requests    = {}    # Command timestamps per user, for anti-flood

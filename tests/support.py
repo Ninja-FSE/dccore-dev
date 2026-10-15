@@ -394,7 +394,18 @@ def reset_config(**overrides):
                         # #1182: one test's background audio reading, or
                         # its result, is not the next one's.
                         ("audio_reading", None), ("audio_reading_last", None),
-                        ("audio_retry_waiting", False)):
+                        ("audio_retry_waiting", False),
+                        # #1389: DAILY_SEND_FAILS_LIMIT's circuit breaker,
+                        # beside failed_transfers (reset with the containers
+                        # above). A connect one test made would let the next
+                        # test's never-connected send count, a streak left
+                        # behind would stop it counting, and a logged streak
+                        # would silence the next test's line. A fresh set
+                        # each time: this tuple is built per call.
+                        ("send_connected_since_start", False),
+                        ("never_connected_streak", 0),
+                        ("never_connected_streak_nicks", set()),
+                        ("never_connected_streak_logged", False)):
         setattr(runtime, name, value)
 
     # A FRESH OUTBOUND CLOCK PER TEST. runtime.outbound_pacer is a
