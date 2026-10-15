@@ -28,7 +28,7 @@ What DCCore does today, and what it does not do yet.
 - **Several folders scanned at once** (`LIST_SCAN_THREADS`, 16 by default), which is what makes a rebuild over a network drive shorter.
 - **Length and quality in the list, if you want them** (`LIST_SHOW_AUDIO_INFO`) — every MP3 and FLAC row gets its duration and bitrate after the size, `::INFO:: 10.3MB 4m31s 320/44.1/JS`, read once per file and remembered.
 - **Every folder heading says what it holds** — `14 files, 1.20GB` on its own line under the heading, placed so that every program that reads these lists (other DCCore bots, AutoQ, DCCore's own request handling) ignores it. Companion files (`.srt`, `.nfo`, `.sfv`…) travel with the film they belong to when the video list is split out, and stay with an album otherwise.
-- **A partially unreadable library fails the rebuild** rather than silently publishing a truncated list.
+- **A partially unreadable library fails the rebuild** rather than silently publishing a truncated list. A folder renamed or removed while the scan runs is left out instead (#1383).
 
 ### Multiple lists, and multiple folders per list
 
