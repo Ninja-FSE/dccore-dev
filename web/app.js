@@ -4910,6 +4910,7 @@
     CHANNEL: "settings.field.CHANNEL",
     DEBUG_CHANNEL: "settings.field.DEBUG_CHANNEL",
     MAX_DCC_SLOTS: "settings.field.MAX_DCC_SLOTS",
+    SLOW_SEND_MIN_KB: "settings.field.SLOW_SEND_MIN_KB",
     MAX_USER_QUEUE: "settings.field.MAX_USER_QUEUE",
     MAX_GLOBAL_QUEUE: "settings.field.MAX_GLOBAL_QUEUE",
     SEARCH_ENABLED: "settings.field.SEARCH_ENABLED",

@@ -241,6 +241,33 @@ the bot fetches - lists, automatic grabs, files and folders from other bots.
 Each is one limit shared by all the transfers going that way, and a change
 applies at once, to transfers already running too. 0 is no limit.
 
+### A send that crawls while others wait
+
+A downloader on a bad link can hold one of your slots (`MAX_DCC_SLOTS`) for
+hours at a few KB/s while the queue behind them does not move. **Stop sends
+slower than** (`SLOW_SEND_MIN_KB`, KB/s, on the Settings page under *Sharing
+& queue* or in the mIRC settings window under *Sharing > Search*, beside the
+slots) stops such a send, but only while every slot is taken and someone is
+waiting for one; with a slot free it may take as long as it takes. The speed
+is what the downloader has received over about the last minute, and a send
+is not judged in its first minute.
+
+Slow has to be the downloader's fault, not your line's. Only the slowest
+send is stopped, and only while another of your sends is reaching that
+speed at the same time - proof your side can deliver. When your whole
+uplink is full, your disk is slow, or your **Max upload speed** is what
+holds the sends back, every send is slow and none is stopped. With one slot,
+or one send running, it never fires. Someone whose own send was stopped for
+its speed does not, while waiting, cost another slow send its slot, so two
+slow downloaders cannot keep trading it.
+
+A stopped file that was waiting in the queue stays there: it counts as a
+failed try against **Max send failures** (`MAX_SEND_FAILS`), the person goes
+to the back of the queue and is told why, and their client can resume it
+when their turn comes again. A file that was sent straight away, without
+waiting in the queue, is dropped instead; they ask for it again and their
+client resumes it. 0, the default, is off.
+
 ### Starting with the system
 
 Once the bot runs by hand, it can start by itself. Each script has a twin

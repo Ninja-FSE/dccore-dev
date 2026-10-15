@@ -803,6 +803,20 @@
 # Maximum simultaneous live downloads
 #MAX_DCC_SLOTS = 3
 
+# Only while every slot is taken and someone is waiting. 0 means off. The
+# slowest send, under this many KB/s over its last minute while another send
+# manages it, is stopped for the next in line. A queued file stays queued to
+# resume; one sent without waiting is dropped. Never with one slot.
+#
+# A send that crawls while others wait (#1388): the rate is what the receiver
+# acknowledged over about the last minute, judged from a minute after it
+# connected, and a stop counts against MAX_SEND_FAILS like a stall. Only the
+# slowest send, and only while another one moves at least this much - proof
+# the bot's side can deliver - so with one slot it never fires. Not while
+# MAX_UPLOAD_KB is what holds the sends back. See dcc._SlowSendWatch.
+# In KB/s, 0 = off
+#SLOW_SEND_MIN_KB = 0
+
 # The most files one person can have waiting in their queue at once.
 #
 # Most files a single user may queue

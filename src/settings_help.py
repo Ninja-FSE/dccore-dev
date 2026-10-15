@@ -178,6 +178,7 @@ PLAIN_HELP = {
     'CHANNEL': 'The channel(s) the bot serves in, each starting with #, separated by commas. The first one is where announcements go unless a request came from another channel. Required.',
     'DEBUG_CHANNEL': 'A channel of your own where the bot reports what it is doing - transfers, joins, bans, problems. Leave blank for none. Do not use a channel other people sit in: everything the bot reports goes there.',
     'MAX_DCC_SLOTS': 'How many files the bot sends at the same time. Everyone else waits in the queue. 3 is a good number for a home connection; raise it only if your upload speed can take it.',
+    'SLOW_SEND_MIN_KB': 'Only while every slot is taken and someone is waiting. 0 means off. The slowest send, under this many KB/s over its last minute while another send manages it, is stopped for the next in line. A queued file stays queued to resume; one sent without waiting is dropped. Never with one slot.',
     'MAX_USER_QUEUE': 'The most files one person can have waiting in their queue at once.',
     'MAX_GLOBAL_QUEUE': "The most files that can be waiting across everybody's queues put together.",
     'SEARCH_ENABLED': 'Answer @find and @locator searches. Off, they are ignored without a reply and the channel advert says Search: OFF. Requests for files and lists are still answered.',
