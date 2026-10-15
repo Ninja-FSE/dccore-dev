@@ -186,6 +186,11 @@ alias dccore.init {
   ; from other DCCore bots arrive at all, so there is little to filter
   dccore.default chat.all 1
   dccore.default chat.popup 1
+  ; Its history file in mIRC's log folder, and the window flashing for a
+  ; line while it is not the active one (#1393): both on unless turned off
+  ; in the window's right-click menu.
+  dccore.default chat.history 1
+  dccore.default chat.flash 1
   ; Which windows open, minimised, when mIRC starts (#1201). @DCCore does by
   ; default, so the bot's window is there before anything has connected;
   ; Chat and Downloads only when asked for, as before.
@@ -6766,6 +6771,40 @@ alias dccore.sw.data {
 ;
 ;  The tag is neutral so that a script that is not DCCore's can speak it too.
 ;  It cannot change once people use it.
+;
+;  History (#1393). The bot keeps nothing on disk; THIS script does. It is
+;  ON by default - for an operator who only updated the script too - until
+;  "Keep a history file" is unticked in the window's right-click menu, and
+;  the window says where it keeps it when it opens. Every chat line the
+;  window draws - private conversations included; not the bot's own
+;  remarks, not the script's grey lines - goes into mIRC's LOG folder
+;  ($logdir, which can be outside the mIRC folder), in DCCore-Chat\:
+;    #channel.log        one per channel, "@nick.log" for a private
+;                        conversation, every-channel.log for your own line
+;                        said with `chat *` in several channels at once -
+;                        "yyyy-mm-dd HH:nn:ss channel nick text", plain
+;                        text, and never cut back: they only grow
+;    recent.txt          the last lines of all of them together, as
+;                        "<id> <channel> <nick> own|other <text>", cut back
+;                        to the last 200 once it passes 400
+;  When the window opens, the last 200 lines of recent.txt are drawn in grey,
+;  under "Earlier", by the same rules as a live line: channels listened on,
+;  private lines and your own. They are not written again and not counted
+;  as unread, and chat.last moves past them, so the bot's own replay after
+;  HELLO cannot draw any of them a second time - but never past the clock
+;  (an id more than five minutes ahead of $ctime): one line from a bot whose
+;  clock ran ahead, or from before the PC's clock was put back, would
+;  otherwise hold chat.last above every line to come, and the window would
+;  draw and keep nothing more. Such a line is still drawn. Turning the
+;  history off stops the writing and the replay; the files are left as
+;  they are.
+;
+;  Unread (#1393). A line from another bot drawn while the window is not
+;  the active one - or while mIRC itself is in the background - counts in
+;  the title ("3 unread") until you are back in the window. Its switchbar
+;  button is lit as for any new line, and with "Flash on a new line" ticked
+;  /flash makes mIRC flash in the taskbar - which it does only while mIRC
+;  is in the background.
 
 alias dccore.chat.tag { return $+($chr(91),ServersChat,$chr(93)) }
 alias dccore.chat.win { return @DCCore-Chat }
@@ -6794,8 +6833,10 @@ alias dccore.chat.window {
   if ($dccore.opt(font)) { font $dccore.chat.win $dccore.fontsize Lucida Console }
   dccore.chat.title
   dccore.chat.sys Public: everyone in the channel reads what is typed here, with or without this script.
+  if ($dccore.opt(chat.history)) { dccore.chat.sys What this window shows, private conversations too, is kept in $dccore.chat.hist.dir - right-click to stop keeping a history. }
   dccore.chat.sys What you type is said by $iif($dccore.bot,$dccore.bot,your bot) in the channels where it has seen other DCCore bots. Right-click to send to one channel instead, and to choose the ones to listen on.
   dccore.chat.sys Double-click a bot in the list on the right (or right-click it) to message it privately instead.
+  dccore.chat.hist.replay
   dccore.chat.peers.redraw
 }
 alias dccore.chat.title {
@@ -6809,17 +6850,23 @@ alias dccore.chat.title {
   var %target = $iif(%auto,$dccore.st(chat.replyto),%to)
   var %where = $iif(%target != $null,%target,every channel with other DCCore bots)
   var %priv = $iif((%target != $null) && ($left(%target,1) !isin $+($chr(35),&+!)),1,0)
-  titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot typing sends $iif(%priv,privately to,to) %where $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot)
+  ; The lines from other bots drawn while the window was not active (#1393).
+  titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot typing sends $iif(%priv,privately to,to) %where $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot) $iif($dccore.st(chat.unread) > 0,$dccore.dot $dccore.st(chat.unread) unread)
 }
 alias dccore.chat.sys {
   dccore.chat.window
   echo 14 -i2 $dccore.chat.win $1-
 }
+; A chat line's text as the window draws it: past 400 characters, the first
+; 397 and "...". The live line and the replayed one both.
+alias dccore.chat.cut {
+  if ($len($1-) > 400) { return $left($1-,397) $+ ... }
+  return $1-
+}
 ; One chat line: $1 channel, $2 nick, $3 own or other, $4 time, $5- text.
 alias dccore.chat.show {
   dccore.chat.window quiet
-  var %text = $5-
-  if ($len(%text) > 400) { var %text = $left(%text,397) $+ ... }
+  var %text = $dccore.chat.cut($5-)
   var %who = $+($chr(3),$iif($3 == own,$dccore.col(console),$dccore.col(name)),$chr(2),$2,$chr(15))
   var %line = $+($chr(3),14,$4,$chr(160),$1,$chr(15)) %who %text
   if ($version >= 7) { echo -mi2 $dccore.chat.win %line }
@@ -6830,6 +6877,11 @@ alias dccore.chat.show {
 ; the bot's own remark (somebody hidden for flooding).
 alias dccore.chat.feed {
   if ($1 !isnum) { return }
+  ; The first line of a session: the history file's newest id counts as
+  ; drawn (#1393), so a line the bot replays after HELLO that the window will
+  ; also replay from the file - when this line is what opens it - is drawn
+  ; and written once.
+  if ($dccore.st(chat.last) !isnum) { dccore.chat.hist.floor }
   if ($dccore.st(chat.last) isnum) && ($1 <= $dccore.st(chat.last)) { return }
   hadd dccore.live chat.last $1
   ; Somebody else's line names where the conversation is: typing with no
@@ -6857,7 +6909,13 @@ alias dccore.chat.feed {
   if ($3 != $dccore.bot) && ($left($2,1) != @) && (!$dccore.chat.listens($2)) { return }
   if (!$window($dccore.chat.win)) && (!$dccore.opt(chat.popup)) { return }
   if ($3 == *) { dccore.chat.sys $2 $strip($4-) | return }
-  dccore.chat.show $iif($2 == -,*,$2) $3 $iif($3 == $dccore.bot,own,other) $asctime($int($calc($1 / 1000)),HH:nn) $strip($4-)
+  var %kind = $iif($3 == $dccore.bot,own,other)
+  dccore.chat.show $iif($2 == -,*,$2) $3 %kind $asctime($int($calc($1 / 1000)),HH:nn) $strip($4-)
+  ; Drawn: into the history file, after the window has replayed the file
+  ; (so not twice), then counted as unread - last, as /flash is the one
+  ; step here that touches something outside the script (#1393).
+  dccore.chat.hist.add $1 $2 $3 %kind $strip($4-)
+  if (%kind == other) { dccore.chat.unread.add }
 }
 ; A CHANNELS line: the channels the bot is in, which are the ones it chats in.
 alias dccore.chat.channels {
@@ -6922,10 +6980,27 @@ alias dccore.chat.say {
   dccore.send chat %to %text
 }
 on *:INPUT:@DCCore-Chat: {
+  ; Typing here is reading here, should on ACTIVE below not have fired.
+  dccore.chat.unread.clear
   if ($left($1,1) == /) && ($left($1,2) != //) { return }
   dccore.chat.say $1-
   halt
 }
+; The window activated: everything in it has been seen (#1393). Any window,
+; with $active checked here, rather than the window's name as the event's
+; target: it holds whether mIRC matches that target against the window
+; being activated or the one being left. An mIRC without on ACTIVE clears
+; the count on the first line typed in the window instead (on INPUT above).
+;
+; mIRC runs only the FIRST matching event of a kind in one script file, and
+; this one matches every window: anything else this file ever does on
+; ACTIVE has to go into this handler, never into a second on ACTIVE below.
+on *:ACTIVE:*: { if ($active == $dccore.chat.win) { dccore.chat.unread.clear } }
+; mIRC back in the foreground with the chat window the active one: the
+; count of what arrived while it was in the background goes (#1393). The
+; same as on ACTIVE: the only on APPACTIVE this file may have.
+on *:APPACTIVE: { if ($appactive) && ($active == $dccore.chat.win) { dccore.chat.unread.clear } }
+on *:CLOSE:@DCCore-Chat: { if ($dccore.st(chat.unread) != $null) { hdel dccore.live chat.unread } }
 
 ; Choosing channels, from the window's right-click menu. Picking where to
 ; send also listens there: a channel you talk into and cannot hear back
@@ -7006,8 +7081,171 @@ menu @DCCore-Chat {
   $iif($dccore.opt(chat.all),$style(1)) Listen on all the bot's channels:dccore.chat.all
   $iif($sline($dccore.chat.win,1),$dccore.mi(mail) Message this bot privately):dccore.chat.pickpeer $sline($dccore.chat.win,1).ln
   -
+  $iif($dccore.opt(chat.history),$style(1)) Keep a history file:dccore.chat.hist.toggle
+  $iif($dccore.opt(chat.flash),$style(1)) Flash on a new line:dccore.chat.flash.toggle
+  $dccore.mi(folder) Open the history folder:dccore.chat.hist.open
+  -
   $dccore.mi(clear) Clear window:clear $dccore.chat.win
   $dccore.mi(settings) Control Panel...:dccore.settings
+}
+
+; ---- History and unread (#1393) ---------------------------------------
+
+; The folder, in mIRC's own log folder ($logdir, which ends with "\"), and
+; the files in it. A channel's file is its name made safe for a file name
+; ($mkfn); a private conversation's is its "@<nick>" channel the same way -
+; the "@" also keeps a nick such as CON or NUL from naming a Windows device;
+; and your own line said in several channels at once ("-") goes to
+; every-channel.log. Paths are quoted ($qt) wherever a command takes one.
+alias dccore.chat.hist.dir { return $+($logdir,DCCore-Chat) }
+alias dccore.chat.hist.recent { return $+($dccore.chat.hist.dir,\recent.txt) }
+alias dccore.chat.hist.file {
+  if ($1 == -) { return $+($dccore.chat.hist.dir,\every-channel.log) }
+  return $+($dccore.chat.hist.dir,\,$mkfn($1),.log)
+}
+; How many lines of recent.txt the window replays. The file is cut back to
+; that many once it holds twice as many.
+alias dccore.chat.hist.keep { return 200 }
+; The hidden window the trim and the replay load recent.txt into.
+alias dccore.chat.hist.buf { return @dccore.chat.buf }
+; The newest id the file may raise chat.last to: five minutes past the
+; clock. One further ahead - from a bot whose clock ran fast, or from before
+; this PC's clock was put back - would hold chat.last above every line to
+; come, and the window would draw and keep nothing more.
+alias dccore.chat.hist.clock { return $calc(($ctime + 300) * 1000) }
+
+; The folder, made when it is missing - and mIRC's log folder before it,
+; which is only there once something has been logged. $true when it is there.
+alias dccore.chat.hist.mkdir {
+  var %d = $dccore.chat.hist.dir
+  if ($isdir(%d)) { return $true }
+  if (!$isdir($logdir)) { mkdir $qt($left($logdir,-1)) }
+  mkdir $qt(%d)
+  return $isdir(%d)
+  :error
+  reseterror
+  return $false
+}
+
+; A line the window drew: $1 its id, $2 its channel as the bot sent it, $3
+; the nick, $4 own or other, $5- the text. Nothing while the history is off.
+; A file that cannot be written loses the line, and nothing else: the
+; error stops here, not in the feed.
+alias dccore.chat.hist.add {
+  if (!$dccore.opt(chat.history)) { return }
+  if (!$dccore.chat.hist.mkdir) { return }
+  write $qt($dccore.chat.hist.file($2)) $asctime($int($calc($1 / 1000)),yyyy-mm-dd HH:nn:ss) $iif($2 == -,*,$2) $3 $strip($5-)
+  var %r = $dccore.chat.hist.recent
+  write $qt(%r) $1 $2 $3 $4 $strip($5-)
+  if ($lines(%r) > $calc(2 * $dccore.chat.hist.keep)) { dccore.chat.hist.trim }
+  return
+  :error
+  reseterror
+}
+
+; recent.txt cut back to its last lines, through a hidden window: /loadbuf N
+; loads the LAST N lines of a file, and /savebuf writes them back over it.
+alias dccore.chat.hist.trim {
+  var %r = $dccore.chat.hist.recent
+  var %w = $dccore.chat.hist.buf
+  if ($window(%w)) { window -c %w }
+  window -h %w
+  loadbuf $dccore.chat.hist.keep %w $qt(%r)
+  savebuf %w $qt(%r)
+  window -c %w
+}
+
+; The last lines of recent.txt, drawn in grey when the window opens, by the
+; rules a live line is drawn by (dccore.chat.feed): a channel listened on, a
+; private line, your own. Drawn with a plain echo - never written again,
+; never counted as unread, and no -m, so the button is not lit for them.
+; chat.last moves to the newest id read, so the bot's own replay after HELLO
+; cannot draw one of them a second time - but not past the clock
+; (dccore.chat.hist.clock): a line from the future is drawn, and moves nothing.
+alias dccore.chat.hist.replay {
+  if (!$dccore.opt(chat.history)) { return }
+  var %r = $dccore.chat.hist.recent
+  if (!$isfile(%r)) { return }
+  var %w = $dccore.chat.hist.buf
+  if ($window(%w)) { window -c %w }
+  window -h %w
+  loadbuf $dccore.chat.hist.keep %w $qt(%r)
+  var %top = $dccore.st(chat.last)
+  var %clock = $dccore.chat.hist.clock
+  var %shown = 0
+  var %i = 1
+  while (%i <= $line(%w,0)) {
+    tokenize 32 $line(%w,%i)
+    if ($1 isnum) && ($4 != $null) {
+      if ($1 <= %clock) && ((%top !isnum) || ($1 > %top)) { var %top = $1 }
+      if ($4 == own) || ($left($2,1) == @) || ($dccore.chat.listens($2)) {
+        if (!%shown) { dccore.chat.sys Earlier, from the history file: | var %shown = 1 }
+        echo 14 -i2 $dccore.chat.win $+($dccore.chat.hist.when($1),$chr(160),$iif($2 == -,*,$2)) $3 $dccore.chat.cut($5-)
+      }
+    }
+    inc %i
+  }
+  window -c %w
+  if (%shown) { dccore.chat.sys End of the history file. }
+  if (%top isnum) { hadd dccore.live chat.last %top }
+  return
+  :error
+  reseterror
+  if ($window($dccore.chat.hist.buf)) { window -c $dccore.chat.hist.buf }
+}
+; A replayed line's time, from its id: the time alone for today, the date
+; and the time before that.
+alias dccore.chat.hist.when {
+  var %t = $int($calc($1 / 1000))
+  if ($asctime(%t,yyyymmdd) == $asctime($ctime,yyyymmdd)) { return $asctime(%t,HH:nn) }
+  return $asctime(%t,yyyy-mm-dd HH:nn)
+}
+; The newest id in recent.txt, for the first CHAT line of a session: that
+; line was drawn, and written, in an earlier one. Not one from the future
+; (dccore.chat.hist.clock).
+alias dccore.chat.hist.floor {
+  if (!$dccore.opt(chat.history)) { return }
+  var %r = $dccore.chat.hist.recent
+  if (!$isfile(%r)) { return }
+  var %n = $lines(%r)
+  if (%n < 1) { return }
+  var %id = $gettok($read(%r,nt,%n),1,32)
+  if (%id isnum) && (%id <= $dccore.chat.hist.clock) { hadd dccore.live chat.last %id }
+  return
+  :error
+  reseterror
+}
+
+; A line from another bot, drawn while the window is not the active one -
+; or while it is, with mIRC itself in the background, where $active stays
+; the window you left: counted in the title, and with "Flash on a new line"
+; ticked /flash, which flashes mIRC in the taskbar only while mIRC is in
+; the background. The switchbar button is lit by the line itself
+; (dccore.chat.show's echo -m), as before.
+alias dccore.chat.unread.add {
+  if ($active == $dccore.chat.win) && ($appactive) { return }
+  hinc dccore.live chat.unread
+  dccore.chat.title
+  if ($dccore.opt(chat.flash)) { flash $dccore.chat.win DCCore Chat $dccore.dot $dccore.st(chat.unread) unread }
+}
+alias dccore.chat.unread.clear {
+  if ($dccore.st(chat.unread) == $null) { return }
+  hdel dccore.live chat.unread
+  dccore.chat.title
+}
+
+; The right-click menu's three.
+alias dccore.chat.hist.toggle {
+  dccore.set chat.history $iif($dccore.opt(chat.history),0,1)
+  dccore.chat.sys $iif($dccore.opt(chat.history),Keeping a history file in $dccore.chat.hist.dir $+ .,No longer keeping a history file: nothing more is written to it and nothing is replayed. The files already written are left as they are.)
+}
+alias dccore.chat.flash.toggle {
+  dccore.set chat.flash $iif($dccore.opt(chat.flash),0,1)
+  dccore.chat.sys $iif($dccore.opt(chat.flash),mIRC flashes in the taskbar for a new line while it is in the background.,mIRC no longer flashes in the taskbar for a new line. The unread count in the title and the lit button stay.)
+}
+alias dccore.chat.hist.open {
+  if (!$dccore.chat.hist.mkdir) { dccore.chat.sys Could not make the history folder $dccore.chat.hist.dir $+ . | return }
+  run $qt($dccore.chat.hist.dir)
 }
 
 ; A PEERS line: the DCCore bots WHO found in one channel, right now - kept

@@ -1203,6 +1203,29 @@ title and its first lines say so.
 - **Reconnecting:** the bot keeps the last 50 lines in memory, and a window
   that reconnects shows what it missed, each line once, with the time it
   was said. A bot restart forgets them.
+- **History (#1393):** the bot keeps nothing on disk, but the script does,
+  and it is **on by default** - also when you only update the script. Every
+  chat line the window shows, **private conversations included**, is written
+  as plain text to mIRC's *log* folder (`//echo -a $logdir` shows where; it
+  can be outside the mIRC folder), in `DCCore-Chat\`: one file per channel
+  (`#channel.log`), one per private conversation (`@nick.log`),
+  `every-channel.log` for your own lines said in several channels at once,
+  and `recent.txt`, the last few hundred lines of them all. Only
+  `recent.txt` is cut back; the `.log` files are never trimmed and keep
+  growing until you delete them. When the window opens it says where the
+  history is kept, and shows the last 200 lines again in grey, from the
+  channels you listen on, your private conversations and your own lines,
+  so closing it or restarting mIRC loses nothing. Untick right-click →
+  *Keep a history file* to stop writing and replaying (the files already
+  written are left alone); *Open the history folder* opens it. Anyone who
+  can read your log folder can read these files.
+- **Unread:** a line from another bot that arrives while the window is not
+  the one you are looking at - or while mIRC is in the background - is
+  counted in the window's title (*3 unread*) until you are back in it. The
+  window's switchbar button lights up as for any new line (mIRC 7), and while mIRC is
+  in the background it flashes in the Windows taskbar. Untick right-click →
+  *Flash on a new line* to keep the count and the button without the
+  taskbar flashing.
 
 **Who is another DCCore bot:** every DCCore bot registers with a realname whose
 first word is `DCCore/sc` (then its nick). The bot asks `WHO` for each of its
@@ -1230,7 +1253,9 @@ channels, and:
   the queue's own messages. A line said in three channels counts three;
 - **strips colours, control codes and the characters that reverse the
   direction text is drawn in**, both ways;
-- **never writes a chat line to disk or to the debug channel.**
+- **never writes a chat line to disk or to the debug channel.** (The
+  mIRC script's history file, above, is on your own PC and is the
+  script's, not the bot's.)
 
 The tag proves nothing about the sender. Anyone can type it, and the nick
 shown is whoever the server says sent the line.
