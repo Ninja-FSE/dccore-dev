@@ -241,6 +241,19 @@ the bot fetches - lists, automatic grabs, files and folders from other bots.
 Each is one limit shared by all the transfers going that way, and a change
 applies at once, to transfers already running too. 0 is no limit.
 
+### How fast the bot talks
+
+The bot paces its queued replies, its adverts and its requests to other bots
+on one clock, at least `MSG_DELAY` seconds (5 out of the box) apart. Some
+servers also limit how fast a client may start talking to people it has not
+messaged before, and drop the message that goes over: Undernet answers
+*"Target change too fast. Please wait 8 seconds."* (numeric 439), other
+networks 707. The bot then holds those paced lines for as long as the server
+asks - 10 seconds when it does not say, never more than 120 - and sends a
+dropped reply again, once. The bot's log shows a `[QUEUE]` line each time.
+There is nothing to set: if you see that line often, a larger `MSG_DELAY`
+makes it rarer.
+
 ### Starting with the system
 
 Once the bot runs by hand, it can start by itself. Each script has a twin

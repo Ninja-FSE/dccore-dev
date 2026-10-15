@@ -3627,6 +3627,10 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None)
         # and the server would read the fragment as a complete command.
         # Guarded by tests/test_no_socket_write_is_a_partial_write.py.
         irc_sock.sendall(offer.encode("utf-8", errors="ignore"))
+        # Recorded with no lane (#1386): unpaced and never sent again,
+        # recorded only so that the server refusing it is not taken for an
+        # older line to this nick, which would then go out twice.
+        runtime.note_paced_line(offer, None)
         print(f"[ADMINCHAT] Offered DCC CHAT to {nick} on "
               f"{dcc.dcc_address() or '?'}:{port}; waiting for the connection.")
         deadline = time.monotonic() + LISTEN_TIMEOUT

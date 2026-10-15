@@ -157,6 +157,8 @@ def _debug_drain_worker(my_id):
                 max(config.MSG_DELAY, getattr(config, 'DEBUG_MSG_DELAY', 0)))
             try:
                 irc_sock.sendall(msg.encode("utf-8", errors="ignore"))
+                # Its target and lane, for a refusal (#1386).
+                runtime.note_paced_line(msg, "debug")
             except Exception as send_err:
                 print(f"[DEBUG SEND ERROR] Could not write debug line: {send_err}")
         except Exception as drain_err:
