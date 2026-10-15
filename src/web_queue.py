@@ -64,6 +64,11 @@ def build_queue_payload(user=None):
         print(f"[WEBSERVER] The running pack could not be read for the queue: {err}")
     packing_user = str(pack["user"]).lower() if pack else ""
 
+    def _queued_status(entries, active):
+        # "large-wait" while the next file is large and another large file
+        # is being sent (#1387): the page says why the nick is passed over.
+        return "large-wait" if dcc.waits_for_a_large_send(list(entries), active) else "queued"
+
     def _progress_fields(user_key):
         # None, not 0, when there is nothing sending or the size is not
         # known yet (dcc.start_dcc_send() writes "size" onto the row the
@@ -87,7 +92,7 @@ def build_queue_payload(user=None):
         elif user_key in frozen:
             status = "frozen"
         elif entries:
-            status = "queued"
+            status = _queued_status(entries, active)
         else:
             status = "empty"
         files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
@@ -135,7 +140,7 @@ def build_queue_payload(user=None):
         elif user_key == packing_user:
             status = "packing"
         else:
-            status = "frozen" if user_key in frozen else "queued"
+            status = "frozen" if user_key in frozen else _queued_status(entries, active)
         files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
         first = entries[0] if entries else None
         if first is not None:

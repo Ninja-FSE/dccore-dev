@@ -803,6 +803,15 @@
 # Maximum simultaneous live downloads
 #MAX_DCC_SLOTS = 3
 
+# Files of at least this many MB count as large, and only one is sent at a
+# time, so a few huge downloads cannot hold every slot for hours. Someone
+# whose next file is large keeps their place and waits; the slot goes to the
+# next in line. The bot's list and !rar folder packs are never held back. 0
+# means off.
+#
+# A file of at least this many MB is large, and only one large file is sent at a time (0 = off)
+#LARGE_FILE_MB = 0
+
 # The most files one person can have waiting in their queue at once.
 #
 # Most files a single user may queue

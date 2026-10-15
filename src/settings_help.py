@@ -178,6 +178,7 @@ PLAIN_HELP = {
     'CHANNEL': 'The channel(s) the bot serves in, each starting with #, separated by commas. The first one is where announcements go unless a request came from another channel. Required.',
     'DEBUG_CHANNEL': 'A channel of your own where the bot reports what it is doing - transfers, joins, bans, problems. Leave blank for none. Do not use a channel other people sit in: everything the bot reports goes there.',
     'MAX_DCC_SLOTS': 'How many files the bot sends at the same time. Everyone else waits in the queue. 3 is a good number for a home connection; raise it only if your upload speed can take it.',
+    'LARGE_FILE_MB': "Files of at least this many MB count as large, and only one is sent at a time, so a few huge downloads cannot hold every slot for hours. Someone whose next file is large keeps their place and waits; the slot goes to the next in line. The bot's list and !rar folder packs are never held back. 0 means off.",
     'MAX_USER_QUEUE': 'The most files one person can have waiting in their queue at once.',
     'MAX_GLOBAL_QUEUE': "The most files that can be waiting across everybody's queues put together.",
     'SEARCH_ENABLED': 'Answer @find and @locator searches. Off, they are ignored without a reply and the channel advert says Search: OFF. Requests for files and lists are still answered.',

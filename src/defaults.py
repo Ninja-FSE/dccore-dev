@@ -548,6 +548,7 @@ ANNOUNCE_INTERVAL: int = 300     # Time between each channel advert, in seconds 
 # 5. LIMITS, SLOTS AND QUEUE CONTROL
 # ---------------------------------------------------------------------
 MAX_DCC_SLOTS: int      = 3      # Maximum simultaneous live downloads
+LARGE_FILE_MB: int      = 0      # A file of at least this many MB is large, and only one large file is sent at a time (0 = off)
 MAX_USER_QUEUE: int     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE: int   = 1000   # Most files across every queue combined
 SEARCH_ENABLED: bool = True  # Answer @find and @locator; off ignores them and the advert says Search: OFF

@@ -780,12 +780,17 @@ def nicks_waiting_for_a_slot(except_key="", plain_files_only=False):
     """Queue keys of the nicks that have a file waiting and no send running, longest wait first.
 
     The caller holds queue_lock. A nick counts once it is in a channel the bot
-    is in, is not frozen, and is neither sending nor claimed. With
+    is in, is not frozen, and is neither sending nor claimed, nor holding a
+    large file back while another is sent (#1387). With
     plain_files_only a nick whose next row is a folder pack is left out: only
     the specific-user path in check_queue_and_send() can start those.
     """
     busy = {str(tx.get("user", "")).lower() for tx in config.active_transfers}
     busy |= set(getattr(config, "user_processing_lock", ()) or ())
+    # A nick whose next file is large waits while another large file is being
+    # sent (#1387): it could not take a slot now, so it does not keep one.
+    large_limit = _large_file_bytes()
+    large_running = _a_large_send_is_running(large_limit)
     candidates = []
     for key, rows in list(config.dcc_queue.items()):
         key = str(key).lower()
@@ -793,6 +798,8 @@ def nicks_waiting_for_a_slot(except_key="", plain_files_only=False):
             continue
         head = rows[0]
         if plain_files_only and (not isinstance(head, dict) or head.get("is_unpacked_rar_folder")):
+            continue
+        if large_running and _row_is_large(head, large_limit):
             continue
         candidates.append(key)
     if not candidates:
@@ -858,6 +865,127 @@ def a_list_may_go_first(transfers=None):
     """
     held = config.active_transfers if transfers is None else transfers
     return not any(tx.get("list_went_first") for tx in held)
+
+
+# ONE LARGE FILE AT A TIME (#1387). With MAX_DCC_SLOTS = 3 and three nicks each
+# asking for a multi-gigabyte archive, every slot was held for hours and every
+# ordinary track waited behind them. LARGE_FILE_MB (0 = off) makes a file of at
+# least that many MB large, and at most one large file is sent at a time: a
+# nick whose next file is large, while another large file is being sent, is
+# passed over as a nick already sending is, keeps its place, and the slot goes
+# to the next in line. When the large send ends, the longest wait is next.
+#
+# The size is recorded on the row when it is queued, where the path has just
+# been resolved, because stat() must not run under queue_lock (#605). A row
+# without one counts as small: rows from before this change and folder packs,
+# whose archive does not exist until it is made. So a guess never holds a
+# file back. The bot's own list is never large.
+QUEUED_SIZE_KEY = "queued_size"
+LARGE_FILE_WAIT_NOTE = "waiting: one large file at a time"
+
+
+def _large_file_bytes():
+    """LARGE_FILE_MB in bytes; 0 when the rule is off or the setting is unusable."""
+    try:
+        megabytes = int(getattr(config, "LARGE_FILE_MB", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return megabytes * 1024 * 1024 if megabytes > 0 else 0
+
+
+def _size_on_disk(path):
+    """The file's size for its queue row, or 0 when it cannot be read. Never under queue_lock (#605)."""
+    try:
+        return int(os.path.getsize(platform_compat.long_path(path)))
+    except (OSError, TypeError, ValueError):
+        return 0
+
+
+def _recorded_size(row):
+    """The size a queue row was given when it was queued; 0 for none, or one a hand edit broke."""
+    if not isinstance(row, dict):
+        return 0
+    try:
+        size = int(row.get(QUEUED_SIZE_KEY) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, size)
+
+
+def _is_the_list(row):
+    """A queue row or a transfer row for the bot's own list, which is never large."""
+    return isinstance(row, dict) and (is_a_list_row(row) or is_a_list_row(row.get("queue_row"))
+                                      or list_mod.is_list_artifact_name(str(row.get("file") or "")))
+
+
+def _row_is_large(row, limit):
+    """Is this queue row a large file under `limit` bytes (#1387)? Unknown sizes are small."""
+    if not limit or _is_the_list(row):
+        return False
+    return _recorded_size(row) >= limit
+
+
+def _transfer_is_large(tx, limit):
+    """Is this transfer a large file? Its real size once the send has read it; before
+    that, the size its queue row (or the claim itself) was given when it was queued."""
+    if not limit or _is_the_list(tx):
+        return False
+    size = 0
+    try:
+        size = int(tx.get("size") or 0)
+    except (TypeError, ValueError):
+        size = 0
+    if not size:
+        size = _recorded_size(tx) or _recorded_size(tx.get("queue_row"))
+    return size >= limit
+
+
+def _a_large_send_is_running(limit, transfers=None):
+    """Is a large file being sent, or claimed for sending? Caller holds queue_lock, or passes a copy."""
+    held = config.active_transfers if transfers is None else transfers
+    return bool(limit) and any(_transfer_is_large(tx, limit) for tx in held if isinstance(tx, dict))
+
+
+def waits_for_a_large_send(rows, transfers=None):
+    """Is this nick's next file large while another large file is being sent (#1387)?
+
+    `rows` is the nick's queue. The dispatcher passes the nick over while this
+    holds; the console and the Queue page show it as "waiting: one large file
+    at a time". `transfers` is a copy of active_transfers for a reader that
+    holds no lock; by default the live list, under queue_lock.
+    """
+    limit = _large_file_bytes()
+    if not limit or not rows:
+        return False
+    return _row_is_large(rows[0], limit) and _a_large_send_is_running(limit, transfers)
+
+
+def _say_a_large_file_waits(nick, row):
+    print(f"[DCC QUEUE] {nick}'s next file is large ({_recorded_size(row) // (1024 * 1024)} MB) and "
+          f"another large file is being sent - the slot goes to the next in line.")
+
+
+def _fill_the_slots_a_large_send_left(irc_sock, passed_over, dispatched_row):
+    """One more pass of the sweep while a slot is still free (#1387).
+
+    A trigger dispatches one nick, which was always enough: a slot stayed
+    free only while nobody could use it. A large file held back can leave a
+    slot free with that nick waiting, and when the large send ends the nick
+    and the finished one can both be due with one trigger between them.
+
+    Only then: when the pass that dispatched `dispatched_row` passed over a
+    large head (`passed_over`), or the row it dispatched is large. Not after
+    every dispatch: a send refused at once (no address, no free port) hands
+    its slot straight back, and a pass after each of those refused the same
+    nick over and over, a NOTICE each time. The pass this starts is a
+    fill_pass, which starts none of its own.
+    """
+    limit = _large_file_bytes()
+    if not limit or not (passed_over or _row_is_large(dispatched_row, limit)):
+        return
+    if len(config.active_transfers) < config.MAX_DCC_SLOTS:
+        threading.Thread(target=check_queue_and_send, args=(irc_sock, "system_next_trigger_fallback"),
+                         kwargs={"fill_pass": True}, daemon=True).start()
 
 
 def list_first_rank(user_key, rows, lists_first):
@@ -2180,7 +2308,7 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         return False
 
 
-def claim_next_in_line():
+def claim_next_in_line(passed_over=None):
     """Section B of check_queue_and_send(): under queue_lock, give a free
     slot to the next in line and claim them. Returns (promoted,
     promoted_key, pack_to_wake, absent_users):
@@ -2199,7 +2327,9 @@ def claim_next_in_line():
 
     Was section B's sweep inside check_queue_and_send() until #1304, step 3
     of splitting dcc.py's largest functions (docs/FUTURE.md). Moved
-    unchanged.
+    unchanged. Since #1387 a nick whose next file is large is passed over
+    while another large file is being sent; `passed_over`, a list if given,
+    gets the nick of each one, so the caller knows to fill the slot it left.
     """
     promoted = None
     promoted_key = None
@@ -2218,6 +2348,11 @@ def claim_next_in_line():
         # while no other list that went first is being sent; then the
         # longest wait, as before.
         lists_first = a_list_may_go_first()
+        # One large file at a time (#1387). Read once: the sweep claims at
+        # most one nick and then stops, and a claim carries its row, whose
+        # recorded size a concurrent caller then counts.
+        large_limit = _large_file_bytes()
+        large_running = _a_large_send_is_running(large_limit)
         for waiting_user, user_files in sorted(config.dcc_queue.items(),
                                                key=lambda entry: list_first_rank(entry[0], entry[1], lists_first)):
             # Use the dcc_queue dict key for every lock/queue operation. The old code
@@ -2329,6 +2464,14 @@ def claim_next_in_line():
                 if pack_to_wake is not None and len(config.active_transfers) + 1 >= config.MAX_DCC_SLOTS:
                     break
 
+                # Passed over, keeping its place, while another large file
+                # is being sent (#1387): the slot goes to the next in line.
+                if large_running and _row_is_large(g_next, large_limit):
+                    _say_a_large_file_waits(real_username, g_next)
+                    if passed_over is not None:
+                        passed_over.append(real_username)
+                    continue
+
                 # CLAIM the user before releasing the lock, so a concurrent caller sees
                 # them as busy. start_dcc_send's finally already discards this key on
                 # every exit path, including the early aborts.
@@ -2351,8 +2494,12 @@ def claim_next_in_line():
     return promoted, promoted_key, pack_to_wake, absent_users
 
 
-def check_queue_and_send(irc_sock, completed_user):
-    """Check the queues and run RAR packing one at a time, without flooding the server."""
+def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
+    """Check the queues and run RAR packing one at a time, without flooding the server.
+
+    fill_pass is the one extra sweep a dispatch starts for a slot a held
+    large file left free (#1387): it starts no further one.
+    """
     import announce as announce_mod
     import subprocess
     import threading
@@ -2661,11 +2808,23 @@ def check_queue_and_send(irc_sock, completed_user):
                         print(f"[DCC-BLOCK] {completed_user} is already claimed elsewhere; skipping duplicate dispatch.")
                         return
 
+                    # ONE LARGE FILE AT A TIME (#1387), asked in the hold that
+                    # claims: their own next file waits, keeping its place,
+                    # while another large file is being sent, and the slot
+                    # goes to the sweep.
+                    large_waits = waits_for_a_large_send([next_file])
+                    # The nicks this slot passes over for a large file:
+                    # nicks_waiting_for_a_slot() left them out of the line
+                    # above, so they did not send this nick to the back.
+                    held_back = [key for key, rows in config.dcc_queue.items()
+                                 if str(key).lower() != user_key and key not in config.frozen_queues
+                                 and waits_for_a_large_send(rows)]
+
                     # THE LIST CAP, READ AGAIN UNDER THE CLAIM (#1205). The rank
                     # above was taken under an earlier hold of the lock, and a
                     # concurrent trigger may have sent another list ahead since.
                     list_cap_reached = list_went_first and not a_list_may_go_first()
-                    if not list_cap_reached:
+                    if not list_cap_reached and not large_waits:
                         if not hasattr(config, 'user_processing_lock'):
                             config.user_processing_lock = set()
                         config.user_processing_lock.add(completed_user.lower())
@@ -2683,6 +2842,11 @@ def check_queue_and_send(irc_sock, completed_user):
                     print(f"[DCC QUEUE] {completed_user}'s list waits: another list went first meanwhile.")
                     check_queue_and_send(irc_sock, "system_next_trigger_fallback")
                     return
+                if large_waits:
+                    # The sweep passes this nick over too, and says so when
+                    # it reaches them: one log line, not two.
+                    check_queue_and_send(irc_sock, "system_next_trigger_fallback")
+                    return
 
                 # STILL SHARED? (#1268) The row carries the path it was
                 # resolved to when it was asked for, and the dashboard's
@@ -2698,6 +2862,8 @@ def check_queue_and_send(irc_sock, completed_user):
 
                 announce_mod.send_dcc_sending_notice(completed_user, f_name, path=f_path, channel=target_chan)
                 threading.Thread(target=start_dcc_send, args=(irc_sock, completed_user, f_path, f_name, target_chan, next_file), daemon=True).start()
+                if not fill_pass:
+                    _fill_the_slots_a_large_send_left(irc_sock, held_back, next_file)
                 return
         else:
             # Not in any of our channels: freeze and start the countdown. The
@@ -2726,9 +2892,11 @@ def check_queue_and_send(irc_sock, completed_user):
     # branch has always dispatched outside the lock; this is the same shape.
     promoted = None
     pack_to_wake = None
+    # The nicks this sweep passed over for a large file (#1387).
+    held_back = []
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
         # The sweep under queue_lock is claim_next_in_line() (#1304).
-        promoted, promoted_key, pack_to_wake, swept_absent = claim_next_in_line()
+        promoted, promoted_key, pack_to_wake, swept_absent = claim_next_in_line(passed_over=held_back)
         absent_users.extend(swept_absent)
 
     if promoted is not None and drop_an_unshared_row(promoted[0], promoted[4], lock_key=promoted_key):
@@ -2744,6 +2912,8 @@ def check_queue_and_send(irc_sock, completed_user):
 
         announce_mod.send_dcc_sending_notice(real_username, g_name, path=g_path, channel=g_chan)
         threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
+        if not fill_pass:
+            _fill_the_slots_a_large_send_left(irc_sock, held_back, g_next)
 
     if pack_to_wake is not None:
         print(f"[DCC QUEUE] A slot is free and {pack_to_wake}'s folder pack has waited longest; starting it.")
@@ -4156,6 +4326,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         announce.feed_event("REQUEST", f'{user} asked for "{file_name}"{privately_from(private, row_chan)}',
                             nick=user, channel=row_chan, kind="file", name=file_name)
 
+        # The size goes on the row now, outside the lock (#1387, #605): the
+        # one-large-file rule reads it under queue_lock, where no stat may
+        # run. The list is never large, so it gets none.
+        queued_size = 0 if is_master_zip else _size_on_disk(full_path)
+
         with queue_lock:
             # Asking again for what is already waiting adds nothing (#1077):
             # one nick pasting the same ISO every few seconds filled its
@@ -4207,6 +4382,31 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                          and not transfers_are_paused()
                          and (list_goes_first
                               or (not user_has_queue and a_slot_is_free_beyond_those_waiting(user_key))))
+            # ONE LARGE FILE AT A TIME (#1387). A large file is queued,
+            # keeping its place, instead of sent now: while another large
+            # file is being sent, and while a nick that has waited longer
+            # has a large file next - the large turn is theirs. Just after
+            # a large send ends that nick is waiting for the trigger it
+            # started, a slot is idle, and a newcomer's large file would
+            # otherwise take the turn from them.
+            #
+            # Asked only of a request that would be sent now (the `if
+            # sends_now`), on purpose: that is the nick's next file. One
+            # queued for any other reason - behind the nick's own files, or
+            # with every slot taken - is not held back by this rule, and the
+            # log line below would say it was.
+            large_limit = _large_file_bytes()
+            large_running = False
+            large_ahead = None
+            if sends_now and _row_is_large({QUEUED_SIZE_KEY: queued_size, "file": file_name}, large_limit):
+                large_running = _a_large_send_is_running(large_limit)
+                if not large_running:
+                    large_ahead = next((key for key in nicks_waiting_for_a_slot(user_key)
+                                        if config.dcc_queue.get(key)
+                                        and _row_is_large(config.dcc_queue[key][0], large_limit)), None)
+            large_waits = large_running or large_ahead is not None
+            if large_waits:
+                sends_now = False
             # It went first only if the rule for files would have queued it.
             list_went_first = bool(sends_now and list_goes_first
                                    and (user_has_queue or not a_slot_is_free_beyond_those_waiting(user_key)))
@@ -4220,6 +4420,12 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     next_file_fake["private"] = True
                 claim = {"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name,
                          "path": full_path}
+                # This claim has no queue row to carry the size, and a
+                # concurrent dispatch must see a large file from the claim
+                # on, before the send reads its real size (#1387).
+                if queued_size:
+                    next_file_fake[QUEUED_SIZE_KEY] = queued_size
+                    claim[QUEUED_SIZE_KEY] = queued_size
                 if is_master_zip:
                     next_file_fake[LIST_ROW_KEY] = True
                 if list_went_first:
@@ -4234,6 +4440,13 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                                    "queued_at": time.time()})
                 if private:
                     config.dcc_queue[user_key][-1]["private"] = True
+                if queued_size:
+                    config.dcc_queue[user_key][-1][QUEUED_SIZE_KEY] = queued_size
+                if large_running:
+                    _say_a_large_file_waits(user, config.dcc_queue[user_key][-1])
+                elif large_ahead is not None:
+                    print(f"[DCC QUEUE] {user}'s file is large ({queued_size // (1024 * 1024)} MB) and "
+                          f"{large_ahead} has waited longer with a large file next - it is queued behind them.")
                 user_pos = len(config.dcc_queue[user_key])
                 if is_master_zip:
                     user_pos = put_the_list_first(config.dcc_queue[user_key])
