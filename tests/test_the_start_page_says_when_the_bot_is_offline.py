@@ -45,6 +45,8 @@ import re
 import sys
 import unittest
 
+from tests import support  # noqa: E402
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_the_mirc_settings_window import block, code, generated_data  # noqa: E402
@@ -990,16 +992,19 @@ def read(*parts):
 
 class TheDocs(unittest.TestCase):
 
-    def test_both_fragments_are_rolled_as_written(self):
+    def test_both_entries_are_written_and_rolled(self):
+        """Both entries, as fragments until a release rolls them and in the
+        two changelogs after (support.changelog_entry)."""
         fragments, problems = roll_changelog.load(REPO_ROOT)
         self.assertEqual([p for p in problems if p.startswith("1396")], [])
-        mine = {f.public: f.text for f in fragments if f.number == 1396}
-        self.assertEqual(set(mine), {False, True})
-        self.assertTrue(mine[False].startswith("### "))
-        self.assertIn("(#1396)", mine[False].split("\n", 1)[0])
-        self.assertTrue(mine[True].startswith("- **"))
-        self.assertEqual(len(mine[True].splitlines()), 1)
-        self.assertIn("(bot offline)", mine[True])
+        internal = support.changelog_entry(1396, public=False)
+        public = support.changelog_entry(
+            1396, public=True, opening="- **Fixed (mIRC): the control panel's start page said")
+        self.assertTrue(internal.startswith("### "))
+        self.assertIn("(#1396)", internal.split("\n", 1)[0])
+        self.assertTrue(public.startswith("- **"))
+        self.assertEqual(len(public.splitlines()), 1)
+        self.assertIn("(bot offline)", public)
 
     def test_the_console_guide_describes_the_row(self):
         text = read("docs", "ADMIN-CONSOLE.md")

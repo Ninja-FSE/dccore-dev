@@ -21,13 +21,15 @@ import runtime
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE: bool    = False        # Print every raw line the bot sends to the server in its own window; noisy, for chasing a protocol problem
-SCRIPT_VERSION: str = "DCCore v1.16.2"
+SCRIPT_VERSION: str = "DCCore v1.17.0"
 
 # Where this bot came from. Defined once because two things say it: the CTCP
 # VERSION reply, and the header of every generated list. Before this there was
 # no project URL anywhere in the tree, so anyone who received a list had no way
-# to find out what produced it.
-PROJECT_URL: str = "https://github.com/Ninja-FSE/dccore"
+# to find out what produced it. The project page since #1407; the update check
+# below reads the repository out of it (version_check.repository()), so a
+# github.com/<owner>/<name> address works here too.
+PROJECT_URL: str = "https://ninja-fse.github.io/dccore/"
 # Tell the operator when a newer DCCore is out (#572). Once a day the bot asks
 # the latest release of the repository PROJECT_URL names - one request to
 # GitHub, carrying nothing about this bot - and says so on the dashboard, in the

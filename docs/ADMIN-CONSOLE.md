@@ -210,7 +210,7 @@ Waiting for acknowledgement...
 DCC Chat connection established
 
 Welcome to DCCore
-DCCore v1.16.2 - platform=posix python=3.10 rar=/usr/bin/rar
+DCCore v1.17.0 - platform=posix python=3.10 rar=/usr/bin/rar
 
 Enter Your Password:
 ```
@@ -1285,7 +1285,10 @@ is lost.
 ### Updating the script
 
 A newer bot may send a line with a field the loaded script does not know
-about. Save the new `dccore.mrc` over the old one, then in mIRC:
+about. Save the new `dccore.mrc` over the old one, with the `dcx` and `dll`
+folders from `scripts/mirc/` beside it - the control panel draws with the
+first and the dark theme and icons come from the second; without them the
+script uses the plain settings window and light dialogs - then in mIRC:
 
 ```
 /reload -rs dccore.mrc

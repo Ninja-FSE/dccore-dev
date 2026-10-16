@@ -274,13 +274,22 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
         self.assertFalse(
             _evaluate(condition, ":attacker!u@h PRIVMSG #c :hey NICK :victim"), condition)
 
-    def test_nick_recovery_accepts_quit_and_part_independently(self):
+    def test_nick_recovery_accepts_quit_and_nick_independently(self):
         """Catches an or/and slip, which would disable recovery entirely."""
         condition = _guard_condition_for("reclaim_main_nick(line, s)",
                                          helper=("is_user_event",))
-        for key in ("QUIT", "PART"):
+        for key in ("QUIT", "NICK", "NICK_BARE"):
             with self.subTest(event=key):
                 self.assertTrue(_evaluate(condition, GENUINE[key]), condition)
+
+    def test_nick_recovery_ignores_a_part(self):
+        """A PART frees no nick: every ask it caused was refused, and each was
+        an unpaced NICK the holder could draw once per shared channel."""
+        condition = _guard_condition_for("reclaim_main_nick(line, s)",
+                                         helper=("is_user_event",))
+        for key in ("PART", "PART_REASON"):
+            with self.subTest(event=key):
+                self.assertFalse(_evaluate(condition, GENUINE[key]), condition)
 
     def test_nick_recovery_ignores_channel_chatter(self):
         condition = _guard_condition_for("reclaim_main_nick(line, s)",
@@ -305,6 +314,11 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
         else:
             self.addCleanup(delattr, config, "ORIGINAL_NICK")
         config.ORIGINAL_NICK, config.NICKNAME = "DCCore", "DCCore_"
+        # Not a DCCoreTestCase, so another test's ask may still be inside the
+        # reclaim gap.
+        import runtime
+        self.addCleanup(setattr, runtime, "nick_reclaim_asked_at", runtime.nick_reclaim_asked_at)
+        runtime.nick_reclaim_asked_at = None
         with contextlib.redirect_stdout(io.StringIO()):
             forged = irc.reclaim_main_nick(":attacker!u@h QUIT :bye :DCCore!x@y", Recorder())
             real = irc.reclaim_main_nick(":DCCore!bot@host QUIT :Quit: leaving", Recorder())

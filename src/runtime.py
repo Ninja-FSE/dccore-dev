@@ -243,6 +243,11 @@ library_scan_turns = threading.Condition()  # dcc.py: one library scan per nick 
 # this one is held BY the rehash.
 config_reload_lock = threading.RLock()
 
+# When irc.reclaim_main_nick() last asked the server for the main nick, so
+# the asks are spaced however often its holder leaves. A plain value, not a
+# container: kept here so a !rehash of irc.py does not forget it.
+nick_reclaim_asked_at = None
+
 # Only one rehash at a time.
 #
 # handle_rehash_request() reloads modules AND then compares the channel list it
