@@ -527,6 +527,33 @@ on *:CHATCLOSE: {
   if (%was == in) { hadd dccore.live tries 0 }
   dccore.retry
 }
+; $true when the console is up: logged in, and a chat to the bot is open
+; (#1396). The state alone outlives a chat that ended without the CHATCLOSE
+; above (or a table that outlived its session), and the control panel's
+; start page read a stopped bot as connected from it. Nested, as mIRC
+; evaluates every identifier in an if-line.
+alias dccore.linked {
+  if ($dccore.st(state) != in) { return $false }
+  if ($dccore.bot == $null) { return $false }
+  return $iif($chat($dccore.bot),$true,$false)
+}
+; A state that says logged in with no chat to the bot is put right as the
+; CHATCLOSE above does it, without its message, its retry or its timers
+; (#1396): nothing dials from here. The titles and the side panel are
+; redrawn so they stop showing the old session; none of them dials.
+alias dccore.unstale {
+  if ($dccore.st(state) != in) { return }
+  if ($dccore.linked) { return }
+  hadd dccore.live state closed
+  hdel dccore.live mode
+  hdel dccore.live pairsent
+  hdel dccore.live vetted
+  hdel dccore.live typed
+  hdel dccore.live sw.unlocked
+  dccore.title
+  dccore.chat.title
+  dccore.panel
+}
 
 ; Every line the bot sends on the chat lands here. The chat window itself
 ; is hidden the moment the first line arrives; @DCCore is the window.
@@ -702,6 +729,8 @@ alias dccore.plain {
   dccore.title
   dccore.chat.title
   dccore.panel
+  ; no HELLO, so no dccore.sw.lost: the start page says the link is up (#1396)
+  dccore.sw.home.fill
 }
 
 ; ---------------------------------------------------------------------
@@ -1219,6 +1248,10 @@ alias dccore.out {
 }
 
 alias dccore.title {
+  ; the control panel's start page follows the state too (#1396): the
+  ; title is redrawn on every step of a dial. The timer dccore.panel.soon
+  ; uses, so the two coalesce; before the return, as @DCCore may be closed
+  if ($dialog(dccore.set)) { .timerdccoreSwHome -m 1 300 dccore.sw.home.fill }
   if (!$window($dccore.win)) { return }
   var %bot = $iif($dccore.bot,$dccore.bot,DCCore)
   var %net = $iif($network,$network,$server)
@@ -2121,6 +2154,9 @@ alias dccore.theme.dcxtexts {
     }
     inc %i
   }
+  ; the Connection row keeps its state's colour (dccore.sw.home.ink)
+  var %ink = $dccore.sw.s(home.ink)
+  if (%ink != $null) { dccore.dcx xdid dccore.set $gettok(%ink,1,32) -C +t $gettok(%ink,2,32) }
 }
 ; The page list's colours. The tables get theirs as they are made, the
 ; first time they are needed (dccore.sw.lv.make) - enabled, as
@@ -3181,23 +3217,45 @@ alias dccore.sw.home.fill {
     inc %i
   }
 }
-; $1 a frame's number, $2 its title's DCX id, $3- its title: its rows filled
+; $1 a frame's number, $2 its title's DCX id, $3- its title: its rows filled.
+; Not linked to the bot (dccore.linked, #1396), nothing the bot sent is shown
+; as current - those are the last session's - only the nick and network,
+; which are this mIRC's own; the Connection row says which, in colour
 alias dccore.sw.home.frame {
+  var %on = $dccore.linked
   if ($3 == Bot) {
     dccore.sw.home.row $1 1 $iif($dccore.bot,$dccore.bot,-)
     dccore.sw.home.row $1 2 $iif($network,$network,$iif($server,$server,-))
-    var %since = $dccore.st(st.started)
+    var %since = $iif(%on,$dccore.st(st.started))
     dccore.sw.home.row $1 3 $iif(%since > 0,$asctime(%since,ddd d mmm HH:nn) ( $+ $dccore.dur($calc($ctime - %since)) $+ ),-)
-    dccore.sw.home.row $1 4 $iif($dccore.st(state) == in,connected $iif($dccore.st(mode) == structured,(structured console),(plain console)),$iif($dccore.st(state),$dccore.st(state),not connected))
+    var %state = $dccore.st(state)
+    if (%on) {
+      dccore.sw.home.ink $1 4 on
+      dccore.sw.home.row $1 4 $chr(9679) connected $iif($dccore.st(mode) == structured,(structured console),(plain console))
+    }
+    elseif ($istok(opening waiting banner auth password,%state,32)) {
+      dccore.sw.home.ink $1 4 wait
+      dccore.sw.home.row $1 4 $chr(9679) connecting: %state
+    }
+    else {
+      dccore.sw.home.ink $1 4 off
+      dccore.sw.home.row $1 4 $chr(9679) offline
+    }
+    return
+  }
+  if (!%on) && ($istok(Today Library,$3,32)) {
+    var %j = 1
+    while (%j <= $dccore.sw.m($+(home.f.,$1,.n))) { dccore.sw.home.row $1 %j - | inc %j }
     return
   }
   if ($3 == Sending) {
-    var %used = $dccore.st(st.used), %slots = $dccore.st(st.slots)
+    var %used = $dccore.st(st.used), %slots = $iif(%on,$dccore.st(st.slots))
     dccore.dcx xdid dccore.set $2 -t Sending $iif(%slots != $null,%used $+ / $+ %slots)
     var %j = 1
     while (%j <= $dccore.sw.m($+(home.f.,$1,.n))) {
       var %l = $dccore.st(slot. $+ %j), %line
-      if (%l != $null) {
+      if (!%on) { %line = $iif(%j == 1,(bot offline)) }
+      elseif (%l != $null) {
         ; <nick> <sent> <total> <bps> <name>, as the side panel draws it
         var %pct = $iif($gettok(%l,3,32) > 0,$int($calc($gettok(%l,2,32) * 100 / $gettok(%l,3,32))),0)
         %line = > $dccore.fit($gettok(%l,1,32),9) $dccore.rfit($dccore.bytes($gettok(%l,3,32)),7) $dccore.rfit(%pct $+ $chr(37),4) $dccore.rfit($dccore.speed($gettok(%l,4,32)),9) $gettok(%l,5-,32)
@@ -3257,6 +3315,21 @@ alias dccore.sw.home.lib {
 alias dccore.sw.home.row {
   var %r = $dccore.sw.m($+(home.f.,$1,.r.,$2)), %id = $iif($gettok(%r,2,32),$gettok(%r,2,32),$gettok(%r,1,32))
   dccore.dcx xdid dccore.set %id -t $iif($3 == $null,$dccore.nbsp,$3-)
+}
+; $1 a frame's number, $2 a row's, $3 on, wait or off: the row's text in
+; green, amber or red (#1396) - set on every fill, so no colour outlives the
+; state it was for. The theme has no such colours: these are darker on the
+; light face and lighter on the dark one. Kept (home.ink) for
+; dccore.theme.dcxtexts, which gives every value the theme's text colour
+; once, just after the window is made - after its first fill
+alias dccore.sw.home.ink {
+  var %r = $dccore.sw.m($+(home.f.,$1,.r.,$2)), %id = $iif($gettok(%r,2,32),$gettok(%r,2,32),$gettok(%r,1,32))
+  var %dark = $iif($dccore.theme.dialogsdark,1,0), %rgb
+  if ($3 == on) { %rgb = $iif(%dark,$rgb(110,200,110),$rgb(0,128,0)) }
+  elseif ($3 == wait) { %rgb = $iif(%dark,$rgb(230,170,50),$rgb(160,100,0)) }
+  else { %rgb = $iif(%dark,$rgb(240,100,100),$rgb(192,0,0)) }
+  hadd dccore.sws home.ink %id %rgb
+  dccore.dcx xdid dccore.set %id -C +t %rgb
 }
 ; the lists' names, (primary) after the primary one - asked for from the
 ; bot once, as the Lists page asks, the first time the start page shows
@@ -3479,6 +3552,7 @@ alias dccore.sw.start {
   ; nothing asked before this start is still awaited
   hdel -w dccore.sws w.*
   dccore.sw.enable 0
+  dccore.unstale
   if ($dccore.st(mode) != structured) || (!$chat($dccore.bot)) {
     dccore.sw.put 1013 Not connected to the bot
     dccore.sw.status Not connected to the bot: /dccore connect, then Reload. Only this mIRC's own switches can be changed now.
@@ -3518,6 +3592,8 @@ alias dccore.sw.lost {
     if ($dccore.sw.changed != $null) || ($dccore.sw.unsaved != $null) { hadd dccore.sws keep 1 }
   }
   dccore.sw.start
+  ; the start page says the link dropped or came up now, not at Reload (#1396)
+  dccore.sw.home.fill
 }
 alias dccore.sw.load {
   hadd dccore.sws phase load

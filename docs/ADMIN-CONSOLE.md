@@ -1005,7 +1005,12 @@ panel draws, refreshed with it; and, from a bot that has `library:1` in its
 CAPS, the library's totals (#1359): each list's files, the files and folders
 and size of them all, the newest rebuild and how long it took, and the search
 index of the lists held from other bots. The window sends `library` once, and
-the `LIBRARY` and `SEARCHINDEX` lines then come in every burst. A side has a back arrow at the top left and
+the `LIBRARY` and `SEARCHINDEX` lines then come in every burst. The connection row has a coloured dot
+(#1396): green and `connected (structured console)` when the console is logged in and its chat is open,
+amber and `connecting: <step>` while the script dials, red and `offline` otherwise. Offline, nothing
+the bot sent is shown as current: up since, today's figures and the library read `-`, the running sends
+`(bot offline)`; the nick and network stay. The page redraws when the link drops or comes up.
+A side has a back arrow at the top left and
 the side's name beside it, and the window opens on the start page every time. **Bot** is the bot's own settings,
 as the dashboard's Settings page has them, over the console commands above:
 six groups - **General**,
