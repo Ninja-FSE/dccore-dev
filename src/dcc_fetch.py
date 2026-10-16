@@ -1967,6 +1967,28 @@ def requests_not_sent(lines):
     return back
 
 
+def _put_back_refused_request(line):
+    """Put a request line the server refused (#1386) back at the front of
+    the fetch lane, if a row still waits for it. Returns whether it was.
+
+    Under the fetch lock, and only for a row still "offered" with this very
+    line: a row that was cancelled, failed or asked again since has had its
+    line taken back (#1028), and sending it now would have the other bot
+    send a file nobody waits for. Back in the lane, the row reads it as
+    unsent again, and its offer clock restarts when it goes (#1044). A line
+    already waiting there (the row asked again) is not added twice; it goes
+    out anyway, so that counts as put back.
+    """
+    with _fetch_lock():
+        if line in config.fetch_request_queue:
+            return True
+        for row in _ensure_fetch_queue().values():
+            if row.get("state") == "offered" and row.get("request_line") == line:
+                config.fetch_request_queue.insert(0, line)
+                return True
+    return False
+
+
 def drop_our_request_at(bot, filename, channel=None):
     """Ask `bot` to take `filename` out of our queue there: `@<bot>-remove
     <file>` in the channel, the per-file form of the command DCCore answers

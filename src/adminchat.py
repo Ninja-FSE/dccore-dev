@@ -1809,6 +1809,13 @@ def _cmd_queue(session, args):
     queue = dict(getattr(config, "dcc_queue", {}))
     frozen = dict(getattr(config, "frozen_queues", {}))
     target = args.strip().lower()
+    # A nick whose next file is large while another large file is being sent
+    # (#1387) is passed over, keeping its place: said here, so it is not a mystery.
+    import dcc
+    active = list(getattr(config, "active_transfers", []))
+
+    def large_note(rows):
+        return dcc.waits_for_a_large_send(list(rows), active)
 
     if target:
         rows = queue.get(target, [])
@@ -1816,7 +1823,8 @@ def _cmd_queue(session, args):
             session.send(f"{target} has nothing queued.")
             return
         session.send(f"{target}: {len(rows)} file(s)"
-                     f"{' (FROZEN)' if target in frozen else ''}")
+                     f"{' (FROZEN)' if target in frozen else ''}"
+                     f"{' (' + dcc.LARGE_FILE_WAIT_NOTE + ')' if large_note(rows) else ''}")
         for place, row in enumerate(rows, start=1):
             name = row.get("file", "?") if isinstance(row, dict) else str(row)
             session.send(f"  {place}. {name}")
@@ -1832,7 +1840,8 @@ def _cmd_queue(session, args):
     import commands
     for user_key in commands.queue_order():
         session.send(f"  {user_key:<20} {len(queue[user_key]):>4} file(s)"
-                     f"{'  FROZEN' if user_key in frozen else ''}")
+                     f"{'  FROZEN' if user_key in frozen else ''}"
+                     f"{'  ' + dcc.LARGE_FILE_WAIT_NOTE if large_note(queue[user_key]) else ''}")
 
 
 def _pack_progress_text(pack):
@@ -3627,6 +3636,10 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None)
         # and the server would read the fragment as a complete command.
         # Guarded by tests/test_no_socket_write_is_a_partial_write.py.
         irc_sock.sendall(offer.encode("utf-8", errors="ignore"))
+        # Recorded with no lane (#1386): unpaced and never sent again,
+        # recorded only so that the server refusing it is not taken for an
+        # older line to this nick, which would then go out twice.
+        runtime.note_paced_line(offer, None)
         print(f"[ADMINCHAT] Offered DCC CHAT to {nick} on "
               f"{dcc.dcc_address() or '?'}:{port}; waiting for the connection.")
         deadline = time.monotonic() + LISTEN_TIMEOUT

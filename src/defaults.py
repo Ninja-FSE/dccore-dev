@@ -555,6 +555,7 @@ MAX_DCC_SLOTS: int      = 3      # Maximum simultaneous live downloads
 # the bot's side can deliver - so with one slot it never fires. Not while
 # MAX_UPLOAD_KB is what holds the sends back. See dcc._SlowSendWatch.
 SLOW_SEND_MIN_KB: int   = 0      # In KB/s, 0 = off
+LARGE_FILE_MB: int      = 0      # A file of at least this many MB is large, and only one large file is sent at a time (0 = off)
 MAX_USER_QUEUE: int     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE: int   = 1000   # Most files across every queue combined
 SEARCH_ENABLED: bool = True  # Answer @find and @locator; off ignores them and the advert says Search: OFF

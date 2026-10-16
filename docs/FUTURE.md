@@ -12,6 +12,7 @@ What DCCore does today, and what it does not do yet.
 
 - **DCC SEND over IRC**, with a per-user and global queue, configurable slot limits, and a DCC port range you control.
 - **The list goes first** — `@nick` takes the next free slot ahead of queued files and folders, so a newcomer does not wait behind everyone's albums just to see what the bot has. It never interrupts a send, a nick still has one send at a time, and only one list at a time may pass nicks that waited longer, so a flood of list requests cannot starve the files. A list is not its nick's turn: the files that nick was waiting for keep their place (#1205).
+- **One large file at a time** (`LARGE_FILE_MB`, off by default) — a file of at least that many MB is large, and only one large file is sent at a time, so a few multi-gigabyte requests cannot hold every slot for hours. A nick whose next file is large waits, keeping its place, while another large file is being sent, and the slot goes to the next in line; the console's `queue` and the Queue page say "waiting: one large file at a time". The size is taken when the file is queued. The bot's list never counts as large, and a `!rar` folder pack is never held back, since its size is not known until it is packed (#1387).
 - **Album packing** — `!rar <folder>` builds an archive on demand and cleans it up afterwards, bounded by `MAX_RAR_FOLDER_SIZE` so a request cannot ask for an unbounded pack.
 - **Requests by private message** — `!<nick> <file>` sent privately is answered only for somebody in one of the channels the bot serves, whether a slot is free or not. It belongs to the first such channel they share with the bot: the console, the `@DCCore` window and the debug channel name it, and its channel mode decides the notices. Nothing about it is announced in any channel, and it never appears on the Messages page (#1242).
 - **Freeze box** — a user who parts or quits keeps their queue for five minutes; rejoining thaws it instantly rather than losing their place.
@@ -28,7 +29,7 @@ What DCCore does today, and what it does not do yet.
 - **Several folders scanned at once** (`LIST_SCAN_THREADS`, 16 by default), which is what makes a rebuild over a network drive shorter.
 - **Length and quality in the list, if you want them** (`LIST_SHOW_AUDIO_INFO`) — every MP3 and FLAC row gets its duration and bitrate after the size, `::INFO:: 10.3MB 4m31s 320/44.1/JS`, read once per file and remembered.
 - **Every folder heading says what it holds** — `14 files, 1.20GB` on its own line under the heading, placed so that every program that reads these lists (other DCCore bots, AutoQ, DCCore's own request handling) ignores it. Companion files (`.srt`, `.nfo`, `.sfv`…) travel with the film they belong to when the video list is split out, and stay with an album otherwise.
-- **A partially unreadable library fails the rebuild** rather than silently publishing a truncated list.
+- **A partially unreadable library fails the rebuild** rather than silently publishing a truncated list. A folder renamed or removed while the scan runs is left out instead (#1383).
 
 ### Multiple lists, and multiple folders per list
 
