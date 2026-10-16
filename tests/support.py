@@ -1307,7 +1307,7 @@ class DCCoreTestCase(unittest.TestCase):
         return tree
 
 
-def changelog_entry(number, public, opening=None):
+def changelog_entry(test, number, public, opening=None):
     """The changelog text issue `number` brought, wherever it is now (#1407's
     release roll).
 
@@ -1323,9 +1323,15 @@ def changelog_entry(number, public, opening=None):
         `opening`. A public bullet carries no issue number, so the caller
         names its first words.
 
-    Raises AssertionError when the entry is in neither place.
+    Raises AssertionError when the entry is in neither place. Skips `test`
+    in an extracted public tree (#1409): it has neither docs/changes/ nor
+    docs/UPDATES-PUBLIC.md, and its docs/UPDATES.md is the public changelog.
     """
     import io as _io
+    from tests.exported_tree import _this_is_an_export
+    if _this_is_an_export(test):
+        test.skipTest("an extracted public tree keeps no fragments and no internal "
+                      "changelog; the entry is checked in the development repository")
     name = f"{number}.public.md" if public else f"{number}.md"
     fragment = os.path.join(REPO_ROOT, "docs", "changes", name)
     if os.path.exists(fragment):
