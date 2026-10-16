@@ -328,6 +328,8 @@ def reset_config(**overrides):
             del canonical[:]
         setattr(config, name, canonical)
     runtime.known_bots_pruned_at = 0.0
+    # A reclaim one test asked for must not space out the next test's.
+    runtime.nick_reclaim_asked_at = None
     for name, value in SETTINGS_DEFAULTS.items():
         setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():

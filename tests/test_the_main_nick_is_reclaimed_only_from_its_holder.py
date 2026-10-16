@@ -1,7 +1,8 @@
 """#1291: reclaim_main_nick(), step 2 of splitting irc_loop().
 
-When the client holding the bot's main nick quits or parts and the bot is on
-another name, the bot asks for the main nick back. This was a block inside
+When the client holding the bot's main nick quits or changes nick and the
+bot is on another name, the bot asks for the main nick back - not on a PART,
+which frees nothing, and at most once per NICK_RECLAIM_GAP_SECONDS. This was a block inside
 irc_loop(), reachable only by driving the whole loop
 (tests/test_the_bots_own_nick_follows_the_server.py still does, for the
 wiring). Here the function is called directly, for each way it must say no.
@@ -19,6 +20,7 @@ if REPO_ROOT not in sys.path:
 
 import defaults as config  # noqa: E402
 import irc  # noqa: E402
+import runtime  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
 
@@ -42,21 +44,46 @@ class TheMainNickIsReclaimedOnlyFromItsHolder(DCCoreTestCase):
         config.ORIGINAL_NICK = "SomeBot"
         self.addCleanup(setattr, config, "ORIGINAL_NICK", "DCCore")
 
-    def reclaim(self, line, sock):
+    def reclaim(self, line, sock, now=None):
         with contextlib.redirect_stdout(io.StringIO()) as said:
-            asked = irc.reclaim_main_nick(line, sock)
+            asked = irc.reclaim_main_nick(line, sock, now=now)
         return asked, said.getvalue()
 
-    def test_the_holder_quitting_or_parting_is_answered_with_one_nick(self):
+    def test_the_holder_quitting_or_renaming_is_answered_with_one_nick(self):
         for line in (":SomeBot!ghost@host.example QUIT :Ping timeout",
-                     ":SomeBot!ghost@host.example PART #somechannel :bye",
+                     ":SomeBot!ghost@host.example NICK :SomeoneElse",
                      ":someBOT!ghost@host.example QUIT :case does not matter"):
             with self.subTest(line=line):
+                runtime.nick_reclaim_asked_at = None
                 sock = _Socket()
                 asked, said = self.reclaim(line, sock)
                 self.assertTrue(asked)
                 self.assertEqual(sock.sent, ["NICK SomeBot"])
-                self.assertIn("logged out", said)
+                self.assertIn("is free", said)
+
+    def test_asks_are_spaced_however_often_the_holder_leaves(self):
+        """A holder that quits and comes straight back, again and again, gets
+        one NICK per gap - every one of them unpaced."""
+        sock = _Socket()
+        gap = irc.NICK_RECLAIM_GAP_SECONDS
+        for at in (1000.0, 1001.0, 1000.0 + gap - 1):
+            self.reclaim(":SomeBot!ghost@host.example QUIT :bye", sock, now=at)
+        self.assertEqual(sock.sent, ["NICK SomeBot"])
+        self.reclaim(":SomeBot!ghost@host.example QUIT :bye", sock, now=1000.0 + gap)
+        self.assertEqual(sock.sent, ["NICK SomeBot", "NICK SomeBot"])
+
+    def test_a_clock_set_back_does_not_stop_the_asks(self):
+        sock = _Socket()
+        self.reclaim(":SomeBot!ghost@host.example QUIT :bye", sock, now=5000.0)
+        self.reclaim(":SomeBot!ghost@host.example QUIT :bye", sock, now=100.0)
+        self.assertEqual(len(sock.sent), 2)
+
+    def test_a_refused_reason_does_not_use_up_the_gap(self):
+        """Somebody else leaving is no ask, so it must not delay the real one."""
+        sock = _Socket()
+        self.reclaim(":SomeBot2!x@host.example QUIT :bye", sock, now=1000.0)
+        self.reclaim(":SomeBot!ghost@host.example QUIT :bye", sock, now=1001.0)
+        self.assertEqual(sock.sent, ["NICK SomeBot"])
 
     def test_the_name_is_asked_for_not_taken(self):
         self.reclaim(":SomeBot!ghost@host.example QUIT :Ping timeout", _Socket())
