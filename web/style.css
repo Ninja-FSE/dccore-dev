@@ -955,6 +955,7 @@ html, body {
 .status-pill.status-packing { color: var(--status-sending); }
 .status-pill.status-frozen  { color: var(--status-frozen); }
 .status-pill.status-queued  { color: var(--status-queued); }
+.status-pill.status-large-wait { color: var(--status-queued); }
 .status-pill.status-empty   { color: var(--status-empty); }
 
 /* ---------------------------------------------------- Broadcast search */
