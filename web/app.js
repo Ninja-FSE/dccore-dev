@@ -1315,6 +1315,8 @@
   var STATUS_LABELS = {
     sending: "queue.status.sending", frozen: "queue.status.frozen",
     packing: "queue.status.packing",
+    // Next file large while another large file is sent (#1387, LARGE_FILE_MB).
+    "large-wait": "queue.status.largeWait",
     queued: "sidebar.queued", empty: "queue.status.empty"
   };
 
@@ -4910,6 +4912,8 @@
     CHANNEL: "settings.field.CHANNEL",
     DEBUG_CHANNEL: "settings.field.DEBUG_CHANNEL",
     MAX_DCC_SLOTS: "settings.field.MAX_DCC_SLOTS",
+    SLOW_SEND_MIN_KB: "settings.field.SLOW_SEND_MIN_KB",
+    LARGE_FILE_MB: "settings.field.LARGE_FILE_MB",
     MAX_USER_QUEUE: "settings.field.MAX_USER_QUEUE",
     MAX_GLOBAL_QUEUE: "settings.field.MAX_GLOBAL_QUEUE",
     SEARCH_ENABLED: "settings.field.SEARCH_ENABLED",

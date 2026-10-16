@@ -415,6 +415,13 @@ def reset_config(**overrides):
     # state like any other, and it costs real wall-clock on every suite run.
     # test_a_shared_outbound_pace.py already did this by hand for itself.
     runtime.outbound_pacer = runtime.OutboundPacer()
+    # #1386: the record of paced lines sent, which a 439/707 refusal reads to
+    # find the line to put back. Process-wide like the pacer, and filled by
+    # every test that runs the real queue worker or debug drain: a line one
+    # test sent is not the next test's to resend. Cleared in place and under
+    # its lock, as the disconnect epilogue does, not rebound.
+    with runtime.recent_paced_lock:
+        runtime.recent_paced_lines.clear()
 
     config.debug_flood_lock = threading.Lock()
     config.fetch_queue_lock = threading.Lock()

@@ -4,6 +4,7 @@ import io
 import re
 import sys
 import shutil
+import stat
 import sqlite3
 import datetime
 import subprocess
@@ -1815,15 +1816,40 @@ def generate_master_list(list_name=None, reading_jobs=None, stop=None):
     # published over the previous good one. Collected here and checked
     # once the walk finishes, so one bad subtree costs the whole run
     # (keeping the previous index) rather than a silent partial one.
+    # Two kinds of error are not that and are skipped instead - a folder
+    # denied to us that is still there, and one renamed or removed while
+    # the scan ran (#1383) - see _on_walk_error().
     walk_errors = []
     denied_dirs = []
+    # The errors themselves rather than their paths, so that a folder whose
+    # configured root turns out to be gone can hand them to walk_errors
+    # unchanged - see the check after each folder's walk.
+    vanished_dirs = []
     # Folders left out because their own name cannot survive the list format
     # (#464) - see has_backslash_component() at the point it is used.
     unlistable_dirs = []
 
+    # The configured folder being walked right now, and which directory it
+    # was when its walk began (#1383). Set per folder in the loop below and
+    # read by _on_walk_error(), which walk_with_sizes() calls on this thread.
+    walking = {"root": None, "identity": None}
+
+    def _directory_identity(path):
+        """(st_dev, st_ino) of the directory at `path`, or None if there is
+        no directory there now."""
+        try:
+            found = os.stat(path)
+        except (OSError, ValueError):
+            return None
+        return (found.st_dev, found.st_ino) if stat.S_ISDIR(found.st_mode) else None
+
+    def _walking_root_is_unchanged():
+        identity = walking["identity"]
+        return identity is not None and _directory_identity(walking["root"]) == identity
+
     def _on_walk_error(err):
-        # TWO DIFFERENT FAILURES, AND ONLY ONE OF THEM IS WORTH ABORTING FOR
-        # (#441).
+        # THREE DIFFERENT FAILURES, AND ONLY ONE OF THEM IS WORTH ABORTING FOR
+        # (#441, #1383).
         #
         # A directory that is PERMANENTLY unreadable - a Windows volume root's
         # System Volume Information, a POSIX lost+found, anything whose ACL
@@ -1831,15 +1857,36 @@ def generate_master_list(list_name=None, reading_jobs=None, stop=None):
         # future scan. Treating it as "keep the previous index" meant the list
         # could never be rebuilt again on that install: every !update ran the
         # whole scan and then threw the result away, for ever, and the log line
-        # said only that part of the library could not be read.
+        # said only that part of the library could not be read. The test is
+        # whether the path is still there: permission denied on a directory
+        # that exists is a fact about the ACL, not about the scan. Skipped.
         #
-        # A directory that has VANISHED mid-scan is the opposite: it means the
-        # library changed underneath us, the scan we just did is of a state
-        # that no longer exists, and publishing it would be publishing a
-        # snapshot known to be wrong. That one still aborts.
+        # A folder RENAMED OR REMOVED under a configured folder that is still
+        # there (#1383) - an operator replacing a release, a sorter moving
+        # one - is skipped too. #441 aborted on it, reasoning that the scan
+        # described a state that no longer exists. But what it kept instead
+        # is the previous list, which is older and wrong in more ways: it
+        # names that same folder, and it lacks everything added since. On a
+        # network share a scan takes minutes, so one rename cost a day's list.
+        # Only a FileNotFoundError for a path that is really gone counts, and
+        # on Windows only WinError 2 and 3: 53 and 67 (network path or share
+        # not found) are the same Python class but say the share is in
+        # trouble, not the folder.
         #
-        # The test is whether the path is still there. Permission denied on a
-        # directory that exists is a fact about the ACL, not about the scan.
+        # The CONFIGURED FOLDER ITSELF going away is what #441 still guards
+        # against: the share drops mid-walk, its whole subtree goes
+        # unreadable, and publishing would truncate the list. So a vanished
+        # folder is skipped only while the folder being walked is still the
+        # same directory it was when its walk began - same device and inode,
+        # because a mount point left behind by an unmounted share is still a
+        # directory, just an empty one. Checked here and once more when that
+        # folder's walk ends; gone either time, it aborts and keeps the
+        # previous index. So does every other error: EIO, a stale handle,
+        # permission denied on a path that is gone.
+        #
+        # A known, accepted gap: a drive mounted INSIDE a configured folder
+        # and unmounted mid-walk looks like a rename, since the configured
+        # folder is unchanged (Windows does not descend mount points at all).
         denied = isinstance(err, PermissionError)
         if denied:
             try:
@@ -1852,6 +1899,27 @@ def generate_master_list(list_name=None, reading_jobs=None, stop=None):
             print(f"[LIST-GEN] Skipping {err.filename!r}: permission denied, and "
                   f"it is still there - excluded from the list rather than "
                   f"failing the whole rebuild.")
+            return
+
+        vanished = (isinstance(err, FileNotFoundError)
+                    and getattr(err, "winerror", None) in (None, 2, 3)
+                    and bool(err.filename))
+        # Root first, then the path: a share that drops and comes back
+        # between the two checks then reads as "path still there" and aborts,
+        # never as a present subtree skipped.
+        if vanished:
+            vanished = _walking_root_is_unchanged()
+        if vanished:
+            try:
+                vanished = not os.path.lexists(platform_compat.long_path(err.filename))
+            except Exception:
+                vanished = False
+
+        if vanished:
+            vanished_dirs.append(err)
+            print(f"[LIST-GEN] Skipping {err.filename!r}: it was moved or removed "
+                  f"during the scan - left out of this list; the next rebuild "
+                  f"lists whatever replaced it.")
             return
 
         walk_errors.append(err)
@@ -1913,7 +1981,9 @@ def generate_master_list(list_name=None, reading_jobs=None, stop=None):
         # different from walk_errors below, which is a subtree going unreadable
         # DURING a walk of a folder that was present: that is a systemic
         # failure of a library we are meant to be reading, and it keeps the
-        # previous index rather than publishing a truncated one.
+        # previous index rather than publishing a truncated one. (A subfolder
+        # renamed or removed while this folder stays put is neither - it is
+        # skipped, see _on_walk_error() and #1383.)
         #
         # Every folder missing is still caught, further down: the zero-files
         # guard refuses to publish an empty list.
@@ -1926,6 +1996,9 @@ def generate_master_list(list_name=None, reading_jobs=None, stop=None):
         # long_path()-wrapped, and the SAME wrapped value is relpath()'s base
         # below - see the note above scan_root's original single-folder form.
         scan_root = platform_compat.long_path(scan_folder.path)
+        walking["root"] = scan_root
+        walking["identity"] = _directory_identity(scan_root)
+        vanished_before = len(vanished_dirs)
 
         # walk_with_sizes(), not os.walk: the size comes back with the name
         # rather than being asked for again per file. See its docstring for
@@ -2080,6 +2153,21 @@ def generate_master_list(list_name=None, reading_jobs=None, stop=None):
             # or the one after the loop, sees a stop that arrived meanwhile.
             walk.close()
 
+        # Something under this folder vanished and was skipped: ask once more,
+        # now its walk is over, whether the folder itself is still there
+        # (#1383). Folders vanishing one after another because the share
+        # under them dropped look exactly like renames until the root goes
+        # too - and if it has, they were the share, and they abort the
+        # rebuild like any other walk error, keeping the previous index.
+        if len(vanished_dirs) > vanished_before and not _walking_root_is_unchanged():
+            lost = vanished_dirs[vanished_before:]
+            del vanished_dirs[vanished_before:]
+            walk_errors.extend(lost)
+            print(f"[LIST-GEN ERROR] {scan_folder.path} itself went away during "
+                  f"the scan, so the {len(lost)} folder(s) that vanished under "
+                  f"it are treated as lost with it, not as renames - the "
+                  f"library could not be read.")
+
     # Asked once more with the walk over, before anything is written (#1356).
     stopped = stop(force=True)
     if stopped:
@@ -2089,6 +2177,11 @@ def generate_master_list(list_name=None, reading_jobs=None, stop=None):
             audio.close()
         return False
 
+    # walk_errors holds what the scan could not read and could not explain
+    # (#441): EIO, a stale handle, a configured folder that went away during
+    # its own walk. Not in it: a folder denied to us that is still there
+    # (denied_dirs) and one renamed or removed under a configured folder that
+    # stayed (vanished_dirs, #1383) - both skipped, reported below.
     if walk_errors:
         print(f"[LIST-GEN ERROR] {len(walk_errors)} part(s) of the library could not be "
               "read - keeping the previous index rather than publishing a truncated one.")
@@ -2113,6 +2206,15 @@ def generate_master_list(list_name=None, reading_jobs=None, stop=None):
               f"will not be in the next one until their permissions change: "
               f"{', '.join(repr(p) for p in denied_dirs[:5])}"
               f"{' ...' if len(denied_dirs) > 5 else ''}")
+
+    if vanished_dirs:
+        # An event rather than a standing condition, unlike denied_dirs: the
+        # next rebuild lists whatever took their place.
+        print(f"[LIST-GEN] {len(vanished_dirs)} folder(s) changed during the "
+              f"scan and were left out of this list; the next rebuild lists "
+              f"whatever replaced them: "
+              f"{', '.join(repr(err.filename) for err in vanished_dirs[:5])}"
+              f"{' ...' if len(vanished_dirs) > 5 else ''}")
 
     if unlistable_dirs:
         # Same shape and same reasoning as denied_dirs above: a standing

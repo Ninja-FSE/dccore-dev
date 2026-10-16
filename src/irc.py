@@ -413,6 +413,99 @@ def answer_nick_refusal(line, sock, registered, refusals):
     return refusals
 
 
+# TARGET CHANGE TOO FAST (#1386). ircu's 439 says how long to wait ("Please
+# wait 8 seconds."); 707 (hybrid, ratbox, charybdis) and a 439 without a
+# number do not, and get the default - about what ircu asks for when it
+# names a time. The cap keeps a malformed or hostile number from silencing
+# the bot for long. Fixed numbers rather than settings: the server sets the
+# wait, and these only stand in for it.
+TARGET_CHANGE_HOLD_DEFAULT = 10.0
+TARGET_CHANGE_HOLD_MAX = 120.0
+
+_TARGET_CHANGE_LINE = re.compile(
+    r"^:\S+\s+(439|707)\s+(\S+)\s+([^:\s]\S*)(?:\s+(.*))?$")
+_TARGET_CHANGE_WAIT = re.compile(r"\bwait\s+(\d+)\s+sec", re.IGNORECASE)
+
+
+def _parse_target_change(line):
+    """(target, seconds to hold) from a 439 or 707 addressed to the bot, or
+    None for any other line. The target is the parameter after our nick."""
+    match = _TARGET_CHANGE_LINE.match(line.rstrip("\r\n"))
+    if match is None:
+        return None
+    code, to_nick, target, text = match.groups()
+    if irc_lower(to_nick) != irc_lower(getattr(config, "NICKNAME", "")):
+        return None
+    seconds = TARGET_CHANGE_HOLD_DEFAULT
+    if code == "439":
+        wait = _TARGET_CHANGE_WAIT.search(text or "")
+        if wait:
+            seconds = float(wait.group(1))
+    return target, min(seconds, TARGET_CHANGE_HOLD_MAX)
+
+
+def _owner_is_silenced(owner):
+    """Whether `owner` (a send_queue key) is banned or muted right now. A
+    mute or ban drops the user's pending replies (security.is_flooding()),
+    so a refused one must not come back through the put-back (#1386)."""
+    key = str(owner or "").strip().lower()
+    if security.ban_seconds_left(key) > 0:
+        return True
+    return config.muted_until.get(key, 0) > time.time()
+
+
+def _put_back_refused_line(entry):
+    """Put a refused line back at the front of the lane it was sent from,
+    marked as sent again (#1386). Returns whether it was.
+
+    The VIP and standard lanes are changed under send_queue_lock, which
+    queue_mgr._resent_line_first() takes to send a put-back line first."""
+    lane = entry.get("lane")
+    line = runtime.ResentLine(entry["line"])
+    if lane == "standard" and entry.get("owner"):
+        with runtime.send_queue_lock:
+            config.send_queue.setdefault(entry["owner"], []).insert(0, line)
+        return True
+    if lane == "vip":
+        with runtime.send_queue_lock:
+            config.vip_queue.insert(0, line)
+        return True
+    if lane == "fetch":
+        import dcc_fetch
+        return dcc_fetch._put_back_refused_request(line)
+    if lane == "debug":
+        import announce
+        announce._debug_queue.appendleft(line)
+        return True
+    return False
+
+
+def _answer_target_change(line):
+    """The server dropped a message: target change too fast (439 or 707 -
+    irc_loop() guards on the numerics). Hold every paced lane for the time
+    the server asked for, and put the dropped line back at the front of its
+    lane, once. Returns the seconds held, or None if the line was not one."""
+    parsed = _parse_target_change(line)
+    if parsed is None:
+        return None
+    target, seconds = parsed
+    runtime.outbound_pacer.hold_for(seconds)
+    entry = runtime.take_paced_line(target, fold=irc_lower)
+    if entry is None:
+        outcome = "nothing to resend."
+    elif entry["resent"]:
+        outcome = "it was already sent again once, so it is dropped."
+    elif entry.get("lane") == "standard" and _owner_is_silenced(entry.get("owner")):
+        outcome = "nothing to resend: its user is muted or banned now."
+    elif _put_back_refused_line(entry):
+        outcome = "then sending it again."
+    else:
+        outcome = "nothing to resend."
+    print(f"[QUEUE] The server refused a message to {target}: target changes "
+          f"too fast. Holding paced output for {seconds:g} s, {outcome}")
+    return seconds
+
+
 def reclaim_main_nick(line, sock):
     """Somebody quit or parted (irc_loop() guards on the QUIT/PART event).
     If it was the client holding the bot's main nick, and the bot is not on
@@ -4729,6 +4822,12 @@ def irc_loop():
                     if is_server_numeric(line, "433") or is_server_numeric(line, "432") or is_server_numeric(line, "437"):
                         nick_refusals = answer_nick_refusal(line, s, conn.joined, nick_refusals)
 
+                    # A message the server dropped: target change too fast
+                    # (#1386). Anchored, so channel text quoting the numeric
+                    # cannot hold the bot's output.
+                    if is_server_numeric(line, "439") or is_server_numeric(line, "707"):
+                        _answer_target_change(line)
+
                     # Reclaim the main nick the moment the other client releases it
                     # Anchored twice over. The old test matched " QUIT "/" PART " anywhere,
                     # then looked for ":<mainnick>!" anywhere - and a QUIT reason is free
@@ -4924,9 +5023,15 @@ def irc_loop():
         # failed send; this is the same decision at the other exit.
         stale_vip = len(getattr(config, 'vip_queue', ()) or ())
         if stale_vip:
-            del config.vip_queue[:]
+            # Under the lock queue_mgr._resent_line_first() swaps under (#1386).
+            with runtime.send_queue_lock:
+                del config.vip_queue[:]
             print(f"[CONNECT] Dropped {stale_vip} queued VIP line(s) from the dead connection.")
         # Not the fetch requests (#1044): their rows count a line gone from
         # the lane as sent, and timed out as "no response". They wait for
         # the next connection; an unsent line's row does not time out.
+        # The record of lines sent (#1386) goes with the connection: a
+        # refusal on the next one is never about a line sent on this one.
+        with runtime.recent_paced_lock:
+            runtime.recent_paced_lines.clear()
         time.sleep(reconnect_wait)

@@ -287,6 +287,46 @@ the bot fetches - lists, automatic grabs, files and folders from other bots.
 Each is one limit shared by all the transfers going that way, and a change
 applies at once, to transfers already running too. 0 is no limit.
 
+### A send that crawls while others wait
+
+A downloader on a bad link can hold one of your slots (`MAX_DCC_SLOTS`) for
+hours at a few KB/s while the queue behind them does not move. **Stop sends
+slower than** (`SLOW_SEND_MIN_KB`, KB/s, on the Settings page under *Sharing
+& queue* or in the mIRC settings window under *Sharing > Search*, beside the
+slots) stops such a send, but only while every slot is taken and someone is
+waiting for one; with a slot free it may take as long as it takes. The speed
+is what the downloader has received over about the last minute, and a send
+is not judged in its first minute.
+
+Slow has to be the downloader's fault, not your line's. Only the slowest
+send is stopped, and only while another of your sends is reaching that
+speed at the same time - proof your side can deliver. When your whole
+uplink is full, your disk is slow, or your **Max upload speed** is what
+holds the sends back, every send is slow and none is stopped. With one slot,
+or one send running, it never fires. Someone whose own send was stopped for
+its speed does not, while waiting, cost another slow send its slot, so two
+slow downloaders cannot keep trading it.
+
+A stopped file that was waiting in the queue stays there: it counts as a
+failed try against **Max send failures** (`MAX_SEND_FAILS`), the person goes
+to the back of the queue and is told why, and their client can resume it
+when their turn comes again. A file that was sent straight away, without
+waiting in the queue, is dropped instead; they ask for it again and their
+client resumes it. 0, the default, is off.
+
+### How fast the bot talks
+
+The bot paces its queued replies, its adverts and its requests to other bots
+on one clock, at least `MSG_DELAY` seconds (5 out of the box) apart. Some
+servers also limit how fast a client may start talking to people it has not
+messaged before, and drop the message that goes over: Undernet answers
+*"Target change too fast. Please wait 8 seconds."* (numeric 439), other
+networks 707. The bot then holds those paced lines for as long as the server
+asks - 10 seconds when it does not say, never more than 120 - and sends a
+dropped reply again, once. The bot's log shows a `[QUEUE]` line each time.
+There is nothing to set: if you see that line often, a larger `MSG_DELAY`
+makes it rarer.
+
 ### Starting with the system
 
 Once the bot runs by hand, it can start by itself. Each script has a twin
@@ -334,6 +374,8 @@ or `!update` from IRC, or the dashboard's **Update list** button. On a large lib
 Because everything is listed, **anything you leave in that directory is offered to anyone who asks.** It is the public face of the bot — keep out of it whatever should not leave.
 
 **The list is what the bot serves** (#1376). A request for a name the list does not have is answered "File not found" at once: the bot does not search the folders for it. A file you add is requestable after the next rebuild; run one (**Update list**, `!update`, or `update` at the console) to offer it straight away. A file type the list leaves out is not served either, even to someone who knows its exact name.
+
+**A folder you rename, replace or delete while a rebuild runs is left out of that list** (#1383), and the log says so (`moved or removed during the scan`); the rebuild still publishes, and the next one lists whatever took its place. What does stop a rebuild is a configured folder (or the share it is on) going away mid-scan, or a folder the system cannot read for any other reason. Then the bot keeps serving the previous list and says `could not be read`; a folder that is merely denied to the bot's account is left out instead, and stays out until its permissions change. A separate drive mounted inside a configured folder and unmounted mid-scan is the exception: the configured folder itself is unchanged, so that drive's folders are left out of that list like renamed ones (Linux and macOS; on Windows the scan does not go into a drive mounted in a folder at all).
 
 Two settings decide how the result is split up:
 
