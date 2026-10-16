@@ -230,6 +230,52 @@ UPnP in the standard library, and the bot does not know your router's
 password. Test from a second machine or a phone, not from the same network
 (see WINDOWS.md for why that fails even when everything is right).
 
+### Someone whose downloads keep failing
+
+The same can be true at the other end: a downloader whose client never
+accepts an offer, or sits behind a firewall that never lets the connection
+in, or drops every transfer halfway. **Max send failures**
+(`MAX_SEND_FAILS`, 3) drops one queued file after that many failed tries, but
+it counts per file: someone with twenty files queued can cost sixty failed
+tries, each holding a slot for the accept or stall timeout.
+
+**Failed sends in a day before a nick is paused** (`DAILY_SEND_FAILS_LIMIT`,
+on the Settings page under *Transfers* or in the mIRC settings window under
+*Sharing > Transfers*, beside it) looks at the nick instead. Once a nick's
+sends have failed that many times since midnight (the bot's local time), it
+is paused until midnight: the files left in its queue are removed and its new
+requests are refused, each with a notice telling them why and to check that
+their client accepts DCC sends. A failure is a send the receiver never
+connected to, one that stalled or timed out, and one it closed before it had
+the whole file - and that includes a downloader closing or cancelling the
+transfer in their own client before it finishes: the bot cannot tell that
+from a client that drops every send. Taking a request out of the queue is
+not a failed send: a pack stopped with `packcancel`, or a queued file or pack
+the downloader removes with `@<bot>-remove`, does not count. Nor does a
+failure on the bot's side, such as a file that vanished from the library or
+a network share that stopped answering while it was read. Admins
+(`ADMIN_NICK`) are never paused. The count is kept in memory, so a restart
+forgives it. The console's `status` shows who is paused, and `unpause <nick>`
+lifts it at once. 0, the default, is off.
+
+A send nobody connected to is often the bot's own problem rather than the
+downloader's: a wrong address (`MY_IP_OR_DOCK`), a port forward the router
+lost, a firewall in front of the bot. Then every offer fails, and counting
+them would pause everybody within minutes. So sends that never connected do
+not count until one send has connected since the bot started, and once offers
+to several downloaders in a row go unanswered with no send connecting in
+between (three offers, to at least two different nicks), they stop counting
+until a send connects again. The log says so once, and asks you to check the
+address and the port forwarding. One downloader whose offers keep going
+unanswered while others connect is still counted: that is their client.
+
+One risk to know about before turning it on: the bot takes whoever connects
+first to the port it offered, so somebody who keeps connecting to your DCC
+ports (the range is small) can get in ahead of the downloader and make their
+sends fail. That is true of every DCC
+bot, but with this limit on it can also get the downloader paused for the
+day. Set the limit high, or leave it off where that is a concern.
+
 ### Leaving room on your line
 
 Out of the box the bot uses all the speed your line has. To keep some for

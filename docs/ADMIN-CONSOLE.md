@@ -229,8 +229,8 @@ prefix.
 
 | Command | Effect |
 |---|---|
-| `status` | everything at a glance — slots, queue, bans, list, uptime |
-| `queue [nick]` | queued files, all users (in the order they are served) or one nick's files, numbered |
+| `status` | everything at a glance — slots, queue, bans, list, uptime; with `DAILY_SEND_FAILS_LIMIT` on, a `Paused` line naming each nick paused until midnight for failed sends, with its count (#1389) |
+| `queue [nick]` | queued files, all users (in the order they are served) or one nick's files, numbered; a nick with nothing queued that is paused for failed sends says so |
 | `slots` | what is sending right now, and how far along |
 | `packing` | the folder pack that is running: for whom, which folder (its name, never its path), how long, and the archive's size so far against the folder's (#1202) |
 | `packcancel` | stop the folder pack that is running: `rar` is terminated, the partial archive is deleted, the user is told it was cancelled (no failure is counted against the request), and the next waiting pack starts. "Nothing is being packed." when none runs (#1202) |
@@ -253,6 +253,7 @@ prefix.
 | `ignore <nick> <minutes>` | drop one nick's requests for a while, 1 to 10080 minutes (#1206). It is a timed ban: kept across a restart, ends by itself, listed by `bans` with the time left. Its queued files stay; `clearqueue` removes them |
 | `clearandignore <nick> <minutes>` | `ignore`, then `clearqueue` the same nick - but only if the ignore actually took (the bot's own nick, and a nick outside the pattern `ignore` accepts, are refused and the queue is left alone). dccore.mrc's "Clear the queue of ... and ignore for..." sends this one command instead of the two separately (#1247) |
 | `unignore <nick>` | end a timed ignore - or a flood ban - now |
+| `unpause <nick>` | lift a pause for failed sends (`DAILY_SEND_FAILS_LIMIT`, #1389): the nick's failed sends today are forgotten and its next request is queued as usual. The files the pause removed are not put back; they ask again. Kept in memory only, like the count: a restart lifts every pause too |
 | `clearqueue <nick>` | force-clear another user's queue |
 | `rehash` | reload modules in place |
 | `update` | rebuild the MasterList |

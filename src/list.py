@@ -2440,6 +2440,15 @@ def send_file_list(irc_sock, user, channel):
     if not dcc.is_channel_name(channel) and library.shared_channel(user) is None:
         dcc.refuse_unshared_private_request(user, "the list")
         return
+    # Paused by DAILY_SEND_FAILS_LIMIT (#1389): handle_download_request()
+    # refuses it too, so the same one notice is sent here, before "Preparing
+    # full list" promises a list that never comes.
+    paused_fails = dcc.send_fails_paused(user)
+    if paused_fails:
+        print(f"[DCC PAUSE] Refused a list request from {user}: {paused_fails} failed "
+              f"sends today, paused until midnight.")
+        announce.send_fails_paused_notice(user, paused_fails, channel)
+        return
 
     current_zip_path = find_latest_list_file(wanted)
     

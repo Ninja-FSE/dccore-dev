@@ -995,6 +995,35 @@ def send_dcc_error(user, error_type, channel=None):
     if oserve:
         oserve.queue_message(user, msg)
 
+def send_fails_paused_text(fails, removed=0):
+    """What a nick paused by DAILY_SEND_FAILS_LIMIT (#1389) is told: when it
+    is paused (`removed` is how many queued files went with it) and when a
+    later request is refused."""
+    times = "once" if fails == 1 else f"{fails} times"
+    text = f"Your downloads failed {times} today, so requests from you are paused until midnight"
+    if removed:
+        text += (", and the 1 file left in your queue was removed" if removed == 1
+                 else f", and the {removed} files left in your queue were removed")
+    return text + ". Check that your client accepts DCC sends."
+
+
+def send_fails_paused_notice(user, fails, channel=None):
+    """Refuse a request from a nick paused by DAILY_SEND_FAILS_LIMIT (#1389).
+
+    The request gets this notice and nothing else. Said once per
+    QUEUE_FULL_REPEAT_SECONDS, like the full-queue refusals: an AutoQ paste
+    of thirty rows is thirty requests, and a notice for each would spend
+    the bot's paced line on telling one nick the same thing thirty times.
+    """
+    oserve = sys.modules.get('oserve')
+    if not notices_allowed(user, channel):
+        return
+    if _already_told_queue_full(user, "send_fails_paused"):
+        return
+    if oserve:
+        oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}{send_fails_paused_text(fails)}{config.C_RESET}\r\n")
+
+
 def send_dcc_already_queued_notice(user, file_name, position, channel=None):
     """Tell a nick that what it asked for is already in its own queue (#1077),
     or, with no position, that it is already being sent to them (#1086).

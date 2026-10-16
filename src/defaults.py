@@ -1012,6 +1012,19 @@ MUTE_TIME: int      = 30       # Mute in seconds on the first flood violation
 # midnight accidentally did - repeat offenders are a hard-ban case (!ban).
 FLOOD_BAN_SECONDS: int = 3600  # Ban in seconds when someone floods while muted
 MAX_SEND_FAILS: int = 3        # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
+# A NICK WHOSE SENDS KEEP FAILING (#1389). MAX_SEND_FAILS is per queued file,
+# so a nick with twenty files queued whose client never accepts an offer can
+# cost sixty failed attempts, each holding a slot for the accept or stall
+# timeout. With this above 0, a nick whose sends failed this many times since
+# local midnight is paused until midnight: its queued files are removed and
+# its new requests are refused, each with a notice saying why. Counted: the
+# receiver never connected, stalled, let a write time out, or closed the
+# connection before it had the whole file. Not counted: a pack cancelled by
+# the operator or withdrawn by the user, a send the bot stops itself, or a
+# failure on the bot's side (the file vanished). Admins (ADMIN_NICK) are never
+# paused. Kept in memory: a restart forgives. The console's `status` shows who
+# is paused, and `unpause <nick>` lifts it.
+DAILY_SEND_FAILS_LIMIT: int = 0  # Failed sends in a day that pause a nick until midnight; 0 is off
 # HOW LONG AN OFFER STANDS. After the DCC SEND handshake the bot listens for
 # the receiver to connect; when nobody has by this deadline the offer is
 # withdrawn and counted as one failed attempt against MAX_SEND_FAILS. This
@@ -1135,7 +1148,7 @@ C_ITALIC       = "\x1D"     # Italic
 # Mutate them in place. Never rebind them: `config.dcc_queue = {}` detaches
 # this name from the object runtime.py still holds, and the two silently drift
 # apart. tests/test_runtime_state.py fails the build if anything does.
-failed_transfers  = runtime.failed_transfers   # Failed-transfer counter, per user
+failed_transfers  = runtime.failed_transfers   # Failed sends per nick today (#1389)
 channel_users     = runtime.channel_users      # Users currently seen in the channels
 banned_users      = runtime.banned_users       # Currently banned users, in memory
 user_requests     = runtime.user_requests      # Command timestamps per user, anti-flood

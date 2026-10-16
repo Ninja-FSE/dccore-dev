@@ -205,9 +205,13 @@ class TheSendLoopUsesTheUploadCap(unittest.TestCase):
     ASendUnderACap below drives it."""
 
     def test_each_chunk_is_sized_and_paced_by_the_cap_before_it_goes(self):
-        steps = [ast.unparse(node) for node in _send_loop().body]
+        body = _send_loop().body
+        steps = [ast.unparse(node) for node in body]
         sent_at = next(i for i, step in enumerate(steps) if "conn.sendall(chunk)" in step)
-        self.assertEqual(steps[0], "chunk = f.read(speed_cap.chunk_size(speed_cap.UPLOAD, block))")
+        # The read sits in a try of its own since #1389, which turns the
+        # file's OSError into _SourceUnreadable; the read itself is the same.
+        first = body[0].body[0] if isinstance(body[0], ast.Try) else body[0]
+        self.assertEqual(ast.unparse(first), "chunk = f.read(speed_cap.chunk_size(speed_cap.UPLOAD, block))")
         before = steps[:sent_at]
         self.assertIn("speed_cap.take(speed_cap.UPLOAD, len(chunk))", before)
         self.assertIn("acks.sending()", before)

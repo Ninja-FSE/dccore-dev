@@ -1820,7 +1820,11 @@ def _cmd_queue(session, args):
     if target:
         rows = queue.get(target, [])
         if not rows:
-            session.send(f"{target} has nothing queued.")
+            import dcc
+            fails = dcc.send_fails_paused(target)
+            session.send(f"{target} has nothing queued"
+                         + (f" - paused until midnight after {fails} failed sends today."
+                            if fails else "."))
             return
         session.send(f"{target}: {len(rows)} file(s)"
                      f"{' (FROZEN)' if target in frozen else ''}"
@@ -1939,6 +1943,13 @@ def _cmd_status(session, args):
     except Exception as err:
         session.send(f"Queued      : unavailable ({err})")
     session.send(f"Frozen      : {len(getattr(config, 'frozen_queues', {}))} queue(s)")
+    # Only with DAILY_SEND_FAILS_LIMIT on (#1389): who it has paused.
+    if dcc.daily_send_fails_limit():
+        paused = dcc.paused_for_send_fails()
+        session.send("Paused      : " + (
+            f"{len(paused)} nick(s) until midnight for failed sends today: "
+            + ", ".join(f"{nick} ({fails})" for nick, fails in sorted(paused.items()))
+            + ". unpause <nick> lifts it." if paused else "nobody for failed sends today"))
     session.send(f"Timed bans  : {len(getattr(config, 'banned_users', {}))}")
     try:
         import db
@@ -2053,6 +2064,22 @@ def _cmd_unignore(session, args):
         return
     ok, message = security.lift_ban(nick)
     session.send(message)
+
+
+def _cmd_unpause(session, args):
+    """Lift a DAILY_SEND_FAILS_LIMIT pause (#1389): the nick's failed sends
+    today are forgotten, and its next request is queued as usual."""
+    import dcc
+    nick = args.strip()
+    if not nick or " " in nick:
+        session.send("Usage: unpause <nick>")
+        return
+    fails = dcc.unpause_send_fails(nick)
+    if not fails:
+        session.send(f"{nick} has no failed sends counted today; nothing to lift.")
+        return
+    session.send(f"{nick}'s {fails} failed send(s) today are forgotten; "
+                 f"its requests are taken again.")
 
 
 def _cmd_bans(session, args):
@@ -2806,6 +2833,7 @@ COMMANDS = {
     "ignore":     (_cmd_ignore,     "ignore a nick for some minutes (drops its requests)", "ignore <nick> <minutes>"),
     "clearandignore": (_cmd_clearandignore, "ignore a nick, then clear its queue - only if the ignore took", "clearandignore <nick> <minutes>"),
     "unignore":   (_cmd_unignore,   "end a timed ignore or ban now",     "unignore <nick>"),
+    "unpause":    (_cmd_unpause,    "lift a pause for failed sends today", "unpause <nick>"),
     "unban":      (_cmd_unban,      "remove a permanent wildcard ban",   "unban <pattern>"),
     "clearqueue": (_cmd_clearqueue, "force-clear another user's queue",  "clearqueue <nick>"),
     "rehash":     (_cmd_rehash,     "reload modules in place",           "rehash"),
