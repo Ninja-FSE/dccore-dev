@@ -3322,12 +3322,15 @@ alias dccore.sw.home.row {
 ; $1 a frame's number, $2 a row's, $3 on, wait or off: the row's text in
 ; green, amber or red (#1396) - set on every fill, so no colour outlives the
 ; state it was for. The theme has no such colours: these are darker on the
-; light face and lighter on the dark one. Kept (home.ink) for
-; dccore.theme.dcxtexts, which gives every value the theme's text colour
-; once, just after the window is made - after its first fill
+; light face and lighter on the dark one. The face is the one the window
+; was made with (sw.s dark), as for the rest of the panel, not the live
+; theme: a theme changed while it is open applies when it next opens
+; (#1406). Kept (home.ink) for dccore.theme.dcxtexts, which gives every
+; value the theme's text colour once, just after the window is made -
+; after its first fill
 alias dccore.sw.home.ink {
   var %r = $dccore.sw.m($+(home.f.,$1,.r.,$2)), %id = $iif($gettok(%r,2,32),$gettok(%r,2,32),$gettok(%r,1,32))
-  var %dark = $iif($dccore.theme.dialogsdark,1,0), %rgb
+  var %dark = $iif($dccore.sw.s(dark),1,0), %rgb
   if ($3 == on) { %rgb = $iif(%dark,$rgb(110,200,110),$rgb(0,128,0)) }
   elseif ($3 == wait) { %rgb = $iif(%dark,$rgb(230,170,50),$rgb(160,100,0)) }
   else { %rgb = $iif(%dark,$rgb(240,100,100),$rgb(192,0,0)) }
