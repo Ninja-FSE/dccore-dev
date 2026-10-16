@@ -506,10 +506,23 @@ def _answer_target_change(line):
     return seconds
 
 
-def reclaim_main_nick(line, sock):
-    """Somebody quit or parted (irc_loop() guards on the QUIT/PART event).
-    If it was the client holding the bot's main nick, and the bot is not on
-    its main nick, ask for the main nick back. Returns True if it asked.
+# The least time between two asks for the main nick, in seconds.
+NICK_RECLAIM_GAP_SECONDS = 30.0
+
+
+def reclaim_main_nick(line, sock, now=None):
+    """Somebody quit or changed nick (irc_loop() guards on the QUIT/NICK
+    event). If it was the client holding the bot's main nick, and the bot is
+    not on its main nick, ask for the main nick back. Returns True if it asked.
+
+    QUIT AND NICK, NOT PART, AND AT MOST ONCE PER NICK_RECLAIM_GAP_SECONDS.
+    A PART releases no nick, so the server refused every ask it caused - and
+    each was a NICK written straight to the socket, outside the outbound
+    pacer. Whoever held the bot's main nick could PART and JOIN all the
+    channels it shares with the bot, one line each way, and draw one unpaced
+    NICK per channel per round, past the server's flood limit. The gap
+    bounds what is left: a holder that quits and comes straight back costs
+    one NICK per gap, however often it does it.
 
     Was a block inside irc_loop() until #1291, step 2 of splitting that loop
     (docs/FUTURE.md). Moved unchanged.
@@ -523,7 +536,12 @@ def reclaim_main_nick(line, sock):
         return False
     if event_source_nick(line) != main_nick.lower():
         return False
-    print(f"[NICK RECOVERY] The main nick {main_nick} logged out. Reclaiming it now...")
+    now = time.time() if now is None else now
+    last = runtime.nick_reclaim_asked_at
+    if last is not None and 0 <= now - last < NICK_RECLAIM_GAP_SECONDS:
+        return False
+    runtime.nick_reclaim_asked_at = now
+    print(f"[NICK RECOVERY] The main nick {main_nick} is free. Reclaiming it now...")
     try:
         # Asked for, not yet held: config.NICKNAME follows the server's NICK
         # event (#635).
@@ -4834,8 +4852,9 @@ def irc_loop():
                     # text. Together with the 433 handler above that was a two-line flood:
                     # forge a 433 to push the bot onto its alt nick, forge a QUIT to pull it
                     # back, repeat. Two unpaced NICK commands per round, from channel text.
-                    # reclaim_main_nick() does the rest (#1291).
-                    if is_user_event(line, "QUIT") or is_user_event(line, "PART"):
+                    # reclaim_main_nick() does the rest (#1291). A PART frees no
+                    # nick, so it is no reason to ask; a NICK away from it does.
+                    if is_user_event(line, "QUIT") or is_user_event(line, "NICK"):
                         reclaim_main_nick(line, s)
 
 
