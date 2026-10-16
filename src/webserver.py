@@ -440,6 +440,7 @@ from web_list_update import (  # noqa: F401
 # name, so webserver.<name> still answers for each of them.
 from web_settings import (  # noqa: F401
     CHOICE_LABELS,
+    EDITED_ELSEWHERE,
     SETTINGS_CATEGORIES,
     SETTINGS_LABELS,
     SETTINGS_RESTART_ONLY,

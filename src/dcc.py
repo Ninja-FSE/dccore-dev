@@ -21,6 +21,7 @@ import announce
 import db
 import library
 import runtime
+import speed_cap
 import transfer_log
 
 # THE queue lock: bound to runtime.py's object, not constructed here - dcc.py is
@@ -115,7 +116,7 @@ def resolves_to_a_stream(path, windows=None):
 
     The second gate behind names_a_hidden_part_of_a_file(): that one reads
     the request, this reads the path the lookup settled on, whichever of the
-    memories, the list scan or the walk produced it. On Windows a ':' after
+    memories or the list scan produced it. On Windows a ':' after
     the drive can only be an alternate data stream.
     """
     if windows is None:
@@ -128,7 +129,8 @@ def resolves_to_a_stream(path, windows=None):
 
 # A LIBRARY-WIDE LOOKUP IS THE EXPENSIVE THING A REQUEST CAN ASK FOR (#580).
 # A name that is not in the first folder's root makes handle_download_request()
-# read every published list and then walk every configured folder; each request
+# read every published list (until #1376 it then walked every configured folder
+# too); each request
 # runs on its own thread, and file requests no longer pass the flood gate (#888).
 # Two bounds, both cheap, and a third per nick below (#969): only a few scans at a time (the rest are told the bot
 # is busy, at once, without touching the disk), and a name that just missed is
@@ -778,12 +780,17 @@ def nicks_waiting_for_a_slot(except_key="", plain_files_only=False):
     """Queue keys of the nicks that have a file waiting and no send running, longest wait first.
 
     The caller holds queue_lock. A nick counts once it is in a channel the bot
-    is in, is not frozen, and is neither sending nor claimed. With
+    is in, is not frozen, and is neither sending nor claimed, nor holding a
+    large file back while another is sent (#1387). With
     plain_files_only a nick whose next row is a folder pack is left out: only
     the specific-user path in check_queue_and_send() can start those.
     """
     busy = {str(tx.get("user", "")).lower() for tx in config.active_transfers}
     busy |= set(getattr(config, "user_processing_lock", ()) or ())
+    # A nick whose next file is large waits while another large file is being
+    # sent (#1387): it could not take a slot now, so it does not keep one.
+    large_limit = _large_file_bytes()
+    large_running = _a_large_send_is_running(large_limit)
     candidates = []
     for key, rows in list(config.dcc_queue.items()):
         key = str(key).lower()
@@ -791,6 +798,8 @@ def nicks_waiting_for_a_slot(except_key="", plain_files_only=False):
             continue
         head = rows[0]
         if plain_files_only and (not isinstance(head, dict) or head.get("is_unpacked_rar_folder")):
+            continue
+        if large_running and _row_is_large(head, large_limit):
             continue
         candidates.append(key)
     if not candidates:
@@ -856,6 +865,127 @@ def a_list_may_go_first(transfers=None):
     """
     held = config.active_transfers if transfers is None else transfers
     return not any(tx.get("list_went_first") for tx in held)
+
+
+# ONE LARGE FILE AT A TIME (#1387). With MAX_DCC_SLOTS = 3 and three nicks each
+# asking for a multi-gigabyte archive, every slot was held for hours and every
+# ordinary track waited behind them. LARGE_FILE_MB (0 = off) makes a file of at
+# least that many MB large, and at most one large file is sent at a time: a
+# nick whose next file is large, while another large file is being sent, is
+# passed over as a nick already sending is, keeps its place, and the slot goes
+# to the next in line. When the large send ends, the longest wait is next.
+#
+# The size is recorded on the row when it is queued, where the path has just
+# been resolved, because stat() must not run under queue_lock (#605). A row
+# without one counts as small: rows from before this change and folder packs,
+# whose archive does not exist until it is made. So a guess never holds a
+# file back. The bot's own list is never large.
+QUEUED_SIZE_KEY = "queued_size"
+LARGE_FILE_WAIT_NOTE = "waiting: one large file at a time"
+
+
+def _large_file_bytes():
+    """LARGE_FILE_MB in bytes; 0 when the rule is off or the setting is unusable."""
+    try:
+        megabytes = int(getattr(config, "LARGE_FILE_MB", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return megabytes * 1024 * 1024 if megabytes > 0 else 0
+
+
+def _size_on_disk(path):
+    """The file's size for its queue row, or 0 when it cannot be read. Never under queue_lock (#605)."""
+    try:
+        return int(os.path.getsize(platform_compat.long_path(path)))
+    except (OSError, TypeError, ValueError):
+        return 0
+
+
+def _recorded_size(row):
+    """The size a queue row was given when it was queued; 0 for none, or one a hand edit broke."""
+    if not isinstance(row, dict):
+        return 0
+    try:
+        size = int(row.get(QUEUED_SIZE_KEY) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, size)
+
+
+def _is_the_list(row):
+    """A queue row or a transfer row for the bot's own list, which is never large."""
+    return isinstance(row, dict) and (is_a_list_row(row) or is_a_list_row(row.get("queue_row"))
+                                      or list_mod.is_list_artifact_name(str(row.get("file") or "")))
+
+
+def _row_is_large(row, limit):
+    """Is this queue row a large file under `limit` bytes (#1387)? Unknown sizes are small."""
+    if not limit or _is_the_list(row):
+        return False
+    return _recorded_size(row) >= limit
+
+
+def _transfer_is_large(tx, limit):
+    """Is this transfer a large file? Its real size once the send has read it; before
+    that, the size its queue row (or the claim itself) was given when it was queued."""
+    if not limit or _is_the_list(tx):
+        return False
+    size = 0
+    try:
+        size = int(tx.get("size") or 0)
+    except (TypeError, ValueError):
+        size = 0
+    if not size:
+        size = _recorded_size(tx) or _recorded_size(tx.get("queue_row"))
+    return size >= limit
+
+
+def _a_large_send_is_running(limit, transfers=None):
+    """Is a large file being sent, or claimed for sending? Caller holds queue_lock, or passes a copy."""
+    held = config.active_transfers if transfers is None else transfers
+    return bool(limit) and any(_transfer_is_large(tx, limit) for tx in held if isinstance(tx, dict))
+
+
+def waits_for_a_large_send(rows, transfers=None):
+    """Is this nick's next file large while another large file is being sent (#1387)?
+
+    `rows` is the nick's queue. The dispatcher passes the nick over while this
+    holds; the console and the Queue page show it as "waiting: one large file
+    at a time". `transfers` is a copy of active_transfers for a reader that
+    holds no lock; by default the live list, under queue_lock.
+    """
+    limit = _large_file_bytes()
+    if not limit or not rows:
+        return False
+    return _row_is_large(rows[0], limit) and _a_large_send_is_running(limit, transfers)
+
+
+def _say_a_large_file_waits(nick, row):
+    print(f"[DCC QUEUE] {nick}'s next file is large ({_recorded_size(row) // (1024 * 1024)} MB) and "
+          f"another large file is being sent - the slot goes to the next in line.")
+
+
+def _fill_the_slots_a_large_send_left(irc_sock, passed_over, dispatched_row):
+    """One more pass of the sweep while a slot is still free (#1387).
+
+    A trigger dispatches one nick, which was always enough: a slot stayed
+    free only while nobody could use it. A large file held back can leave a
+    slot free with that nick waiting, and when the large send ends the nick
+    and the finished one can both be due with one trigger between them.
+
+    Only then: when the pass that dispatched `dispatched_row` passed over a
+    large head (`passed_over`), or the row it dispatched is large. Not after
+    every dispatch: a send refused at once (no address, no free port) hands
+    its slot straight back, and a pass after each of those refused the same
+    nick over and over, a NOTICE each time. The pass this starts is a
+    fill_pass, which starts none of its own.
+    """
+    limit = _large_file_bytes()
+    if not limit or not (passed_over or _row_is_large(dispatched_row, limit)):
+        return
+    if len(config.active_transfers) < config.MAX_DCC_SLOTS:
+        threading.Thread(target=check_queue_and_send, args=(irc_sock, "system_next_trigger_fallback"),
+                         kwargs={"fill_pass": True}, daemon=True).start()
 
 
 def list_first_rank(user_key, rows, lists_first):
@@ -1308,6 +1438,33 @@ class _ReceiverStalled(Exception):
         self.acked = acked
 
 
+class _TooSlowWhileOthersWait(Exception):
+    """Acknowledged under SLOW_SEND_MIN_KB over the last
+    SLOW_SEND_WINDOW_SECONDS, with every slot taken and someone waiting for
+    one (#1388). `speed` is that rate in bytes per second."""
+
+    def __init__(self, acked, speed):
+        super().__init__(acked, speed)
+        self.acked = acked
+        self.speed = speed
+
+
+class _SourceUnreadable(Exception):
+    """Our own file could not be opened or read mid-send (#1389).
+
+    Not an OSError on purpose. Since Python 3.10 socket.timeout IS
+    TimeoutError, and a network share that hiccups raises TimeoutError,
+    ConnectionResetError or ConnectionAbortedError from open() or read() -
+    the very types start_dcc_send() takes for the receiver timing out or
+    closing. Wrapped, a NAS hiccup is reported as the bot's failure and never
+    counts toward a downloader's DAILY_SEND_FAILS_LIMIT.
+    """
+
+    def __init__(self, err):
+        super().__init__(err)
+        self.err = err
+
+
 class _ShortSend(Exception):
     """Raised to skip the completion bookkeeping when a send ended early.
 
@@ -1516,6 +1673,201 @@ def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, 
 
     print("[DCC QUEUE] " + str(user) + ": " + outcome + ((" (" + reason + ")") if reason else "") + ".")
     return retained
+
+
+# ---------------------------------------------------------------------
+# A NICK WHOSE SENDS KEEP FAILING (#1389): DAILY_SEND_FAILS_LIMIT.
+# ---------------------------------------------------------------------
+# MAX_SEND_FAILS above is per queued file; this is per nick, per day. The
+# count is runtime.failed_transfers, under runtime.failed_transfers_lock,
+# keyed like dcc_queue. In memory only: a restart forgives, which a daily
+# limit can afford.
+#
+# WHAT COUNTS is decided where a send fails, not here: start_dcc_send() sets
+# receiver_failed in the handlers for a receiver that never connected,
+# stalled, let a write time out or closed the connection before it had the
+# whole file, and finish_send() counts it. Everything else that ends a send
+# short leaves it unset - a failure on our side (the file vanished or
+# shrank, the handshake could not be sent, no port), and a stop the bot
+# makes itself. A new way for the bot to stop a send gets its own handler
+# and does not set it. The pack cancels, the operator's and the user's own
+# remove, never reach a send at all.
+
+def _send_fails_today():
+    """Today, by the bot's local clock: the day a failure is counted in. A
+    function of its own so a test can move midnight."""
+    import datetime
+    return datetime.date.today()
+
+
+# "NEVER CONNECTED" IS OFTEN OUR SIDE. A stale MY_IP_OR_DOCK (an ISP's daily
+# reconnect), a port forward the router lost or a firewall in front of the
+# bot makes every offer go unanswered, and counting those would pause
+# everybody and empty every queue within minutes. Two rules, both reset by
+# the next send that connects (note_send_connected()):
+#   * before any send has connected since start-up, none counts;
+#   * a run of never-connected sends with no connect in between stops
+#     counting once it reaches NEVER_CONNECTED_STREAK sends to at least
+#     NEVER_CONNECTED_STREAK_NICKS different nicks - several downloaders
+#     failing the same way at once is the bot. One nick failing alone keeps
+#     counting: that is its own problem.
+NEVER_CONNECTED_STREAK = 3
+NEVER_CONNECTED_STREAK_NICKS = 2
+
+
+def note_send_connected():
+    """A DCC send's receiver connected: the bot's offers work, so the
+    never-connected streak starts again from nothing."""
+    with runtime.send_connected_lock:
+        runtime.send_connected_since_start = True
+        runtime.never_connected_streak = 0
+        runtime.never_connected_streak_nicks.clear()
+        runtime.never_connected_streak_logged = False
+
+
+def never_connected_counts(nick):
+    """Whether a send to `nick` whose receiver never connected may count
+    toward DAILY_SEND_FAILS_LIMIT; adds it to the streak either way. Not
+    before any send has connected since start-up, nor once the streak
+    (this send included) has reached NEVER_CONNECTED_STREAK sends to
+    NEVER_CONNECTED_STREAK_NICKS or more nicks. When it does not count, the
+    log says why - once per streak, not once per offer."""
+    with runtime.send_connected_lock:
+        runtime.never_connected_streak += 1
+        runtime.never_connected_streak_nicks.add(_send_fails_key(nick))
+        since_start = runtime.send_connected_since_start
+        broken = (runtime.never_connected_streak >= NEVER_CONNECTED_STREAK
+                  and len(runtime.never_connected_streak_nicks) >= NEVER_CONNECTED_STREAK_NICKS)
+        if since_start and not broken:
+            return True
+        say = not runtime.never_connected_streak_logged
+        runtime.never_connected_streak_logged = True
+        streak = runtime.never_connected_streak
+        nicks = len(runtime.never_connected_streak_nicks)
+    if say:
+        why = (f"no send has connected since start-up" if not since_start
+               else f"{streak} offers to {nicks} different nicks have gone unanswered "
+                    f"since the last send that connected")
+        print(f"[DCC PAUSE] Sends that never connected are not counted toward "
+              f"DAILY_SEND_FAILS_LIMIT until one connects: {why}, so it looks like "
+              f"the bot's own address (MY_IP_OR_DOCK) or port forwarding.")
+    return False
+
+
+def daily_send_fails_limit():
+    """DAILY_SEND_FAILS_LIMIT as a whole number; 0, off, for anything that
+    is not a positive one."""
+    try:
+        return max(0, int(getattr(config, "DAILY_SEND_FAILS_LIMIT", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _send_fails_key(nick):
+    """The dcc_queue key of `nick`: the count follows the queue it pauses."""
+    return str(nick or "").lower().strip()
+
+
+def _never_paused(key):
+    """An admin (ADMIN_NICK) is never counted or paused."""
+    import commands
+    return key in commands.admin_nicks()
+
+
+def send_fails_paused(nick):
+    """How many of `nick`'s sends failed today, when that has paused it; 0
+    when it is not paused - the limit off, an admin, under the limit, or the
+    count from a day that has ended."""
+    limit = daily_send_fails_limit()
+    key = _send_fails_key(nick)
+    if not limit or not key or _never_paused(key):
+        return 0
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        entry = runtime.failed_transfers.get(key)
+        fails = int(entry["fails"]) if entry and entry.get("day") == today else 0
+    return fails if fails >= limit else 0
+
+
+def paused_for_send_fails():
+    """{nick_key: failed sends today} for every nick paused right now."""
+    limit = daily_send_fails_limit()
+    if not limit:
+        return {}
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        counted = {key: int(entry["fails"]) for key, entry in runtime.failed_transfers.items()
+                   if entry.get("day") == today and int(entry["fails"]) >= limit}
+    return {key: fails for key, fails in counted.items() if not _never_paused(key)}
+
+
+def note_failed_send(nick):
+    """Count one failed send against `nick` (#1389) and return its count for
+    today; 0 when nothing is counted (the limit off, or an admin).
+
+    The first count of a new day finds yesterday's counts and drops them,
+    so midnight resets every nick and the dict never holds more than a day.
+    The failure that reaches the limit pauses the nick: its queued files are
+    removed and it is told why (_pause_for_send_fails). Once, not on every
+    failure after it; a limit raised past the count and lowered again
+    pauses it again.
+    """
+    limit = daily_send_fails_limit()
+    key = _send_fails_key(nick)
+    if not limit or not key or _never_paused(key):
+        return 0
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        for stale in [k for k, entry in runtime.failed_transfers.items() if entry.get("day") != today]:
+            del runtime.failed_transfers[stale]
+        entry = runtime.failed_transfers.setdefault(key, {"day": today, "fails": 0, "paused": False})
+        entry["fails"] += 1
+        fails = entry["fails"]
+        pause_now = fails >= limit and not entry["paused"]
+        entry["paused"] = fails >= limit
+    print(f"[DCC PAUSE] {nick}: {fails} failed send(s) today, of {limit} allowed.")
+    if pause_now:
+        _pause_for_send_fails(nick, key, fails)
+    return fails
+
+
+def _pause_for_send_fails(nick, key, fails):
+    """`nick` has reached DAILY_SEND_FAILS_LIMIT: drop its queued files, as
+    !clearqueue would, and say why - to the nick and to the operator."""
+    import db
+    with queue_lock:
+        rows = config.dcc_queue.get(key) or []
+        removed = len(rows)
+        if rows:
+            # Before the rows go: they are the only record of their archives.
+            for temp_path in discard_orphaned_temp_archives(key):
+                print(f"[DCC PAUSE] Removed orphaned temp archive: {temp_path}")
+            config.dcc_queue.pop(key, None)
+        getattr(config, "frozen_queues", {}).pop(key, None)
+    if removed:
+        try:
+            db.save_dcc_queue()
+        except Exception as save_err:
+            print("[DCC QUEUE ERROR] Could not persist the queue: " + str(save_err))
+    print(f"[DCC PAUSE] {nick} is paused until midnight after {fails} failed sends today; "
+          f"{removed} queued file(s) removed.")
+    announce.send_debug(f"{config.C_BOLD}{nick}{config.C_RESET} is paused until midnight: "
+                        f"{fails} failed sends today, {removed} queued file(s) removed. "
+                        f"unpause {nick} lifts it.", category="INFO")
+    oserve_mod = sys.modules.get("oserve")
+    if oserve_mod:
+        oserve_mod.queue_message(nick, f"NOTICE {nick} :{config.C_BOLD}"
+                                       f"{announce.send_fails_paused_text(fails, removed)}{config.C_RESET}\r\n")
+
+
+def unpause_send_fails(nick):
+    """Forget `nick`'s failed sends today, lifting a pause (the console's
+    `unpause`). Returns how many there were; 0 when there were none."""
+    key = _send_fails_key(nick)
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        entry = runtime.failed_transfers.pop(key, None)
+    return int(entry["fails"]) if entry and entry.get("day") == today else 0
 
 
 def get_total_queued_count():
@@ -2178,7 +2530,7 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         return False
 
 
-def claim_next_in_line():
+def claim_next_in_line(passed_over=None):
     """Section B of check_queue_and_send(): under queue_lock, give a free
     slot to the next in line and claim them. Returns (promoted,
     promoted_key, pack_to_wake, absent_users):
@@ -2197,7 +2549,9 @@ def claim_next_in_line():
 
     Was section B's sweep inside check_queue_and_send() until #1304, step 3
     of splitting dcc.py's largest functions (docs/FUTURE.md). Moved
-    unchanged.
+    unchanged. Since #1387 a nick whose next file is large is passed over
+    while another large file is being sent; `passed_over`, a list if given,
+    gets the nick of each one, so the caller knows to fill the slot it left.
     """
     promoted = None
     promoted_key = None
@@ -2216,6 +2570,11 @@ def claim_next_in_line():
         # while no other list that went first is being sent; then the
         # longest wait, as before.
         lists_first = a_list_may_go_first()
+        # One large file at a time (#1387). Read once: the sweep claims at
+        # most one nick and then stops, and a claim carries its row, whose
+        # recorded size a concurrent caller then counts.
+        large_limit = _large_file_bytes()
+        large_running = _a_large_send_is_running(large_limit)
         for waiting_user, user_files in sorted(config.dcc_queue.items(),
                                                key=lambda entry: list_first_rank(entry[0], entry[1], lists_first)):
             # Use the dcc_queue dict key for every lock/queue operation. The old code
@@ -2327,6 +2686,14 @@ def claim_next_in_line():
                 if pack_to_wake is not None and len(config.active_transfers) + 1 >= config.MAX_DCC_SLOTS:
                     break
 
+                # Passed over, keeping its place, while another large file
+                # is being sent (#1387): the slot goes to the next in line.
+                if large_running and _row_is_large(g_next, large_limit):
+                    _say_a_large_file_waits(real_username, g_next)
+                    if passed_over is not None:
+                        passed_over.append(real_username)
+                    continue
+
                 # CLAIM the user before releasing the lock, so a concurrent caller sees
                 # them as busy. start_dcc_send's finally already discards this key on
                 # every exit path, including the early aborts.
@@ -2349,8 +2716,12 @@ def claim_next_in_line():
     return promoted, promoted_key, pack_to_wake, absent_users
 
 
-def check_queue_and_send(irc_sock, completed_user):
-    """Check the queues and run RAR packing one at a time, without flooding the server."""
+def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
+    """Check the queues and run RAR packing one at a time, without flooding the server.
+
+    fill_pass is the one extra sweep a dispatch starts for a slot a held
+    large file left free (#1387): it starts no further one.
+    """
     import announce as announce_mod
     import subprocess
     import threading
@@ -2659,11 +3030,23 @@ def check_queue_and_send(irc_sock, completed_user):
                         print(f"[DCC-BLOCK] {completed_user} is already claimed elsewhere; skipping duplicate dispatch.")
                         return
 
+                    # ONE LARGE FILE AT A TIME (#1387), asked in the hold that
+                    # claims: their own next file waits, keeping its place,
+                    # while another large file is being sent, and the slot
+                    # goes to the sweep.
+                    large_waits = waits_for_a_large_send([next_file])
+                    # The nicks this slot passes over for a large file:
+                    # nicks_waiting_for_a_slot() left them out of the line
+                    # above, so they did not send this nick to the back.
+                    held_back = [key for key, rows in config.dcc_queue.items()
+                                 if str(key).lower() != user_key and key not in config.frozen_queues
+                                 and waits_for_a_large_send(rows)]
+
                     # THE LIST CAP, READ AGAIN UNDER THE CLAIM (#1205). The rank
                     # above was taken under an earlier hold of the lock, and a
                     # concurrent trigger may have sent another list ahead since.
                     list_cap_reached = list_went_first and not a_list_may_go_first()
-                    if not list_cap_reached:
+                    if not list_cap_reached and not large_waits:
                         if not hasattr(config, 'user_processing_lock'):
                             config.user_processing_lock = set()
                         config.user_processing_lock.add(completed_user.lower())
@@ -2681,6 +3064,11 @@ def check_queue_and_send(irc_sock, completed_user):
                     print(f"[DCC QUEUE] {completed_user}'s list waits: another list went first meanwhile.")
                     check_queue_and_send(irc_sock, "system_next_trigger_fallback")
                     return
+                if large_waits:
+                    # The sweep passes this nick over too, and says so when
+                    # it reaches them: one log line, not two.
+                    check_queue_and_send(irc_sock, "system_next_trigger_fallback")
+                    return
 
                 # STILL SHARED? (#1268) The row carries the path it was
                 # resolved to when it was asked for, and the dashboard's
@@ -2696,6 +3084,8 @@ def check_queue_and_send(irc_sock, completed_user):
 
                 announce_mod.send_dcc_sending_notice(completed_user, f_name, path=f_path, channel=target_chan)
                 threading.Thread(target=start_dcc_send, args=(irc_sock, completed_user, f_path, f_name, target_chan, next_file), daemon=True).start()
+                if not fill_pass:
+                    _fill_the_slots_a_large_send_left(irc_sock, held_back, next_file)
                 return
         else:
             # Not in any of our channels: freeze and start the countdown. The
@@ -2724,9 +3114,11 @@ def check_queue_and_send(irc_sock, completed_user):
     # branch has always dispatched outside the lock; this is the same shape.
     promoted = None
     pack_to_wake = None
+    # The nicks this sweep passed over for a large file (#1387).
+    held_back = []
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
         # The sweep under queue_lock is claim_next_in_line() (#1304).
-        promoted, promoted_key, pack_to_wake, swept_absent = claim_next_in_line()
+        promoted, promoted_key, pack_to_wake, swept_absent = claim_next_in_line(passed_over=held_back)
         absent_users.extend(swept_absent)
 
     if promoted is not None and drop_an_unshared_row(promoted[0], promoted[4], lock_key=promoted_key):
@@ -2742,6 +3134,8 @@ def check_queue_and_send(irc_sock, completed_user):
 
         announce_mod.send_dcc_sending_notice(real_username, g_name, path=g_path, channel=g_chan)
         threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
+        if not fill_pass:
+            _fill_the_slots_a_large_send_left(irc_sock, held_back, g_next)
 
     if pack_to_wake is not None:
         print(f"[DCC QUEUE] A slot is free and {pack_to_wake}'s folder pack has waited longest; starting it.")
@@ -3040,6 +3434,10 @@ def _send_resume_accept(irc_sock, user, key, clear_pending=False):
     except Exception as err:
         print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
         return False
+    # Recorded with no lane (#1386): an ACCEPT the server refuses is not sent
+    # again, since the position in it may be stale by then - but the record
+    # keeps that refusal from being taken for an older line to this user.
+    runtime.note_paced_line(reply, None)
     print(f"[DCC-RESUME] {user} already has {position} of {size} bytes of "
           f"{offered_name}; accepted and will send from there.")
     import stats_mgr
@@ -3457,8 +3855,8 @@ def path_from_published_lists(list_paths, requested_file, requested_size_hint, w
         # [0], and the line starts with the separator - so [0]
         # is the empty string on every line here. The filename
         # is in [1]; the whole list lookup was dead code
-        # without it, leaving the os.walk() below to answer
-        # every request.
+        # without it, leaving the os.walk() that followed it
+        # (gone since #1376) to answer every request.
         parts_nick = line_clean.split(request_prefix, 1)
         rest_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
 
@@ -3587,6 +3985,14 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 print(f"[DCC] {user}'s private request is a {routed!r} row; "
                       f"answering from that list rather than {wanted_list!r}.")
                 wanted_list = routed
+    # A nick paused by DAILY_SEND_FAILS_LIMIT (#1389) is refused here, before
+    # any lookup: the request is not queued, and the notice says why.
+    paused_fails = send_fails_paused(user)
+    if paused_fails:
+        print(f"[DCC PAUSE] Refused a request from {user}: {paused_fails} failed sends "
+              f"today, paused until midnight.")
+        announce.send_fails_paused_notice(user, paused_fails, target_chan)
+        return
     # ---------------------------------------------------------------------
     # The global maintenance gate:
     # ---------------------------------------------------------------------
@@ -3971,7 +4377,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # Every configured folder, in the operator's order (#164). The
             # first is still where a bare filename is guessed to be, which is
             # what a single-folder install has always done; the rest are what
-            # the list lookup and the walk below fall through to.
+            # the list lookup below falls through to.
             search_roots = [os.path.abspath(folder.path)
                             for folder in library.folders(wanted_list)]
             base_directory = search_roots[0]
@@ -4012,9 +4418,9 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
 
         if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
             # THE EXPENSIVE PART, BOUNDED (#580). A name that is not in the first
-            # folder's root is looked up by streaming every published list and,
-            # failing that, walking every configured folder - a full-library
-            # metadata scan, on this request's own thread, for one ~40 byte line.
+            # folder's root is looked up by streaming every published list - on
+            # a large library tens of megabytes, on this request's own thread,
+            # for one ~40 byte line (until #1376 a walk of every folder followed).
             # The flood gate no longer counts file requests (#888), so the cost
             # is bounded here instead: a name that just missed is answered
             # from memory, only a few scans run at once, and one nick gets one
@@ -4088,18 +4494,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                             full_path = found_in_lists
                     except Exception as list_err:
                         print(f"[DCC-LOOKUP ERROR] {list_err}")
-                if not os.path.exists(platform_compat.long_path(full_path)):
-                    # Last resort, once the list lookup has not placed the file:
-                    # walk for it. Each configured folder in turn, in the
-                    # operator's order, so the same name in two of them resolves
-                    # the way the list's own ordering already does.
-                    for search_root in search_roots:
-                        for root, dirs, files in os.walk(search_root):
-                            if requested_file in files:
-                                full_path = os.path.join(root, requested_file)
-                                break
-                        if os.path.exists(platform_compat.long_path(full_path)):
-                            break
+                # NO WALK AFTER THE LISTS (#1376). A name the published lists
+                # do not place is not found. There used to be a last resort
+                # here, from OmenServe: os.walk() every configured folder for
+                # the name. It could only find a file no list names, which
+                # nobody can have got from this bot, and it had no time
+                # limit: over a network share it ran for minutes, holding a
+                # scan slot and this nick's turn, so every request of theirs
+                # was answered "busy" - and a minute after it ended, the next
+                # request for the same name walked again. A file added since
+                # the last rebuild is requestable after the next one.
             finally:
                 if recalled is None:
                     _library_scans.release()
@@ -4133,6 +4537,20 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             announce.send_dcc_error(user, "file_not_found", target_chan)
             return
 
+        # WHAT THE LIST LEAVES OUT IS NOT SERVED (#1376). The list is what
+        # this bot serves, and a file type it leaves out - LIST_IGNORED_EXTENSIONS
+        # or the list's own exclusions (#1295) - is not in it. Two shortcuts
+        # above find a file without reading the list: the name in the first
+        # folder's root, and a folder a recent lookup resolved into (#886). So
+        # the file they found is held to the list's own rule here, the same
+        # update_list.is_listed_file() the build uses.
+        if not is_master_zip and not update_list.is_listed_file(
+                full_path, update_list.ignored_extensions(wanted_list)):
+            print(f"[DCC-LOOKUP] {user}'s request for {requested_file!r} refused: "
+                  f"the list leaves its file type out.")
+            announce.send_dcc_error(user, "file_not_found", target_chan)
+            return
+
         file_name = os.path.basename(full_path)
 
         # The console feed (#528): the request is real and the file exists -
@@ -4141,6 +4559,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # is reported by its refusal.
         announce.feed_event("REQUEST", f'{user} asked for "{file_name}"{privately_from(private, row_chan)}',
                             nick=user, channel=row_chan, kind="file", name=file_name)
+
+        # The size goes on the row now, outside the lock (#1387, #605): the
+        # one-large-file rule reads it under queue_lock, where no stat may
+        # run. The list is never large, so it gets none.
+        queued_size = 0 if is_master_zip else _size_on_disk(full_path)
 
         with queue_lock:
             # Asking again for what is already waiting adds nothing (#1077):
@@ -4193,6 +4616,31 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                          and not transfers_are_paused()
                          and (list_goes_first
                               or (not user_has_queue and a_slot_is_free_beyond_those_waiting(user_key))))
+            # ONE LARGE FILE AT A TIME (#1387). A large file is queued,
+            # keeping its place, instead of sent now: while another large
+            # file is being sent, and while a nick that has waited longer
+            # has a large file next - the large turn is theirs. Just after
+            # a large send ends that nick is waiting for the trigger it
+            # started, a slot is idle, and a newcomer's large file would
+            # otherwise take the turn from them.
+            #
+            # Asked only of a request that would be sent now (the `if
+            # sends_now`), on purpose: that is the nick's next file. One
+            # queued for any other reason - behind the nick's own files, or
+            # with every slot taken - is not held back by this rule, and the
+            # log line below would say it was.
+            large_limit = _large_file_bytes()
+            large_running = False
+            large_ahead = None
+            if sends_now and _row_is_large({QUEUED_SIZE_KEY: queued_size, "file": file_name}, large_limit):
+                large_running = _a_large_send_is_running(large_limit)
+                if not large_running:
+                    large_ahead = next((key for key in nicks_waiting_for_a_slot(user_key)
+                                        if config.dcc_queue.get(key)
+                                        and _row_is_large(config.dcc_queue[key][0], large_limit)), None)
+            large_waits = large_running or large_ahead is not None
+            if large_waits:
+                sends_now = False
             # It went first only if the rule for files would have queued it.
             list_went_first = bool(sends_now and list_goes_first
                                    and (user_has_queue or not a_slot_is_free_beyond_those_waiting(user_key)))
@@ -4206,6 +4654,12 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     next_file_fake["private"] = True
                 claim = {"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name,
                          "path": full_path}
+                # This claim has no queue row to carry the size, and a
+                # concurrent dispatch must see a large file from the claim
+                # on, before the send reads its real size (#1387).
+                if queued_size:
+                    next_file_fake[QUEUED_SIZE_KEY] = queued_size
+                    claim[QUEUED_SIZE_KEY] = queued_size
                 if is_master_zip:
                     next_file_fake[LIST_ROW_KEY] = True
                 if list_went_first:
@@ -4220,6 +4674,13 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                                    "queued_at": time.time()})
                 if private:
                     config.dcc_queue[user_key][-1]["private"] = True
+                if queued_size:
+                    config.dcc_queue[user_key][-1][QUEUED_SIZE_KEY] = queued_size
+                if large_running:
+                    _say_a_large_file_waits(user, config.dcc_queue[user_key][-1])
+                elif large_ahead is not None:
+                    print(f"[DCC QUEUE] {user}'s file is large ({queued_size // (1024 * 1024)} MB) and "
+                          f"{large_ahead} has waited longer with a large file next - it is queued behind them.")
                 user_pos = len(config.dcc_queue[user_key])
                 if is_master_zip:
                     user_pos = put_the_list_first(config.dcc_queue[user_key])
@@ -4351,6 +4812,20 @@ class _AckTracker:
         return ((now if now is not None else time.time())
                 - self.last_advance_at) > ACK_STALL_SECONDS
 
+    def sending(self, now=None):
+        """More is about to be sent. A receiver that holds everything it has
+        been sent owes nothing, so the time since its last acknowledgement
+        is not silence, and the stall clock starts again here.
+
+        It used to start at the last acknowledgement whatever happened after
+        it, which only held while the sender never paused between chunks.
+        Under the bot's own upload cap (#1352) it does: a receiver that had
+        acknowledged the last chunk, followed by a wait past
+        ACK_STALL_SECONDS, read as stalled the instant the next chunk went.
+        """
+        if self.acked >= self.sent:
+            self.last_advance_at = now if now is not None else time.time()
+
 
 def _drain_acks(conn, tracker, wait=0.0):
     """Read whatever acknowledgements are waiting, without blocking the send.
@@ -4390,6 +4865,200 @@ def _wait_for_final_ack(conn, tracker, file_size):
             return None
         _drain_acks(conn, tracker, wait=0.25)
     return tracker.last_advance_at
+
+
+# A SEND THAT CRAWLS WHILE OTHERS WAIT (#1388). The stall check above catches a
+# receiver that has stopped; one on a bad link that still moves a few KB/s
+# could hold a slot for hours while the queue behind it did not move. With
+# SLOW_SEND_MIN_KB above 0 such a send is stopped, as a failed attempt, but
+# only while every slot is taken and somebody is waiting for one: with a slot
+# free nobody is kept waiting, so it may take as long as it takes.
+#
+# Measured fairly: bytes the receiver ACKNOWLEDGED, over about the last minute
+# rather than since the start, so a burst that recovers is not punished - and
+# not at all for the first minute after it connects (TCP ramp-up, a resume
+# finding its feet). Never while the bot's own upload cap (#1352) is what holds
+# the sends back: then the cap is slow, not the receiver.
+#
+# SLOW HAS TO BE THE RECEIVER'S FAULT. A full uplink with no cap set, a slow
+# disk or a cap above what the line really does makes EVERY send slow, and
+# stopping each in turn would only burn everybody's MAX_SEND_FAILS. So each
+# send publishes its window rate on its transfer row ("acked_bps"), and one is
+# stopped only while ANOTHER running send moved at least the floor over its
+# own window - proof the bot's side can deliver right now - and only if it is
+# the slowest of the rated sends, ties kept: one stop per decision. With one
+# slot, or one rated send, it never fires; that is the deliberate safe side.
+#
+# AND NOT TWICE FOR THE SAME TRADE. A row stopped for its speed carries
+# "stopped_for_speed", and a nick waiting with such a row at its head does not
+# count as waiting: two slow receivers would otherwise take the slot from
+# each other in turn. The mark lives on the queue row, so it is saved in
+# dcc_queue.txt with it, survives a restart, and goes when the row does.
+SLOW_SEND_GRACE_SECONDS = 60.0   # not judged until this long after it connected
+SLOW_SEND_WINDOW_SECONDS = 60.0  # its speed is what was acknowledged over about this long
+SLOW_SEND_CHECK_SECONDS = 0.5    # looked at no more often than this, not once per chunk
+# The upload cap binds while every send together moves at least this share of it.
+SLOW_SEND_CAP_NEAR = 0.9
+# The transfer-row key a send publishes its window rate under (bytes/s), and
+# the queue-row mark of a row stopped for its speed.
+ACKED_RATE = "acked_bps"
+STOPPED_FOR_SPEED = "stopped_for_speed"
+
+# The watch's clock. A module-level name so a test can drive it, the way
+# _AckTracker.stalled() takes now=.
+_slow_send_clock = time.monotonic
+
+
+def slow_send_floor():
+    """SLOW_SEND_MIN_KB in bytes per second; 0 when it is off. A value that is
+    not a positive number is off. Read the way the speed caps are: the same
+    KB/s setting, the same rule for an odd value."""
+    return speed_cap.rate("SLOW_SEND_MIN_KB")
+
+
+def upload_cap_binds(total_bps):
+    """Is the bot's own upload cap (#1352) what holds the sends back? True
+    while MAX_UPLOAD_KB is set and every send together (`total_bps`) moves
+    at least SLOW_SEND_CAP_NEAR of it."""
+    cap = speed_cap.rate(speed_cap.UPLOAD)
+    return bool(cap) and total_bps >= cap * SLOW_SEND_CAP_NEAR
+
+
+def others_wait_for_a_slot():
+    """Is every slot taken, with a nick waiting that a freed one could go to?
+
+    Takes queue_lock, so it is asked only once a send is already too slow.
+    The waiting nicks are nicks_waiting_for_a_slot()'s - in a channel, not
+    frozen, nothing running - which is who the dispatcher would hand the
+    slot to; a nick whose next row is a folder pack counts only while no
+    pack is being made, as check_queue_and_send() has it. A nick whose next
+    row was itself stopped for its speed does not count (STOPPED_FOR_SPEED).
+    """
+    with queue_lock:
+        if len(config.active_transfers) < config.MAX_DCC_SLOTS:
+            return False
+        packs_can_start = not getattr(config, "rar_inprogress", False)
+        for key in nicks_waiting_for_a_slot(plain_files_only=not packs_can_start):
+            head = config.dcc_queue.get(key, [None])[0]
+            if not (isinstance(head, dict) and head.get(STOPPED_FOR_SPEED)):
+                return True
+        return False
+
+
+def the_slowest_while_another_delivers(row, speed, floor):
+    """Is the bot's side delivering, and this send the one that is slow?
+
+    True while another running send's published window rate ("acked_bps")
+    is at least `floor`, and `speed` is under every other published rate -
+    a tie is kept. `row` is this send's transfer row; without one, or with no
+    other rated send (one slot), the answer is no. Reads a copy of
+    active_transfers, no lock: a send joining or leaving mid-read changes
+    nothing that the next half-second does not see.
+    """
+    if row is None:
+        return False
+    others = [tx.get(ACKED_RATE) for tx in list(config.active_transfers) if tx is not row]
+    others = [rate for rate in others if isinstance(rate, (int, float))]
+    return (any(rate >= floor for rate in others)
+            and all(speed < rate for rate in others))
+
+
+def _bytes_uploaded():
+    """Every byte the bot's sends have put on the wire this session
+    (oserve.total_sent_bytes), 0 without the daemon loaded."""
+    oserve = sys.modules.get("oserve")
+    return int(getattr(oserve, "total_sent_bytes", 0) or 0) if oserve else 0
+
+
+class _SlowSendWatch:
+    """Is this send crawling while others wait for its slot? (#1388)
+
+    check() is called after every chunk and costs one clock read; at most
+    every SLOW_SEND_CHECK_SECONDS it takes a sample - when, what the receiver
+    has acknowledged, what every send together has moved - publishes its
+    window rate on `row` once past the grace, and judges.
+    `clock` is _slow_send_clock unless a test hands it one.
+    """
+
+    def __init__(self, acked, clock=None, row=None):
+        self.clock = clock or _slow_send_clock
+        self.row = row
+        now = self.clock()
+        self.connected_at = now
+        self.next_check_at = now + SLOW_SEND_CHECK_SECONDS
+        # (when, acknowledged, the bot's total sent), oldest first. The first
+        # is where the window starts until a minute has passed.
+        self.samples = collections.deque([(now, int(acked), _bytes_uploaded())])
+
+    def check(self, acked):
+        """The acknowledged rate in bytes per second when the send should be
+        stopped; None to let it go on."""
+        now = self.clock()
+        if now < self.next_check_at:
+            return None
+        self.next_check_at = now + SLOW_SEND_CHECK_SECONDS
+        uploaded = _bytes_uploaded()
+        self.samples.append((now, int(acked), uploaded))
+        # The oldest sample kept is the last one at or before the window's
+        # start, so the rate always covers at least the whole window.
+        while len(self.samples) > 1 and self.samples[1][0] <= now - SLOW_SEND_WINDOW_SECONDS:
+            self.samples.popleft()
+        if now - self.connected_at < SLOW_SEND_GRACE_SECONDS:
+            return None
+        then, acked_then, uploaded_then = self.samples[0]
+        span = now - then
+        if span <= 0:
+            return None
+        speed = (int(acked) - acked_then) / span
+        # Published whether or not the setting is on, so turning it on finds
+        # every running send already rated.
+        if self.row is not None:
+            self.row[ACKED_RATE] = speed
+        floor = slow_send_floor()
+        if not floor or speed >= floor:
+            return None
+        # Cheapest first; the lock last.
+        if upload_cap_binds((uploaded - uploaded_then) / span):
+            return None
+        if not the_slowest_while_another_delivers(self.row, speed, floor):
+            return None
+        if not others_wait_for_a_slot():
+            return None
+        return speed
+
+
+def too_slow_reason(speed, to_the_user=False):
+    """Why a send was stopped for speed (#1388): "sent at N KB/s, under
+    SLOW_SEND_MIN_KB (M KB/s) while others waited for a slot" for the log
+    and the feed; without the setting's name `to_the_user`."""
+    floor = getattr(config, "SLOW_SEND_MIN_KB", 0)
+    if to_the_user:
+        return (f"it was arriving at {speed / 1024:.1f} KB/s, under this bot's minimum of "
+                f"{floor} KB/s while every slot was taken and others waited for one")
+    return (f"sent at {speed / 1024:.1f} KB/s, under SLOW_SEND_MIN_KB ({floor} KB/s) "
+            f"while others waited for a slot")
+
+
+def tell_them_it_was_too_slow(user, file_name, speed):
+    """Tell a nick its send was stopped for its speed and the file is still
+    queued (#1388). A row that was dropped instead is told by
+    release_queue_entry(), with too_slow_reason(to_the_user=True) as the
+    reason."""
+    oserve_mod = sys.modules.get("oserve")
+    if not oserve_mod:
+        return
+    floor = getattr(config, "SLOW_SEND_MIN_KB", 0)
+
+    def _build(shown_name):
+        return (f"NOTICE {user} :{config.C_BOLD}Stopped{config.C_RESET}: {shown_name} was "
+                f"arriving at {speed / 1024:.1f} KB/s, under this bot's minimum of {floor} KB/s "
+                f"while every slot is taken and others are waiting, so the slot went to the "
+                f"next in line. It stays in your queue, and your client can resume it when "
+                f"your turn comes again.\r\n")
+    try:
+        oserve_mod.queue_message(user, announce.fit_irc_line(_build, str(file_name)))
+    except Exception as notify_err:
+        print(f"[DCC QUEUE] Could not notify {user}: {notify_err}")
 
 
 def drop_an_unshared_row(user, row, lock_key=None):
@@ -4492,8 +5161,9 @@ SentFile = collections.namedtuple("SentFile", (
     "row", "user", "next_file", "file_path", "file_name", "file_size", "resume_offset", "bytes_sent",
     "transfer_completed", "already_held", "offered_at", "start_time", "transfer_finished_at",
     "channel", "irc_sock", "owns_packer", "outcome_identity", "outcome_status", "acked",
-    "never_connected", "assigned_port", "conn", "dcc_sock"),
-    defaults=(None, None, False, None, None, 0, False, None, None, None))
+    "never_connected", "assigned_port", "conn", "dcc_sock", "too_slow_bps",
+    "receiver_failed"),
+    defaults=(None, None, False, None, None, 0, False, None, None, None, None, False))
 SentFile.__doc__ = """What start_dcc_send() knows about a send once it has ended (#1328): the
 transfer row, the nick, the queue row, the file and its size, where it
 resumed, the bytes sent, whether the receiver acknowledged the whole file or
@@ -4502,7 +5172,13 @@ already held it, and when it was offered, started and finished.
 Since #1336 also what finish_send() needs to wind it up: the channel and the
 IRC socket, whether it owns the packer, the outcome's identity and status,
 the bytes the receiver acknowledged, whether it never connected, the port,
-and the two sockets. record_completed_send() leaves those at their defaults."""
+and the two sockets. record_completed_send() leaves those at their defaults.
+
+too_slow_bps (#1388) is the rate a send was stopped at for crawling while
+others waited for a slot, None for any other ending.
+
+Since #1389 whether the receiver failed it, which counts toward the nick's
+DAILY_SEND_FAILS_LIMIT."""
 
 
 def record_completed_send(sent):
@@ -4738,6 +5414,14 @@ def finish_send(sent):
             settled_reason = "transfer complete"
         elif sent.never_connected:
             settled_reason = never_connected_advice()
+        elif sent.too_slow_bps is not None:
+            settled_reason = too_slow_reason(sent.too_slow_bps, to_the_user=True)
+            # Marked before the settle saves the queue, so the mark is in
+            # dcc_queue.txt with the row: waiting with it, this nick cannot
+            # cost another crawling send its slot (see STOPPED_FOR_SPEED).
+            if isinstance(sent.next_file, dict):
+                with queue_lock:
+                    sent.next_file[STOPPED_FOR_SPEED] = True
         else:
             settled_reason = "transfer did not complete"
         row_retained = release_queue_entry(
@@ -4745,6 +5429,24 @@ def finish_send(sent):
             reason=settled_reason)
     except Exception as pop_err:
         print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
+    # A row dropped above has already told them why; one kept is told here,
+    # or a send cut off for its speed would read as the bot failing (#1388).
+    if sent.too_slow_bps is not None and row_retained:
+        tell_them_it_was_too_slow(sent.user, sent.file_name, sent.too_slow_bps)
+
+    # 4b. A send the receiver failed counts toward the nick's daily limit
+    #     (#1389) - after the row is settled, so a pause removes what is left
+    #     of the queue, a row kept for retry included. Under the nick the
+    #     send is filed under now: the queue moved with a /nick.
+    #     A never-connected one only while the bot's offers are not all
+    #     going unanswered (never_connected_counts()): else it is our address.
+    if sent.receiver_failed and daily_send_fails_limit():
+        try:
+            nick = (sent.row or {}).get('user') or sent.user
+            if not sent.never_connected or never_connected_counts(nick):
+                note_failed_send(nick)
+        except Exception as count_err:
+            print("[DCC PAUSE ERROR] Could not count the failed send: " + str(count_err))
 
     # 5. The RAR cache and the send lock
     try:
@@ -4799,8 +5501,12 @@ def finish_send(sent):
     # 3-second completion timer as the retry timer would hammer a broken entry three
     # times in nine seconds, each pass emitting a NOTICE and a VIP notice while the VIP
     # queue drains slower than that. Back off instead.
+    #
+    # Not after a send stopped for its speed (#1388): it was stopped so that
+    # somebody waiting gets the slot, and its nick has just gone to the back,
+    # so the sweep hands the slot to the next in line rather than retrying it.
     retry_delay = 3
-    if row_retained and isinstance(sent.next_file, dict):
+    if row_retained and isinstance(sent.next_file, dict) and sent.too_slow_bps is None:
         retry_delay = 15 * max(1, int(sent.next_file.get('send_fails', 1)))
 
     def delayed_queue_trigger_fallback():
@@ -4843,7 +5549,10 @@ def refuse_an_unsendable_file(irc_sock, user, row, next_file, file_path, file_si
     try: 
         msg = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {reason}.\r\n"
         irc_sock.sendall(msg.encode('utf-8', errors='ignore'))
-    except: 
+        # No lane, never sent again; recorded only so a refusal of it is
+        # not taken for an older line to this user (#1386).
+        runtime.note_paced_line(msg, None)
+    except:
         pass
 
     # Clear the locks and wait three seconds, to stay well clear of Excess Flood.
@@ -4928,7 +5637,12 @@ def refuse_without_a_port(irc_sock, user, row, next_file, dcc_sock, listener_err
         refusal = "Could not open a DCC port right now. Your file stays queued."
     else:
         refusal = "No available DCC ports."
-    try: irc_sock.sendall(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {refusal}\r\n".encode("utf-8", errors="ignore"))
+    refusal_line = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {refusal}\r\n"
+    try:
+        irc_sock.sendall(refusal_line.encode("utf-8", errors="ignore"))
+        # No lane, never sent again; recorded only so a refusal of it is
+        # not taken for an older line to this user (#1386).
+        runtime.note_paced_line(refusal_line, None)
     except: pass
     with queue_lock:
         config.active_transfers[:] = [tx for tx in config.active_transfers if not _is_this_send(tx, row, user)]
@@ -4984,6 +5698,89 @@ def refuse_without_a_port(irc_sock, user, row, next_file, dcc_sock, listener_err
         except Exception:
             pass
     return
+
+
+def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user):
+    """Send the file down a connected DCC socket, from resume_offset to its
+    end, reading the receiver's acknowledgements as it goes; return the
+    bytes sent, counted the way the receiver holds them (the skipped part
+    of a resume included).
+
+    Raises _ReceiverGone or _ReceiverStalled when the receiver closes or
+    stops acknowledging with bytes outstanding, and lets a socket error
+    through. acks.sent equals the bytes sent after every chunk, so whoever
+    catches it still knows how far the send got. Each chunk also moves the
+    transfer row's bytes_sent and the bot's total.
+
+    Raises _TooSlowWhileOthersWait when it crawls while every slot is taken
+    and others wait (#1388); its _SlowSendWatch publishes the send's window
+    rate on `row` for the other sends' watches to compare against.
+    Raises _SourceUnreadable when the FILE fails - open, seek or read
+    (#1389): a timeout or a reset from a network share is an OSError of the
+    same type as the receiver's, and must not be taken for one.
+
+    start_dcc_send()'s send loop until #1350, step 4 of splitting it
+    (docs/FUTURE.md).
+    """
+    try:
+        f = open(platform_compat.long_path(file_path), 'rb')
+    except OSError as err:
+        raise _SourceUnreadable(err) from err
+    with f:
+        if resume_offset:
+            try:
+                f.seek(resume_offset)
+            except OSError as err:
+                raise _SourceUnreadable(err) from err
+        # mIRC's "packet size", and the reason raising it there is
+        # noticeable: mIRC defaults to 4 KB and this has always been 64.
+        # Resolved once per transfer, not once per pass - the value cannot
+        # change mid-file, and a getattr in the inner loop of a 4 GB send
+        # is a million lookups for one answer.
+        block = dcc_block_size()
+        # The timeout covers one whole sendall() of `block` bytes, so it
+        # scales with the block; see SEND_TIMEOUT_SECONDS.
+        conn.settimeout(_send_timeout(block))
+        # From here the send is connected: the slow-send grace runs from now.
+        slow = _SlowSendWatch(acks.acked, row=row)
+        while True:
+            # The bot's upload cap (#1352), read per chunk so a change
+            # reaches a send already running: under a cap the chunk is a
+            # tenth of a second of line, and it waits its turn behind
+            # every other send's.
+            try:
+                chunk = f.read(speed_cap.chunk_size(speed_cap.UPLOAD, block))
+            except OSError as err:
+                raise _SourceUnreadable(err) from err
+            if not chunk: break
+            speed_cap.take(speed_cap.UPLOAD, len(chunk))
+            acks.sending()
+            try:
+                conn.sendall(chunk)
+                bytes_sent += len(chunk)
+                acks.sent = bytes_sent
+            except socket.error as e:
+                raise e
+            # Read whatever the receiver has acknowledged so far, without
+            # waiting for it - the sends must not sit behind the acks any
+            # more than the acks should be ignored. A receiver that has gone
+            # quiet for ACK_STALL_SECONDS while bytes are outstanding is
+            # dead, and this is the first place that can tell.
+            _drain_acks(conn, acks)
+            if acks.eof and acks.acked < bytes_sent:
+                raise _ReceiverGone(acks.acked)
+            if acks.stalled() and acks.acked < bytes_sent:
+                raise _ReceiverStalled(acks.acked)
+            # Crawling while every slot is taken and others wait (#1388).
+            too_slow = slow.check(acks.acked)
+            if too_slow is not None:
+                raise _TooSlowWhileOthersWait(acks.acked, too_slow)
+            for tx in config.active_transfers:
+                if _is_this_send(tx, row, user):
+                    tx['bytes_sent'] += len(chunk)
+            oserve = sys.modules.get('oserve')
+            if oserve: oserve.total_sent_bytes += len(chunk)
+    return bytes_sent
 
 
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, owns_packer=False):
@@ -5062,6 +5859,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
     transfer_completed = False
     # A completed send that moved nothing: see where it is set below.
     already_held = False
+    # The rate a send was stopped at for crawling while others waited (#1388).
+    too_slow_bps = None
 
     # #430: `irc_sock` is whatever socket was live when the caller captured
     # it - which can be several minutes stale by the time this actually
@@ -5148,6 +5947,13 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
     # Set by the accept branch below and read by the finally, so the notice
     # the user gets can say what happened rather than "did not complete".
     never_connected = False
+    # The receiver failed the send (#1389): counted toward the nick's
+    # DAILY_SEND_FAILS_LIMIT by finish_send(). Set only in the handlers below
+    # for a receiver that never connected, stalled, let a write time out or
+    # closed the connection before it had the whole file - never for a
+    # failure on our side or a stop the bot makes (see the #1389 block above
+    # _send_fails_today()).
+    receiver_failed = False
     # How the send ended when it did not complete (#1203); set where that is
     # known, and FAILED wherever nothing more is.
     outcome_status = transfer_log.STATUS_FAILED
@@ -5205,6 +6011,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
 
         try:
             irc_sock.sendall(ctcp_handshake.encode("utf-8", errors="ignore"))
+            # Recorded with no lane (#1386): unpaced and never sent again,
+            # recorded only so that the server refusing it is not taken for
+            # an older line to this user, which would then go out twice.
+            runtime.note_paced_line(ctcp_handshake, None)
             print(f"[DCC-LISTEN] Listening on port {assigned_port} for {user} (Handshake sent directly).")
         except Exception as e:
             # #430: this used to fall straight through into accept() below,
@@ -5231,6 +6041,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             report_failure(user, file_name, never_connected_reason(accept_window),
                            acked=0, total=file_size)
             never_connected = True
+            receiver_failed = True
             oserve = sys.modules.get('oserve')
             if oserve: oserve.send_fails_count += 1
             return
@@ -5246,6 +6057,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         _apply_send_buffer(conn)
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         print(f"[DCC-CONNECT] {user} connected from {addr}!")
+        # The bot's offers reach people: never-connected sends count (#1389).
+        note_send_connected()
 
         start_time = time.time()
 
@@ -5287,42 +6100,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             print(f"[DCC-RESUME] Resuming {file_name} for {user} at byte "
                   f"{resume_offset} of {file_size}.")
 
-        with open(platform_compat.long_path(file_path), 'rb') as f:
-            if resume_offset:
-                f.seek(resume_offset)
-            # mIRC's "packet size", and the reason raising it there is
-            # noticeable: mIRC defaults to 4 KB and this has always been 64.
-            # Resolved once per transfer, not once per pass - the value cannot
-            # change mid-file, and a getattr in the inner loop of a 4 GB send
-            # is a million lookups for one answer.
-            block = dcc_block_size()
-            # The timeout covers one whole sendall() of `block` bytes, so it
-            # scales with the block; see SEND_TIMEOUT_SECONDS.
-            conn.settimeout(_send_timeout(block))
-            while True:
-                chunk = f.read(block)
-                if not chunk: break
-                try:
-                    conn.sendall(chunk)
-                    bytes_sent += len(chunk)
-                    acks.sent = bytes_sent
-                except socket.error as e:
-                    raise e
-                # Read whatever the receiver has acknowledged so far, without
-                # waiting for it - the sends must not sit behind the acks any
-                # more than the acks should be ignored. A receiver that has gone
-                # quiet for ACK_STALL_SECONDS while bytes are outstanding is
-                # dead, and this is the first place that can tell.
-                _drain_acks(conn, acks)
-                if acks.eof and acks.acked < bytes_sent:
-                    raise _ReceiverGone(acks.acked)
-                if acks.stalled() and acks.acked < bytes_sent:
-                    raise _ReceiverStalled(acks.acked)
-                for tx in config.active_transfers:
-                    if _mine(tx):
-                        tx['bytes_sent'] += len(chunk)
-                oserve = sys.modules.get('oserve')
-                if oserve: oserve.total_sent_bytes += len(chunk)
+        # stream_the_file() since #1350; acks.sent follows it when it raises.
+        bytes_sent = stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, _row, user)
                 
         # COMPLETE MEANS ALL OF IT. The loop above ends on local EOF, which
         # says the file stopped giving bytes - not that it gave as many as the
@@ -5370,6 +6149,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         already_held = bool(transfer_completed and resume_offset
                             and resume_offset >= file_size)
         if not transfer_completed and not short_read:
+            # Every byte went out and the receiver did not take them all:
+            # it closed, or stopped acknowledging (#1389).
+            receiver_failed = True
             if not acks.received_any:
                 report_failure(user, file_name,
                     "the receiver never acknowledged a single byte, so there "
@@ -5432,6 +6214,20 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             f"closed the connection mid-transfer, having acknowledged "
             f"{gone.acked:,} of {file_size:,} bytes.",
             acked=gone.acked, total=file_size)
+        # Counted toward the daily limit all the same (#1389): a user's Close
+        # and a client that drops every send halfway cannot be told apart on
+        # the wire - either closes with a FIN, or with a reset while data is
+        # still unread - and both hold a slot for a file that does not arrive.
+        receiver_failed = True
+        oserve = sys.modules.get('oserve')
+        if oserve: oserve.send_fails_count += 1
+    except _SourceUnreadable as unreadable:
+        # Our side (#1389): the file, not the receiver. Not counted against
+        # the nick, whatever type of OSError the share raised.
+        report_failure(user, file_name,
+            f"could not read the file being sent: {type(unreadable.err).__name__}: "
+            f"{unreadable.err}. The bot's side, not the receiver's.",
+            acked=acks.acked, total=file_size)
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except _ReceiverStalled as stalled:
@@ -5440,6 +6236,18 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             f"and made no progress for {int(ACK_STALL_SECONDS)}s; giving up on "
             f"a dead link.",
             acked=stalled.acked, total=file_size)
+        receiver_failed = True
+        oserve = sys.modules.get('oserve')
+        if oserve: oserve.send_fails_count += 1
+    except _TooSlowWhileOthersWait as slow:
+        # A failed attempt like a stall (#1388): finish_send() keeps the row
+        # against MAX_SEND_FAILS, sends the nick to the back and hands the
+        # slot to the next in line.
+        too_slow_bps = slow.speed
+        report_failure(user, file_name,
+            f"{too_slow_reason(slow.speed)}; stopped at {slow.acked:,} of "
+            f"{file_size:,} bytes so the next in line gets the slot.",
+            acked=slow.acked, total=file_size)
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except socket.timeout:
@@ -5451,6 +6259,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         report_failure(user, file_name,
             "the send blocked for the whole socket timeout with the receiver "
             "not draining it.", acked=acks.acked, total=file_size)
+        receiver_failed = True
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except Exception as e:
@@ -5459,18 +6268,27 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         # to tell which one happened after the fact, especially once the temp archive is
         # already deleted and the queue row already gone.
         report_failure(user, file_name, f"{type(e).__name__}: {e}")
+        # A reset or a broken pipe is the receiver closing on us (#1389). Not
+        # anything else that lands here: a file that vanished or could not
+        # be read is our side's failure, not theirs.
+        if isinstance(e, ConnectionError):
+            receiver_failed = True
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     finally:
         # finish_send() since #1336. resume_offset, acks and
         # transfer_finished_at are unset on the exits before the transfer.
+        # Once acks is set, acks.sent is the bytes sent: a send that raised
+        # out of stream_the_file() never returned its count (#1350).
         _here = locals()
         finish_send(SentFile(
             _row, user, next_file, file_path, file_name, file_size,
-            _here.get('resume_offset', 0), bytes_sent, transfer_completed, already_held,
+            _here.get('resume_offset', 0), _here['acks'].sent if 'acks' in _here else bytes_sent,
+            transfer_completed, already_held,
             offered_at, start_time, _here.get('transfer_finished_at'),
             channel=channel, irc_sock=irc_sock, owns_packer=owns_packer,
             outcome_identity=outcome_identity, outcome_status=outcome_status,
             acked=_here['acks'].acked if 'acks' in _here else 0,
             never_connected=never_connected, assigned_port=assigned_port,
-            conn=conn, dcc_sock=dcc_sock))
+            conn=conn, dcc_sock=dcc_sock, too_slow_bps=too_slow_bps,
+            receiver_failed=receiver_failed))

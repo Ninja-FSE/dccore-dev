@@ -13,6 +13,7 @@ headed - with nothing more than a Python install.
 import ast
 import gc
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -51,6 +52,17 @@ _PRISTINE = [
     (dcc, "start_dcc_send", dcc.start_dcc_send),
     (dcc, "check_queue_and_send", dcc.check_queue_and_send),
 ]
+
+
+# dccore.mrc's menus (#1368): with the icons on, an item's text starts with
+# `$dccore.mi(name) `, the mark the theme's menu hook turns into the icon
+# beside it - and nothing without the icons. The tests that read the menus
+# read them as they read without the marks.
+_MENU_ICON_MARK = re.compile(r"\$dccore\.mi\([a-z]+\) ")
+
+
+def without_menu_icons(text):
+    return _MENU_ICON_MARK.sub("", text)
 
 
 # Parsed source, shared by every source-reading test in the process (#1147).
@@ -123,6 +135,9 @@ RUNTIME_CONTAINERS = {
     # #926: who else asked which bot for its list. A leftover is a bot the
     # next test's automatic grab leaves alone for no reason it can see.
     "list_grab_others_asked": dict,
+    # #1352: the speed caps' clocks. A leftover is a line still "busy" into
+    # the next test, whose first capped chunk would wait for no reason.
+    "speed_cap_clocks": dict,
     # Offers in flight. A leftover here is not inert: it is keyed by (nick,
     # port), the DCC port range is small and reused, and a stale entry would
     # hand the next test's send an offset agreed for a different file.
@@ -379,7 +394,18 @@ def reset_config(**overrides):
                         # #1182: one test's background audio reading, or
                         # its result, is not the next one's.
                         ("audio_reading", None), ("audio_reading_last", None),
-                        ("audio_retry_waiting", False)):
+                        ("audio_retry_waiting", False),
+                        # #1389: DAILY_SEND_FAILS_LIMIT's circuit breaker,
+                        # beside failed_transfers (reset with the containers
+                        # above). A connect one test made would let the next
+                        # test's never-connected send count, a streak left
+                        # behind would stop it counting, and a logged streak
+                        # would silence the next test's line. A fresh set
+                        # each time: this tuple is built per call.
+                        ("send_connected_since_start", False),
+                        ("never_connected_streak", 0),
+                        ("never_connected_streak_nicks", set()),
+                        ("never_connected_streak_logged", False)):
         setattr(runtime, name, value)
 
     # A FRESH OUTBOUND CLOCK PER TEST. runtime.outbound_pacer is a
@@ -389,6 +415,13 @@ def reset_config(**overrides):
     # state like any other, and it costs real wall-clock on every suite run.
     # test_a_shared_outbound_pace.py already did this by hand for itself.
     runtime.outbound_pacer = runtime.OutboundPacer()
+    # #1386: the record of paced lines sent, which a 439/707 refusal reads to
+    # find the line to put back. Process-wide like the pacer, and filled by
+    # every test that runs the real queue worker or debug drain: a line one
+    # test sent is not the next test's to resend. Cleared in place and under
+    # its lock, as the disconnect epilogue does, not rebound.
+    with runtime.recent_paced_lock:
+        runtime.recent_paced_lines.clear()
 
     config.debug_flood_lock = threading.Lock()
     config.fetch_queue_lock = threading.Lock()

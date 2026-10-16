@@ -59,22 +59,38 @@ from web_common import WEB_DASHBOARD_SOURCE, json_object
 # Every name here is checked against config.py's actual annotations by
 # SettingsPayloadTests' completeness guard, so a setting added later and never
 # slotted in fails a test instead of silently never showing up.
+#
+# Settings an editor of their own replaces on this page (#1357), and so on no
+# category. FILE_DIRECTORY is the folder a bot with no folder list serves.
+# Your list's folder rows show it as their first row, and saving them writes
+# the list, so a field for it as well put one folder on the page twice - and
+# the field's "used only when no folders are set" was a second way to say
+# what is shared that the rows silently overrode. It stays a setting: the
+# first-time setup writes it, and a bot that never saved a folder list still
+# serves it.
+EDITED_ELSEWHERE = {
+    "FILE_DIRECTORY": "Your list's folder rows",
+}
+
 SETTINGS_CATEGORIES = (
     ("identity",      "Identity & network",    ["SERVER", "PORT", "NICKNAME", "ALT_NICKNAME", "REJOIN_ATTEMPTS",
                                                 "ON_CONNECT_CHECK_MINUTES",
                                                 "ADMIN_NICK", "CHANNEL", "DEBUG_CHANNEL",
                                                 "CHECK_FOR_UPDATES"]),
-    ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_USER_QUEUE",
+    ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "LARGE_FILE_MB", "SLOW_SEND_MIN_KB", "MAX_USER_QUEUE",
                                                 "MAX_GLOBAL_QUEUE", "SEARCH_ENABLED", "MAX_SEARCH_RESULTS",
                                                 "SEARCH_SHOW_FOLDER", "SEARCH_FOLDER_MAX_CHARS",
                                                 "PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE",
                                                 "REHASH_TRANSFER_WAIT"]),
-    # The transfer-tuning pair, together. Anyone reaching for one wants the
-    # other in front of them.
-    ("transfers",     "Transfers",             ["DCC_BLOCK_SIZE", "DCC_SEND_BUFFER",
+    # The speed caps first (#1352), the setting most operators come here for;
+    # then the transfer-tuning pair, together. Anyone reaching for one wants
+    # the other in front of them.
+    ("transfers",    "Transfers",             ["MAX_UPLOAD_KB", "MAX_DOWNLOAD_KB",
+                                                "DCC_BLOCK_SIZE", "DCC_SEND_BUFFER",
                                                 "DCC_PORT_START", "DCC_PORT_END",
-                                                "DCC_ACCEPT_TIMEOUT", "MAX_SEND_FAILS"]),
-    ("your-list",     "Your list",             ["FILE_DIRECTORY", "LIST_BASE_NAME",
+                                                "DCC_ACCEPT_TIMEOUT", "MAX_SEND_FAILS",
+                                                "DAILY_SEND_FAILS_LIMIT"]),
+    ("your-list",     "Your list",             ["LIST_BASE_NAME",
                                                 "LIST_FORMAT", "LIST_IGNORED_EXTENSIONS",
                                                 "SEPARATE_VIDEO_LIST", "LIST_VIDEO_EXTENSIONS",
                                                 "LIST_VIDEO_COMPANION_EXTENSIONS",
@@ -190,6 +206,8 @@ SETTINGS_LABELS = {
     "DEBUG_CHANNEL": "Debug channel",
 
     "MAX_DCC_SLOTS": "Max simultaneous sends",
+    "SLOW_SEND_MIN_KB": "Stop sends slower than (KB/s, 0 = off)",
+    "LARGE_FILE_MB": "One large file at a time, from (MB, 0 = off)",
     "MAX_USER_QUEUE": "Max queue per user",
     "MAX_GLOBAL_QUEUE": "Max global queue",
     "SEARCH_ENABLED": "Answer @find searches",
@@ -208,6 +226,8 @@ SETTINGS_LABELS = {
     "MAX_LIST_TEXT_SIZE": "Largest list text accepted from a peer",
     "DCC_BLOCK_SIZE": "Packet size",
     "DCC_SEND_BUFFER": "Socket send buffer (0 = the default for your platform)",
+    "MAX_UPLOAD_KB": "Max upload speed (KB/s, 0 = no limit)",
+    "MAX_DOWNLOAD_KB": "Max download speed (KB/s, 0 = no limit)",
     "REHASH_TRANSFER_WAIT": "Seconds a rehash waits for transfers to finish",
     "AUTO_REFETCH_LISTS": "Re-fetch a held list when its bot advertises a new one",
     "AUTO_GRAB_LISTS": "Grab the lists of bots you have no list from",
@@ -309,6 +329,7 @@ SETTINGS_LABELS = {
     "FLOOD_BAN_SECONDS": "Ban after flooding while muted (seconds)",
     "DCC_ACCEPT_TIMEOUT": "Wait for the receiver to connect (seconds)",
     "MAX_SEND_FAILS": "Max send failures",
+    "DAILY_SEND_FAILS_LIMIT": "Failed sends in a day before a nick is paused (0 = off)",
     "CHECK_FOR_UPDATES": "Tell me when a new version is out",
     "RAR_TIMEOUT": "RAR pack timeout (seconds)",
     "LIST_UPDATE_TIMEOUT": "List rebuild hard cap (seconds, 0 = none)",
@@ -622,6 +643,7 @@ def _settings_payload_unlocked(settings_file):
     # name rather than raising, matching how it already reaches the page at
     # all despite being uncategorised.
     leftover = [n for n in types if n not in seen and n != "ADMIN_PASSWORD_HASH"
+                and n not in EDITED_ELSEWHERE
                 and settings_file.is_overridable(n, getattr(config, n, None))]
     if leftover:
         categories.append({"id": "other", "label": "Other", "fields": [

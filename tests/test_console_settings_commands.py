@@ -720,7 +720,7 @@ class TheCapabilities(DCCoreTestCase):
 
     def test_consolecaps_names_every_part_with_its_version(self):
         reply = run(make_session(self), "consolecaps")
-        self.assertEqual(reply, ["DCCORE CAPS settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1 unlock:1"
+        self.assertEqual(reply, ["DCCORE CAPS settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1 unlock:1 library:1"
                                  " machine:" + console_settings.machine_name()])
 
     def test_the_machine_name_is_one_token_naming_this_computer(self):

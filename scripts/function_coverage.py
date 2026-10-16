@@ -61,7 +61,11 @@ def public_functions():
     """{(module, name): lineno} for every public module-level function, at the
     repository root - an entry point run by hand, like oserve.py - and in
     src/ (#959). entered() below matches by bare filename, so a module found
-    in either place is keyed the same way either would give it."""
+    in either place is keyed the same way either would give it.
+
+    lineno is the function's FIRST line, as the profiler's co_firstlineno
+    gives it: for a decorated function that is its first decorator, not its
+    def line (#1379)."""
     found = {}
     seen_modules = set()
     for folder in (REPO_ROOT, SRC):
@@ -74,7 +78,13 @@ def public_functions():
             for node in tree.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if not node.name.startswith("_"):
-                        found[(name, node.name)] = node.lineno
+                        # co_firstlineno of a decorated function is the line
+                        # of its first decorator (Python 3.8+), while
+                        # node.lineno is the def line. Keyed on the def line,
+                        # a decorated function never matched what the
+                        # profiler recorded and read as never entered (#1379).
+                        found[(name, node.name)] = min(
+                            [node.lineno] + [d.lineno for d in node.decorator_list])
     return found
 
 
@@ -90,6 +100,7 @@ class Recorder:
 
     def __init__(self):
         self.seen = set()
+        self._previous = (None, None)
 
     def __call__(self, frame, event, arg):
         if event == "call":
@@ -97,12 +108,19 @@ class Recorder:
             self.seen.add((code.co_filename, code.co_name, code.co_firstlineno))
 
     def start(self):
+        # Whatever profiler was installed before is put back by stop(), not
+        # cleared: run_suite() is itself called by tests that run while this
+        # script profiles the suite, and clearing would end that outer
+        # profile for the rest of the run (#1379). threading.getprofile()
+        # is 3.10+, the project's minimum.
+        self._previous = (sys.getprofile(), threading.getprofile())
         threading.setprofile(self)
         sys.setprofile(self)
 
     def stop(self):
-        sys.setprofile(None)
-        threading.setprofile(None)
+        previous_sys, previous_threading = self._previous
+        sys.setprofile(previous_sys)
+        threading.setprofile(previous_threading)
 
 
 def read_allowlist():
@@ -119,19 +137,28 @@ def read_allowlist():
     return entries
 
 
-def run_suite():
-    """The whole suite, quietly, with the profiler attached."""
-    loader = unittest.TestLoader()
-    suite = loader.discover(start_dir=os.path.join(REPO_ROOT, "tests"),
-                            top_level_dir=REPO_ROOT)
+def run_suite(suite=None):
+    """The whole suite, quietly, with the profiler attached.
+
+    suite defaults to everything under tests/. sys.stdout and sys.stderr are
+    put back afterwards, whatever a test left in their place: the report is
+    printed after the run, and a test that once left sys.stdout replaced sent
+    it into that test's StringIO, so the pass failed without saying why
+    (#1146, #1379)."""
+    if suite is None:
+        loader = unittest.TestLoader()
+        suite = loader.discover(start_dir=os.path.join(REPO_ROOT, "tests"),
+                                top_level_dir=REPO_ROOT)
     recorder = Recorder()
     stream = io.StringIO()
+    real_stdout, real_stderr = sys.stdout, sys.stderr
     recorder.start()
     try:
         runner = unittest.TextTestRunner(stream=stream, verbosity=0)
         result = runner.run(suite)
     finally:
         recorder.stop()
+        sys.stdout, sys.stderr = real_stdout, real_stderr
     return recorder.seen, result
 
 

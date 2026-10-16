@@ -548,6 +548,14 @@ ANNOUNCE_INTERVAL: int = 300     # Time between each channel advert, in seconds 
 # 5. LIMITS, SLOTS AND QUEUE CONTROL
 # ---------------------------------------------------------------------
 MAX_DCC_SLOTS: int      = 3      # Maximum simultaneous live downloads
+# A send that crawls while others wait (#1388): the rate is what the receiver
+# acknowledged over about the last minute, judged from a minute after it
+# connected, and a stop counts against MAX_SEND_FAILS like a stall. Only the
+# slowest send, and only while another one moves at least this much - proof
+# the bot's side can deliver - so with one slot it never fires. Not while
+# MAX_UPLOAD_KB is what holds the sends back. See dcc._SlowSendWatch.
+SLOW_SEND_MIN_KB: int   = 0      # In KB/s, 0 = off
+LARGE_FILE_MB: int      = 0      # A file of at least this many MB is large, and only one large file is sent at a time (0 = off)
 MAX_USER_QUEUE: int     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE: int   = 1000   # Most files across every queue combined
 SEARCH_ENABLED: bool = True  # Answer @find and @locator; off ignores them and the advert says Search: OFF
@@ -778,6 +786,13 @@ DCC_BLOCK_SIZE: int = 65536      # 64 KB - one of 4096/8192/16384/32768/65536/13
 # there 0 sets 4 MB. It is here to be experimented with on a link the operator
 # knows, not to be set hopefully.
 DCC_SEND_BUFFER: int = 0         # 0 = per-platform default (4MB on Windows, OS auto-tuning on Linux)
+
+# Speed caps (#1352), in KB/s, 0 = no limit: one pace per direction, shared by
+# every transfer that way - see speed_cap.py. Waiting on the download cap moves
+# a fetch's FETCH_TRANSFER_TIMEOUT along by as long as it waited.
+MAX_UPLOAD_KB: int = 0
+MAX_DOWNLOAD_KB: int = 0
+
 DCC_PORT_START: int = 55000      # First port the bot listens on for outgoing DCC sends; forward this range if you are behind NAT
 DCC_PORT_END: int   = 55010      # Last port of that range; sends, passive fetches and a listen-mode admin console share it, so keep at least MAX_DCC_SLOTS + MAX_FETCH_SLOTS + 1
 
@@ -997,6 +1012,19 @@ MUTE_TIME: int      = 30       # Mute in seconds on the first flood violation
 # midnight accidentally did - repeat offenders are a hard-ban case (!ban).
 FLOOD_BAN_SECONDS: int = 3600  # Ban in seconds when someone floods while muted
 MAX_SEND_FAILS: int = 3        # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
+# A NICK WHOSE SENDS KEEP FAILING (#1389). MAX_SEND_FAILS is per queued file,
+# so a nick with twenty files queued whose client never accepts an offer can
+# cost sixty failed attempts, each holding a slot for the accept or stall
+# timeout. With this above 0, a nick whose sends failed this many times since
+# local midnight is paused until midnight: its queued files are removed and
+# its new requests are refused, each with a notice saying why. Counted: the
+# receiver never connected, stalled, let a write time out, or closed the
+# connection before it had the whole file. Not counted: a pack cancelled by
+# the operator or withdrawn by the user, a send the bot stops itself, or a
+# failure on the bot's side (the file vanished). Admins (ADMIN_NICK) are never
+# paused. Kept in memory: a restart forgives. The console's `status` shows who
+# is paused, and `unpause <nick>` lifts it.
+DAILY_SEND_FAILS_LIMIT: int = 0  # Failed sends in a day that pause a nick until midnight; 0 is off
 # HOW LONG AN OFFER STANDS. After the DCC SEND handshake the bot listens for
 # the receiver to connect; when nobody has by this deadline the offer is
 # withdrawn and counted as one failed attempt against MAX_SEND_FAILS. This
@@ -1120,7 +1148,7 @@ C_ITALIC       = "\x1D"     # Italic
 # Mutate them in place. Never rebind them: `config.dcc_queue = {}` detaches
 # this name from the object runtime.py still holds, and the two silently drift
 # apart. tests/test_runtime_state.py fails the build if anything does.
-failed_transfers  = runtime.failed_transfers   # Failed-transfer counter, per user
+failed_transfers  = runtime.failed_transfers   # Failed sends per nick today (#1389)
 channel_users     = runtime.channel_users      # Users currently seen in the channels
 banned_users      = runtime.banned_users       # Currently banned users, in memory
 user_requests     = runtime.user_requests      # Command timestamps per user, anti-flood
@@ -1223,6 +1251,8 @@ recent_departures = runtime.recent_departures
 recent_departure_bases = runtime.recent_departure_bases
 # #926: who else asked which bot for its list - list_grab.py.
 list_grab_others_asked = runtime.list_grab_others_asked
+# #1352: speed_cap.py's clocks, one per direction - see runtime.py.
+speed_cap_clocks = runtime.speed_cap_clocks
 nick_aliases = runtime.nick_aliases
 # #376 option B - see runtime.py.
 bot_idents = runtime.bot_idents

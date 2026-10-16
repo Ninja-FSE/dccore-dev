@@ -57,7 +57,7 @@ import runtime
 # tell a bot that has these commands from one that answers "Unknown command",
 # and a later change that moves a field bumps the number of the part it moves.
 CAPS = (("settings", 1), ("preview", 1), ("served", 1), ("folders", 1),
-        ("onconnect", 1), ("banlist", 1), ("unlock", 1))
+        ("onconnect", 1), ("banlist", 1), ("unlock", 1), ("library", 1))
 
 # Wrong `unlock` passwords a session gets before it is closed - the login's
 # own allowance (adminchat.MAX_PASSWORD_ATTEMPTS), for the same guessing.
@@ -214,6 +214,16 @@ def is_locked(session):
     A stand-in without the attribute (the dashboard's Console, behind its
     password login) is not locked."""
     return not getattr(session, "unlocked", True)
+
+
+def refused_read_only(session, what):
+    """Refuse `what` on a session that logged in with a read-only token
+    (#1374), as a LOCKED line - a script that shows LOCKED shows this - or
+    the sentence. The password is the only way to more: such a session is
+    never unlocked, so there is nothing to type here that would help."""
+    sentence = ("This console logged in with a read-only token: it can look, not change "
+                "anything. Log in with the password to do that.")
+    _say(session, f"LOCKED {what} {sentence}", sentence)
 
 
 def refused_while_locked(session, what):

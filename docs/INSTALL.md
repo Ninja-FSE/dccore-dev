@@ -110,7 +110,7 @@ On Windows that command is **`py configure.py`**. A python.org install gives you
 4. **Admin nick** - who may run `!ban`, `!rehash`, `!update`, `!clearqueue`.
 5. **Your services host**, optional - blank skips it. On a re-run the hosts already configured are shown; blank keeps them all, and typing one you already have changes nothing. Locks the admin console (and the in-channel admin commands, once this is set) to your account rather than just your nick, which anyone can take while you are offline; see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md#how-the-host-proves-your-login) for how to read it off `/whois`.
 6. **Admin console password**, typed twice and never shown; only its hash is written.
-7. **Music directory** - optional here (see below). A pasted or dragged path in quotes (Explorer's *Copy as path*) is fine; a full path to a folder that does not exist yet offers to create it, and anything that is not a full path is asked again.
+7. **Music directory** - optional here (see below). It becomes the first folder under *Settings > Your list*, where you add more. A pasted or dragged path in quotes (Explorer's *Copy as path*) is fine; a full path to a folder that does not exist yet offers to create it, and anything that is not a full path is asked again.
 8. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.
 
 Then two offers, either of which you can decline: **generate the file list now** (when a music directory was given; a first start does it anyway), and **import your OmenServe or KeepTrack totals** from mIRC's `vars.ini` (in mIRC's folder, or `scripts\vars.ini` on older installs) if you are coming from there. When both counted your sends you pick which totals to keep - they counted the same sends, so they are never added together. The answers are written to `settings.conf`, with the password hash (and nothing else) in `admin_config.py`.
@@ -138,7 +138,7 @@ The daemon refuses to start until `NICKNAME`, `CHANNEL` and `ADMIN_NICK` have va
 Three things are deliberately *not* required:
 
 - **`SERVER`** and **`DEBUG_CHANNEL`** — their shipped values are already right for almost every install, so requiring them would only make you retype something correct. `DEBUG_CHANNEL` ships blank, and blank means no debug channel is joined.
-- **`FILE_DIRECTORY`** — requiring it would block the daemon from reaching the dashboard, which is the easiest place to set it. A blank one warns, at the pre-flight check and again at boot, and the bot serves nothing until it has one.
+- **`FILE_DIRECTORY`** — requiring it would block the daemon from reaching the dashboard, which is the easiest place to set it: add your folders under *Settings > Your list*. A blank one warns, at the pre-flight check and again at boot, and the bot serves nothing until it has one.
 
 ### Values that are refused
 
@@ -230,6 +230,103 @@ UPnP in the standard library, and the bot does not know your router's
 password. Test from a second machine or a phone, not from the same network
 (see WINDOWS.md for why that fails even when everything is right).
 
+### Someone whose downloads keep failing
+
+The same can be true at the other end: a downloader whose client never
+accepts an offer, or sits behind a firewall that never lets the connection
+in, or drops every transfer halfway. **Max send failures**
+(`MAX_SEND_FAILS`, 3) drops one queued file after that many failed tries, but
+it counts per file: someone with twenty files queued can cost sixty failed
+tries, each holding a slot for the accept or stall timeout.
+
+**Failed sends in a day before a nick is paused** (`DAILY_SEND_FAILS_LIMIT`,
+on the Settings page under *Transfers* or in the mIRC settings window under
+*Sharing > Transfers*, beside it) looks at the nick instead. Once a nick's
+sends have failed that many times since midnight (the bot's local time), it
+is paused until midnight: the files left in its queue are removed and its new
+requests are refused, each with a notice telling them why and to check that
+their client accepts DCC sends. A failure is a send the receiver never
+connected to, one that stalled or timed out, and one it closed before it had
+the whole file - and that includes a downloader closing or cancelling the
+transfer in their own client before it finishes: the bot cannot tell that
+from a client that drops every send. Taking a request out of the queue is
+not a failed send: a pack stopped with `packcancel`, or a queued file or pack
+the downloader removes with `@<bot>-remove`, does not count. Nor does a
+failure on the bot's side, such as a file that vanished from the library or
+a network share that stopped answering while it was read. Admins
+(`ADMIN_NICK`) are never paused. The count is kept in memory, so a restart
+forgives it. The console's `status` shows who is paused, and `unpause <nick>`
+lifts it at once. 0, the default, is off.
+
+A send nobody connected to is often the bot's own problem rather than the
+downloader's: a wrong address (`MY_IP_OR_DOCK`), a port forward the router
+lost, a firewall in front of the bot. Then every offer fails, and counting
+them would pause everybody within minutes. So sends that never connected do
+not count until one send has connected since the bot started, and once offers
+to several downloaders in a row go unanswered with no send connecting in
+between (three offers, to at least two different nicks), they stop counting
+until a send connects again. The log says so once, and asks you to check the
+address and the port forwarding. One downloader whose offers keep going
+unanswered while others connect is still counted: that is their client.
+
+One risk to know about before turning it on: the bot takes whoever connects
+first to the port it offered, so somebody who keeps connecting to your DCC
+ports (the range is small) can get in ahead of the downloader and make their
+sends fail. That is true of every DCC
+bot, but with this limit on it can also get the downloader paused for the
+day. Set the limit high, or leave it off where that is a concern.
+
+### Leaving room on your line
+
+Out of the box the bot uses all the speed your line has. To keep some for
+yourself, set **Max upload speed** (`MAX_UPLOAD_KB`) and **Max download
+speed** (`MAX_DOWNLOAD_KB`), in KB/s, on the Settings page under
+*Transfers* or in the mIRC settings window under *Sharing > Transfers*.
+Upload is every send to people downloading from you; download is everything
+the bot fetches - lists, automatic grabs, files and folders from other bots.
+Each is one limit shared by all the transfers going that way, and a change
+applies at once, to transfers already running too. 0 is no limit.
+
+### A send that crawls while others wait
+
+A downloader on a bad link can hold one of your slots (`MAX_DCC_SLOTS`) for
+hours at a few KB/s while the queue behind them does not move. **Stop sends
+slower than** (`SLOW_SEND_MIN_KB`, KB/s, on the Settings page under *Sharing
+& queue* or in the mIRC settings window under *Sharing > Search*, beside the
+slots) stops such a send, but only while every slot is taken and someone is
+waiting for one; with a slot free it may take as long as it takes. The speed
+is what the downloader has received over about the last minute, and a send
+is not judged in its first minute.
+
+Slow has to be the downloader's fault, not your line's. Only the slowest
+send is stopped, and only while another of your sends is reaching that
+speed at the same time - proof your side can deliver. When your whole
+uplink is full, your disk is slow, or your **Max upload speed** is what
+holds the sends back, every send is slow and none is stopped. With one slot,
+or one send running, it never fires. Someone whose own send was stopped for
+its speed does not, while waiting, cost another slow send its slot, so two
+slow downloaders cannot keep trading it.
+
+A stopped file that was waiting in the queue stays there: it counts as a
+failed try against **Max send failures** (`MAX_SEND_FAILS`), the person goes
+to the back of the queue and is told why, and their client can resume it
+when their turn comes again. A file that was sent straight away, without
+waiting in the queue, is dropped instead; they ask for it again and their
+client resumes it. 0, the default, is off.
+
+### How fast the bot talks
+
+The bot paces its queued replies, its adverts and its requests to other bots
+on one clock, at least `MSG_DELAY` seconds (5 out of the box) apart. Some
+servers also limit how fast a client may start talking to people it has not
+messaged before, and drop the message that goes over: Undernet answers
+*"Target change too fast. Please wait 8 seconds."* (numeric 439), other
+networks 707. The bot then holds those paced lines for as long as the server
+asks - 10 seconds when it does not say, never more than 120 - and sends a
+dropped reply again, once. The bot's log shows a `[QUEUE]` line each time.
+There is nothing to set: if you see that line often, a larger `MSG_DELAY`
+makes it rarer.
+
 ### Starting with the system
 
 Once the bot runs by hand, it can start by itself. Each script has a twin
@@ -275,6 +372,10 @@ or `!update` from IRC, or the dashboard's **Update list** button. On a large lib
 **Everything under `FILE_DIRECTORY` goes into the list** — every format, and files with no extension at all. `LIST_IGNORED_EXTENSIONS` names what to leave out; write it however you like, since dots and spacing are optional and case does not matter (`db,ini,tmp` and `.DB, .INI, .TMP` are the same list). It ships skipping only what is never a real file: `.db`, `.ini`, `.lnk`, `.url`, and the `.tmp`/`.part`/`.crdownload`/`.!ut` suffixes of downloads still in flight. The scan prints what it is skipping before it starts.
 
 Because everything is listed, **anything you leave in that directory is offered to anyone who asks.** It is the public face of the bot — keep out of it whatever should not leave.
+
+**The list is what the bot serves** (#1376). A request for a name the list does not have is answered "File not found" at once: the bot does not search the folders for it. A file you add is requestable after the next rebuild; run one (**Update list**, `!update`, or `update` at the console) to offer it straight away. A file type the list leaves out is not served either, even to someone who knows its exact name.
+
+**A folder you rename, replace or delete while a rebuild runs is left out of that list** (#1383), and the log says so (`moved or removed during the scan`); the rebuild still publishes, and the next one lists whatever took its place. What does stop a rebuild is a configured folder (or the share it is on) going away mid-scan, or a folder the system cannot read for any other reason. Then the bot keeps serving the previous list and says `could not be read`; a folder that is merely denied to the bot's account is left out instead, and stays out until its permissions change. A separate drive mounted inside a configured folder and unmounted mid-scan is the exception: the configured folder itself is unchanged, so that drive's folders are left out of that list like renamed ones (Linux and macOS; on Windows the scan does not go into a drive mounted in a folder at all).
 
 Two settings decide how the result is split up:
 

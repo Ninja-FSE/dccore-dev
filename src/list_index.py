@@ -127,6 +127,22 @@ _SCHEMA_VERSION = 3
 # nothing here uses: search() has no ORDER BY. About 5% of the file.
 _FTS_OPTIONS = "tokenize='unicode61', prefix='1 2 3 4', columnsize=0"
 
+# HOW MUCH THE INDEX REWRITES ITSELF WHILE IT IS FILLED (#1345). FTS5 keeps
+# the rows being inserted in an in-memory hash and writes it out as a new
+# segment each time it reaches `hashsize`, 1 MB by default; with five prefix
+# entries per word that is every few thousand rows, and every few segments
+# are merged into a bigger one, and those again. A Windows bot re-indexing
+# its 97 held lists wrote about 36 GB for a 5.2 GB index. Measured on the 8
+# largest of them (6.78M rows): 13.1 GB written and 272 s with the defaults;
+# 8.0 GB and 195 s with a 16 MB hash and merges every 8 segments instead of
+# 4, the index about the same size and every filter query as fast; on the 25
+# largest (13.0M rows) 26.6 GB and 573 s became 16.6 GB and 371 s. A 64 MB hash
+# saved little more and costs memory a small host may not have. Kept in the
+# table's own config, and set on every open so an index made before is
+# tuned too.
+_FTS_HASHSIZE = 16 * 1024 * 1024
+_FTS_AUTOMERGE = 8
+
 # One connection, reused. Opening a database per keystroke would be the
 # cheapest thing here to get wrong.
 _connection = None
@@ -142,6 +158,14 @@ _read_connection_path = None
 # Set by _connect() after it replaced a damaged file; consumed by the readers
 # through _prepare_to_read(). A flag and not a lock, so it lives here.
 _rebuild_pending = False
+# How many backfills are indexing held lists right now (#1367): the startup
+# one, and the one a repair owes, which a reader runs before it answers. The
+# console's start page says `filling` while one runs; _rebuild_pending says
+# only that one is owed, and stays set until somebody next types in the
+# dashboard's filter bar, which can be days. Changed under
+# runtime.list_index_backfills_lock. Kept across a reload: one running then
+# still ends, and would take the count below 0.
+_backfills_running = globals().get("_backfills_running", 0)
 
 
 def _index_path():
@@ -346,6 +370,10 @@ def _open(path):
                      "(key TEXT PRIMARY KEY, value TEXT)")
         conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                      (str(_SCHEMA_VERSION),))
+        conn.execute("INSERT INTO entries (entries, rank) VALUES ('hashsize', ?)",
+                     (_FTS_HASHSIZE,))
+        conn.execute("INSERT INTO entries (entries, rank) VALUES ('automerge', ?)",
+                     (_FTS_AUTOMERGE,))
         conn.commit()
     except Exception:
         if conn is not None:
@@ -729,7 +757,7 @@ def index_bot_list(bot, rows):
             # that replaced a list must not leave the old rows searchable
             # beside the new ones, and a crash between the two must not leave
             # the bot indexed twice.
-            conn.execute("DELETE FROM entries WHERE bot = ?", (name,))
+            _delete_rows_of(conn, name)
             # And its folders, or every refetch under a new set of headings
             # would leave the old ones behind for good (#1135).
             conn.execute("DELETE FROM folders WHERE bot = ?", (name,))
@@ -771,6 +799,27 @@ def index_bot_list(bot, rows):
             return 0
 
 
+def _delete_rows_of(conn, name):
+    """Delete one list's rows, found through the index. Caller holds _conn_lock
+    and owns the transaction.
+
+    `DELETE ... WHERE bot = ?` was a scan of the whole table (#1345): FTS5
+    answers nothing but MATCH and rowid from its index, so every refresh read
+    every row of every list to find its own - 2.3 s at 6.8M rows, even for a
+    list with no rows yet, and a rebuild re-indexing ninety lists into a
+    growing table paid it ninety times. The MATCH finds the candidates and
+    `bot = ?` keeps the delete exact, as in bots_with_a_match(): `bot:"name"`
+    is a tokenised phrase, and some_bot and some-bot are the same one. A
+    name with no tokens at all (#1091) has no phrase, and is found the old
+    way.
+    """
+    if _has_tokens(name):
+        conn.execute("DELETE FROM entries WHERE rowid IN (SELECT rowid FROM entries "
+                     "WHERE entries MATCH ? AND bot = ?)", ("bot:" + _quote(name), name))
+    else:
+        conn.execute("DELETE FROM entries WHERE bot = ?", (name,))
+
+
 def _counted_values(name, rows, indexed, folder_ids, next_id):
     """index_bot_list()'s INSERT parameters, counting each into indexed[0].
 
@@ -806,7 +855,7 @@ def drop_bot(bot):
         if conn is None:
             return False
         try:
-            conn.execute("DELETE FROM entries WHERE bot = ?", (name,))
+            _delete_rows_of(conn, name)
             # Its folders too (#1135): forget_bot() and a purge come through
             # here, and a folder whose rows are gone is a leak, not a cache.
             conn.execute("DELETE FROM folders WHERE bot = ?", (name,))
@@ -913,6 +962,49 @@ def indexed_bots():
                     for row in conn.execute("SELECT DISTINCT bot FROM entries")}
         except Exception:
             return set()
+
+
+def held_totals(held):
+    """(rows, lists, state) for the console's start page (#1359), from what
+    the held lists recorded when they were fetched - never from the index:
+    a COUNT(*) over an FTS5 table reads every row, 3.3 GB on a live bot.
+
+    `rows` is what the lists' fetches counted, which is what each indexed;
+    `lists` how many lists are held. `state`:
+      none     - no list is held, so the index has nothing to hold;
+      filling  - a backfill is indexing held lists now: the startup one,
+                 or the one a repair owes, which the dashboard's filter runs
+                 before it answers - so some are not searchable yet;
+      ok       - none is running. A repair's backfill that is owed but not
+                 begun is not `filling` (#1367): nothing reads the index
+                 before running it, and nothing may run it for days.
+    """
+    rows = count = 0
+    # A copy, as every other reader of the live config.fetched_bot_lists
+    # takes (#1367): this runs on the status burst's helper thread, and a
+    # fetch completing on the transfer thread changes the map, and an
+    # entry's "lists", under the loop.
+    for key, entry in dict(held or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        entry = dict(entry)
+        if isinstance(entry.get("lists"), dict):
+            entry["lists"] = dict(entry["lists"])
+        bot = str(entry.get("bot") or key).strip()
+        # The lists the backfill indexes, chosen by the same function.
+        for _name, info in _held_list_infos(bot, entry):
+            try:
+                rows += max(0, int(info.get("entry_count") or 0))
+            except (TypeError, ValueError, OverflowError):
+                pass
+            count += 1
+    if not count:
+        state = "none"
+    elif _backfills_running > 0 or not runtime.list_index_backfill_done.is_set():
+        state = "filling"
+    else:
+        state = "ok"
+    return rows, count, state
 
 
 def bots_with_a_match(terms, bots):
@@ -1135,15 +1227,22 @@ def _held_lists(bot, entry):
     showed a list that does match as holding nothing. An entry written before
     an archive could hold more than one list has no "lists", only its main
     list's "list_path"."""
+    return [(name, info["list_path"]) for name, info in _held_list_infos(bot, entry)]
+
+
+def _held_list_infos(bot, entry):
+    """[(index name, the dict recording the list)] - _held_lists()'s
+    choice, with what the fetch recorded of each list beside its name, so
+    held_totals() counts exactly the lists the backfill indexes (#1367)."""
     import list_fetch
     out = []
     lists = entry.get("lists")
     if isinstance(lists, dict):
         for marker, info in lists.items():
             if isinstance(info, dict) and info.get("list_path"):
-                out.append((list_fetch.index_key(bot, marker), info["list_path"]))
-    if not any(name == bot for name, _path in out) and entry.get("list_path"):
-        out.insert(0, (bot, entry["list_path"]))
+                out.append((list_fetch.index_key(bot, marker), info))
+    if not any(name == bot for name, _info in out) and entry.get("list_path"):
+        out.insert(0, (bot, entry))
     return out
 
 
@@ -1169,7 +1268,21 @@ def backfill_missing(held, log=print):
 
     Best-effort per bot: one unreadable list costs its own row in the filter
     and nothing else, which is the posture the whole module already takes.
+
+    Counted in _backfills_running while it runs (#1367), which is what
+    held_totals() calls `filling`.
     """
+    global _backfills_running
+    with runtime.list_index_backfills_lock:
+        _backfills_running += 1
+    try:
+        return _backfill_missing(held, log)
+    finally:
+        with runtime.list_index_backfills_lock:
+            _backfills_running -= 1
+
+
+def _backfill_missing(held, log):
     import list as list_mod
     import platform_compat
 
