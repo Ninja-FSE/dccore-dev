@@ -13,9 +13,9 @@ nothing but Windows' own libraries, the icons' names in the script in the
 order the README gives them and as many of them as the file holds, and the
 sources beside the binaries.
 
-The source can be ahead of the shipped file (#1378: the 1.6 source waits for
-a machine with mingw). So the README's list of calls is held to the source's
-exports, not the binary's; the README's version may trail the source's but
+The source can be ahead of the shipped file between a change to src/ and the
+next build (as the 1.6 source was, #1378, until it was built with mingw). So
+the README's list of calls is held to the source's exports, not the binary's; the README's version may trail the source's but
 never lead it; and the day the README names the source's version, the shipped
 DLL has to export exactly what the source does.
 """
