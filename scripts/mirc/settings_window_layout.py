@@ -275,6 +275,14 @@ GROUPS = (
                 {"local": "chat.all", "label": "Listen on every channel the bot is in, not only the ticked ones"},
                 {"local": "chat.popup", "label": "Open the chat window when a line arrives"},
             )),
+            # The bot's settings (#1401), here because they limit files on this
+            # PC: the bot sends them to the script as DCCORE CHATHIST.
+            ("History", (
+                {"note": "Whole months of the history file are deleted: those that ended longer ago than "
+                         "the days, then the oldest while the folder is over the size. 0 is no limit."},
+                {"key": "CHAT_HISTORY_DAYS", "label": "Keep for (days)"},
+                {"key": "CHAT_HISTORY_MAX_MB", "label": "At most (MB)"},
+            )),
         )),
     )),
 )

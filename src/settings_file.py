@@ -890,6 +890,9 @@ def folder_problem(path):
 # without coerce(), from admin_config.py.
 MINIMUMS = {
     "ANNOUNCE_INTERVAL": 60,
+    # 0 is "no limit"; below it the script refuses the CHATHIST line (#1401).
+    "CHAT_HISTORY_DAYS": 0,
+    "CHAT_HISTORY_MAX_MB": 0,
 }
 
 

@@ -732,6 +732,28 @@
 # The window the burst ceiling above is counted over
 #PRIVATE_MESSAGE_DECLINE_BURST_SECONDS = 600
 
+# How many days dccore.mrc keeps DCCore Chat's history on your PC: whole
+# months are deleted once they ended more than this many days ago. 0 keeps
+# everything. The bot sends this to the script; a script that never had it
+# deletes nothing.
+#
+# HOW LONG DCCORE CHAT'S HISTORY IS KEPT (#1401). dccore.mrc writes what its
+# chat window shows to a file per channel - and per private conversation - per
+# month, in mIRC's log folder on the operator's PC, not on the bot's machine.
+# The limits are the bot's settings so the dashboard can set them: the bot
+# sends them to the script (DCCORE CHATHIST) after `hello` and whenever either
+# changes, and the script deletes whole months - every month that ended more
+# than this many days ago. 0 keeps everything. A script that has never been
+# sent the limits deletes nothing.
+# Days DCCore Chat's history is kept in mIRC; 0 keeps everything
+#CHAT_HISTORY_DAYS = 100
+
+# How big DCCore Chat's history folder on your PC may grow, in MB: past it,
+# the oldest months are deleted first, never the month running. 0 is no limit.
+#
+# MB DCCore Chat's history may take in mIRC; 0 is no limit
+#CHAT_HISTORY_MAX_MB = 100
+
 # How many times the bot tries to get back into a channel after being kicked
 # before giving up on it. It waits until the next advert is due before each
 # try, so it never looks like it is fighting the kick. 0 means never rejoin.

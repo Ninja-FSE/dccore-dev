@@ -500,6 +500,16 @@ PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS: int = 86400
 # moves on. Nobody is owed an explanation of why they did not get one.
 PRIVATE_MESSAGE_DECLINE_BURST: int = 20
 PRIVATE_MESSAGE_DECLINE_BURST_SECONDS: int = 600   # The window the burst ceiling above is counted over
+# HOW LONG DCCORE CHAT'S HISTORY IS KEPT (#1401). dccore.mrc writes what its
+# chat window shows to a file per channel - and per private conversation - per
+# month, in mIRC's log folder on the operator's PC, not on the bot's machine.
+# The limits are the bot's settings so the dashboard can set them: the bot
+# sends them to the script (DCCORE CHATHIST) after `hello` and whenever either
+# changes, and the script deletes whole months - every month that ended more
+# than this many days ago. 0 keeps everything. A script that has never been
+# sent the limits deletes nothing.
+CHAT_HISTORY_DAYS: int = 100   # Days DCCore Chat's history is kept in mIRC; 0 keeps everything
+CHAT_HISTORY_MAX_MB: int = 100  # MB DCCore Chat's history may take in mIRC; 0 is no limit
 # How many times to try rejoining a channel that has thrown us out, before
 # giving up on it.
 #

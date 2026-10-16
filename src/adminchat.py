@@ -73,6 +73,7 @@ listen-mode work, and tests/test_adminchat.py drives it end to end.
 import binascii
 import codecs
 import collections
+import contextlib
 import hashlib
 import hmac
 import ipaddress
@@ -761,6 +762,70 @@ def script_reads_peers(version):
     return theirs is not None and theirs >= ours
 
 
+# The first script that reads a CHATHIST line (#1401). An older one has no
+# handler for it and would print it as text after every `hello`.
+CHATHIST_SCRIPT_VERSION = "1.20"
+
+
+def script_reads_chathist(version):
+    ours = _version_tuple(CHATHIST_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is not None and theirs >= ours
+
+
+def chathist_line():
+    """`DCCORE CHATHIST <days> <max_mb>`: how long and how big dccore.mrc may
+    keep DCCore Chat's history (#1401), or None while a rehash is reloading
+    the settings.
+
+    The script DELETES by these numbers, so a value read halfway through a
+    reload - a setting back at its shipped default for a moment (see
+    runtime.config_reload_lock) - must never go out: an operator who keeps
+    everything (0) would be sent 100 days and lose every older month. None
+    means "not now"; the writer asks again on its next pass. A value from
+    admin_config.py, which never went through coerce(), is held to 0 or
+    more and to a whole number, the two the script accepts."""
+    lock = runtime.config_reload_lock
+    if not lock.acquire(blocking=False):
+        return None
+    try:
+        # defaults.py declares both; 0 here only means a missing one keeps
+        # everything rather than deletes.
+        days = getattr(config, "CHAT_HISTORY_DAYS", 0)
+        max_mb = getattr(config, "CHAT_HISTORY_MAX_MB", 0)
+    finally:
+        lock.release()
+
+    def whole(value):
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+    return f"DCCORE CHATHIST {whole(days)} {whole(max_mb)}"
+
+
+def send_chat_history_limits(session):
+    """DCCORE CHATHIST to `session` (#1401): at `hello`, then again from the
+    writer's half-second pass whenever CHAT_HISTORY_DAYS or
+    CHAT_HISTORY_MAX_MB has changed - a Settings save, a `set`, a rehash - so
+    the script prunes by the new limits at once. Only to a script that reads
+    the line: reads_chathist is set by `hello` after its HELLO line is queued,
+    so this never goes out ahead of HELLO.
+
+    `hello` (the reader thread) and the writer both call this. Under the
+    session's _chathist_lock the read, the compare and the queueing are one
+    step, so a setting changed during a hello cannot queue the older line
+    behind the newer one - the script would prune once by the old limits."""
+    if not getattr(session, "reads_chathist", False):
+        return
+    with getattr(session, "_chathist_lock", None) or contextlib.nullcontext():
+        line = chathist_line()
+        if line is None or line == getattr(session, "_chathist_sent", None):
+            return
+        session._chathist_sent = line
+        session.send(line)
+
+
 def _download_name(row):
     if row.get("request_type") == "list":
         return f"{row.get('bot') or '?'}'s file list"
@@ -1195,6 +1260,12 @@ class Session:
         self.draws_downloads = False  # ... and the Downloads window's rows (#1022)
         self.draws_dlqueue = False    # ... and the Download queues window's rows (#1217)
         self.reads_peers = False      # ... and PEERS and CONSOLEFEED lines (#1045)
+        self.reads_chathist = False   # ... and CHATHIST lines (#1401)
+        # The CHATHIST line this session was last sent (#1401), to send it
+        # again only when a setting changed; the lock makes the compare and
+        # the send one step for hello and the writer (send_chat_history_limits).
+        self._chathist_sent = None
+        self._chathist_lock = threading.Lock()
         self.reads_library = False    # it sent `library`: LIBRARY lines in every burst (#1359)
         self.downloads_finished = 0   # > 0 while that window is open: how many finished rows it wants
         self._downloads_sent_at = 0.0
@@ -1498,6 +1569,7 @@ class Session:
                 self.send_rebuild_progress()
                 self.send_packing_progress()
                 self.send_downloads()
+                send_chat_history_limits(self)
                 self._wake.wait(0.5)
                 self._wake.clear()
                 continue
@@ -2617,6 +2689,11 @@ def _cmd_hello(session, args):
             session.send(serverschat.peers_channel_line(chan))
     for line in serverschat.recent_lines():
         session.send(line)
+    # How long the chat's history is kept (#1401). Mid-rehash this sends
+    # nothing, and the writer's next pass sends it instead.
+    session.reads_chathist = script_reads_chathist(version)
+    session._chathist_sent = None
+    send_chat_history_limits(session)
     session.send_status()
     print(f"[ADMINCHAT] {session.nick}'s session switched to the structured feed "
           f"({session.client} {' '.join(parts[1:]) or '?'}).")
