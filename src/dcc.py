@@ -3042,6 +3042,10 @@ def _send_resume_accept(irc_sock, user, key, clear_pending=False):
     except Exception as err:
         print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
         return False
+    # Recorded with no lane (#1386): an ACCEPT the server refuses is not sent
+    # again, since the position in it may be stale by then - but the record
+    # keeps that refusal from being taken for an older line to this user.
+    runtime.note_paced_line(reply, None)
     print(f"[DCC-RESUME] {user} already has {position} of {size} bytes of "
           f"{offered_name}; accepted and will send from there.")
     import stats_mgr
@@ -4871,7 +4875,10 @@ def refuse_an_unsendable_file(irc_sock, user, row, next_file, file_path, file_si
     try: 
         msg = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {reason}.\r\n"
         irc_sock.sendall(msg.encode('utf-8', errors='ignore'))
-    except: 
+        # No lane, never sent again; recorded only so a refusal of it is
+        # not taken for an older line to this user (#1386).
+        runtime.note_paced_line(msg, None)
+    except:
         pass
 
     # Clear the locks and wait three seconds, to stay well clear of Excess Flood.
@@ -4956,7 +4963,12 @@ def refuse_without_a_port(irc_sock, user, row, next_file, dcc_sock, listener_err
         refusal = "Could not open a DCC port right now. Your file stays queued."
     else:
         refusal = "No available DCC ports."
-    try: irc_sock.sendall(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {refusal}\r\n".encode("utf-8", errors="ignore"))
+    refusal_line = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {refusal}\r\n"
+    try:
+        irc_sock.sendall(refusal_line.encode("utf-8", errors="ignore"))
+        # No lane, never sent again; recorded only so a refusal of it is
+        # not taken for an older line to this user (#1386).
+        runtime.note_paced_line(refusal_line, None)
     except: pass
     with queue_lock:
         config.active_transfers[:] = [tx for tx in config.active_transfers if not _is_this_send(tx, row, user)]
@@ -5293,6 +5305,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
 
         try:
             irc_sock.sendall(ctcp_handshake.encode("utf-8", errors="ignore"))
+            # Recorded with no lane (#1386): unpaced and never sent again,
+            # recorded only so that the server refusing it is not taken for
+            # an older line to this user, which would then go out twice.
+            runtime.note_paced_line(ctcp_handshake, None)
             print(f"[DCC-LISTEN] Listening on port {assigned_port} for {user} (Handshake sent directly).")
         except Exception as e:
             # #430: this used to fall straight through into accept() below,
