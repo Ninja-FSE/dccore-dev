@@ -2,6 +2,2368 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟩 v1.17.0 (2026-10-16) - "The Control Panel Release"
+
+### 🔗 The bot's project link is the project page (#1407)
+
+- **`PROJECT_URL` defaults to `https://ninja-fse.github.io/dccore/`**, the project page (#1309). That is what the CTCP
+  VERSION reply and the "Served by" line at the top of every list show.
+- **The update check reads the repository out of a project page.** `version_check.repository()` takes
+  `https://<owner>.github.io/<name>/` as `<owner>/<name>`, beside `https://github.com/<owner>/<name>`. It is one
+  setting still, and a fork with its own page works the same way. An address that names no repository is refused as
+  before: a user site with no name, an empty owner, an owner with dots, a page below the root.
+- `conf/settings.conf.sample` is regenerated. The README links to the page.
+- **Tests:** in `tests/test_the_bot_says_when_a_new_version_is_out.py`:
+  - the page form is read, and the addresses that name no repository are not;
+  - the shipped default is the page, read from a fresh copy of `defaults.py`, and it names the public repository;
+  - with the page as `PROJECT_URL`, the one GET goes to that repository's latest release.
+- **Mutation checks, 5/5 caught:** the page form dropped, unanchored, with an empty owner allowed, the old default,
+  owner and name swapped.
+
+### 🌐 The project page describes this release (#1405)
+
+The page was written against v1.16.1, and marked **Next release** what was newer. This release ships all of it, so:
+
+- **No Next release marks are left:** the control panel and its start page, the dark theme and icons,
+  `/dccore settings` and `/dccore theme`.
+- **The mIRC page:** install with the `dcx` and `dll` folders, and open the control panel; `/dccore options` is its
+  mIRC side. DCCore Chat's history is mentioned.
+- **The Commands page:** `set` is back in the console table, with `unlock` for a token login.
+
+Published to `dccore`'s `gh-pages` with the release, by PUBLIC-REPO-WORKFLOW.md step 5.
+
+### 🗂️ dccore.mrc: DCCore Chat's history keeps within its limits, a file per channel per month (#1401, the script's side)
+
+The history (#1393) wrote one file per channel and per private conversation that only ever grew. The operator decided
+on two limits, the bot's settings `CHAT_HISTORY_DAYS` (100) and `CHAT_HISTORY_MAX_MB` (100), set on the dashboard and
+in the control panel; the bot's side adds them and sends them as `DCCORE CHATHIST <days> <max_mb>`. The script's side:
+
+- **A file per channel per month:** `DCCore-Chat\<channel>\YYYY-MM.log` (`@nick\`, `every-channel\` likewise), the
+  channel's folder made with its first line. A limit then deletes whole months instead of rewriting a large file,
+  which mIRC script does slowly.
+- **`DCCORE CHATHIST`** is handled by `dccore.chat.hist.limits`: two whole numbers of 0 or more, kept in `dccore.ini`
+  (`chat.hist.days`, `chat.hist.mb`) so they hold before the next connection, and applied at once when either
+  changed. Anything else is ignored.
+- **`dccore.chat.hist.prune`** deletes every month that ended more than the days ago (a month before the one the limit
+  falls in), then, while the folder is over the size, the oldest months, never the month running. It reads the folder
+  once (`$findfile` with a command per file, one level of channel folders), looks only at files named for a month,
+  and leaves `recent.txt`, older flat files and anything else alone. Nothing before a bot has sent limits, or with
+  both at 0. A file that cannot be deleted stops the pass, its table freed, and the next pass tries again.
+- **When:** `dccore.chat.hist.daily`, after the replay when the chat window opens, once a day (the day is marked
+  whatever the pass finds), and when the bot sends new limits - also for a history that was turned off, whose files
+  stay until the limits remove them.
+- Docs: ADMIN-CONSOLE's history paragraph and a new one on the limits; #1393's public line no longer says the files
+  are never trimmed. The two settings take their place on the control panel's mIRC side once the bot has them.
+- **Tests:** `tests/test_the_chat_history_is_kept_within_its_limits.py` (30 tests) runs the aliases on the chat
+  history's interpreter, taught `$findfile`, `$file().size` and `/remove`, against a real folder: the file names, the
+  limits from the bot and its line through the dispatcher, the days, the size, the month running, what is not a month
+  file, nothing without limits, once a day, a file that cannot be deleted, the docs. 12 of 12 mutants caught.
+  `tests/test_dccore_chat_keeps_a_history_and_counts_unread.py` reads the month files.
+
+### 🗂️ DCCore Chat's history limits: CHAT_HISTORY_DAYS and CHAT_HISTORY_MAX_MB, sent as DCCORE CHATHIST (#1401, the bot's side)
+
+dccore.mrc's chat history (#1393) wrote files that were never trimmed. The operator decided on two limits, kept as the
+bot's settings so the dashboard can set them, while the files stay on the operator's PC; the script's side (#1402)
+deletes whole months by them. The bot's side:
+
+- **Two settings**, on the dashboard under **Settings -> Private messages**: `CHAT_HISTORY_DAYS` (100) and
+  `CHAT_HISTORY_MAX_MB` (100), 0 = no limit, with help, labels (en/es/fr) and the sample regenerated. Both have a
+  minimum of 0 in `settings_file.MINIMUMS`: the Settings page and the console refuse a negative one, and
+  settings.conf's is raised to 0 on load - keep everything, never a value the script would refuse.
+- **`DCCORE CHATHIST <days> <max_mb>`**, built by `adminchat.chathist_line()`: sent after `HELLO` (after the chat's
+  CHANNELS and replay) to a script that said 1.20 or later (`CHATHIST_SCRIPT_VERSION`), and again from the
+  session writer's half-second pass whenever the line has changed, so a Settings save, a `set` or a rehash reaches
+  the script within a second. The script deletes by these numbers, so they are read under
+  `runtime.config_reload_lock` without waiting for it: halfway through a rehash's reload a setting is back at its
+  shipped default for a moment, and an operator who keeps everything (0) would have been sent 100 days. Mid-reload
+  the line is skipped and the next pass sends it. A value from `admin_config.py`, which never went through
+  `coerce()`, is held to a whole number of 0 or more. `hello` and the writer send it under a per-session lock,
+  so a setting changed during a hello cannot queue the older line behind the newer one.
+- **The control panel:** the two settings on the mIRC side's *Chat* page, in a *History* section
+  (`scripts/mirc/settings_window_layout.py`), and the settings window's block rebuilt.
+- Docs: the CHATHIST row in ADMIN-CONSOLE's structured-feed table.
+- **Tests:** `tests/test_the_bot_sends_the_chat_history_limits.py` (19 tests): the version gate (1.9 is older than
+  1.20), the line from the settings, a value from `admin_config.py`, nothing while a rehash holds the reload lock
+  and no wait for it, HELLO before CHATHIST, an older script, hello again, a change sent once, the real session
+  writer sending a changed limit on its own, the Settings page, the labels, a negative refused, the feed-table row.
+  14 of 14 mutants caught.
+
+### 📖 docs: dccore-dev is public, and a security fix goes through a draft advisory (#1399)
+
+`docs/PUBLIC-REPO-WORKFLOW.md` called this repository private, and so did the instructions the coding agents read
+(chchatzop noticed). It is public and stays public. The document now says so where it matters: why an issue from
+`dccore` is not transferred here, what a `Ninja-FSE/dccore#N` reference does now that both repos are public, and that
+a name pushed here is published at once, so scrubbing happens before pushing rather than before releasing. A new
+section, **Security fixes**, writes down the procedure already in use: a draft security advisory on `dccore-dev` and
+its temporary private fork, the branch pushed only there, reviewed there and tested locally (the full suite and
+preflight, since CI does not run in the fork), neutral commit and changelog text, and the PR merged from the advisory
+when the release that carries it is ready. The agents' local instructions say the same.
+
+### 🔌 dccore.mrc: the start page says when the bot is offline (#1396)
+
+With the bot stopped, the control panel's footer said *Not connected to the bot* while its start page said
+`connected (structured console)`, with the stopped bot's start time under *Up since* and its duration still
+counting, and the old session's figures under *Today*. `dccore.sw.home.frame` read the Connection row from
+`dccore.live`'s `state` and `mode` and the figures from its `st.*` keys, which are whatever the last session
+left; the footer (`dccore.sw.start`) checks `$chat($dccore.bot)`. A `state` of `in` with no chat open (a chat
+that ended without `on CHATCLOSE` resetting it, or a table that outlived its session) made the two disagree.
+
+- **One test for "linked":** `dccore.linked` is `$true` only when `state` is `in` and a chat to the bot is open.
+  The start page's rows all use it.
+- **The Connection row says it at a glance**, its text coloured on every fill (`dccore.sw.home.ink`) so no
+  colour outlives its state: a dot and `connected (structured console)` / `(plain console)` in green; an amber
+  dot and `connecting: <state>` while the script dials (`opening`, `waiting`, `banner`, `auth`, `password`); a
+  red dot and `offline` otherwise. The theme has no such colours, so they are fixed: darker on the light face
+  (`0,128,0`, `160,100,0`, `192,0,0`), lighter on the dark one (`110,200,110`, `230,170,50`, `240,100,100`).
+  The colour is kept in `dccore.sws` (`home.ink`) and set again at the end of `dccore.theme.dcxtexts`, which
+  gives every value the dark theme's text colour once, just after the window is made and its first fill.
+- **Offline, nothing from the bot is shown as current:** *Up since* is `-`, *Sending* has no counts in its title
+  and `(bot offline)` on its first line, *Today* and *Library* are `-` on every row. *Nick* and *Network* are
+  this mIRC's own and stay.
+- **The page redraws when the link drops or comes up:** `dccore.sw.lost` (run on `CHATCLOSE` and on `HELLO`)
+  refills the start page after `dccore.sw.start`, and `dccore.plain` does, for a bot without the structured
+  feed, which sends no `HELLO`. Every step of a dial redraws the @DCCore title, so `dccore.title` also starts
+  the start page's fill, on the timer `dccore.panel.soon` uses (`dccore.sw.home.fill` 300 ms later; a burst's
+  two calls coalesce), before its own return so a closed @DCCore does not stop it. The state changes that do not
+  go through `dccore.title` (`auth`, `password`, `taken`) show at the page's next redraw.
+  `dccore.sw.home.fill` guards itself as before (window open, DCX, start page shown). The title starts the
+  fill only through that timer, never directly; the one way back from the fill to the title (its `library`
+  ask with no chat, which opens @DCCore for the error line) is asked once a window, as `asked.library` is set
+  before the send, so the two cannot keep feeding each other.
+- **A stale state is put right:** `dccore.unstale`, at the top of `dccore.sw.start`, resets a `state` of `in`
+  with no chat as `on CHATCLOSE` does (`state closed`; `mode`, `pairsent`, `vetted`, `typed`, `sw.unlocked`
+  deleted) and redraws the @DCCore title, the chat window's title and the side panel, without the *Console
+  closed* message, a retry or a timer.
+
+### 💬 dccore.mrc: DCCore Chat keeps a history file, replays it on open, and counts what is unread (#1393)
+
+The chat window's content was only ever mIRC's scrollback: gone when the window was closed or mIRC restarted, and
+nothing said a line had arrived while you were looking elsewhere. The bot still keeps nothing on disk; the script
+does, on the operator's own PC. mIRC side only, `scripts/mirc/dccore.mrc`:
+
+- **The history file.** Every line `dccore.chat.feed` draws through `dccore.chat.show` is written, after it is
+  drawn, by `dccore.chat.hist.add`, into `$logdir\DCCore-Chat\`: `<channel>.log` per channel (`$mkfn`), the
+  `@<nick>` channel of a private conversation the same way (`@nick.log` - the `@` also keeps a nick such as `CON`
+  from naming a Windows device), `every-channel.log` for an own line said with `chat *` (channel `-`). Each line is
+  `yyyy-mm-dd HH:nn:ss channel nick text`, the time from the line's id, the text stripped. The bot's own remarks
+  (nick `*`) and the script's grey lines are never written. The folder, and mIRC's log folder if it is missing, are
+  made on first use. A write that fails is caught (`:error`) in the alias, so it never stops the feed. The history is
+  ON by default, for an operator who only updates the script too, and includes private conversations; the `.log`
+  files are never cut back. So the window now says, under its "Public:" line and only while the history is on, where
+  it is kept and that a right-click stops it.
+- **recent.txt**, beside them: `<id> <channel> <nick> own|other <text>` for every line, cut back to the last 200 once
+  it passes 400 (`dccore.chat.hist.trim`, through a hidden window: `/loadbuf 200` loads the last 200 lines,
+  `/savebuf` writes them back). The hidden window's name is one alias, `dccore.chat.hist.buf`.
+- **Replay on open.** `dccore.chat.window`, in all three of its modes, ends with `dccore.chat.hist.replay`: the last
+  200 lines of recent.txt in grey (colour 14, a plain echo, so the button is not lit) between "Earlier, from the
+  history file:" and "End of the history file.", by the live line's rules: an own line, a private (`@`) line, or a
+  channel listened on, the text cut at 400 characters by `dccore.chat.cut`, the one cut `dccore.chat.show` now uses
+  too. Never written again and never counted as unread. `chat.last` moves to the newest id read.
+  And the first CHAT line of a session first takes recent.txt's newest id as `chat.last` (`dccore.chat.hist.floor`):
+  otherwise the first line of the bot's replay after HELLO, being the line that opens the window, would be drawn by
+  the window's replay and then again by itself, and written twice. Neither moves `chat.last` past the clock
+  (`dccore.chat.hist.clock`, five minutes ahead of `$ctime`): one id from the future in the file - a bot whose clock
+  ran fast, a PC clock put back - would otherwise have held `chat.last` above every later line, and the window would
+  have drawn and kept nothing more. Such a line is still drawn.
+- **Unread.** A line from another bot (`own`/`other` from the feed, now one `%kind`) drawn while `$active` is not the
+  window, or while mIRC is in the background (`!$appactive`: `$active` stays the window you left), counts in
+  `chat.unread` (`dccore.live`), shown at the end of the title as `· 3 unread`. The switchbar button is lit by the
+  line's own `echo -m`, as before (mIRC 7). With `chat.flash` on, `/flash` makes mIRC flash in the taskbar, which it
+  does only while mIRC is in the background. `on ACTIVE` (any window, `$active` checked in the body - mIRC runs only
+  the first matching event of a kind per file, so it is the file's only one) clears the count, as do `on APPACTIVE`
+  with mIRC back in front and the window active, a line typed in the window (for an mIRC without on ACTIVE), and
+  closing it.
+- **Options**, in dccore.ini: `chat.history` and `chat.flash`, both on by default (`dccore.default`). The window's
+  right-click menu gains a group: *Keep a history file* and *Flash on a new line* (ticked toggles), *Open the
+  history folder*. History off stops the writing and the replay and leaves the files as they are.
+- **Docs:** the section's header comment, `docs/ADMIN-CONSOLE.md` (*History* and *Unread* under DCCore Chat, and the
+  bot's "never writes a chat line to disk" said to be the bot's), `docs/FUTURE.md` (the "still missing" entry folded
+  into the implemented one).
+- **Tests:** `tests/test_dccore_chat_keeps_a_history_and_counts_unread.py` (67 tests) runs the script's own aliases -
+  the feed, the window, the title, the history and unread aliases, the ACTIVE, APPACTIVE, INPUT and CLOSE events -
+  through a small mIRC interpreter in the test (a fixed `$ctime`, `$appactive` a switch), against a temporary log
+  folder with a space in its path: a drawn line written once, after it is drawn, to its channel, private or
+  every-channel file and recent.txt, stripped, its file name through `$mkfn`; a remark or an undrawn line never
+  written; a failed write losing that line only; the bot's replay after HELLO drawn once, the floor read once a
+  session, and recent.txt read without evaluating it; an id past the clock moving nothing in the floor or the replay
+  (one at the clock still does), and a present line drawn and written after it; the replay's filter (own, private,
+  listened), grey without `-m`, between its markers, the last 200, a broken row skipped, nothing written or counted,
+  `chat.last` raised and never lowered, a failing replay stopping in the replay, in all three ways the window opens;
+  the line saying where the history is, only while it is kept; a line past 400 characters cut the same live and
+  replayed, and written whole; the hidden window named once; recent.txt cut to 200 past 400 and not at 400; the
+  unread count in the title, the flash and its option, counting while mIRC is in the background, and the four ways
+  it clears (a typed /command too); history off; both defaults; the menu group, its bare commands and its icon; the
+  docs. `NothingAnswers` in `tests/test_dccore_chat_in_the_mirc_window.py` reads the new aliases and the three
+  events too. 70/70 mutations caught, the reviewer's four survivors among them.
+
+### ⏸️ A nick whose sends keep failing is paused until midnight: DAILY_SEND_FAILS_LIMIT (#1389)
+
+`MAX_SEND_FAILS` is per queued file, so a nick with twenty files queued whose client never accepts an offer could cost
+sixty failed attempts, each holding a slot for the accept or stall timeout. `DAILY_SEND_FAILS_LIMIT` (0, off, by
+default) looks at the nick: once its sends have failed that many times since local midnight, it is paused until
+midnight.
+
+- **What counts is decided where the send fails.** `start_dcc_send()` sets `receiver_failed` in the handlers for a
+  receiver that never connected (the accept timeout), stalled (`_ReceiverStalled`, and the final-ack wait giving up),
+  let a write time out (`socket.timeout`), or closed the connection before it had the whole file (`_ReceiverGone`,
+  the final-ack wait seeing EOF, and a `ConnectionError` out of the send). `finish_send()` counts it through
+  `SentFile.receiver_failed`, after the queue row is settled. Nothing else sets it: a file that vanished or shrank
+  under the send, a handshake that could not go out, no port or address - our side's failures - and the pack
+  cancels, the operator's (#1202) and the user's own remove (#1268), never reach a send. A stop the bot makes itself
+  (such as #1388's slow-send stop) gets its own `except` and leaves it unset.
+- **Our own file failing is not the receiver closing.** Since 3.10 `socket.timeout` is `TimeoutError`, and a NAS or
+  network share that hiccups raises `TimeoutError`, `ConnectionResetError` or `ConnectionAbortedError` from `open()`
+  or `read()` - the types the handlers above take for the receiver. `stream_the_file()` wraps its open, seek and
+  read: any `OSError` there becomes `_SourceUnreadable` (deliberately not an `OSError`), which has its own `except`
+  in `start_dcc_send()`, is reported as the bot's side and is never counted.
+- **A circuit breaker for "never connected": a streak, not a clock.** An unanswered offer is often our side: a stale
+  `MY_IP_OR_DOCK` after the ISP's daily reconnect, a lost port forward, a firewall. Counted, that pauses everybody:
+  with three slots, a 30 s accept timeout and a limit of 3, every queued nick within about ten minutes. A first
+  version trusted the offers for an hour after any connect, which protected only a bot broken from start-up or for
+  over an hour. Now `never_connected_counts(nick)` adds each never-connected send to a streak -
+  `runtime.never_connected_streak` and the nicks in it, `runtime.never_connected_streak_nicks` - and it counts only
+  when some send has connected since start-up (`runtime.send_connected_since_start`) and the streak, this send
+  included, has not reached `NEVER_CONNECTED_STREAK` (3) sends to `NEVER_CONNECTED_STREAK_NICKS` (2) or more nicks.
+  One nick failing alone keeps counting: that is its own client. `note_send_connected()`, called when a receiver
+  connects, sets `send_connected_since_start` and resets the streak. The "not counted ... MY_IP_OR_DOCK" line is
+  logged once per streak (`runtime.never_connected_streak_logged`). All of it under `runtime.send_connected_lock`, in
+  `runtime.py` so a `!rehash` keeps it.
+- **Known risk, documented, not fixed:** `accept()` takes whoever connects first, so a third party connecting to the
+  DCC ports can make a downloader's sends fail and, with the limit on, get them paused. True of any DCC bot; the
+  limit makes it costlier. `docs/INSTALL.md` says so and advises a high value, or off, where that is a concern.
+- **`_ReceiverGone` counts, though #1203 records it as `cancelled`.** A user's Close and a client that drops every send
+  halfway cannot be told apart on the wire: either closes with a FIN, or with a reset while data is still unread. Both
+  hold a slot for a file that does not arrive, and the issue names "closed the connection with bytes outstanding" as
+  a failure. The record's status is unchanged.
+- **The count** is `runtime.failed_transfers` (the container was unused; it keeps its name, its rehash rescue and its
+  test reset) under the new `runtime.failed_transfers_lock`: `{nick_key: {"day", "fails", "paused"}}`, keyed like
+  `dcc_queue` (lowercased). `dcc._send_fails_today()` is the clock, so a test can move midnight. The first count of a
+  new day drops every entry from an earlier one. In memory only: a restart forgives.
+- **The pause.** The failure that reaches the limit runs `_pause_for_send_fails()` once: the nick's queued rows are
+  removed as `!clearqueue` would (orphaned temp archives first, the freeze entry too), the queue is saved, the nick is
+  told in one notice, and the operator sees a debug line. A row kept for retry by the same failure goes with them.
+- **The refusal.** `handle_download_request()` asks `send_fails_paused()` right after the list routing, before any
+  lookup: a paused nick's request is not queued, and `announce.send_fails_paused_notice()` says why - once per
+  `QUEUE_FULL_REPEAT_SECONDS`, like the full-queue refusals, so an AutoQ paste is not thirty notices.
+  `list.send_file_list()` asks first too, so a paused nick asking for the list gets only that notice, not "Preparing
+  full list" before it.
+- **Admins are never counted or paused**, by nick: `commands.admin_nicks()`, is_admin()'s nick half, now its own
+  function. A pause by nick is escaped by changing nick, so a host check would guard nothing - and the request path
+  carries no host, so with `ADMIN_HOSTMASKS` set it would pause the real admin.
+- **Console:** `status` has a `Paused` line while the limit is on, `queue <nick>` says a paused nick is paused, and
+  `unpause <nick>` (not read-only) forgets the nick's count. The @DCCore menu has *Unpause a nick...* under *User
+  control*.
+- **Settings:** beside `MAX_SEND_FAILS` on the dashboard (*Transfers*), with labels and help in English, Spanish and
+  French, and on the mIRC settings window's *Sharing > Transfers* page. `conf/settings.conf.sample` and the window's
+  generated block are regenerated. `docs/INSTALL.md` explains it beside the firewall section;
+  `docs/ADMIN-CONSOLE.md` has `unpause`.
+
+Tests: `tests/test_a_nick_whose_sends_keep_failing_is_paused.py` (90 tests) covers:
+- through the real `start_dcc_send()`, with a fake listener and connection so every runner runs it: counted - never
+  connected (after a send has connected), `_ReceiverGone`, `_ReceiverStalled`, `socket.timeout`,
+  `ConnectionResetError`, `BrokenPipeError`, and the final-ack wait seeing EOF or a stall; not counted - a file that
+  vanished under the read (`FileNotFoundError`), a file that got shorter, a handshake that could not go out, a
+  `listen()` that raised, no port, and `finish_send()` of a `SentFile` without `receiver_failed`;
+- the file failing under the real send loop: `open()`, a `read()` mid-file and the `seek()` of a resume, each raising
+  `TimeoutError`, `ConnectionResetError` and `ConnectionAbortedError`, reported as "could not read the file being
+  sent" and never counted (`note_failed_send()` not called); the same `ConnectionResetError` from `conn.sendall()`
+  still counted; `_SourceUnreadable` is not an `OSError`;
+- the circuit breaker's streak rule (3 sends over 2 or more nicks): a never-connected send not counted before any send
+  has connected since start-up; after one, one nick never connecting keeps counting (four in a row), two nicks count
+  and a third send to a third nick does not, three to one nick count and a fourth to another does not; one nick in
+  any case is one nick; the "not counted ... MY_IP_OR_DOCK or port forwarding" line once per streak, nothing new on
+  a later send; a connect re-arms counting and the line; a stall or a close counted with no connect at all; nothing
+  logged or added with the limit at 0; a real accepted send arms it and ends the streak, a never-connected one only
+  lengthens it; and an ISP reconnect end to end - a send connects, then twenty queued nicks' offers all go unanswered
+  three times each with a limit of 3, and nobody is paused. `tests/support.py`'s `reset_config()` resets
+  `send_connected_since_start`, `never_connected_streak`, `never_connected_streak_nicks` (a fresh set) and
+  `never_connected_streak_logged`;
+- `list.send_file_list()` for a paused nick: the pause notice only, no "Preparing full list" and no
+  `handle_download_request()`; nothing on a second ask inside the window; an unpaused nick still gets "Preparing";
+- the pause at exactly the limit: the queue, its orphaned temp archive and its freeze entry removed, the queue saved,
+  one notice with the count and the files removed, the operator's line; a row kept for retry by the same failure goes
+  too, and a failure after it sends no second notice; a limit raised and lowered pauses again;
+- one count per nick in any case, counted under the nick the send is filed under after a `/nick`; admins never
+  counted or paused; midnight ends a pause and drops the day before's counts; `unpause_send_fails()`;
+- the refusal in `handle_download_request()`: before any lookup, not queued, one notice per repeat window, none in a
+  Request only channel, an unpaused nick, another nick and an admin queued as usual; the notice's wording, "once"
+  and "1 file ... was" in the singular, "N times" and "N files ... were" otherwise;
+- `commands.admin_nicks()`, and `is_admin()` through it;
+- the console: no `Paused` line with the limit off, `nobody`, the paused nicks with their counts; `queue <nick>`;
+  `unpause` lifting it, with nothing to lift, the usage, and refused for a read-only token (#1374).
+
+47 mutants, all caught: the `ConnectionError` check flipped and widened to `OSError`, the post-loop flag covering a
+short read, each `>= limit` made `>`, the stale-day purge removed, `_never_paused()` short-circuited and the admin
+exemption dropped, the refusal moved after the queue append and removed, the case-folding dropped, the notice's
+dedupe and Request-only checks removed, `unpause` not clearing, the count under the starting nick, each counted
+handler's flag removed, `finish_send()` ignoring the flag, the status line shown with the limit off, `admin_nicks()`
+not lowercased, the pause keeping the queue or the freeze, and the singular count and the singular file each
+broken back to the plural; `_SourceUnreadable` made an `OSError`, the `open()`, `read()` and `seek()` wrapping each
+removed, and its handler setting `receiver_failed`; the breaker always true, `send_connected_since_start` ignored,
+the streak's `>=` and the nick count's `>=` each made `>`, the nick-count and the streak-length condition each
+dropped, the streak's nicks not case-folded, `note_send_connected()` not called after `accept()`, and it not arming,
+not zeroing the streak, not clearing the nicks or not resetting the logged flag, the once-per-streak flag removed,
+and `finish_send()`'s never-connected gate dropped; and the list's check removed or moved after "Preparing".
+
+`tests/test_the_mirc_menu_is_grouped_by_what_you_do.py` has *Unpause a nick...* under *User control*.
+`tests/test_the_speed_caps.py` finds the capped read inside the read's new `try`.
+
+### 🐢 A send that crawls while others wait is stopped: SLOW_SEND_MIN_KB (#1388)
+
+A receiver on a bad link could hold one of `MAX_DCC_SLOTS` for hours at a few KB/s while the queue behind it did not
+move. `ACK_STALL_SECONDS` and the socket write timeout catch a receiver that has stopped, not one that is merely slow.
+
+- **The setting:** `SLOW_SEND_MIN_KB`, in KB/s, 0 (off) by default. Above 0, a send whose acknowledged rate is under it
+  is stopped, **only while every slot is taken (`len(active_transfers) >= MAX_DCC_SLOTS`) and a nick is waiting** -
+  `nicks_waiting_for_a_slot()`, which is who the dispatcher would hand the slot to (in a channel, not frozen, nothing
+  running; a folder-pack head counts only while no pack is being made, as `check_queue_and_send()` has it).
+- **Measured fairly** (`dcc._SlowSendWatch`): bytes the receiver *acknowledged* over a sliding window of about
+  `SLOW_SEND_WINDOW_SECONDS` (60), not since the start, and not at all for `SLOW_SEND_GRACE_SECONDS` (60) after it
+  connected. The window's anchor is the last sample at or before its start, so the rate always covers the whole window.
+- **Cheap in the send loop.** `stream_the_file()` calls `check()` after every chunk; between checks it is one clock
+  read. A sample and a judgement happen at most every `SLOW_SEND_CHECK_SECONDS` (0.5), and `queue_lock` is taken only
+  once a send is already under the floor, outside the cap and the slowest while another delivers - never per chunk.
+- **Never the bot's own cap.** While `MAX_UPLOAD_KB` (#1352) is set and every send together moved at least
+  `SLOW_SEND_CAP_NEAR` (90%) of it over the same window - read from `oserve.total_sent_bytes` - nothing is stopped for
+  speed: the cap is what is slow, not the receiver. This is the cheap first test.
+- **Slow has to be the receiver's fault** (`the_slowest_while_another_delivers()`). A full uplink with no cap, a slow
+  disk or a cap above what the line really does makes every send slow; stopping each in turn only burns everybody's
+  `MAX_SEND_FAILS` (2 slots on an 80 KB/s line at 40/40 with a floor of 50: both were stopped at 60 s, in the same
+  half-second). Each watch now publishes its window rate on its transfer row (`acked_bps`) once past the grace, and a
+  send is stopped only while ANOTHER running send's rate is at least the floor - our side can deliver right now - and
+  only if it is the slowest of the rated sends, a tie kept: one stop per decision. With one slot, or one rated send, it
+  never fires: the deliberate safe side.
+- **No thrash.** Two slow receivers would trade the slot for ever. `finish_send()` marks a stopped row
+  `stopped_for_speed` before the settle saves the queue, and `others_wait_for_a_slot()` does not count a nick whose head
+  row carries it. The mark is a key on the queue row, so it is written to `dcc_queue.txt` and survives a restart (on
+  purpose: it still holds), and it goes when the row does.
+- **What happens:** `_TooSlowWhileOthersWait`, handled in `start_dcc_send()` beside `_ReceiverStalled`.
+  `report_failure()` says "sent at N KB/s, under SLOW_SEND_MIN_KB (M KB/s) while others waited for a slot" and how far
+  it got, and `send_fails_count` goes up. `finish_send()` treats it as the stall: a queued row is kept and counts
+  against `MAX_SEND_FAILS`, the nick goes to the back. The row's settle reason says the same in plain words, without
+  the setting's name (`too_slow_reason(to_the_user=True)`), so a row dropped at the last failure tells the user why; a
+  kept row gets its own notice (`tell_them_it_was_too_slow()`): stopped, still queued, resumable when their turn comes.
+  `SentFile.too_slow_bps` carries the rate.
+- **A direct send is dropped.** A file sent at once from a free slot never had a queue row (`release_queue_entry()`:
+  "sent directly, not queued - nothing to retry"), so a slow stop drops it and the user is told to ask again; their
+  client resumes it. Unchanged behaviour for any failed direct send, and said in the help and `docs/INSTALL.md`.
+- **The freed slot goes to the next in line at once:** the queue is woken 3 s later instead of the
+  `15 x send_fails` retry back-off a failed row normally gets. The back-off is there so a broken row is not hammered;
+  this nick has just gone to the back, so the sweep hands the slot to whoever waited longer.
+- **Settings:** under *Sharing & queue* on the dashboard with labels and help in English, Spanish and French, and on the
+  mIRC settings window's *Sharing > Search* page beside the slots (the generated block is rebuilt).
+  `conf/settings.conf.sample` is regenerated. Operator docs: `docs/INSTALL.md`, *A send that crawls while others wait*.
+- **Not covered:** the wait for the final acknowledgement after the last chunk (`_wait_for_final_ack()`), which only
+  drains what the kernel already holds.
+- **Tests:** `tests/test_a_send_that_crawls_while_others_wait.py` (49). The watch on its own with a fake clock (off, a
+  free slot, nobody queued, the waiting nick gone or frozen, a pack head while one is being made, the grace minute to
+  the exact check, the floor itself, a slow start that recovers, a fast half-minute then a crawl, the window sliding
+  both ways, a resume measured from its offset, at most one look per half second, the upload cap at 95% and 20%); the
+  rate published only after the grace and with the setting off; slow as the receiver's fault (two sends at 40 KB/s
+  under a 50 KB/s floor, with and without a cap above the line, stop nobody; no other send at the floor, or unrated,
+  is no proof; exactly at the floor is; 80/4/6 KB/s stops the 4 and, while its row still runs, not the 6; rated ties
+  are kept; one slot, one rated send, or no row never fires); the stopped-for-speed mark (a marked waiter does not
+  count, an unmarked one beside it does, two crawlers do not trade the slot); `stream_the_file()` with a connection
+  whose every 4 KB chunk takes a second, stopped at 60.0 s at 4.0 KB/s; `finish_send()` with a real queue row (kept,
+  charged, marked in the saved and reloaded `dcc_queue.txt`, told once, to the back, woken after 3 s rather than 15;
+  the last try, and a direct send, dropped with the plain-words reason and no "Stopped" notice); and
+  `start_dcc_send()` whole, against a fake listener whose receiver crawls. No socket or real clock, so every runner
+  runs them. 30/30 mutations caught.
+
+### ✨ One large file at a time: LARGE_FILE_MB keeps big sends from holding every slot (#1387)
+
+From the new OmenServe. With `MAX_DCC_SLOTS` = 3 and three nicks each asking for a multi-gigabyte archive, all three
+slots were held for hours: every ordinary track waited behind them, and the uplink was split three ways the whole time.
+
+- **The setting:** `LARGE_FILE_MB` (`src/defaults.py`, limits and slots; Settings page, *Sharing & queue*). 0, the
+  default, is off and keeps today's order. Above 0, a file of at least that many MiB is large, and at most one large
+  file is sent at a time.
+- **Its place is kept.** A nick whose next file is large, while another large file is being sent, is passed over as a
+  nick already sending is, and the slot goes to the next in wait order. Every path that hands out a slot follows it:
+  the sweep (`claim_next_in_line()`), section A of `check_queue_and_send()` (the nick that just finished: its own large
+  next file waits and the slot goes to the sweep), and a new request that would have been sent at once, which is queued
+  instead. A newcomer's large file is also queued while a nick that has waited longer has a large file next: just
+  after a large send ends that nick waits for its trigger with a slot idle, and the large turn is theirs.
+  `nicks_waiting_for_a_slot()` leaves a held-back nick out, so it does not keep a slot free that it cannot use, and
+  a newcomer's small file still goes straight out.
+- **The size is recorded when the file is queued** (`queued_size` on the row, and on the claim of a request sent at
+  once), where the path has just been resolved, outside `queue_lock` (#605). It survives `dcc_queue.txt` as any row key
+  does. A row without one counts as small: rows from before this change, and folder packs, whose archive does not exist
+  until it is made. A transfer counts as large by its real size once the send has read it, and by the recorded size of
+  its row before that, so a claim is seen by a concurrent dispatch at once. The bot's list is exempt: its rows carry no
+  size, and a transfer of it is never large.
+- **A slot a held file left free is filled.** A trigger dispatches one nick, which was enough while a slot stayed free
+  only when nobody could use it. With the rule on, a dispatch that leaves a slot free starts one more pass of the sweep
+  (`_fill_the_slots_a_large_send_left()`), but only when its pass passed over a large head (`claim_next_in_line()`'s
+  new `passed_over` list) or what it dispatched is large. That pass is a `fill_pass` (`check_queue_and_send()`'s new
+  keyword) and starts none of its own. Not after every dispatch: a send refused at once (no address, no free port)
+  hands its slot straight back, and a pass after each refused the same nick again and again, a NOTICE each time.
+- **Visible.** The log says, each pass that skips the nick: `[DCC QUEUE] <nick>'s next file is large (N MB) and another
+  large file is being sent - the slot goes to the next in line.` The console's `queue` and the dashboard's Queue page
+  show the nick as "waiting: one large file at a time" (`dcc.waits_for_a_large_send()`, status `large-wait`). The nick
+  is told nothing new: their queue position notice already says they wait.
+- The setting is on the mIRC settings window too (Search > Sending; `dccore.mrc`'s block regenerated). Docs: the
+  setting's help, in the sample and as French and Spanish tooltips; the roadmap.
+- **Tests:** `tests/test_one_large_file_is_sent_at_a_time.py` (71) drives the real dispatcher: the sweep
+  (`claim_next_in_line()`) passes a large head over and claims the small one behind it, with the log line, and keeps
+  today's order when off; section A of `check_queue_and_send()` leaves the finished nick's large file queued and the
+  sweep fills the slot, with one log line; once the large send ends the large head is next, and its fresh claim (no
+  `size` yet) counts as large through its row. Edges: exactly the limit is large, a byte under is not, the setting
+  counts MiB, a row without `queued_size` or with a broken one is small, an unusable setting (`"junk"`, -3, `"1.5"`)
+  is off, the list (by name, by its row, as a claim's row) is never large. `handle_download_request()` records
+  `os.path.getsize()` on the row and the list gets none; the size survives `save_dcc_queue()`/`load_dcc_queue()`; a
+  large request with a slot free while a large file is sent is queued, and one sent at once counts as large from its
+  claim on. `nicks_waiting_for_a_slot()` leaves a held-back nick out, so a newcomer's small file goes at once. The
+  fill pass claims a second nick without another trigger (recorded threads that keep their kwargs, and once on real
+  threads, waiting for the claim) and is not started when off or with every slot taken. It is one hop: its thread
+  carries `fill_pass=True` and such a pass starts no further sweep, so with a send that hands its claim straight back
+  one trigger dispatches at most twice with the rule on, once off. It follows a large file only: a small dispatch
+  that passed nobody over starts none (sweep and section A), one that passed a held head over or dispatched a large
+  file starts one. `claim_next_in_line(passed_over=[...])` gets the held nick, and returns the same four values
+  without it. A newcomer's large request is queued behind a present waiting nick with a large head even with no large
+  send running and a slot free (the "waited longer" line), but not behind one whose next file is small; a small one still goes at once, and off the large one does.
+  A large request queued behind the nick's own files, or with every slot taken, logs no "next file is large". A
+  transfer's real `size`, once read, wins over a recorded one either way. The Queue page's
+  `large-wait` (summary and `?user=`; `frozen` and `sending` still win), the console's note in both views, and
+  `dcc.waits_for_a_large_send()` directly (only the head counts; a copy handed in is what is read). 30 of 30 mutants
+  caught: `>=` to `>` in `_row_is_large()` and in `_transfer_is_large()`, each list exemption removed, the
+  `queue_row` fallback removed, section A's guard removed (two ways), `sends_now = False` removed, the
+  `nicks_waiting_for_a_slot()` exclusion removed, the fill pass removed and run while off, the sweep's guard removed,
+  the list given a size, no size on the claim or on the row, a negative setting not off, the copy ignored, every row
+  read instead of the head, the page and both console notes removed; and after the review: the fill gate back to
+  every dispatch, the `fill_pass` hop removed in the sweep and in section A, `passed_over` not appended, section A's
+  `held_back` empty, the newcomer's large-turn check removed or counting any waiting nick, the `sends_now and` gate removed, and the recorded
+  size preferred over the real one.
+  `tests/test_a_private_request_keeps_its_real_channel.py`'s `test_its_row_is_as_it_was` listed a queued row's exact
+  keys; it now lists `queued_size` too, and checks it is the file's 4096 bytes.
+
+### 🚦 Target change too fast (439/707): the pacer holds, and the dropped line is sent again once (#1386)
+
+Undernet's servers limit how fast a client may start messaging new targets, and drop the line that goes over with
+`439 <nick> <target> :Target change too fast. Please wait N seconds.` (hybrid, ratbox and charybdis send `707`, with
+no time). There was no handler: the reply was lost without a log line, and the pacer carried on at `MSG_DELAY`
+straight into the server's window, so the next lines to new targets were likely dropped too.
+
+- **Recognised by position.** The read loop guards on `is_server_numeric(line, "439") or is_server_numeric(line,
+  "707")` and calls `irc._answer_target_change()`, which also checks the numeric is addressed to the bot's nick
+  (`irc_lower()`). The target is the parameter after the nick. Channel text quoting the numeric does nothing.
+- **The shared pacer holds.** `runtime.OutboundPacer.hold_for(seconds)` moves the next slot to the later of now +
+  seconds and the slot already booked, and wakes the waiters, so every paced lane waits: the queue worker's three
+  lanes, the debug drain, the `!ping` and DCC ACCEPT direct waiters. The time is the number in 439's text;
+  otherwise, and for 707, `irc.TARGET_CHANGE_HOLD_DEFAULT` (10 s); never more than `irc.TARGET_CHANGE_HOLD_MAX`
+  (120 s). Module constants, not settings: the server sets the wait.
+- **The dropped line goes back once.** Each paced sender records the line it just sent with its target and lane in
+  `runtime.recent_paced_lines` (`runtime.note_paced_line()`; the last 30 lines, only those from the last 60 s count;
+  PRIVMSG and NOTICE only). Paced lines, plus a few unpaced ones, so that a refusal of one is not mistaken for
+  another line. On a refusal, `runtime.take_paced_line()` takes the most recent line to that target, and
+  it goes back to the front of the lane it came from as a `runtime.ResentLine`, the mark that stops a second refusal
+  from putting it back again:
+  - the standard lane: the front of that user's own `send_queue` list, under `send_queue_lock`. Not while the user
+    is muted or banned (`config.muted_until`, `security.ban_seconds_left()`): a mute or ban drops their pending
+    replies, and the put-back would bring one back;
+  - the VIP lane and the debug drain: the front of their queues. When the debug queue is full (200 lines), putting
+    a line back pushes the newest debug line out;
+  - **in order.** Every lane pops its line before `wait_for_slot()`, so a refusal arriving during the wait put line
+    1 back while the worker already held line 2: the wire read line 2, then line 1. After the wait,
+    `queue_mgr._resent_line_first()` sends a put-back line at the front first and puts the held one in its place,
+    in the standard and VIP lanes, under `send_queue_lock` (which the VIP and standard put-backs take too). Not the
+    fetch lane: each request is its row's only line, so there is nothing of its own behind it to overtake;
+  - the fetch lane: `dcc_fetch._put_back_refused_request()`, under the fetch lock and only while a row is still
+    "offered" with that very line. A row cancelled, failed or asked again since had its line taken back (#1028), and
+    sending it would have the other bot send a file nobody waits for. Back in the lane, the row reads the line as
+    unsent again, so its offer clock restarts when it goes (#1044).
+  - Recorded with no lane, and never sent again: the DCC ACCEPT (its position may be stale by then), and four
+    lines sent unpaced - the DCC SEND handshake, `dcc.py`'s two send error NOTICEs (no usable public address or file
+    access; no free DCC port) and the admin DCC CHAT offer (`adminchat.py`). The record keeps a refusal of one from
+    being taken for an older line to the same nick, which would then go out twice.
+- **The record goes with the connection.** The disconnect epilogue clears it, as it drops the VIP lane.
+- **One log line per refusal:** `[QUEUE] The server refused a message to T: target changes too fast. Holding paced
+  output for N s, then sending it again.` (or `nothing to resend.`, `nothing to resend: its user is muted or banned
+  now.`, or `it was already sent again once, so it is dropped.`).
+- **Docs:** `docs/INSTALL.md` has a short *How fast the bot talks* section.
+- **Tests:** `tests/test_a_refused_target_change_holds_and_resends_once.py` (62 tests).
+  - The hold: `hold_for()` moves the next slot, a shorter hold or one inside a slot already booked leaves it, and a
+    waiter already blocked on another thread gets its slot no earlier than the end of the hold.
+  - The read loop's guard is read out of `irc.py` and evaluated: a real 439 and a real 707 pass it, channel text,
+    a NOTICE and a MOTD line quoting the numeric do not. The same lines also go through `irc_loop()` against a
+    scripted server (#663's harness).
+  - The parse: 8 s from ircu's text; 10 s for a 707 or a 439 without a number; capped at 120 s; our nick matched by
+    `irc_lower()`; a refusal to another nick, or without a target, is none.
+  - Each lane gets the line back at its front as a `runtime.ResentLine`: a user's own `send_queue` list, the VIP
+    lane, the debug drain. The fetch lane only for an "offered" row that owns that very line, and never twice.
+  - Order: with the real queue worker holding line 2 for its slot, a refusal of line 1 puts it back and the wire
+    reads line 1, line 1, line 2, in the standard lane and in the VIP lane. `queue_mgr._resent_line_first()` leaves
+    a plain front line where it is and takes an empty or missing list.
+  - Once only: a resent line refused again is dropped, with its log line; the real queue worker and debug drain
+    send a refused line exactly twice.
+  - A muted or banned user (`muted_until`, `banned_users`, the key folded to lower case) gets no standard-lane line
+    back, and the log line ends "its user is muted or banned now."; the hold still applies. A mute or ban that has
+    run out, or another user's mute, does not count, and the VIP lane and the debug drain are not affected.
+  - The record: PRIVMSG and NOTICE only, the 60 s window, the most recent line to the target, the server's case
+    folding, bounded at 30. Recorded with no lane, each masking an older reply to the same nick, through the real
+    code: the DCC ACCEPT (`_send_resume_accept()`), the DCC SEND handshake (`start_dcc_send()`), the no-address
+    NOTICE (`refuse_an_unsendable_file()`), both wordings of `refuse_without_a_port()`'s NOTICE, and the console's
+    DCC CHAT offer (`adminchat._listen_and_serve_locked()`, with a fake listener). The real queue worker records
+    each of its three lanes, and the standard one with its owner.
+  - The disconnect epilogue clears the record, driven through `irc_loop()`.
+  - `tests/support.py`'s `reset_config()` now clears `runtime.recent_paced_lines` beside the pacer reset: without
+    it, seven of the other tests here failed on lines an earlier test had left.
+- **Mutation checks, 37/37 caught:** `hold_for()` taking the new time over the booked one; the guard's `or` made
+  `and`; the guard as an unanchored substring; the nick check dropped; the cap removed; the resent check removed; the
+  fetch row check removed; its duplicate check removed; the window check removed; no-lane records skipped by
+  `take_paced_line()`; the record not removed when taken; the epilogue's clear removed; the ACCEPT, the SEND
+  handshake, the fetch, the VIP and the debug lines each not recorded; the standard lane recorded without its owner;
+  no `ResentLine` mark; the standard, VIP and debug put-backs at the back instead of the front; no hold; a 707 reading
+  a number; any command recorded; the target not folded; the harness reset removed; no swap in the VIP lane
+  (`test_in_the_vip_lane`); no swap in the standard lane (`test_in_the_standard_lane`); a plain front line swapped
+  too (`test_a_plain_line_at_the_front_is_left_where_it_is` and both order tests); the abort NOTICE
+  (`test_the_no_address_notice_masks_the_reply_before_it`), the no-port NOTICE
+  (`test_both_wordings_mask_the_reply_before_them`) and the console offer (`test_the_offer_masks_the_reply_before_it`)
+  each not recorded; the silenced check dropped (`test_a_muted_user`, `test_a_banned_user`); the ban check removed
+  (`test_a_banned_user`); the mute comparison inverted (`test_a_muted_user`,
+  `test_a_mute_that_has_run_out_does_not_count`); and the key not lowered (`test_a_muted_user`).
+
+### 🐛 A folder renamed during a rebuild is left out, not the whole list (#1383)
+
+Found on a live bot whose library is a network share. The scheduled rebuild failed with
+`Could not read '...\Artist\2025 - Album [WEB]' during the scan: [WinError 3]`: the operator had replaced that
+release with another rip while the scan ran. `_on_walk_error()` treated any subtree vanishing mid-walk as fatal
+(#441), so `generate_list()` kept the previous index and the bot served a day-old list until the next schedule. That
+list is older and wrong in more ways than the scan it replaced: it names the same vanished folder, and lacks every
+file added since.
+
+- **A vanished folder is skipped.** A `FileNotFoundError` for a path that no longer exists (`os.path.lexists()` of its
+  `long_path()` form), while the configured folder being walked is still there, goes to a new `vanished_dirs` and is
+  logged once (`moved or removed during the scan`), as `denied_dirs` is. It does not abort. After the walk one summary
+  line names the count and the first five. On Windows only WinError 2 and 3 count: 53 and 67 (network path or share
+  not found) map to the same Python class but are about the share.
+- **A vanished configured folder still aborts.** "Still there" means the same directory as when that folder's walk
+  began: `(st_dev, st_ino)` taken per folder into a `walking` holder the closure reads, because a mount point left
+  behind by an unmounted share is still a directory, just an empty one. Checked when the error is seen (before the
+  path itself, so a share that drops and returns between the two checks aborts rather than skips), and again when
+  the folder's walk ends if anything under it vanished; gone either time, its vanished entries move to `walk_errors`
+  and the rebuild keeps the previous index, as before. Not covered: a separate drive mounted inside a configured
+  folder and unmounted mid-scan - the configured folder is unchanged, so its vanished subfolders read as renames.
+- **Every other walk error stays fatal:** EIO, a stale handle, permission denied on a path that is gone.
+- The comments at `_on_walk_error()`, the walk-error collector and the post-walk check say which case is which and
+  why. `docs/INSTALL.md` says a folder changed during a rebuild is left out, and what still stops one.
+- **Tests:**
+  - `tests/test_a_folder_renamed_during_a_rebuild.py` (21 tests) runs the real `generate_master_list()`, with
+    `walk_with_sizes()` wrapped to report errors through its `onerror` as a real unreadable subtree would:
+    - a vanished subfolder is skipped, logged, and the rest of the library published - including one really deleted
+      after the walk had queued it, so the `FileNotFoundError` comes from `os.scandir()` itself (WinError 3 on
+      Windows, ENOENT elsewhere); WinError 2 and 3 count as gone, set on the error on every platform and, on
+      Windows only, built the way Windows builds them;
+    - the configured folder gone, or replaced by an empty directory, when the error arrives or when its walk ends,
+      keeps the previous list; a folder moving after a walk that skipped nothing does not matter;
+    - still fatal: not-found for a path that is still there, WinError 53 and 67 (set on every platform, and built
+      from the code on Windows), EIO, not-found with no path, permission denied on a path that is gone;
+    - the summary line appears only when something was skipped, names up to five, and ends in ` ...` past five;
+    - with two configured folders: the second folder gone when an error under it arrives aborts (judged against
+      the folder being walked, not the first), and a skip in the first folder does not make the second folder's
+      end-of-walk check abort when the second moves after a clean walk;
+    - check order: with `os.stat` and `os.path.lexists` replaced while one error is handled, the share is down for
+      whichever of the two is asked first and up for the second; the root is asked first, so it aborts.
+  - `tests/test_four_faults_in_building_a_list.py`: the #441 class docstring no longer says a vanished folder aborts.
+- **Mutation checks, 16/16 caught:** the skip without the root check; no after-walk root check; the WinError tuple
+  widened (53 and 67, and 53 alone); `lexists()` always False; the code before this change; the root's identity
+  reduced to `isdir()`; the identity never recorded; any `OSError` treated as not-found; the summary naming six;
+  the ellipsis at five; the summary always printed; vanished entries dropped rather than moved to `walk_errors`;
+  the root and its identity recorded for the first folder only; `vanished_before` always 0; the path asked about
+  before the root. The last three survived the first round of tests, which had one configured folder and no
+  check-order case; the two-folder and check-order tests were added for them.
+
+### ⚡ dccore.mrc: the control panel opens faster, and leaks less (#1382, #1381)
+
+Timed in the operator's mIRC (dark theme), one open of the control panel took about 2970 ms. Of that, 562 ms filled
+the bot side's 66 menus and 531 ms the mIRC side's, one `did -a` per line; 360 ms drew the frames of all 27 pages,
+each corner worked out point by point; and after the window was made `dccore.theme.dcxfonts` asked every DCX text
+for its font and set it again (297 ms). The DCX listviews also leak about 4 GDI objects each in dcx.dll
+3.1-git978 (#1381), and every open made 5. Five changes, none of them visible; the built-in window (no DCX) gets
+the first two:
+
+- **A menu is filled with one `didtok`.** `dccore.sw.cb.fill` (below) hands a menu's whole list to `didtok`: the
+  layout's colours, the three answers of an unset setting, a choice's labels, and a colour menu's first line with its
+  colours, joined on `$chr(7)`, which no label has, so a label with a comma would still be one line. The bindings'
+  Mode menus, filled at open, take the modes list once in `dccore.sw.combos` and go through `dccore.sw.fillfrom`.
+  Every menu has the same lines in the same order as before, so `.sel` means what it meant: the theme menu's line 1,
+  `fillbg`'s "none" line, `fillspan`'s own lines before the colours. An empty list adds nothing instead of halting
+  on a bare `didtok`.
+- **A menu gets its lines the first time its page is shown.** Measured afterwards, `didtok` had not helped: a
+  line of a mIRC combo costs about 0.6-0.7 ms whatever command adds it (0.60 ms in a three-control window, 0.72 ms
+  in the open panel, about 1.8 ms while the panel is being made), and the menus were still about 1060 ms of a
+  2600 ms open. Now a setting's menu (`choice`, `tri`, both `colour` menus) and the mIRC side's colour menus (the
+  eight line types, 1640-1645, the background 1673) get only a recipe at open (`cb.<id>` in `dccore.sws`, set by
+  `dccore.sw.combos` and by `dccore.fillcombo`/`fillbg`/`fillspan`, which no longer add lines), and
+  `dccore.sw.showpage` fills a page's waiting menus before it shows it, in either window (`dccore.sw.cb.page`, once
+  a page; the page's controls are the layout's own `p.<page>.<n>`). Until then the selected line is kept as a
+  number (`cbsel.<id>`, 0 for none) and a colour menu's 18th line "As set: ..." as its text (`cbx.<id>`); the fill
+  (`dccore.sw.cb.fill`, once a menu) adds the lines, then that line, then selects the kept line. Every read and
+  write of these menus' selection goes through `$dccore.sw.cb.sel` and `dccore.sw.cb.select` (and the "As set" line
+  through `dccore.sw.cb.extra`): `dccore.sw.fill`, `colourfill`, `colourbg`, `dccore.sw.shown`, `dccore.sw.value`,
+  `dccore.sw.wire` (Apply and the theme preview), `dccore.sw.opt.sig`, `dccore.sw.opt.save` and `dccore.spanval`.
+  `cb.sel` gives one number either way, so a selection kept and the same one shown compare equal in the dirty
+  checks, and Apply saves the same values for a page never shown. A page's menus now take their time the first time
+  it is shown instead, e.g. about 0.2 s for the Appearance page's twelve colour menus. The bindings' Mode menus
+  (redrawn as the lists change), 1772 and the theme menu 1691 are still filled at open.
+- **A page's DCX frames are made the first time it is shown.** `dccore.sw.dcx` no longer calls
+  `dccore.sw.dcxframes` for every page; `dccore.sw.showpage` calls it when it shows a page, and it runs once a window
+  (`frmade.<page>` in `dccore.sws`: a DCX id made twice is an error). Hiding a page touches its frames only if they
+  were made. In the dark theme the frame maker gives its titles their light text itself, so
+  `dccore.theme.dcxtexts` no longer colours every frame title at open.
+- **A table's listview is made the first time it is needed.** `$dccore.sw.lv.id`, the one place every DCX command
+  on a table takes its id from, calls `dccore.sw.lv.need`, which makes the listview once (`lvmade.<list>`): when its
+  page is shown, or when the bot's rows, an Apply or a reload reach a table whose page has not been shown.
+  `dccore.sw.enable` remembers its state (`lv.e`) and sets it only on the tables made; `dccore.sw.lv.make` gives a
+  new one that state, its font and, in the dark theme, the lists' colours (`dccore.theme.dcxlist`, which
+  `dccore.theme.dcxlists` now uses for the page list alone). An open and close now makes one listview (the page
+  list) when not connected; with a bot, two or three - the channel table the settings snapshot fills, and the lists
+  table when the start page asks for the lists - instead of five. In the `dccore_ui.dll` dark theme each table made
+  after the window brings one more pass of the DLL, for the dark scroll bars and header it gives a listview
+  (`dccore.sw.lv.dark`, in a timer of 250 ms that each new table restarts, so they usually share one pass). Main
+  paid at least that at every dark open anyway: `dcxfonts` plus a whole-dialog pass. The pass is made only while
+  the theme the panel opened with still holds: after `/dccore theme light` with the panel open, the DLL would turn
+  mIRC's controls light under DCX parts that stay dark until the panel is opened again.
+- **In the dark theme a DCX text gets its final font when it is made.** `dccore.sw.dcx` asks the theme once:
+  `dark` (`$dccore.theme.dialogsdark`) and `noct` (dark and drawn so by `dccore_ui.dll`, not by mIRC's own dark
+  mode - the condition `dcxfonts` had). The explicit fonts take their flags from `$dccore.sw.fontflags`
+  (`+ab`/`+a` with `noct`, `+b`/`+` otherwise); the texts and listviews that had no font of their own get, through
+  `dccore.sw.dcxaa`, what `dcxfonts` gave them - the font DCX gave them, with `a` - asked once a window for each
+  type. `dccore.theme.dcxfonts` and its timer are gone, and with them its redraw through the DLL: the fonts are set
+  before the window is first drawn, and what is made at open is still under the init's `dccore.theme.dialog`.
+- **Docs:** `scripts/mirc/dll/README.md` names the new aliases instead of `dcxfonts`.
+- `dccore.ver` stays 1.20.0 (unreleased).
+
+### 🧪 The coverage pass counts decorated functions, and its report is always printed (#1379)
+
+`scripts/preflight.py` failed on main since #1371 in the pass *no uncovered public function*, and gave no reason.
+
+- **A decorated function was never counted as entered.** `public_functions()` keyed each function on its `def` line,
+  but the profiler records `co_firstlineno`, which for a decorated function is the line of its first decorator. They
+  never matched, so `list.py::list_dirs_held` (`@contextlib.contextmanager`, the first decorated public function) read
+  as never entered although tests call it. A function is now keyed on its first line, decorator included, and the
+  report's "(line N)" is that line.
+- **The report went nowhere.** `run_suite()` now saves `sys.stdout` and `sys.stderr` before the run and puts them back
+  afterwards, whatever a test left in their place, so the summary printed after the run reaches the terminal. It also
+  takes an optional `suite`, everything under `tests/` by default.
+- **The profiler it replaces is put back.** `Recorder.stop()` cleared `sys.setprofile()` and `threading.setprofile()`
+  instead of restoring what `start()` found. A test that calls `run_suite()` while the coverage pass profiles the suite
+  ended that outer profile for the rest of the run. `start()` now saves both and `stop()` restores them.
+- **The test that swallowed it:** `PairAndUnpairDoNotOverlap.test_a_pair_in_flight_does_not_bring_a_revoked_token_back`
+  in `tests/test_pair_and_unpair_say_what_was_stored.py` ran `run_command()`, which wrapped each command in
+  `contextlib.redirect_stdout()`, on two threads at once - the #1146 pattern. Session B entered first, session A entered
+  second and saved the test's StringIO as "the old stdout", B left first and put the real stream back, and A left last
+  and put the StringIO back. `runtime.admin_tokens_lock` made A wait for B, so the order was the same on every run, and
+  every later `print()` in the process went into that StringIO. The class now silences stdout once, on the main thread,
+  for the whole test.
+- **Guards.** A new `tests/test_the_token_store_tests_leave_stdout_alone.py` runs that class and checks that
+  `sys.stdout` and `sys.stderr` are both left as it found them. The #1146 guard,
+  `tests/test_the_outbound_pace_tests_leave_stdout_alone.py`, now also passes when it is run alone.
+
+### 🪟 dccore.mrc: dccore_ui.dll 1.6, with the #1369 review's fixes (#1378)
+
+The review of #1369 left a list for `scripts/mirc/dll/src/dccore_ui.c`, each item needing a rebuild. The source
+carries them, and `scripts/mirc/dll/dccore_ui.dll` is now the 1.6 build of it (32-bit, mingw-w64 on Ubuntu 22.04,
+no warnings with `-Wall`; the same file on a second build). Its hash is in `scripts/mirc/dll/README.md` and in
+`dccore.theme.uisha256`, its `Version` answers `dccore_ui 1.6`, and the README's "What changed in 1.6" says what
+it carries and which compiler versions give the same hash. `dccore_icons.dll` is unchanged.
+
+- **A DCX control whose font DCX replaces is let go of.** The review suspected a leak there: `twin_font` keeps a DCX
+  control's own font in `P_FONT`, and when DCX replaces the font (`xdid -f`) `untwin_font` returned early. DCX's own
+  source (`DcxControl::setControlFont()`, 3.1-git978) settles it: it deletes both the font the control has (the twin)
+  and the one it keeps (the font from before the twin), so nothing leaked. `FontProc` now only lets the control go -
+  drops the three props and the subclass - so nothing of it is left behind; it deletes no font, since both are DCX's.
+  (A first 1.6 build did delete the old font there, a second delete of a handle DCX had already freed; it never
+  shipped.)
+- **`/dll -u` from inside a dialog event** returned into a freed module. The first `ApplyTheme` or `MenuIcons` pins
+  the DLL (`GetModuleHandleExW` with `GET_MODULE_HANDLE_EX_FLAG_PIN`); `UnloadDll` still takes the hook and every
+  subclass off.
+- **Going light left a subclass behind** when a control's class or style no longer matched the branch that installed
+  `CtlProc`. `EnumChild` now removes it unconditionally first when the dialog goes light.
+- **Loose ends:** the two background brushes are deleted when the last dark dialog goes light, and at unload, and made
+  again on demand. `ThemeMenus` (uxtheme's unnamed ordinals 135/136, a `LoadLibraryW` on every call, never called by
+  the script) is removed: the exports are `ApplyTheme LoadDll MenuIcons UnloadDll Version`. `ApplyTheme` answers `ERR
+  ...` instead of `OK` when the dialog table is full or the dialog's subclass fails, and refuses a window of another
+  thread. `mark_menu` clears its buffer before each item.
+- **A script folder with letters outside the ANSI code page:** `MenuIcons` converts the icon file's path as UTF-8
+  (`MB_ERR_INVALID_CHARS`) first and falls back to the ANSI code page, instead of the ANSI code page alone.
+- **`dwmapi.dll` is no longer imported:** `DwmSetWindowAttribute` is looked up once with `LoadLibraryW` and
+  `GetProcAddress`; without it the title bar stays light. `-ldwmapi` leaves the build line. `draw_shape` caps the drawn
+  size at 1024 x 256 pixels (a 16 MB DIB at four times), down from 2000 x 400 (about 51 MB).
+- **Build files:** `make_icons.py` no longer hard-codes a Linux font path. It looks for DejaVu Sans Bold (the shipped
+  icons' font) under the XDG data dirs' `fonts`, then for DejaVu, Arial Bold or Segoe UI Bold in Windows' fonts folder
+  and Arial Bold on macOS, takes `--font <path>`, and names every place it looked when it finds none. It writes
+  `icons-preview.png`, the name the tree has, not `preview.png`. The C file's header no longer repeats the build line
+  (it had drifted from the README's); it points to the README, which is the one place for it.
+- **The price of pinning:** once the DLL has been used, mIRC holds the file until it exits, so replacing
+  `dccore_ui.dll` needs a restart of mIRC (the README says so).
+
+Not yet verified in mIRC: the build is checked as a file (machine, imports, exports, version, hash). The issue's
+last point (whether mIRC's own dark mode draws its owner-drawn popup menus with the marks as text) is the
+operator's to check.
+
+### 🐛 A name no list places is not found, and the disk is not walked for it (#1376)
+
+Found on a live bot whose one folder is a network share. A request for a name its list did not have read every
+published list and then, as a last resort from OmenServe, `os.walk()`ed every configured folder for it, with no time
+limit. Over the share the walk ran for many minutes (one was still enumerating directories eight minutes in). It held
+one of the two scan slots and the nick's turn (#969), so every further request from that nick was answered "Busy looking
+up other files". And a miss is remembered for a minute from when the walk *ends*, so the next request for the same
+name walked again.
+
+- **The walk is gone.** It could only find a file that no list names, and nobody can have that name from this bot: its
+  list, its search and its adverts all come from the lists. A name `path_from_published_lists()` does not place is
+  "File not found" at once, and noted in the miss memory and the nick's misses as before. A file added since the last
+  rebuild is requestable after the next one.
+- **What the list leaves out is not served.** The walk was not the only way past the list. The first folder's root
+  (`os.path.exists` of the bare name) and the folder memory (#886) both find a file without reading it. A file they
+  find is now held to the list's own rule: `update_list.is_listed_file()` with `ignored_extensions()` of the list the
+  request is for, so `LIST_IGNORED_EXTENSIONS` and the list's own exclusions (#1295). The list's own archive is exempt.
+- The comments that described the walk say it is gone. `docs/INSTALL.md` says the list is what the bot serves, and how
+  to offer a new file at once.
+
+Tests: `tests/test_a_name_no_list_places_is_not_found.py` covers:
+- a name in no list, and a file on disk that no list names, both found without a walk;
+- a listed file still found;
+- the excluded types by the root, by the folder memory and by a list's own exclusions, with the control;
+- the list archive;
+- the docs.
+
+The scan tests of #580, #886 and #969 counted `os.walk()` calls and relied on the walk to find their tracks. Their
+`LookupBase` now publishes a list naming the tracks and counts reads of the lists instead. Tests elsewhere had the same
+reliance: `PathSecurityBase`'s tree had files and no list, so every request for a track in a subfolder was answered by
+the walk. It now publishes a list of its tracks, as a configured bot has, through a `publish_list()` that
+`test_long_paths` also uses for its deep track.
+
+### 🔒 Read-only console tokens: a paired credential that can look and change nothing (#1374)
+
+The *Token scope* item of `docs/FUTURE.md` (was #568). A paired token opened the whole console. The lock (#1264) kept
+settings behind the password, but `ban`, `clearqueue`, `rehash`, `update`, `fetch`, `chat` and `shutdown now` ran on a
+token alone, and a token sits in clear text wherever its script keeps it.
+
+- **`pair <client> [version] readonly`** mints a token that can only look. Its hash is stored as `readonly_hash`, never
+  `hash`, so a bot from before this refuses it after a downgrade instead of reading it as a full token. `pair readonly`
+  alone is refused rather than pairing a client called "readonly" with a full token.
+- **An allow-list, not a block-list.** `adminchat.READ_ONLY_COMMANDS` (`status`, `queue`, `slots`, `packing`,
+  `library`, `bans`, `uptime`, `version`, `lists`, `dlqueue`, `downloads`, `hello`, `consolecaps`, `help`, `quit`), plus
+  `READ_ONLY_REPORTS` (`consolefeed`, `checkupdates`) with no argument, plus `unpair` of the session's own name.
+  `handle_command()` refuses everything else before it runs, with the `DCCORE LOCKED <command> <sentence>` line
+  `dccore.mrc` already shows (`console_settings.refused_read_only()`), or the sentence on a plain session. A command
+  added later is refused to a read-only session until it joins the list.
+- **`unlock` is refused too**, before the password is looked at: a read-only token never becomes more, and its session
+  is not a way to try passwords.
+- **A read-only login does not take the console from a full one.** `_promote()` answers `_IN_USE` while a full session
+  holds it, and the login is closed with "The console is in use" without counting as a wrong password. A full login
+  replaces a read-only session as before. Without this, a stats script logging in every few minutes would close the
+  operator's console each time, and a stolen read-only token could do it at will.
+- `unpair` marks read-only tokens, `help` shows a read-only session only what it may run, and the log says which kind
+  of token logged in. `_token_matches()` is unchanged; `_paired_token()` also says whether the token is read-only.
+
+`dccore.mrc` is unchanged: it pairs full tokens, and a read-only pair is typed at the console.
+`tests/test_a_read_only_token_can_look_and_change_nothing.py` covers the store, every command in `COMMANDS` against a
+read-only session, the reports, `unpair`, `unlock`, `help`, the login rules and the docs.
+
+### 🌙 dccore.mrc: a dark theme and icons (#1368)
+
+The script's windows follow a theme of their own, and its menus and the control panel's page list get
+icons. Both can be set from the control panel's mIRC side (*Window* page, the *Theme* frame) and from the
+command line:
+
+- **`/dccore theme auto|dark|light`**. `auto` follows mIRC's own dark mode (`$darkmode`, mIRC 7.79 and
+  later); `dark` darkens the script's dialogs - the control panel, the list window, the download queues:
+  title bar, background and mIRC's own controls - through a DLL of DCCore's own, `scripts/mirc/dll/dccore_ui.dll`
+  (C, 32-bit, `src/dccore_ui.c`), hash-pinned in the script as dcx.dll is. The DCX parts of the control panel
+  take the theme's colours from the script (`dccore.theme.sys`) and keep the system's in the light theme. In
+  mIRC's own dark mode the DLL stands aside: mIRC draws its dialogs dark already. On a dark window background
+  (black, navy, maroon, purple) the line colours meant for a white one are drawn as their light neighbours
+  (`dccore.theme.legible`), so nothing disappears.
+- **`/dccore icons on|off`**: an icon beside each of the script's own menu items - a hook on
+  `WM_INITMENUPOPUP` that touches only the items the script marks (`$dccore.mi`), nothing else in mIRC - and
+  beside each page in the control panel's page list, from `scripts/mirc/dll/dccore_icons.dll` (52 icons drawn
+  by `src/make_icons.py`, resources only, nothing in it runs).
+- **Without the DLLs** the script looks and works as before: a missing `dccore_ui.dll` leaves the dialogs
+  light, a missing `dccore_icons.dll` the menus without icons, and a `dccore_ui.dll` that is not the build the
+  script was shipped with is not loaded. `scripts/mirc/dll/README.md` has the sources, the build commands and
+  the hashes.
+- **Tests:** `tests/test_the_theme_dlls_are_the_build_the_script_pins.py` checks the files, the README and the
+  script against each other as the DCX test does, that both DLLs are 32-bit and import nothing but Windows'
+  own, and that the script's icon list is the README's; `tests/test_the_script_has_a_dark_theme_and_icons.py`
+  reads the setting, the commands, the menu marks and the page icons.
+- **From the review** (#1369), script side only - the DLLs and their hashes are unchanged:
+  - **One way into `dccore_ui.dll`, behind the pin.** `dccore.theme.call` is the only `$dll` that names it,
+    asks `$dccore.theme.ui` itself and catches a DLL that cannot be opened (`:error`, as
+    `dccore.dcx.version` does), so no caller can reach the DLL before the hash check, and a failed load no
+    longer halts a start, a dialog's init or an Apply.
+  - **`dccore.theme.uiwhy`** refuses a 64-bit mIRC, as `dccore.dcx.why` does, and takes the hash again for as
+    long as mIRC does not hold the DLL: a file put right is taken without a restart, a file swapped is caught
+    before it is loaded.
+  - **Nothing is half dark.** The control panel's DCX colours, its dark tables and `dccore.sw.enable`'s dark
+    branch follow `dccore.theme.dialogsdark` - the theme dark and the dialogs drawn dark by mIRC or the DLL -
+    so *Dark* without a usable DLL leaves the whole window light, as the docs say.
+  - **Light draws through a DLL already loaded only**, never by loading one to put back a look a dialog
+    already has.
+  - **After `/reload -rs`**, which runs neither on LOAD nor on START: `dccore.theme.icons` reads an unset
+    option as on, and the first menu drawn starts the hook once (`mi.tried`).
+  - `$darkmode` is asked as a condition, right whether it answers `$true` or 1; the menus' note and the docs
+    say mIRC's own dark mode follows Windows in mIRC 7.79 and later and is under Options -> Display in mIRC 7.81
+    and later, and name the
+    six line colours that are swapped.
+  - **Tests** pin `uiwhy`'s steps in order, that every `$dll` call naming a file is DCX's or
+    `dccore.theme.call`, the half-dark rule and the start and stop in each event's own statements; 21 of 21
+    mutants caught.
+
+### 📚 The library's totals hold up (#1367, the review of #1363)
+
+The `DCCORE LIBRARY` and `DCCORE SEARCHINDEX` lines (#1359) reached the start page with the right figures; the
+review found where they went missing, came late or said the wrong thing. The wire format is unchanged.
+
+- **A fetch landing during a burst no longer takes the lines out of it.** `list_index.held_totals()` iterated the
+  live `config.fetched_bot_lists`, and an entry's `lists`, on the burst's helper thread; a fetch completing on the
+  transfer thread raised `dictionary changed size during iteration` out of `library_figures()` and the burst had
+  neither line. It copies first, as every other reader does, and `library_figures()` reads the index in a try of its
+  own: an index that cannot be read costs the SEARCHINDEX line only.
+- **`filling` means a backfill is running.** It was read from `_rebuild_pending`, which says a repair's backfill is
+  OWED and is consumed only by the dashboard's next filter query, so after an index damaged at startup every burst
+  said "still being filled" for days. `backfill_missing()` now counts itself in `list_index._backfills_running`
+  (changed under `runtime.list_index_backfills_lock`, and kept across a reload so a backfill running then cannot
+  take it below 0), and `held_totals()` says `filling` while that is above 0 or the startup backfill has not begun.
+  An owed backfill that has not begun is `ok`: the filter runs it before it answers.
+- **A burst that misses `STATUS_WAIT` goes out the moment it is done.** The burst asked for at a rebuild's end is
+  the slow one, the first count of the list just published; it took the PING path, and its lines were thrown away
+  when the next timer burst started a fresh helper, so the new totals came up to 30 s late. `send_finished_status()`
+  runs on every pass of the writer and sends a finished late burst within half a second. That holds for the first
+  reply to `library` too.
+- **`library` sent while a burst without the lines is being computed** gets one with them: the job records whether
+  it was begun with `library`, and `_send_status_lines()` asks for another when it was not and the session now
+  reads the library.
+- **A list that cannot be counted is not an empty list.** `get_file_count_date_size_and_raw_bytes()` answers a
+  failure as `(0, 'Error', '0B', 0)`; such a list now has no LIBRARY line (and a log line), and the prose reply
+  says its figures could not be read. A list not built yet (`'No List'`) keeps its line of zeros, which is what it
+  holds, and the prose says "no list built yet". `library_figures()` returns `(served, unreadable, index)`.
+- **`read_library_summary()` cannot raise.** `1e999` in a damaged `dccore.library.json` is infinity to json, and
+  `int()` of it raised `OverflowError`; a file nested too deep raised `RecursionError`. Both read as 0.
+- **A rebuild under a minute says its seconds** in the prose reply ("in 45 Sec", `_rebuild_time()`), not "in 0 Min".
+- **A session that reads the library hears a rebuild end** whether or not its script draws REBUILD lines:
+  `send_rebuild_progress()` watches for either, sends a REBUILD line only to a script that draws them, and a burst
+  sets `_rebuild_shown` only for one - a burst without REBUILD lines would otherwise have cleared it mid-rebuild.
+- **SEARCHINDEX counts the lists the backfill indexes.** `held_totals()` had its own rule for an entry's main list
+  and could be one short; `_held_list_infos()` is now the one selection, `_held_lists()` and `held_totals()` both
+  read it.
+- **A burst reads `lists.json` once per list**, not six times: `list.list_dirs_held()` resolves each list's
+  directory once for the block, on that thread only (a `threading.local`), and `library_figures()` runs inside it.
+- Docs: `docs/ADMIN-CONSOLE.md` (the `library` row, both lines, the PING paragraph). Tests:
+  `tests/test_the_library_totals_hold_up.py`, a writer thread included; 23 of 23 mutants caught. One test in
+  `tests/test_the_library_totals_reach_the_console.py` pinned the old `filling` rule and now pins the new one.
+
+### 📋 Review follow-ups of #1362: whose report it is, and a rebuild that never started (#1366)
+
+A code review of #1362 (#1361) found one reproduced bug and seven gaps in the same area.
+
+- **A crashed hand-run still killed the next `!update`.** `write_progress()` stamps the environment's token, empty
+  outside the bot, so an `update_list.py` run from a terminal that crashed mid-scan left `"token": ""`.
+  `last_progress_at(token=T)` read a tokenless report as before, so the bot's next child, not yet written, was killed
+  at the watch's first ticks as silent for twenty minutes. That broke 1361.public.md's promise that an old run's
+  report no longer counts against a new one. Two fixes:
+  - With a token given, a report must carry that token (`if token and theirs != token`). The bot always gives one and
+    the child always stamps it. Without a token to compare, every report is still read.
+  - `async_list_updater()` also clears the progress file before it starts the child when nothing holds the list
+    lock, as `handle_audio_info_request()` does. A run that holds the lock is reporting there, so its report is left.
+- **A reading whose watch could not start ran on.** `start_audio_watch()` forgot the job but left the child running,
+  with nobody draining its pipes and the list lock held. Once its stdout filled, it blocked forever, and every later
+  rebuild was refused as "already running". `_end_an_unwatched_child()` now kills it (with a bounded `communicate()`,
+  since a launcher's child can hold the pipes) and clears its report before the error is re-raised. A kill that fails
+  never hides that error.
+- **The announcements between the gate and the guard were unguarded.** A `send_debug()` failure there left
+  `update_inprogress`/`search_inprogress` up for the life of the process. The guard now begins right after the gate.
+- **The reading's stall watch read any run's report.** `watch_audio_reading()` now passes `token=job.token`, the same
+  rule as the rebuild's watch.
+- **A rebuild that never started recorded nothing.** The channel could already have been told it started.
+  `_rebuild_did_not_start()`, used by both guards, releases the flags and sets `last_list_update_ok = False` and
+  `last_list_update_error = "could not start: ..."`. It prints `[MAINTENANCE END]` and tries an error notice
+  ("List update FAILED to start"), a new `NOTICE_EVENTS` entry: a list rebuild could not start.
+- **"Nothing configured" is refused before the lock again.** #1361 had moved both early returns after
+  `take_list_lock("rebuild")`, so a run with no folder at all stopped a running audio reading and waited up to
+  `AUDIO_STOP_WAIT`, only to refuse.
+  - The no-folder check reads no folder and cannot block, so it moved back before the lock. It clears no report,
+    since a report there is another run's.
+  - The none-exist check stats the folders, so it stays after the lock and the first report. A bot's own rebuild has
+    already stopped its reading before it starts the child.
+- **The dashboard names the `starting` phase:** "Checking the library's folders…" (`tools.checkingFolders`, in en, es
+  and fr). It used to say "Scanning the library".
+- **Smaller:**
+  - `async_list_updater()`'s finally calls `_release_update_flags()` instead of repeating it.
+  - `_forget_progress()` is gone; it was a wrapper around `update_list.clear_progress()`.
+  - `PHASES_BEFORE_THE_SWAP` is built from `STARTING_PHASE` and `READING_PHASE`.
+  - The gate comment no longer says there is exactly one early return.
+
+Tests: `tests/test_a_rebuilds_progress_report_is_its_own.py` (Neo's reproduction with the `FakeChild`, a report left
+for a run that holds the lock, the unwatched child, the reading's watch, a rebuild that never started, nothing
+configured) and `tests/test_update_list_progress.py` (the dashboard's branch and its key in every language). 15 of 15
+mutants caught.
+
+### 🛑 A rebuild is stopped by its token, and a stop is not a failure (#1365)
+
+Follow-ups from the review of #1360 (#1356). The stop held, but by the shared stop file and the lock's kind, so it
+could miss the bot's own rebuild, stop a terminal's, or clear the request under a reading the stopped rebuild had just
+begun; and a stop was logged and announced as a failed rebuild.
+
+- **Asked by its token, not by the reading's stop file.** The bot already gives every `update_list.py` it starts a
+  token (`audio_run_env()`, #1182). It now keeps the last 16 (`runtime.run_tokens`), and `commands.stop_rebuild()`
+  writes them to `<progress>.stop-runs` (`update_list.request_run_stop()`); a run stops when its own token is there
+  (`run_stop_requested()`). A run from a terminal has no token, so nothing the bot does stops it, and the reading's stop
+  file no longer stops a rebuild at all. A request names finished runs only, so a run never has to clear it before it
+  starts; it is cleared by the bot once its run has ended, and earlier tokens in it are kept when a new one is added.
+- **The lock says whose run holds it**: the note is `<kind> <token>` (`_lock_note()`), read by
+  `update_list.list_lock_owner()` as `(pid, kind, token)`. `list_lock_holder()` keeps answering `(pid, kind)`, and the
+  refused run of `take_list_lock()` is told the kind alone.
+- **`stop_rebuild()` targets exactly the bot's rebuild** (review items 1 and 4). It acts while `update_inprogress` is up
+  and asks by token whoever holds the lock, so a child still waiting behind a reading is asked too, and sees the
+  request once it has the lock (`take_list_lock()` clears only the reading's file). It is done when `update_inprogress`
+  is down and no run with one of its tokens holds the lock: a rebuild stopped while it published, now reading audio
+  lengths under the same token, is waited for, and `reading_should_stop()` answers yes to its token too. A request that
+  could not be written is said and not waited for (item 9).
+- **A rebuild left by the bot's last run** is asked to stop at startup (`commands.stop_orphaned_rebuild()`, beside
+  `stop_orphaned_reading()`): a token held at startup is never this process's, since one bot runs from a folder. Its
+  own pid check is not enough on Windows, where a pid is soon reused and one that cannot be opened counts as alive.
+  #1360 declined this because the lock could not tell a bot's rebuild from a terminal's; the token can.
+- **A stop is said as a stop** (item 2). `RebuildStopped` before the swap has its own `except` ("Stopped before
+  publishing: ... The previous list was left untouched"); a multi-list run says "Stopped: these lists were not
+  rebuilt"; `rebuild_main()` ends with "--- Stopped: ... The published list stays as it is. ---" and exits
+  `REBUILD_STOPPED_EXIT` (3), and `async_list_updater()` reads that code: no "External update_list.py failed"
+  announcement and no notice, `last_list_update_error` "stopped with the bot before it published".
+- **`take_list_lock()` forgets an earlier answer however it took the lock** (item 3): one point after both paths.
+- **The question is handed down** (item 5): `generate_all_lists()` and `generate_master_list()` take `stop`, which
+  `rebuild_main()` passes as `rebuild_stop_reason`; a caller passing nothing is never stopped. The coupling to the
+  global `_list_lock` is gone. `rebuild_stop_reason()` asks `run_stop_requested()` and `daemon_gone()`, split from
+  `reading_should_stop()`, so nothing is asked twice (item 10).
+- **`_shut_down()`**: `stop_rebuild()` and `stop_audio_reading()` each have their own try (item 6).
+- **The walk is closed in a `finally`** (item 7), so a folder that raises shuts its scan threads down before the
+  failure leaves, and the throttled question after it, which the next folder's forced one covers, is gone (item 10).
+- **The question between two lists is forced** (item 8): a stop in the last second of a list is seen before the next
+  list's directory, cache and walk are opened.
+
+Tests: `tests/test_a_rebuild_stops_with_the_bot.py`, rewritten for the token. The shutdown's order is now asserted by
+calling `_shut_down()` and recording the calls, not by reading `oserve.py`'s text (item 10). New: the token in the
+lock, a request for another run, a terminal's rebuild left alone, the reading the stopped rebuild began, the child
+waiting behind a reading, an unwritable request, the orphan at startup, the walk closed before a failure leaves, the
+forced question between lists, the stopped exit code and how the bot reports it. 20 of 20 mutants caught.
+
+### 📋 A rebuild's progress report is its own, and there from its first step (#1361)
+
+A read-only check of every way a list rebuild can end found the in-memory flags always released, but two problems on
+the progress-file side and one small gap.
+
+- **A leftover report killed the next rebuild.** A run killed for stalling, or ended by a crash or a reboot, never
+  cleared `list_progress.json`. `commands.last_progress_at()` read its `at` as the new child's, "silent for hours", so
+  the next rebuild was killed at the watch's first tick (5 s) if it had not written yet. The file stayed, so it
+  happened every time. Reproduced with real processes: a child quiet for 7 s was killed at 5.0 s as "silent 3605s".
+  - `last_progress_at(token=...)` now ignores a report carrying another run's token. `run_watching_for_a_stall()`
+    passes the token it gave the child (`RUN_TOKEN_ENV`). A report with no token, from a terminal's run or from
+    before #1182, is read as before.
+  - `_forget_progress()` clears the file after a stall or ceiling kill.
+- **A rebuild that blocked before its first report paused requests with no limit.** `rebuild_main()` stats every
+  configured folder before the scan's first `write_progress()`. On a mount that stopped answering, nothing was ever
+  reported, so the stall rule never applied (`LIST_UPDATE_TIMEOUT` is 0 by default). With no phase to read,
+  `rebuild_pauses_requests()` treated it as the swap and refused every search and file request until a restart.
+  - `rebuild_main()` now writes `STARTING_PHASE` first, after taking the lock, so it never writes over another run's
+    report. `starting` is in `PHASES_BEFORE_THE_SWAP`, so it pauses nothing.
+  - The two early returns clear the report again.
+  - The "no music folder" message now points at *Settings > Your list* (#1357).
+- **Nothing between the flags and the thread left them up.** `handle_list_update_request()` raised
+  `update_inprogress` (and `search_inprogress` with `PAUSE_FOR_WHOLE_UPDATE`) before `count_by_list()`,
+  `send_debug()` and `Thread.start()`, unguarded. `_release_update_flags()` now runs if any of them raises, and
+  `start_audio_watch()` forgets a reading whose watch could not start.
+
+`tests/test_a_rebuilds_progress_report_is_its_own.py` covers whose report it is, the watch with a leftover report,
+the first report before any folder is looked at, the reports that are never written over or left behind, and the
+flags. 13 of 13 mutants caught.
+
+### 📊 dccore.mrc: the start page shows the library's totals (#1359, the script's side)
+
+The control panel's start page had the lists, the rebuild and the pack running in its *Library* frame, and
+nothing of what the lists hold, since the bot never said. The bot's side (#1363) sends, once the session has
+sent `library`, one `DCCORE LIBRARY <files> <folders> <bytes> <rebuilt_at> <rebuild_secs> <primary> <name>`
+per list and a `DCCORE SEARCHINDEX <rows> <lists> <state>` in every status burst, and names `library:1` in
+its CAPS. The script's side:
+
+- **The lines are kept per burst** (`lib.N`, `libindex` in `dccore.live`), cleared by every STATUS as the slots
+  are, the name read as the rest of the line since it may hold spaces.
+- **The start page asks once a window** (`dccore.sw.home.fill`: `library`, through `dccore.send`, when the bot's
+  CAPS name the part), and the lines then come with every burst, which refreshes the page as before.
+- **The Library frame** has the rows *Lists* (each list with the primary marked and its files, from the lines
+  when a bot sends them, the Lists page's own answer otherwise), *Files* (added up, with the folders when a
+  rebuild has published them), *Size*, *Last rebuild* (the newest, when and how long - "not since the bot was
+  updated" until a list is rebuilt once), *Search index* (rows, lists, up to date or still filling, or "no list
+  held"), then *Rebuild* and *Packing* as before. `dccore.sw.home.lib` adds the lines up; an older bot, or one
+  not asked yet, shows `-`.
+- **Tests:** `tests/test_the_start_page_shows_the_library_totals.py` reads the handlers, the per-burst clearing,
+  the one ask, the frame's rows and that the fields are read as the bot writes them.
+
+### 📚 The library's totals reach the console (#1359)
+
+dccore.mrc's control panel start page (#1288) shows the bot's figures from what the console already sends. Nothing said
+how big the library is, so its Library frame could name the lists but not their files, folders, size or last rebuild.
+
+- **What a rebuild records.** After the swap, beside `dccore.size.txt` and `dccore.rawbytes.txt`, each list's rebuild
+  writes `dccore.library.json`: its folder count (the headings of the music and film lists together), when it
+  published and how many seconds it took (`update_list._write_library_summary()`). It never fails a published list.
+  `list.read_library_summary()` reads it as zeros when it is missing or damaged.
+- **`library`, a console command.** A person gets one line per list and one for the search index. A structured
+  session gets `DCCORE LIBRARY <files> <folders> <bytes> <rebuilt_at> <rebuild_secs> <primary> <list>`, one per list
+  in the operator's order, and `DCCORE SEARCHINDEX <rows> <lists> <ok|filling|none>`, in a burst straight away and in
+  every burst after (`Session.reads_library`). A rebuild's `REBUILD end` asks for a burst, so the new totals arrive
+  then, not up to 30 s later. The figures are computed on the burst's helper thread, as every burst's are, since the
+  first count of a list just published reads the whole file.
+- **Asked for, not sent on `hello`.** An older script prints a line it has no handler for in its window, and the
+  script that draws these is not written yet, so no version can be named. `consolecaps` now says `library:1`.
+- **Files and bytes are the advert's own** (`get_file_count_date_size_and_raw_bytes()`), so the start page and the
+  advert cannot disagree.
+- **The search index's rows come from the held lists' fetch counts** (`list_index.held_totals()`), never from the
+  index: a `COUNT(*)` over the FTS5 table reads all of it, 3.3 GB on a live bot. `filling` while the startup backfill
+  or a repair's runs, `none` with no list held.
+- The dashboard's console stand-in session gained `reads_library` and `request_status()`. It is never structured,
+  so it always reads the prose.
+- Docs: `docs/ADMIN-CONSOLE.md` (the command, both lines, the CAPS line). Tests:
+  `tests/test_the_library_totals_reach_the_console.py`, a real rebuild included; 20 of 20 mutants caught.
+
+### 📂 One folder list, one Save (#1357)
+
+*Settings > Your list* had two ways to say what a bot shares, and two Save buttons. The folder rows wrote
+`data/library_folders.json`. The **Music directory (used only when no folders are set)** field was `FILE_DIRECTORY`,
+which a bot with no list serves. With no list, the rows showed that same folder as their one row, so it was on the page
+twice, and removing it and saving brought it straight back. *Save folders* saved the rows and *Save & rehash*
+everything else; it stayed disabled after a folder save and saved nothing when only the folders had changed (#1354).
+Agreed with Neo: the rows are the one place.
+
+- **`web_settings.EDITED_ELSEWHERE`**: settings that an editor of their own replaces on the page, so they are on no
+  category and do not fall into *Other*. `FILE_DIRECTORY` is the one. It stays a setting, because the first-time setup
+  writes it and a bot that never saved a folder list still serves it. The category guards in `test_webserver.py` and
+  `test_every_settings_category_the_page_asks_for_exists.py` subtract the list, and the plain-help guard keeps its
+  text for `settings.conf.sample`.
+- **The rows show what is served.** `build_folders_payload()` already reports the Music directory as the one folder
+  when no list is saved (`source: file_directory`). The summary now counts it like a saved folder ("Serving 1
+  folder"), and the first save writes the list.
+- **An empty folder list is refused** by `apply_folder_changes()` (`POST /api/folders`, and the console's `folders
+  commit`), and the saved list is left alone. It used to remove the file and fall back to `FILE_DIRECTORY`.
+- **One Save.** `saveSettingsPage()` saves an unsaved folder or list editor first (`saveFolders()` / `saveLists()` now
+  answer whether they saved), then the settings (`saveTheSettings()`). A refused editor stops it there, with the reason
+  beside the rows, and the settings stay unsaved. With only the editor changed, its "Saved N folders. Rebuild the
+  list from Tools..." goes to the bar's status. The debug-channel question comes first, and "no" saves nothing. The
+  editors' *Save folders* / *Save lists* buttons are gone, and an editor edit alone enables the page's button.
+- **mIRC settings window:** `FILE_DIRECTORY` is out of `settings_window_layout.py` (the *Library* section and
+  `FOLDER_KEYS`). The generated block is rebuilt.
+- **Strings:** the unsaved notes say "Save below". The keys nothing uses any more are gone in en/es/fr:
+  `saveFolders`, `saveLists`, `noFolderListYet`, `foldersNotSavedDirectory`, `folderListCleared` and
+  `field.FILE_DIRECTORY`.
+
+`tests/test_one_save_for_the_settings_page.py` runs the page's save under node against a fake server that records
+what was posted. It covers the operator's case, folders then settings, a refused folder list, a refused list, the list
+editor, and the debug-channel question. `test_folders_api.py`'s empty-list cases now expect a refusal. 11 of 11 mutants
+caught.
+
+### 🛑 A list rebuild stops with the bot that started it (#1356)
+
+`update_list.py` runs in its own process. An operator stopped the bot with *Tools > Stop* while a scheduled rebuild
+was scanning. The rebuild went on, at folder 10 of 20 half an hour later, and it held the list lock, so the restarted
+bot's *Update list* was refused with "Another list rebuild is already running (pid N)". The background audio reading
+(#1182) already stopped with its bot; the rebuild before it did not.
+
+- **`update_list.rebuild_stop_reason()`** asks the reading's two questions:
+  - Did the bot ask it to stop? That is the stop file.
+  - Is the bot that started it gone? That is `DCCORE_DAEMON_PID`, checked every `DAEMON_CHECK_SECONDS`.
+
+  The answer is kept once given. It is asked at every folder and, at most once a second, at every directory of the
+  scan. It is asked again once the walk is over, before anything is written, and once more just before the swap, by
+  raising `RebuildStopped` inside `generate_master_list()`'s try, so the staged lists are discarded. It is never asked
+  after the swap, the point of no return (#442).
+- **Stopped**, the scan closes its walk, which shuts the scan threads down, closes the audio cache and returns False:
+  "Stopped before publishing: ... The previous list was left untouched and is still in use." A multi-list run builds
+  no further list.
+- **Only a run holding the list lock is stopped**: `rebuild_main()`, the one the bot starts and a terminal's. It
+  cleared any stop file left lying about, and forgot an earlier answer, when it took the lock. A caller building a
+  list without the lock is never stopped, because a stop file meant for somebody's reading must not end its build. The
+  audio-reading tests that call `generate_master_list()` directly found this.
+- **`commands.stop_rebuild()`**, called by the shutdown in `oserve.py` before `stop_audio_reading()`. Only when this
+  bot is rebuilding (`update_inprogress`) and the lock is held by a rebuild, it writes the stop file and waits up to
+  10 s for the lock to be let go. It clears the file only once the lock is free, so a rebuild still finishing a
+  directory sees it.
+- **A rebuild run by hand** has no bot pid, and no bot writes the stop file for it, so a terminal's rebuild is never
+  stopped. For the same reason the bot does not ask a rebuild it finds holding the lock at startup to stop: the lock
+  cannot tell a bot's rebuild from a terminal's. One from a bot that has gone stops by itself.
+
+`tests/test_a_rebuild_stops_with_the_bot.py` covers the question with a clock the test owns, and real rebuilds of a
+throwaway library stopped:
+- during the walk (it ends after that directory);
+- between two folders (the second is not started);
+- after the scan (nothing is swapped and no staged list is left);
+- by a bot that is gone.
+
+It also covers a hand-run rebuild that goes through, a build without the lock, a multi-list run, and the shutdown side. 16 of 16 mutants caught.
+Checked end to end with two real processes, outside the suite. The "bot" ended at 3.0 s, and the rebuild, which needed
+about 100 s to scan a deliberately slow library, stopped by itself at 10.5 s, publishing nothing and releasing the
+lock.
+
+### 📁 An unsaved folder list says so (#1354)
+
+An operator removed all 20 served folders, set the Music directory and clicked *Save & rehash*, then ran *Update list*.
+The rebuild scanned all 20: only *Save folders* writes `data/library_folders.json`, and nothing had. The page said it
+was done:
+
+- **"Serving 0 folders."** `foldersSectionHtml()` counted `state.foldersDraft`. It now counts `state.folders`, what is
+  saved.
+- **"All changes saved."** `updateSettingsSaveBar()` watched `settingsDirty` only. It now also asks
+  `servedDraftUnsaved()`. With nothing else edited the bar says *Served folders not saved: use Save folders* (or *Lists
+  not saved*), and beside a settings edit it adds that after the count. *Save & rehash* stays disabled for an editor
+  edit alone, since it would not save one.
+- **A note beside the editor's Save button**, `.served-draft-unsaved`: not saved yet, and what the bot serves until
+  then (the saved folders, by count, or the single Music directory). It is updated on every render of *Your list* and
+  on every edit, in place, because typing does not re-render.
+
+`servedDraftUnsaved()` compares the draft with what is saved as the save would send it (`draftFolderShape()`,
+`draftListShape()`): a blank row is not an edit, the exclusions are text in the editor and a list on the server, and a
+channel's `normal` mode is the same as none. The served-lists editor gets the same note and bar text.
+
+`tests/test_an_unsaved_folder_list_says_so.py` runs the page's own functions under node against a fake panel: the
+operator's case, typing, a save, and the lists editor. 11 of 11 mutants caught.
+
+### 🚦 A maximum upload and download speed (#1352)
+
+Two settings, both 0 (no limit) by default: `MAX_UPLOAD_KB` caps every DCC send together, and `MAX_DOWNLOAD_KB`
+every fetch together - list fetches, AutoGet grabs, files and folders. Both are in KB/s.
+
+- **One pace per direction, shared.** `speed_cap.take()` reserves each chunk's share of the line, `nbytes / cap`
+  seconds, on one clock per direction, and waits for its turn. Every transfer that way reserves from the same clock,
+  so three sends under 600 KB/s get about 200 each, and the others speed up when one ends. An idle line saves up
+  nothing: the first chunk after a pause goes at once, and the cap holds from the second. A changed cap starts a new
+  clock. The clocks are `runtime.speed_cap_clocks`, under `runtime.speed_cap_lock`, so a `!rehash` cannot start a
+  second one beside the clock the running transfers reserve from.
+- **Small chunks under a cap.** `speed_cap.chunk_size()` makes a chunk a tenth of a second of line, never under 4 KB
+  and never over the transfer's own block (`DCC_BLOCK_SIZE`, `RECV_CHUNK`). The send loop and the receive loop read it
+  for every chunk, so a change reaches transfers already running.
+- **The send loop** sizes the read, calls `take()`, then `_AckTracker.sending()`, then `sendall()`.
+- **`_AckTracker.sending()`: our own pause is not the receiver's silence.** The stall clock (`ACK_STALL_SECONDS`)
+  started at the last acknowledgement, whatever happened after it. A receiver that had acknowledged the whole last
+  chunk, followed by a cap wait past 60 s, read as stalled the instant the next chunk went. `sending()` restarts the
+  clock when nothing is owed. A receiver that still owes bytes keeps its clock.
+- **The receive loop** (`dcc_fetch._run_transfer()`) recv()s at most `chunk_size()` and calls `take()` after the
+  acknowledgement, so the sender never waits for it. **The wall-clock ceiling moves by the time waited.**
+  `FETCH_TRANSFER_TIMEOUT` (600 s) is sized for an uncapped link, and a 200 MB list under a 200 KB/s cap would have
+  been cut off every time and asked for again from the start.
+- **Settings:** under *Transfers* on the dashboard (`web_settings.SETTINGS_CATEGORIES`) with labels and help in
+  English, Spanish and French, and on the mIRC settings window's *Sharing > Transfers* page as *Speed limits*
+  (`settings_window_layout.py`; the generated block is rebuilt). `conf/settings.conf.sample` is regenerated.
+- **A rehash's reload window** (see `runtime.config_reload_lock`) reads the cap as 0 for a few milliseconds, so a chunk
+  reserved then goes uncapped: one chunk per transfer, once per rehash. Not worth a lock in the send loop.
+- **Very low caps.** At a few KB/s the far end can give up, since a DCCore sender drops a receiver that has not taken a
+  64 KB block in 60 s. The help says so; the value is not clamped.
+
+`tests/test_the_speed_caps.py` drives `speed_cap` on a clock the test owns, the fetch loop over a socket pair with the
+wall clock moved only by the cap's waiting, and a real send over loopback with a real cap. The loop's order is also
+checked from the source, for a runner without loopback. 14 of 14 mutants caught.
+
+### 🧱 Splitting `start_dcc_send`, step 4: the send loop is `stream_the_file()` (#1350)
+
+Step 4 of splitting `start_dcc_send()` (steps 1-3 are #1328, #1336 and #1340). The send loop moved, unchanged, into a
+module function in `dcc.py`: `stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user)` opens the
+file, seeks to the resume offset, sends it a block at a time, reads the receiver's acknowledgements as it goes, moves the
+transfer row's `bytes_sent` and the bot's total, and returns the bytes sent. It raises `_ReceiverGone` or
+`_ReceiverStalled` as before, and lets a socket error through.
+
+The moved body has the same syntax tree as before; `_mine()` is `_is_this_send()` (#1336). `start_dcc_send()` goes from
+about 490 to 460 lines. No behaviour changes.
+
+- **The one catch:** the `finally` read the loop's `bytes_sent`, and a send that raises out of `stream_the_file()`
+  never returns it. `acks.sent` is the same count after every chunk (and the resume offset before the first), so the
+  `SentFile` the ending gets takes `acks.sent` once the tracker exists, and `bytes_sent` before that.
+- **Tests:**
+  - `tests/test_the_send_loop_on_its_own.py` (10 tests), with a recording connection and a stand-in receiver, so no
+    socket is needed:
+    - the whole file in blocks, the count returned, the per-block timeout;
+    - only this row's count and the bot's total move, and the row is found by identity after a `/nick` (#598);
+    - a resume sends from the offset, counts the whole file, and moves the totals by what went on the wire;
+    - a receiver that closes, one that stalls, and a socket error each leave `acks.sent` at how far the send got;
+    - read from the source: the ending takes `acks.sent`, and the loop is called with the send's row and count.
+  - `test_complete_means_the_receiver_acked_it.py`: over loopback, a send that fails mid-file hands the ending the
+    bytes it sent, not 0.
+  - Two tests that read the loop out of `start_dcc_send()` now read `stream_the_file()`; one parses it instead of
+    matching its indentation.
+- **Mutation checks, 9/9 caught:** the ending reading the stale local, the tracker not told, the row or the bot's total
+  not moved, no seek on a resume, the row found by nick, no block timeout, the count dropped, a closed receiver not
+  noticed.
+
+### 🎨 Nicks, channels and the search text have colours by default (#1348)
+
+Since #1259, *Nicks* and *Channels* in `/dccore options` started at "same as the line" and *Search text* at "same as
+File names" (navy). Most lines on a busy bot are `[SEARCH]` lines, so out of the box the window was nearly all black,
+and an operator asked why it had no colours.
+
+- **New defaults in `dccore.init`:** `col.term 12` (blue), `col.nick 6` (purple), `col.chan 10` (teal). No yellow: it is
+  hard to read on mIRC's white background.
+- **Once, for scripts that ran before: `dccore.inlinecolours`.** Any save writes the whole table, so every older
+  `dccore.ini` already holds `col.term name`, `col.nick -1` and `col.chan -1`, and `dccore.default` never touches a saved
+  key. The new alias moves each of the three that still holds its old default to the new one, sets the
+  `inlinecolours` mark and saves when `dccore.ini` exists. A colour somebody picked stays, and "same as the line"
+  picked again later is never moved a second time.
+- `docs/ADMIN-CONSOLE.md` names the new defaults. Tests: `TheDefaults` in
+  `tests/test_the_mirc_window_colours_nicks_channels_and_terms.py` runs `dccore.init`'s order and the move, read from
+  the script, over a new install, an older script's saved defaults, picked colours and a later "same as the line".
+- The control panel's **Colours** frame (#1288) said all three start as the line or as File names; its note
+  (`settings_window_layout.py`, regenerated) now only names the choices.
+
+### 🗃️ The search index rewrites itself far less while it is filled (#1345)
+
+After the update to v1.16.x, a Windows bot's one-time re-index of 97 held lists wrote about 36 GB to build a 5.2 GB index.
+Every list fetch pays the same overhead at a smaller scale.
+
+- **A bigger buffer, fewer merges.** FTS5 holds the rows being inserted in an in-memory hash, 1 MB by default, and writes
+  it out as a new segment each time it fills. With `prefix='1 2 3 4'`, every word yields five entries, so that happened
+  every few thousand rows, and every 4 segments were merged into a bigger one, and those again. The index now uses a
+  16 MB hash and merges every 8 segments (`_FTS_HASHSIZE`, `_FTS_AUTOMERGE` in `list_index.py`). Both are kept in the
+  table's own config and set on every open, so an index made before is tuned too.
+- **A refresh no longer reads every list to find its own.** `DELETE FROM entries WHERE bot = ?` was a scan of the whole
+  table, because FTS5 answers only MATCH and rowid from its index. That took 2.3 s at 6.8M rows even for a list with no
+  rows yet, and a rebuild paid it once per list. `_delete_rows_of()` finds the rows with `MATCH` and keeps `bot = ?`, as
+  `bots_with_a_match()` does. `some_bot` and `some-bot` read as the same phrase, and only the exact name's rows go. A
+  name with no tokens (#1091) is found the old way.
+
+Measured on the 8 largest of those held lists (6.78M rows), built through `index_bot_list()`:
+
+| Settings | Build | Written | Index |
+|---|---|---|---|
+| before | 272 s | 13.1 GB | 2104 MB |
+| 16 MB hash | 237 s | 10.1 GB | 2136 MB |
+| 64 MB hash | 205 s | 8.5 GB | 2260 MB |
+| **16 MB hash, merges every 8** | **195 s** | **8.0 GB** | **2095 MB** |
+| 64 MB hash, merges every 8 | 184 s | 6.7 GB | 2111 MB |
+
+The filter-bar queries took the same time in all of them. 64 MB saved a little more, but costs memory a small host may
+not have. `PRAGMA synchronous = NORMAL` made no difference.
+
+**#1296's item 5 is answered: the 1-character prefix stays.** Without it, the index was 8% smaller, but `"love m"*` took
+7.5 s instead of 0.1 s, and `"the b"*` and `"amon a"*` took about 3 s.
+
+Confirmed on the 25 largest held lists (13.0M rows), with this change as a whole, the delete included: 573 s and 26.6 GB written before, 371 s and 16.6 GB after (35% faster, 38% less written). The index came out the same size within 1% (3951 and 3992 MB), and every query took the same time.
+
+- **Tests:** `tests/test_the_index_rewrites_itself_less.py` (6 tests):
+  - a new index has both settings, and an index made before gets them on open;
+  - a refresh and a drop delete through `MATCH`;
+  - a list whose name reads as the same phrase is left alone;
+  - a name with no tokens is still replaced and dropped.
+- **Mutation checks, 5/5 caught:**
+  - either setting not applied;
+  - the delete scanning again;
+  - the delete trusting the phrase alone;
+  - a name with no tokens matched as a phrase.
+
+### 🧱 Splitting `irc_loop`, step 8: the channel and private commands are `answer_command()` (#1342)
+
+Step 8 of splitting `irc_loop()` (step 7, #1338, made the CTCP replies `answer_ctcp()`). The `elif` chain behind
+`answer_privmsg()`'s CTCP arm is now `answer_command(msg, msg_lower, user, user_host, target_chan, bot_aliases, sock,
+oserve)` in `irc.py`, called from an `else:`. The chain covers:
+
+- the `@nick-` commands;
+- `@find` and `@locator`;
+- the list triggers and `!list`;
+- the admin's `!debugnames`, `!ping` and channel commands;
+- file requests.
+
+Nothing followed the chain inside its `try` or after it, so its eight `return`s, and falling through, still end the
+line's handling. An exception still reaches `answer_privmsg()`'s `except`. The chain moved unchanged, its first `elif`
+now an `if`, and the moved body has the original syntax tree. `answer_privmsg()` goes from about 300 to 200 lines: the
+flood gate, the captures and the dispatch. No behaviour changes.
+
+- **Tests:**
+  - `tests/test_the_commands_on_their_own.py` (6 tests):
+    - `@nick-help` and `@nick-que` start their replies;
+    - `!list` explains how to get the list;
+    - ordinary chat starts nothing;
+    - `answer_privmsg()` hands a command over with its parts, and a CTCP line not at all.
+  - `test_irc_dispatch.py` finds the chain's head (`is_list_request(...)`), which is now an `if`. Its shadowing
+    guard, which checks that no earlier branch catches the alias download trigger, adds the head by hand, since the
+    scan reads `elif` lines.
+- **Mutation checks, 4/4 caught:**
+  - the dispatch no longer answering a command;
+  - the dispatch passing the nick as the host, or as the target;
+  - the chain's head shadowing the alias trigger, caught by the shadowing guard through the head it now includes.
+
+### 🧱 Splitting `start_dcc_send`, step 3: its two refusals are functions (#1340)
+
+Step 3 of splitting `start_dcc_send()` (steps 1 and 2 are #1328 and #1336). Its two early exits moved, unchanged, into
+module functions in `dcc.py`:
+
+- `refuse_an_unsendable_file()` turns away a send nobody could receive: no usable public address, a bot not offerable to
+  strangers, or an empty or vanished file. It tells the user and releases the packer, the nick and the transfer row.
+  Without an address the queue is left alone. A bad file is charged to its row, recorded, and the queue is woken
+  three seconds later.
+- `refuse_without_a_port()` is the no-port case: no DCC port or listener could be had. It keeps the row uncharged,
+  schedules one retry 45 seconds later, and closes the listener.
+
+Each body ended in `return` on every path, so its guard now makes the call and then returns. The bodies have the same
+syntax tree as before. `_row`, `_mine()` and `_my_nick()` are `row`, `_is_this_send()` and `_send_nick()` (#1336).
+`start_dcc_send()` goes from about 630 to 490 lines. No behaviour changes.
+
+- **Tests:**
+  - `tests/test_a_refused_send_on_its_own.py` (7 tests):
+    - without an address the queue is left alone;
+    - a bad file is charged, recorded and the queue woken, and a bad list is recorded as cancelled;
+    - with no port the row is kept uncharged and retried once, the listener closed, and a listener that could not
+      be made says the file stays queued;
+    - for both refusals, only the send that owns the packer releases it.
+  - `test_what_the_operator_types_and_is_told.py`'s `code_only()` now strips comments and docstrings by token. Its
+    regex paired triple quotes in order, and was already off by one wherever a comment ending in `(#962)."""` had
+    eaten a closing quote. A docstring placed above the abort message then hid the message from the test.
+  - `test_finishing_a_send_on_its_own.py` (#1336) passes the outcome identity in its real order, (key, name, kind).
+- **Mutation checks, 7/7 caught:**
+  - either refusal not being made;
+  - a bad file not charged;
+  - the no-address path falling through to the bad-file path;
+  - the listener left open;
+  - no retry scheduled;
+  - the abort message offering `settings.conf` again, through the rebuilt `code_only()`.
+
+### 🧱 Splitting `irc_loop`, step 7: the CTCP replies are `answer_ctcp()` (#1338)
+
+Step 7 of splitting `irc_loop()` (step 6, #1334, made the PRIVMSG dispatch `answer_privmsg()`). The dispatch's CTCP
+branch is now `answer_ctcp(line, msg, user, target_chan, sock, oserve)` in `irc.py`. It handles the DCC CHAT, SEND
+and RESUME offers, VERSION, and the QUE and REMOVE queue commands.
+
+- The branch was the first arm of the command chain, and nothing followed the chain inside its `try`. So each of its
+  seven `return`s, and falling through, still ends the line's handling. An exception still reaches the same `except`.
+- The guard stays where it was, and the moved body has the same syntax tree as before.
+- `answer_privmsg()` goes from about 400 to 300 lines. No behaviour changes.
+
+- **Tests:** `tests/test_the_ctcp_replies_on_their_own.py` (9 tests):
+  - a private DCC CHAT offer reaches the admin console, and one sent to a channel does not;
+  - the same for a DCC SEND offer and the fetch;
+  - VERSION is answered through the `oserve` passed in;
+  - QUE starts the queue check, and REMOVE with a name removes that file;
+  - `answer_privmsg()` hands a CTCP line over with its parts, and an ordinary line not at all.
+- **Mutation checks, 6/6 caught:**
+  - the dispatch no longer answering a CTCP;
+  - the dispatch passing the nick as the target, or no `oserve`;
+  - a channel's DCC CHAT reaching the console;
+  - a channel's DCC SEND starting a fetch;
+  - QUE not being answered.
+
+### 🧱 Splitting `start_dcc_send`, step 2: its `finally` block is `finish_send()` (#1336)
+
+Step 2 of splitting `start_dcc_send()` (step 1 is #1328). The function's `finally` block runs on every exit. It speeds
+and records the send, frees the slot, announces a completed send, closes the sockets, settles the queue row, removes a
+spent archive, releases the packer and the nick, and wakes the queue. It is now `finish_send(sent)` in `dcc.py`, and it
+reads the send from one `SentFile`.
+
+- `SentFile` gained the fields the ending reads: the channel and the IRC socket, whether the send owns the packer, the
+  outcome's identity and status, the bytes the receiver acknowledged, whether it never connected, the port and the two
+  sockets. They are defaulted, so `record_completed_send()`'s record (#1328) is built as before.
+- Three values were unset on the exits before the transfer, and the block read them through `locals()`: the resume
+  offset, the ack tracker and the finish time. They are now picked up once, where the `SentFile` is built, with the same
+  fallbacks.
+- `_mine()` and `_my_nick()` call the new module functions `_is_this_send(tx, row, user)` and `_send_nick(row, user)`,
+  which `finish_send()` uses too.
+- The moved body has the original syntax tree once `sent.<field>` is read back as the local it was.
+- `start_dcc_send()` goes from about 820 to 630 lines. No behaviour changes.
+
+- **Tests:**
+  - `tests/test_finishing_a_send_on_its_own.py` (9 tests), each calling `finish_send()` with no socket:
+    - a completed send is recorded, announced, settled as delivered and freed, and its sockets closed;
+    - a resume at the end is neither a speed record nor announced;
+    - a failed send's outcome counts what the receiver acknowledged, less what it already held;
+    - one that never connected says so;
+    - an exit before the transfer, with no sockets, still settles and frees;
+    - only the send that owns the packer releases it and wakes a waiting pack;
+    - a spent archive is removed, and one whose row was kept for a retry stays.
+  - `test_complete_means_the_receiver_acked_it.py`: on a real loopback send, the ending is handed the resume offset,
+    the last ack, the finish time and the port.
+  - Six source-reading tests now read `finish_send()`, and check that `start_dcc_send()`'s `finally` calls it.
+- **Mutation checks, 9/9 caught:**
+  - the `finally` not calling `finish_send()`;
+  - the call site dropping the acknowledged bytes, the resume offset or the finish time;
+  - every send releasing the packer;
+  - every transfer row counting as this send's;
+  - the outcome counting bytes the receiver already held;
+  - a kept row's archive being removed;
+  - a resume at the end being announced.
+
+  The three call-site mutations survived until the loopback test was added.
+
+### 🧱 Splitting `irc_loop`, step 6: the PRIVMSG dispatch is `answer_privmsg()` (#1334)
+
+Step 6 of splitting `irc_loop()` (steps 1-5 are #1287, #1291, #1306, #1330 and #1332). The body of the loop's
+`if privmsg_parsed:` - the flood gate, the chat and advert captures, CTCP, and every channel and private-message
+command - is now `answer_privmsg(line, privmsg_parsed, sock, oserve)` in `irc.py`.
+
+- It was the last statement of the loop's per-line `for`, so the 19 `continue`s that ended a line's handling are
+  `return`s. They were picked by their place in the syntax tree, not by text, and the moved body has the same syntax
+  tree as before once they are put back.
+- `oserve` is the loop's own look-up of the module, passed in.
+- `irc_loop()` goes from about 950 to 560 lines. No behaviour changes.
+
+- **Tests:**
+  - `tests/test_the_privmsg_dispatch_on_its_own.py` (5 tests):
+    - a CTCP VERSION is answered through the `oserve` passed in, and without one nothing is sent;
+    - a stranger's `!ping` starts no reply thread, and the admin's does (the control);
+    - in the real read loop, a PRIVMSG reaches `answer_privmsg()` with the line and the loop's `oserve`.
+  - `test_diagnostics_answer_only_the_admin.py`, `test_membership_events.py` and
+    `test_servers_chat_is_relayed_by_the_bot.py` read `answer_privmsg()`'s body, and look for `return` where they
+    looked for `continue`.
+- **Mutation checks, 2/2 caught:**
+  - the loop no longer handing a PRIVMSG over;
+  - the loop passing no `oserve`.
+
+  A third, the VERSION reply falling through instead of returning, is equivalent: only the QUE and REMOVE checks
+  follow it, and neither matches VERSION.
+
+### 🧱 Splitting `irc_loop`, step 5: end of NAMES, KICK, join refusals and NOTICE are functions (#1332)
+
+Step 5 of splitting `irc_loop()` (steps 1-4 are #1287, #1291, #1306 and #1330). Four more handlers' bodies moved into
+module functions in `irc.py`, each with the same syntax tree as before:
+
+- `answer_end_of_names(line, conn)`: the 366 that completes a channel's member list, and the activation once every
+  target channel has one. It read the loop's `target_channels` and `channels_confirmed`. `channels_confirmed` was
+  already `conn`'s (#1306), and `irc.Connection` now carries `target_channels` too, set where the loop computes it.
+  The function reads both in its first line.
+- `answer_kick(kick_parsed)`: a KICK of the bot, remembered for a rejoin, or of someone else, which is a departure.
+- `answer_join_refusal(refusal)`: a refused JOIN, counted against the channel's retries.
+- `answer_notice(notice_parsed)`: what other bots and services tell the bot.
+
+The guards stay in the loop. `irc_loop()` goes from about 1,050 to 950 lines. No behaviour changes.
+
+- **Tests:**
+  - `tests/test_end_of_names_kick_and_refusal_on_their_own.py` (8 tests):
+    - the end of NAMES confirms one channel of two without activating, activates on the last, and reads the
+      targets from the connection;
+    - in the real read loop, the 366 handler is handed every target channel;
+    - a kick of someone else is their departure; a kick of the bot is remembered; a kick from a channel it does not
+      serve forgets the members;
+    - a refusal counts against a channel being rejoined.
+  - `test_a_kick_of_another_user_is_a_departure.py` reads `answer_kick()`'s body.
+- **Mutation checks, 4/4 caught:**
+  - the connection never learning its target channels;
+  - the end of NAMES confirming into a set nobody keeps;
+  - a kick of someone else not being a departure;
+  - a refusal not counted.
+
+  The first mutation survived at first: with the target set left at its empty default, the first 366 would
+  activate, and every loop-driving test used one channel. The loop test with two channels was added for it.
+
+### 🧱 Splitting `irc_loop`, step 4: the NICK, WHO, NAMES, JOIN, PART and QUIT handlers are functions (#1330)
+
+Step 4 of splitting `irc_loop()` (steps 1-3 are #1287, #1291 and #1306). A map of the read loop showed six handlers
+whose bodies need nothing from it but the line and, for two, the socket. Their bodies moved into module functions
+in `irc.py`:
+
+- `answer_nick_change(line)`;
+- `answer_who_reply(line)`;
+- `answer_names(line, sock)`, which learns the members and thaws a frozen queue whose owner is still there;
+- `answer_join(line, sock)`, `answer_part(line)` and `answer_quit(line)`.
+
+The guards, and the `if/elif` chain the last four form, stay in the loop, so the order of its checks is untouched.
+Each moved body has the same syntax tree as before, apart from the loop's `s` named `sock` and `irc_loop()`'s local
+`import announce` taken where it is read. `irc_loop()` goes from about 1,180 to 1,050 lines. No behaviour changes.
+
+- **A slip the suite caught:** the first attempt renamed the loop's `s` to `sock` with a regular expression over the
+  text, which also rewrote the `\s` inside the NAMES pattern (`\s+` became `\sock+`), so no 353 line parsed. Four
+  loop-driving tests in `test_audit_irc_connection.py` failed at once. The rename is done on Python tokens now, and
+  the bodies were checked against the originals' syntax trees.
+- **Tests:**
+  - `tests/test_the_channel_handlers_on_their_own.py` (8 tests) calls each function:
+    - NAMES learns who is there, thaws a frozen queue on this connection's socket, and ignores an invalid target;
+    - a JOIN adds the member and a PART removes them;
+    - a JOIN thaws on the given socket;
+    - a QUIT removes the member from every channel;
+    - a NICK change follows the member;
+    - the WHO table stays bounded.
+  - The guard tests in `test_membership_events.py` and `test_server_numerics.py` find each guard from its call line.
+  - Four tests that read a handler's body read the function now: `test_a_kick_of_another_user_is_a_departure.py`,
+    `test_a_rename_carries_the_users_state.py`, `test_alt_nick_reconnect_merges_the_sidebar_row.py` and
+    `test_servers_chat_is_relayed_by_the_bot.py`.
+- **Mutation checks, 5/5 caught:**
+  - the NAMES pattern corrupted as in the first attempt;
+  - NAMES thawing on no socket;
+  - NAMES learning nobody;
+  - the loop no longer handling a PART, or following a NICK.
+
+### 🧱 Splitting `start_dcc_send()`, step 1: recording a finished send is its own function (#1328)
+
+`start_dcc_send()` is 890 lines, the last of `dcc.py`'s three largest handlers still in one piece (#1298, #1300 and
+#1304 split the others). Most of it can only move once the send's state is one object: the `finally` block that
+settles a send reads about 20 of its locals, and the opening refusal uses its `_mine()`/`_my_nick()` closures. One
+block was already free of that: the 73 lines that record a finished send.
+
+- **`SentFile`**, a small named tuple, holds what that block reads:
+  - the transfer row, the nick and the queue row;
+  - the file, its size, where it resumed, and the bytes sent;
+  - whether it completed or was already held;
+  - when it was offered, started and finished.
+
+  It is the first piece of the send-state object.
+- **`record_completed_send(sent)`** is the block, moved unchanged, reading the send through `sent`. It leaves a short
+  send and an already-held resume uncounted; it updates the totals and the download count, and writes the transfer
+  record once per row. `start_dcc_send()` builds a `SentFile` from its locals and calls it. Inside `dcc.py`, so
+  `!rehash` and the tests' patches keep working. No behaviour changes.
+- **Tests:**
+  - `tests/test_a_finished_send_is_recorded_once.py` (6 tests) calls it with the three writes recorded:
+    - a completed send is counted everywhere, with its speed and its wait in the queue;
+    - a short send, and an already-held file, count nothing;
+    - a resume counts only what went on the wire;
+    - a row is recorded once;
+    - a failing database is reported, not raised.
+  - Its `RecordsASend` harness turns four tests that read the block as text into calls:
+    `test_two_transfers_counted_wrong.py`'s three #454 checks, and `test_dcc_resume.py`'s totals check.
+- **Mutation checks, 6/6 caught:**
+  - a short send counted;
+  - an already-held file counted;
+  - the skipped bytes counted;
+  - the outcome recorded twice;
+  - the skip reported as a database error;
+  - two fields swapped where `start_dcc_send()` builds the `SentFile` (caught by three end-to-end send tests).
+
+### 📝 docs/FUTURE.md counts the web_*.py modules right (#1326)
+
+#1322 wrote "seventeen"; there are fifteen.
+
+### 🧱 Splitting `webserver.py`, step 6: the login, the console and the setup page; `webserver.py` keeps its app (#1322)
+
+The last step of splitting `webserver.py` (steps 0-5 are #1311 to #1320). The app section's three blocks that are not
+the app itself moved unchanged:
+
+- **`src/web_login.py`**, the dashboard login:
+  - the login page;
+  - the per-address failed-login count and the in-flight limit, with their lock;
+  - the password check;
+  - the host-name check against DNS rebinding, the framing refusal, and the login origin check.
+
+  Their state is used only inside this block.
+- **`src/web_console.py`**, the dashboard's console: its log and debug sink, `build_console_log_payload()`,
+  `_WebConsoleSession` and `build_console_command_result()`. `_console_next_id` and `_console_sink_registered` are
+  reassigned through `global`, so under the split's rule they are not copied onto `webserver`.
+- **`src/web_setup_page.py`**, the first-run setup page: fields, languages, validation, `apply_setup()` and both pages.
+  `setup_page_is_possible()` stays in `webserver`: it answers whether Flask is there, which only `webserver` knows.
+
+`webserver.py` keeps `create_app()` and its routes, `start()`, the request-log quieting, and `_open_in_browser()` with
+`_browser_is_on_the_saved_page`, a flag code in `webserver` reassigns too. It goes from about 2,500 to 1,717 lines,
+down from 7,006 before step 0. No behaviour changes.
+
+- **Patches moved to the module that reads them:**
+  - `WEB_PASSWORD_CHECK_WAIT_SECONDS` (`test_parallel_logins_get_no_extra_guesses.py`);
+  - `_machine_names` (`test_the_dashboard_answers_only_to_its_own_names.py`);
+  - the console's state, session class and command guard (`test_web_console.py`).
+
+  `test_web_console.py` restored its guard through `self.addCleanup(setattr, webserver, ...)`, a form the first
+  retarget missed. It emptied the guard on `web_console` and restored `webserver`'s, and the next test failed. Fixed,
+  and the move script's patch report now matches that form. An audit of every split module finds no other patch on
+  `webserver` that its code reads, except the known `dlagain` case in `web_lists`, which goes through `webserver`.
+- **Source-reading tests:**
+  - `test_console_settings_commands.py`: `web_console.py` is the dashboard's console dispatcher.
+  - `test_dashboard_translations_stay_complete.py`: the setup page's keys are read from `web_setup_page.py` too.
+  - `test_the_console_in_the_bots_own_colours.py`: reads `web_console.py`.
+- **Registered:** the three modules join `SPLIT_MODULES` and the import graph's allowed set.
+- **Mutation checks, 5/5 caught:**
+  - a setup name not imported back;
+  - a reassigned console flag copied back;
+  - `web_console` importing `webserver`;
+  - the host check forgetting the machine's own names;
+  - `quit` no longer intercepted.
+
+### 🧱 Splitting `webserver.py`, step 5: settings, served lists, on-connect and messages are four modules (#1320)
+
+Step 5 of splitting `webserver.py` (steps 0-4 are #1311, #1313, #1315, #1317 and #1318). The "Settings" section held
+four subjects, so it became four modules, all moved unchanged:
+
+- **`src/web_settings.py`**, the Settings page:
+  - the categories, labels, units and choices;
+  - the payload and `apply_settings_changes()`, and the save-and-rehash;
+  - the theme preview and the password change.
+
+  `console_is_enabled()` and `dashboard_is_loopback_only()` came from the app section with it: the settings code
+  reads them, and they answer who may reach the settings and the console.
+- **`src/web_served.py`**: the served folders, the folder browser, and the lists bound to channels.
+- **`src/web_on_connect.py`**: the on-connect commands' payload, save and resend.
+- **`src/web_messages.py`**: the dashboard notices and the private-message inbox.
+
+None imports `webserver`; `webserver` imports every name back, so the routes and `console_settings`' calls through
+`webserver.<name>` are unchanged. `webserver.py` goes from about 3,800 to 2,500 lines. No behaviour changes.
+
+- **One patch moved:** `test_console_settings_commands.py` spies on `_settings_payload_unlocked` to prove the console's
+  `settings` snapshot is read under the reload lock. `build_settings_payload()` calls it inside `web_settings`, so the
+  spy is on `web_settings` now. The move script flagged it.
+- **Source-reading tests:** `test_rehash_config_window.py`, `test_search_can_be_turned_off.py` and
+  `test_required_settings_cannot_be_blanked.py` read `web_settings.py`.
+- **Registered:** the four modules join `SPLIT_MODULES` and the import graph's allowed set. The split test's "something
+  to check" floor is one name, since `web_on_connect` has three.
+- **Mutation checks, 4/4 caught:**
+  - a settings name, or a served-lists name, not imported back;
+  - the settings payload read outside the reload lock;
+  - `web_served` importing `webserver`.
+
+### 🧱 Splitting `webserver.py`, step 4: the library, stats and queue are `web_library`, `web_stats` and `web_queue` (#1318)
+
+Step 4 of splitting `webserver.py` (steps 0-3 are #1311, #1313, #1315 and #1317). The "pure data-building
+functions" section was the largest, at 48 names, and held three subjects, so it became three modules, all moved
+unchanged:
+
+- **`src/web_library.py`**, this bot's own library and list: `count_rar_album_folders()`, `build_library_payload()`,
+  `build_search_payload()`, `build_filelists_payload()` and their helpers.
+- **`src/web_stats.py`**, the Stats page:
+  - `build_stats_payload()` and `STATS_PARTS`;
+  - the stats and KeepTrack imports, with their limits;
+  - the transfer record (payload, one nick, forget, the CSV export).
+- **`src/web_queue.py`**, the Queue page: `build_queue_payload()`; moving, removing and clearing rows; cancelling a
+  pack; ignoring and un-ignoring a nick.
+
+None imports `webserver`; `webserver` imports every name back. `webserver.py` goes from about 5,000 to 3,800 lines.
+No behaviour changes.
+
+- **One patch moved:** `test_the_stats_poll_is_cheap.py` asserts that a transfer-only stats poll never counts the
+  library, by making `build_library_payload` raise. `build_stats_payload()` now calls it through `web_stats`' own
+  name, so the patch on `webserver` no longer reached it: the test would have kept passing while guarding nothing.
+  It patches `web_stats` now. The move script flagged it.
+- **Source-reading tests:**
+  - `test_stats_page.py`'s two guards (no daemon module imported at module scope; the builders import theirs
+    themselves) read `webserver.py` and every `web_*.py`.
+  - `test_a_transfer_during_a_stats_import_is_not_lost.py` reads `web_stats.py`.
+  - `test_a_page_that_does_not_say_why_it_is_short.py` compares `web_library.py` with `web_lists.py`.
+- **Registered:** the three modules join `SPLIT_MODULES` and the import graph's allowed set.
+- **Mutation checks, 4/4 caught:**
+  - a queue name not imported back;
+  - the stats poll counting the library for every part;
+  - a daemon module imported at module scope;
+  - `web_library` importing `webserver`.
+
+### 🧱 Splitting `webserver.py`, step 3: fetching is `web_fetch.py`, the list rebuild `web_list_update.py` (#1317)
+
+Step 3 of splitting `webserver.py` (steps 0-2 are #1311, #1313 and #1315). The fetch section held two different things,
+so it became two modules, both moved unchanged:
+
+- **`src/web_fetch.py`**, the Downloads page's fetch queue: `build_fetch_enqueue_result()`, the status, pause,
+  delete, delete-many and clear results, `FETCH_CLEAR_STATES`, and the fetched-list purge. It imports the four helpers
+  it shares with the List Browser from `web_lists`.
+- **`src/web_list_update.py`**, this bot's own list: `build_verify_list_payload()`,
+  `build_update_list_status_payload()`, `read_list_progress()`, `start_list_update()` and
+  `start_audio_info_reading()`. These were never about fetching from other bots.
+
+Neither imports `webserver`; `webserver` imports every name back, so the routes, `adminchat` and the tests that
+patch `webserver.build_fetch_enqueue_result`, `start_list_update` or `start_audio_info_reading` are unchanged. The
+move script found no patched name read inside the moved code. No behaviour changes.
+
+- **Tests:** both join `SPLIT_MODULES` and the import graph's allowed set.
+- **Mutation checks, 4/4 caught:**
+  - a fetch name, or a list-update name, not imported back;
+  - a `web_lists` helper not imported;
+  - `web_list_update` importing `webserver`.
+
+### 🧱 Splitting `webserver.py`, step 2: other bots' lists are `web_lists.py` (#1315)
+
+Step 2 of splitting `webserver.py` (steps 0 and 1 are #1311 and #1313). The List Browser's section moved unchanged to
+`src/web_lists.py`: its 36 top-level names, covering the list and folder fetch enqueues, the held lists' summaries
+and payload, the cross-list search, adding and removing sources, the purges, and their helpers. It goes before the
+fetch section because that section uses four of its helpers (`fetch_feature_error()`, `bot_not_here_error()`,
+`_preferred_fetch_channel()`, `_enqueue_folder_request()`).
+
+It imports `defaults`, `runtime`, `os` and `web_common`, never `webserver`; `webserver` imports every name back.
+`webserver.py` goes from about 6,850 to 5,500 lines. No behaviour changes.
+
+- **Patches:** the tests that replace `webserver.build_list_fetch_enqueue_result` and its siblings stay as they are.
+  Their callers (`list_fetch`, `list_grab`, `adminchat`, the routes) go through `webserver.<name>` when they run.
+  The move script flags a patched name only where code inside the section reads it; the one flagged here
+  (`build_folder_rar_fetch_enqueue_result`, read by the batch enqueue) is patched by a test that drives the console's
+  `dlagain`, which goes through `webserver`, so it still applies.
+- **The move script** now works out free names per moved function. Taken across all of them at once, one
+  function's local `import runtime` hid another's use of the module-level `runtime`, and the first attempt moved
+  without it. The suite caught it at once.
+- **A copy that would go stale:** `_NICK_RE` is a cache built on first use; it starts as `None` and is reassigned
+  through `global`. An import-back copies the value at import time, so `webserver._NICK_RE` would have stayed `None`
+  for good. Nothing reads it there, so it is not imported back. CI caught it on macOS only, where another test built
+  the cache before the split test ran. The split test now holds every split module to the rule: a name reassigned
+  through `global` is not on `webserver`. The move script skips such names.
+- **Tests:**
+  - Three source-reading tests read the moved code where it now is: `test_one_bot_under_two_nicks_is_one_row.py`,
+    `test_we_do_not_ask_a_bot_that_is_not_there.py`, and `test_a_page_that_does_not_say_why_it_is_short.py`, which
+    compares a payload in each file.
+  - `web_lists` joins `SPLIT_MODULES` and the import graph's allowed set.
+- **Mutation checks, 5/5 caught:**
+  - a name not imported back;
+  - the cache copied back onto `webserver`;
+  - a module the moved code needs not imported;
+  - `web_lists` importing `webserver`;
+  - the summary no longer merging a renamed bot.
+
+### 🧱 Splitting `webserver.py`, step 1: the search broadcast is `web_search.py` (#1313)
+
+Step 1 of splitting `webserver.py` (step 0, `web_common.py`, is #1311). `BROADCAST_SEARCH_WINDOW`,
+`BROADCAST_SEARCH_MIN_TERM_LEN`, `build_broadcast_status_payload()` and `start_broadcast_search()` moved unchanged to
+`src/web_search.py`. It imports `defaults`, `web_common` and the stdlib, never `webserver`; `webserver` imports the
+four names back, so the routes and every `webserver.<name>` caller are unchanged. No behaviour changes.
+
+This is the pattern for the remaining sections. A test that *patches* a moved name now patches the new module:
+`test_webserver.py`'s two broadcast-window tests set `web_search.BROADCAST_SEARCH_WINDOW`, because a patch on
+`webserver` would no longer reach the code that reads it. The move itself is done by a script that moves each name
+with its comments, works out the new module's imports, and refuses when the moved code still needs a name that is
+only in `webserver`.
+
+- **Tests:**
+  - `tests/test_web_common.py` becomes `tests/test_the_webserver_split.py`, over every split module (`SPLIT_MODULES`):
+    each defined name is the same object on `webserver`, and none imports `webserver` or Flask.
+  - `tests/test_import_graph.py` allows `web_search`, with a note.
+- **Mutation checks, 3/3 caught:**
+  - a name not imported back;
+  - `web_search` importing `webserver`;
+  - the window test patching `webserver` again, where it would not reach the code.
+
+### 🧱 Splitting `webserver.py`, step 0: the shared limits and helpers are `web_common.py` (#1311)
+
+The first step of splitting `webserver.py` (`docs/FUTURE.md`), which is 7,006 lines. A map of which top-level names
+each section uses from the others showed that the sections share a base, and that any section moved out first
+would have had to import `webserver` back. That base moved unchanged to a new `src/web_common.py`:
+
+- the request limits (`WEBUI_MAX_SEARCH_RESULTS`, `FILELISTS_DEFAULT_PAGE_SIZE`, `FILELISTS_MAX_PAGE_SIZE`,
+  `IRC_LINE_FIELD_MAX_LEN`, `FETCH_ENQUEUE_MAX_ITEMS`, `MAX_SERVED_FOLDERS`, `MAX_FOLDER_PATH_LEN`,
+  `FOLDER_BROWSE_MAX_ENTRIES`);
+- `WEB_DIR`, `parse_pagination_params()` and `reject_if_unsafe_for_irc_line()`;
+- three helpers other sections used from inside one: `json_object()` (search), `WEB_DASHBOARD_SOURCE` (fetch) and
+  `split_list_search_words()` (stats).
+
+`webserver` imports every name back, so every caller, route and test that says `webserver.<name>` is unchanged; no
+test patches any of them. `console_is_enabled()` stays: it needs the app section's loopback helpers and moves with
+settings. `web_common` imports neither Flask nor `webserver`, and only `os` at module level. `webserver.py` goes to
+6,807 lines. No behaviour changes.
+
+- **Tests:**
+  - `tests/test_web_common.py` (4 tests; now `tests/test_the_webserver_split.py`, #1313): every name `web_common` defines is the same object on `webserver`; it
+    imports neither `webserver` nor Flask; `WEB_DIR` is still the repository's `web/`.
+  - `tests/test_import_graph.py` allows `web_common` in what importing `webserver` loads, with a note.
+- **Mutation checks, 4/4 caught:**
+  - a name not imported back;
+  - a stale copy defined after the import, shadowing it;
+  - `web_common` importing `webserver`;
+  - `WEB_DIR` one folder off.
+
+  A copy defined *before* the import is overwritten by it, so it changes nothing and was not counted.
+
+### 🌐 The project page: five pages in `site/`, published from `dccore`'s `gh-pages` branch (#1309)
+
+Built to the shape settled in #875 (kept in `docs/FUTURE.md`, now under Implemented), then changed with the operator:
+five pages instead of one, and published from a branch instead of an Actions workflow, so a clone of `dccore` holds
+no website.
+
+- **`site/`**: five pages and one stylesheet.
+  - **Overview:** what DCCore is, a channel window with the bot's advert, search reply and notices, the three ways to
+    use it, what it does, and responsible use.
+  - **Commands:** what people type in the channel, and the admin console's most used commands.
+  - **Web dashboard:** a picture of the Live Transfers page in the dashboard's own colours, its nine pages, and how to
+    turn it on.
+  - **mIRC script:** pictures of the @DCCore window and the control panel's start page, what the script gives, how to
+    install it, and its commands.
+  - **Get started:** four steps, then ports, autostart, updates and upgrading.
+
+  The pictures are HTML and CSS, with invented names. No image files, scripts, fonts or frames from anywhere. Light and
+  dark themes. Features newer than the current release are marked **Next release**.
+- **Published from `gh-pages`:** an orphan branch in `dccore`, served by GitHub Pages ("Deploy from a branch", root) at
+  `ninja-fse.github.io/dccore`. `site/` is export-ignored (the directory, so not even an empty one ships), and `.github/workflows/pages.yml` is gone.
+- **`docs/PUBLIC-REPO-WORKFLOW.md`, step 5:** how and when to publish: the Next release marks, the copy onto
+  `gh-pages`, the build check, and a custom domain.
+- **Tests:** `tests/test_the_site_page.py` (16 tests, skipped in the public tree):
+  - the site is exactly its five pages, its stylesheet and `.nojekyll`, each a complete page;
+  - every link goes to a page of the site or to the public repository, and every file it links is in the public tree
+    (with `docs/UPDATES-PUBLIC.md` as `docs/UPDATES.md`, and nothing export-ignored);
+  - no tag, attribute or CSS loads anything but `style.css`;
+  - every page has the same menu and footer, the menu names every page in order and marks the one it is on;
+  - `git archive` leaves `site/` behind, and no workflow publishes it.
+- **Mutation checks, 14/14 caught:** a link to an export-ignored doc, to a missing doc, or to a page the site lacks; a
+  script, an outside stylesheet, a CSS import; a link off the project; a menu missing a page, the current page
+  unmarked, a second page marked; a footer that differs; `site/` no longer export-ignored; a page without a
+  description; a Pages workflow put back.
+
+### 🧩 Each PR writes its changelog entry to a file of its own, joined at release (#1307)
+
+Every PR added its entry at the top of `## Unreleased` in `docs/UPDATES.md`, and often a bullet in
+`docs/UPDATES-PUBLIC.md`, so any two PRs open at once conflicted there whatever their code. On 2026-10-11 #1289 was
+rebased five times for it while five other PRs landed, each rebase restarting CI's nine jobs. `merge=union` does not
+help, because GitHub does not use merge drivers when it decides whether a PR can merge.
+
+- **`docs/changes/`:** a PR now writes `docs/changes/<issue>.md`, the internal `### ` entry, and
+  `docs/changes/<issue>.public.md`, the public bullet when there is one. Two entries for one issue take a suffix
+  (`1288-phase2.md`). `docs/changes/README.md` has the rules. Between releases this folder is "Unreleased", and the
+  two changelogs change only when a release is rolled.
+- **`scripts/roll_changelog.py vX.Y.Z "Title"`** writes the version heading, with the date (`--date`, or today),
+  into both changelogs and puts the entries under it, newest issue first. It then deletes the fragments.
+  - It refuses, changing nothing, when a fragment is malformed (wrong name, no `### ` heading, a `#`/`##` heading
+    outside a code block, a public fragment that is not one `- **` line, a conflict marker, an empty file), when a
+    changelog still has an Unreleased section, or when the version, title or date is wrong.
+  - `--check` only validates.
+  - This replaces the manual "Roll `## Unreleased`" step in `docs/PUBLIC-REPO-WORKFLOW.md`.
+- **Migrated:** the 12 internal entries and 3 public bullets that were under Unreleased are now fragments, and the
+  Unreleased headings are gone. Rolled on a scratch copy, they come back identical, entry for entry, and the rest of
+  both files is unchanged.
+- **`docs/changes/**` is export-ignored**, so a forgotten roll still keeps this repository's issue numbers out of
+  the public tree.
+- **`test_the_public_changelog_names_one_script_version`** reads the pending public fragments as a section above the
+  top one, through the roll script's own functions. The newest script version, 1.20.0 from DCX, is in a fragment now.
+- **Tests:** `tests/test_changelog_fragments.py` (13 tests):
+  - every fragment in the tree can be rolled, no changelog keeps an Unreleased section, and the folder does not ship;
+  - on a scratch copy, the roll's exact output, newest first;
+  - the fragments deleted and the README kept;
+  - a suffix rolled as the later entry;
+  - the public changelog untouched without public bullets;
+  - a code-block comment that is not a heading;
+  - each kind of malformed fragment, a bad version, title or date, a leftover Unreleased section, or nothing to
+    roll, each refused with nothing changed;
+  - `--check` on this tree.
+- **Mutation checks, 13/13 caught:**
+  - the entries rolled oldest first;
+  - the fragments kept;
+  - a roll past a malformed fragment;
+  - a public fragment of several lines;
+  - an entry without its heading;
+  - a conflict marker rolled;
+  - a code-block comment taken for a heading;
+  - an Unreleased section ignored;
+  - an empty public release heading written;
+  - the release appended at the end;
+  - the README taken for a fragment;
+  - the folder shipping;
+  - the version check ignoring the fragments.
+
+### 🧱 Splitting `irc_loop`, step 3: the welcome, with a connection-state object (#1306)
+
+Step 3 of "Splitting the largest functions" in `docs/FUTURE.md` (steps 1 and 2 are #1287 and #1291), the one it named
+as needing a connection-state object. The 001/376 branch defined `delayed_join()`, which started
+`activation_watchdog()`, which started `delayed_activate()`. All three were closures over `irc_loop()`'s frame: the
+watchdog read `joined` and `channels_confirmed` 20 s later, through a variable cell every reconnect rebinds. That is
+why the connect-failure paths had to reset `joined = False`.
+
+- **`irc.Connection`** holds one connection's `sock`, `epoch`, `joined` and `channels_confirmed`. It is made where
+  the epoch is claimed. The loop reads `conn.joined`, and its `channels_confirmed` is the object's set.
+- **Module functions taking it, under their old names:** `delayed_join(conn, channels)`, `activation_watchdog(conn)`
+  and `delayed_activate(conn)`. The branch body is `answer_welcome(line, conn)`. `ACTIVATION_TIMEOUT` is a module
+  constant. The pre-connection `joined = False` resets are gone: each connection's threads read their own object,
+  and the epoch check stays the staleness guard. An AST check shows each moved function uses no names but its
+  parameters and module globals; that check is how `activation_watchdog()`'s missing `import announce` was caught.
+- **One deliberate change:** `delayed_activate()` started the nick monitor with `s`, the loop's *current* socket read
+  through the frame, although it bound its own `sock` for exactly that reason. It now passes its own.
+- `irc_loop()` goes from about 1,430 to 1,180 lines. Nothing else changes, including the order of the loop's checks.
+- **Tests:**
+  - `tests/test_the_welcome_on_its_own.py` (15 tests) calls the four functions with a recording socket, no sleeping,
+    and every thread they start recorded:
+    - the connection's own state;
+    - the welcome registering and starting this connection's join;
+    - the join using its own socket and epoch, even after a reconnect in its sleep;
+    - the watchdog standing down for a dead connection, holding off an unregistered one, and activating;
+    - the activation's nick monitor getting its own socket, and a dead connection not activating.
+    - It also drives the real read loop through the last 366 and through both kinds of reconnect backoff (#663).
+  - Its `WelcomeHarness` replaces the source reading in `test_a_join_nobody_checked.py` (the watchdog: retried, the
+    dashboard notice, the debug channel), `test_channel_list.py` (the JOIN gets the normalised list),
+    `test_on_connect_commands_are_checked.py` (the check after the JOIN, the resend mark between the commands and
+    the JOIN) and `test_the_servers_shortened_nick_is_adopted.py` (a 001 adopts the name, a 376 does not).
+  - The guard tests in `test_membership_events.py` and `test_server_numerics.py` read `conn.joined`.
+- **Mutation checks, 14/14 caught:**
+  - the nick monitor gets another socket;
+  - the watchdog ignores registration, or never activates;
+  - the missing set leaves out the debug channel;
+  - the 366 handler never activates;
+  - the join starts no watchdog, or takes the current epoch instead of its own;
+  - the welcome does not register;
+  - the JOIN is handed the raw setting;
+  - a 376 is adopted as a name;
+  - the welcome guard's `or` becomes `and`;
+  - a new connection starts registered;
+  - the backoff forgets whether the link registered.
+
+### 🧱 Splitting `dcc.py`, step 3: choosing the next user is its own function (#1304)
+
+Step 3 of splitting `dcc.py` (`docs/FUTURE.md`; steps 1 and 2 are #1298 and #1300). Section B of
+`check_queue_and_send()`, the sweep under `queue_lock` that gives a free slot to the next in line, moved unchanged to
+a top-level `claim_next_in_line()`. It returns `(promoted, promoted_key, pack_to_wake, absent_users)`. The sweep:
+
+- re-checks the slot count inside the lock;
+- orders the queues with a list allowed to go first (#1205), then the longest wait;
+- skips held, frozen, already-sending and absent users, returning the absent ones for a freeze;
+- keeps a slot for a pack whose turn has come (#1034);
+- claims the user and their transfer row.
+
+What follows the lock stays in `check_queue_and_send()`: the unshared-row drop (#1268), the notice and
+`start_dcc_send()`, the pack wake and the freezes. The notice `stat()`s the library and must not run under the lock
+(#605). The early `return` when the slots filled while waiting for the lock is now "claimed nothing", after which the
+rest does nothing, as before. An AST check shows the sweep uses no names but module globals.
+`check_queue_and_send()` goes from 539 to 401 lines. No behaviour changes.
+
+- **Tests:**
+  - `tests/test_choosing_the_next_user_on_its_own.py` (9 tests):
+    - the longest wait wins and is claimed;
+    - a list at a queue's head goes first and is counted, but not while another list that went first is sending;
+    - held, frozen and already-sending users are passed over;
+    - an absent user is returned for a freeze;
+    - a pack whose turn has come is woken with a slot kept, and with one slot it keeps it;
+    - while another pack is made, the sweep looks further;
+    - full slots claim nothing.
+  - Two source-reading tests (`test_audit_rar_pack_and_slots.py`, `test_announce_target_is_one_channel.py`) read the
+    sweep where it now is.
+- **Mutation checks, 10/10 caught:**
+  - the caller drops the absent users, or the pack to wake;
+  - full slots are claimed past;
+  - a held, frozen or already-sending user is claimed;
+  - an absent user is not frozen;
+  - no slot is kept for the pack;
+  - the user is not claimed;
+  - a list that went first is not counted.
+
+### 🧪 A stranger's-message save test waits for both rows, not the first write (#1302)
+
+`test_the_timer_writes_them_from_its_own_thread` failed once on ubuntu-latest / Python 3.14 (#1299's first run) with
+`['alfa'] != ['alfa', 'bravo']`. The save timer fires 0.05 s after the first message. On a slow runner it wrote
+`alfa` before `bravo` was recorded, and the test stopped at that first write and read the file. Now it waits for
+both rows on disk, then checks that every write ran off the recording thread and that nothing is left pending. The
+once-only save of a burst stays tested by `test_a_burst_of_strangers_writes_nothing_here_and_once_later`.
+Reproduced: with a 0.3 s pause forced between the two records, the old test fails and the new one passes.
+
+### 🧱 Splitting `dcc.py`, step 2: the inline RAR packer is its own function (#1300)
+
+Step 2 of splitting `dcc.py` (`docs/FUTURE.md`; step 1 is #1298). The packer was `_inline_rar_packer_body()`, a
+280-line closure inside `check_queue_and_send()` over the loop's `next_file`, `target_chan`, `oserve` and
+`announce_mod`, and over two more closures. It moved unchanged to a top-level `pack_folder_for_request(sock,
+next_file, owner_nick, target_chan, oserve)`, which returns, as before, whether it handed the interlocks to a send.
+`row_is_still_queued()` depended only on the row and is now `_row_is_still_queued(row)`. An AST check shows both
+use no names other than their parameters and module globals.
+
+- **Unchanged:**
+  - The `inline_rar_packer` wrapper keeps its name, which tests dispatch it by, and its lifecycle: the interlocks,
+    their one release in `finally`, the error notice and `redispatch_waiting_pack()`.
+  - `owner_nick()` stays a closure, passed in as a callable, so a rename mid-pack still follows the claim (#1268).
+  - Inside `dcc.py`, so `!rehash` and the tests' patches keep working.
+  - `check_queue_and_send()` goes from 825 to 539 lines. No behaviour changes.
+- **Tests:**
+  - `tests/test_the_rar_packer_on_its_own.py` (5 tests) calls it directly for its four endings: a poisoned row
+    (dropped, never packed), a withdrawn row (never packed), a failed rar (no partial archive left), and packed with
+    no free slot (the row becomes the `.rar` and keeps its place). It also checks that the row helper finds the row
+    itself under any nick.
+  - `test_audit_rar_pack_and_slots.py`'s source checks read the packer and then the wrapper.
+- **Mutation checks, 7/7 caught:**
+  - the wrapper always thinks it handed off, or never packs;
+  - a row is found by equality, or every row counts as queued;
+  - no poisoned-row check;
+  - a failed rar leaves its archive;
+  - the row is not pointed at the archive.
+
+### 🧱 Splitting `dcc.py`, step 1: the published-list lookup is its own function (#1298)
+
+The first `dcc.py` step of "Splitting the largest functions" in `docs/FUTURE.md` (was #1150): *pull out the path
+resolver in `handle_download_request`*. The part that turns a requested name into a path on disk by streaming the
+published lists moved out unchanged into `path_from_published_lists(list_paths, requested_file, requested_size_hint,
+wanted_list)`, which returns the path or None. That part covers:
+
+- the folder heading above a matching row;
+- the case-insensitive match;
+- the `::INFO::` size hint that picks between same-named copies;
+- the list's own spelling (#445).
+
+It stays in `dcc.py`, so `!rehash` and the tests' patches keep working. The memories, the scan turns and slots, the
+walk fallback, the containment and stream checks, every reply to the user and the try/except around the lookup all
+stay in `handle_download_request()`, which goes from 871 to 745 lines. No behaviour changes.
+
+- **Tests:** `tests/test_the_published_list_lookup_on_its_own.py` (10 tests) calls it directly:
+  - the heading places a row;
+  - case is ignored and the list's spelling is returned;
+  - the first copy wins without a hint, and a hint picks the copy of that size or falls back to the first;
+  - headings carry across list files;
+  - a row before any heading is not placed, even with the file at the library's top;
+  - another bot's rows are not ours;
+  - a row the disk lacks, or a name no list has, gives None.
+
+  The request-level tests (`test_path_security.py`, the #445 file, `test_multi_folder_resolution.py`) still cover
+  the wiring.
+- **Mutation checks, 9/9 caught:**
+  - the caller ignores what was found;
+  - the match minds case;
+  - the requester's spelling is used;
+  - the hint is never consulted;
+  - no fallback to the first copy;
+  - a row before any heading is placed;
+  - only the first list is read;
+  - a path the disk lacks is returned;
+  - any bot's rows count.
+
+### 🗃️ The search index's rebuild no longer needs its size again in free disk, or keeps the bot off IRC (#1296)
+
+After the update to v1.16.2, a live bot's one-time rebuild of the search index (#1281) failed twice with "database or
+disk is full", on a host with several GB free. Once it had room, it kept the bot off IRC for about ten minutes.
+
+- **No secure delete on the index.** Debian and Ubuntu build SQLite with `SQLITE_SECURE_DELETE`, so every page a DROP or
+  DELETE frees is overwritten with zeros. In WAL mode, those pages pass through the WAL first. The rebuild's drop
+  therefore needed the index's own size again (an 8.8 GB WAL for an 8.8 GB index), and every list refresh, which deletes
+  the old list's rows before inserting, wrote the list twice. The index is a cache of lists already on disk, so both of
+  its connections now turn it off (`_without_secure_delete()` in `list_index.py`). On a 118 MB index, the drop wrote a
+  116 MB WAL with it on and 0.2 MB with it off. `transfers.db` keeps it on: `forget_nick()` relies on it (#1082).
+- **The startup backfill runs on a thread of its own.** `oserve.py` called `list_index.backfill_missing()` before the IRC
+  connection, and after a rebuild that re-indexes every held list. It is now `list_index.backfill_in_background()`, so
+  the bot connects first. Nothing on IRC reads the index. The dashboard's filter waits on
+  `runtime.list_index_backfill_done` before it answers, so it never reports a list it has not reached yet as holding no
+  match. The thread reads a copy of the held lists, and a failure releases the filter all the same.
+- **A full disk is said plainly.** When the index cannot be opened because the disk is full, the log line adds how much
+  room the disk has and how big the index and its WAL are.
+- The rebuild's log lines and `docs/INSTALL.md` say the bot connects meanwhile.
+
+Not done: building the new index in a new file and swapping it in. With secure delete off, the drop in place costs about
+as little. The prefix-index re-measurement (item 5) is left for its own issue.
+
+- **Tests:** `tests/test_the_index_rebuild_is_cheap_and_off_the_connect.py` (9 tests):
+  - On connections that open with secure delete on, as a Debian build's do, the writer and the reader both read
+    `secure_delete` 0, and a schema-2 index's rebuild writes a WAL under a tenth of the index's size.
+  - A full disk names the free space; any other failure adds nothing.
+  - The backfill runs on its own thread over a copy of the held lists. The filter waits for it, and a failing
+    backfill still lets the filter answer.
+  - `test_crosslist_search.py`'s startup check reads the background call.
+- **Mutation checks, 8/8 caught:**
+  - either connection keeping secure delete;
+  - the filter not waiting;
+  - the live dict iterated;
+  - a failed backfill never releasing the filter;
+  - the backfill on the caller's thread;
+  - startup blocking on it again;
+  - the disk note on every failure.
+
+### 🗂️ Each served list can leave out file types of its own (#1295)
+
+From `docs/FUTURE.md`'s "Smaller things worth having": the per-list `Exclude = .mpu,.db` that OmenServe has.
+`LIST_IGNORED_EXTENSIONS` did this for every list at once; now a list can add its own on top.
+
+- **Stored** as `exclude` in `data/lists.json`, on `library.ServedList` (a new last field, default `()`).
+  - Spelled by `library.normalise_extensions()`: lower case, the dot added, each once. The dot is what stops `ts`
+    matching a file called `credits`, the same rule as `update_list._extension_set()`.
+  - Checked on save by `library.extension_problems()`: no slashes, spaces or control characters, at most 32
+    characters each and 50 in all. A refusal names the list.
+  - A bad entry in a hand-edited file is dropped on load and the rest is kept. An old `lists.json` has none.
+- **Built:** `update_list.ignored_extensions(list_name)` is `LIST_IGNORED_EXTENSIONS` and then the list's own set.
+  `generate_master_list()` passes the list it builds. `scripts/setup_check.py` now resolves the set once per count:
+  asked per file, it would read `lists.json` once per file in the library.
+- **A save that doesn't carry the field keeps it.** The mIRC settings window, a dashboard tab from before the upgrade
+  and the console's `served` transaction all send the whole set of lists without it. `apply_list_changes()` keeps
+  the stored exclusions of the list with the same name, and only an explicit value (`""` or `[]` clears) replaces
+  them. Without this, a save from mIRC would silently drop every exclusion. The console's "nothing changed" check
+  leaves the field out for the same reason.
+- **Dashboard:** each list on the lists page has *File types to leave out of this list*, with es/fr strings.
+  `GET /api/lists` shows `exclude` only on a list that has some, as `lists.json` does with `modes`.
+- **Console:** the typed `served` shows a list's exclusions. The `SRV` snapshot does not carry them, and
+  `docs/ADMIN-CONSOLE.md` says so. Editing them from the mIRC window is a follow-up.
+- **Tests:** `tests/test_each_list_leaves_out_its_own_file_types.py` (19 tests). They run the real scan of two
+  lists, the dashboard's save, and the console's `served` send-back, unchanged and with a change.
+  `test_master_list_generation.py`'s stand-in for `ignored_extensions()` takes the list name, and its source check
+  reads the resolved-once count.
+- **Mutation checks, 16/16 caught:**
+  - the build reads the primary's set for every list;
+  - a list's own set is never applied, or replaces the global one;
+  - no dot is added; case is kept;
+  - bad entries are kept on load;
+  - slashes and spaces are allowed;
+  - no count limit;
+  - a save does not check them;
+  - they are not read from or not written to `lists.json`;
+  - a row without the field wipes them (the mIRC save);
+  - a non-list value is accepted;
+  - the dashboard is not shown them;
+  - an unchanged console send-back is saved anyway;
+  - the typed snapshot does not show them.
+
+### 🏷️ List requests to DCCore bots can carry a short tag: `LIST_REQUEST_TAG` (#1293)
+
+Built from `docs/FUTURE.md`'s "A short DCCore tag on list requests" (was #1051), as specified there. AutoQ's "Get
+Listfile" sends `@<nick>  ::AutoQ::` so a channel can see what is fetching. DCCore can now do the same:
+
+- **`LIST_REQUEST_TAG`** is a new setting, empty out of the box, which sends no tag. When it is set, a list request
+  goes out as `@<trigger>  <tag>`, with two spaces as AutoQ sends it.
+- **Only to known DCCore peers** (`serverschat.is_known_peer()`), via `dcc_fetch.list_request_tag()`. Every DCCore
+  that can be recognised as a peer (the realname mark, 2026-09-26) already answers `@<nick>` followed by anything
+  (`irc.is_list_request()`, 2026-09-06). Every other bot gets the bare `@<nick>`, because many server scripts match
+  the trigger exactly and would silently never send the list.
+- **Plain text, at most 32 characters.** `settings_file.request_tag_problem()` refuses colour and other control
+  characters (some channels strip or kick for them, and a CR or LF would end the line), and the save trims the value.
+  It is checked again at send time, because settings.conf is read in as text even where a save would refuse it.
+- **List requests only.** It is never added to a file or `!rar` folder line, which AutoQ copies verbatim.
+- **Asking again still replaces the earlier ask (#1028).** A bot can become a known peer between two asks for its
+  list, so `list_request_lines()` also takes back the other form, tagged or bare, of a line still waiting to go out.
+- **Where it shows:**
+  - the dashboard's Settings page, under *Fetching from bots*, with es/fr labels and help;
+  - the mIRC settings window, Downloads tab, *Queue* page, under *List requests*;
+  - `settings.conf.sample` and the help text.
+- **Tests:** `tests/test_a_list_request_carries_the_tag_only_to_dccore_bots.py` (15 tests). They drive the real fetch
+  dispatch (`enqueue_fetch()` then `check_fetch_queue()`) and check that our own `is_list_request()` answers the
+  tagged form.
+- **Mutation checks, 11/11 caught:**
+  - the tag is sent to every bot;
+  - no check at send time;
+  - one space instead of two;
+  - the other form is not taken back, in either direction;
+  - a file request carries it;
+  - no length limit;
+  - colour codes are allowed;
+  - a save does not check it;
+  - it is saved untrimmed;
+  - it is on out of the box.
+
+### 🧱 Splitting `irc_loop`, step 2: the QUIT/PART nick reclaim is its own function (#1291)
+
+Step 2 of "Splitting the largest functions" in `docs/FUTURE.md`, after #1287. The body of the block that asks for the
+main nick back when its holder quits or parts moved out of `irc_loop()` unchanged into `reclaim_main_nick(line, sock)`
+in `irc.py`, which returns whether it asked. The guard (`is_user_event(line, "QUIT") or is_user_event(line, "PART")`)
+stays in the read loop where it was. No behaviour changes.
+
+- **Tests:**
+  - New `tests/test_the_main_nick_is_reclaimed_only_from_its_holder.py` calls the function directly.
+    - It asks once when the holder quits or parts, whatever the case of the nick.
+    - The ask does not rename the bot (#635).
+    - It does not ask when the bot already holds the main nick, when someone else leaves, or when a QUIT or PART
+      reason names the main nick.
+    - A failed send is logged and does not escape.
+  - In `tests/test_membership_events.py`, the outer-guard tests find the guard from the call line. The inner-guard
+    test, which read the text, now calls the function.
+  - The loop-driving tests in `test_the_bots_own_nick_follows_the_server.py` are unchanged and still cover the wiring.
+- **Mutation checks, 8/8 caught:**
+  - the loop no longer calls it;
+  - the guard's `or` becomes `and`;
+  - the PART half is unanchored;
+  - it asks while already on the main nick;
+  - anybody leaving is a reason;
+  - the quitter is searched for in the whole line;
+  - the ask renames the bot;
+  - a failed send escapes.
+
+### 🪟 dccore.mrc: the settings window laid out as its mockup, with tables (#1288, phase 3)
+
+The window of phase 2 kept the first version's pages: label | control rows, the blank strip of the hidden tabs
+above them, a channel list of five rows with the rest of the page empty, and Lists & channels as one list of
+mixed rows. It is now the window the mockup drew, in both of its forms:
+
+- **488 x 364 dialog units** (was 420 x 298): the mockup's proportions at a size that fits a 1080p screen, with
+  a row for the page's name under the tabs. The tab control frames the whole body, as a tabbed dialog does:
+  a strip of tabs only had Windows draw the page border cut off under the first tab.
+- **With DCX, every line in one colour.** The operator found Windows' frames too faint, and its tab strip
+  draws an unselected tab with its top and right edges only, so the first tab has no left edge at all;
+  none of it can be recoloured. So in DCX mode the native tabs and frames are hidden and the script draws
+  every line itself: the tab strip (an outline panel, a panel on the face and a text per tab, the chosen
+  one standing on the body frame's top line on the window's face, the others a little lower on the
+  lighter face - `dccore.sw.dcxtabs`, laid out by `dccore.sw.dcxtabsel` on every switch, a click on one
+  going through `dccore.sw.go`), the body frame and every section's frame with its title over the top line
+  (`dccore.sw.dcxframes`; shown and hidden with the page, the native box kept hidden). A frame is one
+  panel shaped by its window region (`xdid -R`) as a ring a pixel wide (`dccore.sw.dcxring`: the inside,
+  then the outside less that), so nothing else of it is drawn or clicked and the controls inside stay
+  Windows' own; a tab's outline and face are shaped the same way, round at the top and straight below.
+  **The corners are round**, the pixels of the midpoint circle as GDI draws one with a pen
+  (`arc_pixels`, `ROUND_PX` across), and the regions are polygons on pixel edges, which hold exactly the
+  pixels in them (`corner_traces`, the two staircases a corner is, `dcxcorner.o`/`.i` in the window data,
+  mirrored to the four corners by `dccore.sw.dcxpoly`): a ring cut from GDI's rounded-rectangle region
+  came out as dots at the corners, and the `rounded` DCX box's `FrameRgn` edge as an uneven stair. A
+  tab's panels are hidden while they are moved and shaped on a switch, since a region set does not
+  redraw and what a panel had drawn outside its new region stayed on the screen. The tab's text is a
+  control a line of dialog text tall in the middle of the tab, since the dll the script ships
+  (3.1-git978) has no `vcenter`. The colours are the system's - COLOR_3DSHADOW for the lines,
+  COLOR_3DFACE and COLOR_3DLIGHT for the faces - so a theme is followed. The generator puts the tabs'
+  widths (`tab.N`), the body frame (`dcxbody`), each frame's ring and title (`fr.<box id>`) and a page's
+  frames (`p.N.bx`, `p.N.fr`: one id range) into the window data; the native form keeps Windows' own look.
+- **The mockup's navigation, not a tree.** The operator's screenshots of the phase-2 tree against the mockup
+  said so: the mockup has the groups as tabs on top and, on the left, only the chosen group's pages. So the
+  tree goes. The tab strip stays in both forms; with DCX the page buttons are hidden under a DCX listview of the
+  chosen tab's pages (`dccore.sw.dcxpages`, refilled by `dccore.sw.tab`; a row each, the whole row highlighted),
+  a click or the keyboard on a row drives `dccore.sw.page` as the buttons do, and the row of the page shown is
+  selected quietly. A jump to a refused setting's page selects its tab (`did -f`) in either form now.
+- **`dccore.sw.dcxrect`** turns a rectangle in dialog units into DCX's pixels for the list, the title and the
+  tables - from one parameter, since an identifier's parameters are split on commas: read as `$1` to `$4` they
+  were one number and three blanks, and the first build in the operator's mIRC had every DCX control
+  zero-sized, the left column empty. A test pins the `$1-` form.
+- **Every section is a titled frame** (a `box` control, listed before what it holds, which mIRC would otherwise
+  paint over), and inside it every label is on a line of its own above a field the frame's width - the mockup's
+  form, "roomy". A page too tall for that takes two columns; one that fits no other way (File locations, 23
+  paths) takes the first version's compact label | control rows. `STYLES` in `build_settings_window.py` is the
+  order tried, and `p.<n>.layout` in the generated data says which each page got. A check box too long for a
+  column counts as "too tall" and sends the page to the next form, instead of failing the build - which is how
+  Fetch tuning's re-fetch check got the shorter label that keeps the page in two roomy columns.
+- **With DCX, the page's name in bold** between the tabs and the page, and **a listview with columns over
+  every table**: the channels; the lists (Name | Primary | Folders); the timed bans (Nick | Time left) and
+  the permanent patterns on Bans & ignores. `dccore.sw.lv.make` creates each over its native list's rectangle (scaled by `dccore.sw.dcxrect`, as
+  the tree is), hidden until its page is shown; the native list stays hidden under it. `LISTVIEWS` in the
+  generator gives each list its DCX id, columns and styles, and `lvs`, `lv.<id>`, `lvc.<id>`, `lvx.<id>` and
+  `p.<n>.lv` carry them to the script.
+- **One way to a table.** `dccore.sw.lv.clear`, `.add`, `.sel`, `.count`, `.text` and `.del` say the same thing to
+  the listview or to the native list, and nothing else in the script touches a list's id. `lv.add` takes a row's
+  cells as tokens (encoded, as the snapshots are kept): one column each in a listview, joined with " - " in the
+  native list. A row picked in a listview, by click or keyboard, drives the same pick as a click on the list.
+- **Lists & channels is two pages, the mockup's.** *Lists*: a table with a row per list (Name | Primary ✓ |
+  Folders) and Add list, Edit, Delete and Refresh under it; Add list and Edit open the list window
+  (`dccore.setl`) for one list's name, primary flag and folders (a label and a path each, with their own
+  add, change and remove), and OK writes it into the set. *Channel bindings*: a row per channel with its own
+  List and Mode menus and a Remove button - a change in a menu is kept in the set at once - and the row that
+  adds one under them; fifteen rows (`BIND_ROWS`, the controls generated by `binding_rows()`) with a
+  scrollbar beside them for the channels beyond - mIRC's own `scroll` control, so the same in both forms;
+  the rows never move, they are filled from its position (`on scroll`, `bind.off`) - and the spare rows
+  hidden again each time the page is shown (showing a page shows every control of it). `srv.rowl.N` maps a
+  table row to its list, `bind.row.R` a row to its binding. Nothing reaches the bot until Apply.
+- **This mIRC's own settings are a side of the same window.** The operator wanted the script's own settings
+  in the same design as the bot's. The Options dialog (`dccore.opt`, 322 x 340, one page of five frames) is
+  gone; its contents are the **mIRC** group's pages (the window's mIRC side with DCX, its last tab without),
+  in the window's form: *@DCCore window* (the line types' checks and
+  colours, the status line, the colours of file names, console replies, panel headings, search text, nicks
+  and channels), *Window* (panel, title bar, separate replies, beep, font and size, background, finished
+  downloads shown, and the DCX switch that was on This mIRC window - that page goes), *Connection* (the bot's
+  nick, the pairing line, Pair again and Forget token, the console feed) and *Chat*. The checks are the
+  window's locals; the menus, fields and the console feed check are filled by `dccore.sw.opt.fill` and read
+  back by `dccore.sw.opt.save`, which Apply runs in place of the dialog's OK - the same writes to
+  `dccore.ini`, the same redraw of the window when the panel, font or background changed, the console feed
+  sent only when it disagrees with what the bot last said. `/dccore options` opens the window there
+  (`dccore.settings mirc`). "Open when mIRC starts" and "Reconnect by itself" stay on General Settings;
+  "Check GitHub for a new version" is the bot's own CHECK_FOR_UPDATES there, so the dialog's hand-mirrored
+  `checkupdates` goes. The tests that read the dialog read the tab now.
+- **Apply saves everything; the pages' own Save buttons go.** The operator: a Save button beside Apply is
+  easy to miss, and easy to take for the one that saves. So *Save lists* and *Save on-connect commands* are
+  gone, and `dccore.sw.apply` sends the on-connect commands (`dccore.sw.oc.save`) and the lists with their
+  bindings (`dccore.sw.srv.save`) as their own transactions, this mIRC's switches to `dccore.ini`, then the
+  settings as before. OK closes through `dccore.sw.maybeclose`, once no save is still out and every reply
+  was ok; a refused one keeps the window and the edits. **Leaving a page with changes not saved asks
+  first** (`dccore.sw.go`, from a tab, a page button or the page list): the window stays on its page,
+  `dccore.sw.leaveask` asks from a timer - Yes applies and goes on, No stays - and `dccore.sw.anydirty`
+  is what counts as not saved: a setting, one of this mIRC's switches, the lists, the on-connect
+  commands.
+- **A control panel: a start page, Bot or mIRC, and a way back.** The operator's design: the window opens on
+  a start page with two pills, **Bot** (the bot's settings, the six groups as tabs) and **mIRC** (this
+  mIRC's own, its four pages the list and no tab strip), each with a line on what is there; a side has the
+  way back - a pill with an arrow - at the strip's left end and the side's name beside it, and the window
+  opens on the start page every time (`dccore.sw.side`; the pills and the way back `dccore.sw.dcxhome`,
+  `dcxpill` and `dcxlabel`, shaped like the frames; a click goes through `dccore.sw.go side`, which asks
+  about changes not saved as a tab does, and a jump to a refused setting's page enters its side first).
+  The window is **DCCore - Control Panel**, and one menu entry, **Control Panel...**, replaces *Script
+  Settings...* and *Bot Settings...* in every menu; `/dccore options` still opens this mIRC's own. The
+  native form keeps its tabs, the mIRC group the last. Under the pills, **the bot's figures**: frames
+  like a page's - *Bot* (nick, network, up since, the connection), *Sending n/m* (the running sends as
+  the side panel lists them, in a fixed-width font), *Today* (sent, queue, speed record, failed,
+  searches) and *Library* (the lists, with the primary marked, the rebuild and the pack running) - filled
+  from what the bot sends for the side panel (`dccore.sw.home.fill`, when the start page shows and on
+  every status burst while it does, `dccore.panel.soon`), the lists asked for once as the Lists page asks
+  them. The library's totals (files, size, the last rebuild) need a word from the bot first.
+- **Channels** gives the whole page to its table (168 units, about ten rows), Add channel and Remove beside it.
+- **Sharing in a sensible order, with clearer names.** The operator found "Your list" beside "Lists" confusing,
+  the !rar switch missing from the !rar frame, and the order of the pages wrong. So: *Your list* is *List
+  settings* (what goes into the list and how it is packed), `RAR_ENABLED` sits first in its *!rar packing*
+  frame instead of on General Settings, and the pages run Lists, Channel bindings, List settings, Rebuild,
+  Transfers, Search - what is shared, where, how the list is built, then transfers and search.
+- **Docs:** `docs/ADMIN-CONSOLE.md`'s settings-window section describes the frames, the tree, the tables and the
+  two pages of Lists & channels.
+- **Tests:** `ThePageList` (was `TheTree`) and `TheMockupLayout` in
+  `tests/test_the_mirc_script_falls_back_when_dcx_cannot_load.py` - the tab strip kept and the buttons hidden,
+  the list placed by the generated geometry and the scale, filled from the chosen tab's pages, the row
+  selected quietly, a click driving `dccore.sw.page`; frames listed before what they hold, labels above their
+  fields on every roomy page and beside them on the compact one, the title between the tabs and the page,
+  every table's listview and columns, the helpers the only way to a table, the two pages of Lists & channels
+  with the list window and the bindings rows, the stored names shown as tokens. `TheDialog`'s overlap check takes a frame
+  as a container: a control is inside it whole or clear of it. The generator's tests add the check that is too
+  long for every form (refused, naming the check) and one too long for half a page (the page goes to one
+  column).
+
+### 🪟 dccore.mrc: the settings window draws its pages as a DCX tree (#1288, phase 2)
+
+`/dccore dcx check` in the operator's mIRC (32-bit, the shipped dll from `C:\mIRC\scripts\dcx\`) answered what the
+design rests on: the dll loads and passes its hash, the tree raises `sclick` with the item path (`1 1` = General >
+IRC Server), **mIRC's own button still raises its `sclick` in the DCX-marked dialog**, and the 240 x 120 dbu window's
+client area is 480 x 240 - `$dialog().cw` over the width in dialog units is the pixel scale, and the tree placed by it
+filled its box. So the DCX window is the built-in one, marked, with a tree for the navigation:
+
+- **`dccore.sw.dcx`**, called by `dccore.sw.init` before the first page is shown, returns at once when
+  `$dccore.dcx.why` says no. Otherwise it marks `dccore.set` (callback `dccore.sw.dcxcb`), hides the tab strip
+  (1001-1006) and the page buttons (1020 up), and creates a DCX treeview over the left column: each group bold and
+  expanded, its pages under it, names from the window's own data (`g.N`, `g.N.pages`, `p.N`).
+- **Its place comes from the generator**: `build_settings_window.py`'s `DCX_TREE` (4, 4, 86 x 264 dbu, id 900) and
+  the dialog's size go into the data as `dcxtree` and `size`, and the script turns them into pixels with
+  `$dialog(dccore.set).cw/.ch`. The generator refuses a tree that would overlap the page or the connection line, or
+  an id inside the dialog's own range.
+- **A click drives the same switch as the buttons.** `dccore.sw.dcxcb` takes `sclick` and `selchange` on the tree
+  only: a page item (`G N`) becomes `last.G` and `dccore.sw.tab G`; a group item switches to that group's last page.
+  `dccore.sw.page` selects the page shown in the tree (`dccore.sw.dcxshow`, with `dcxquiet` set so the selection is
+  not taken as a click), so `dccore.sw.goto` - Apply jumping to the first refused setting - moves the tree too.
+  `dccore.sw.tab` no longer shows the page buttons again in DCX mode, and `dccore.sw.goto` no longer focuses a hidden
+  tab.
+- **`WebView2Loader.dll` ships beside `dcx.dll`.** Run in mIRC, DCX wrote `D_ERROR LoadDLL (Warning Unable to Load
+  WebView2Loader.dll, web2ctrl will not work.)` in the status window: its `DcxWebView2Module::load()` runs every time
+  the dll starts, tries mIRC's folder and then the dll's own, and has no setting to skip it. The file in the DCX zip
+  is byte for byte Microsoft's `runtimes/win-x86/native/WebView2Loader.dll` from the `Microsoft.Web.WebView2`
+  1.0.2151.40 NuGet package (same SHA-256), whose `LICENSE.txt` - BSD-3-Clause-style - ships beside it as
+  `LICENSE-WebView2.txt`. It also leaves DCX's web control available to a later version of the script. The script
+  pins it like `dcx.dll` (`dccore.dcx.wv2sha256`): a loader beside the dll that is not that file is a reason in
+  `$dccore.dcx.why`; a missing one is not (DCX only warns).
+- **Tests:** seven more in `tests/test_the_mirc_script_falls_back_when_dcx_cannot_load.py` (the order in `init`, the
+  early return, the hidden strip and buttons, the generated geometry against the dialog, the names from the data, the
+  quiet selection, the click's path to `dccore.sw.tab`) and one for the loader's check;
+  `tests/test_the_bundled_dcx_dll_is_the_pinned_release.py` checks the loader's hash against the README and the
+  script, that it is 32-bit and version 1.0.2151.40, and Microsoft's notice beside it.
+
+### 🪟 dccore.mrc: DCX for the settings window, phase 1 - the dll, the loader and the fallback (#1288)
+
+The settings window (#1264) is to be drawn with DCX (https://github.com/twig/dcxdll, BSD-3-Clause): a real treeview
+for the pages, listviews with columns for the ban, channel and list tables, colour combos for the theme overrides.
+The DCX window will be the default and the built-in window the fallback. This first step ships what both need and
+what can only be learnt in a real mIRC; the window itself comes in phase 2.
+
+- **The dll ships with the script.** `scripts/mirc/dcx/dcx.dll` is release `3.1-git978`'s `Optimal` build,
+  unmodified, 32-bit, beside `LICENSE-DCX.txt` (BSD-3-Clause requires the notice with a binary) and a README with the
+  release, the build and its SHA-256. `dcx.dll` imports only Windows' own libraries (`gdiplus.dll` delay-loaded).
+  `.gitattributes` marks `*.dll` binary. (`WebView2Loader.dll` was left out here at first; phase 2 ships it - see
+  there.)
+- **`$dccore.dcx.why`** says why DCX cannot be used, or nothing: the new local option `nodcx` (*Use the built-in
+  settings window, not DCX*, on the window's *This mIRC window* page, off by default), a mIRC below version 7.45 (DCX 3.1's
+  floor), a 64-bit mIRC (`$bits`), the file missing, its `$sha256` not the pinned one (`dccore.dcx.sha256`), or a
+  `$dll(...,Version,)` that fails - an error that would stop the script, so `dccore.dcx.version` catches it with
+  `:error`. A `dcx.dll` another script already loaded is used as it is and not hash-checked: it is in this mIRC
+  already, and DCX warns against loading a second copy beside it.
+- **`dccore.dcx`** calls the dll by its full path (`/dccore.dcx xdialog <dialog> -c ...`, `$dccore.dcx(Version)`),
+  so a user's own DCX helper aliases (`xdid`, `xdialog`, `dcx`) are neither needed nor shadowed.
+- **`/dccore dcx`** says whether DCX is used and why not; **`/dccore dcx check`** opens `dccore.dcxcheck`, a 240 x 120
+  dbu window that DCX marks, with one of mIRC's own buttons and a DCX treeview placed by the scale
+  `$dialog().cw/.ch` reports. It writes to @DCCore whether the native button still raises its click in a marked
+  dialog, whether the tree raises its own, and the scale - and the tree fills the box drawn for it only when that
+  scale is the pixel one. Both are what phase 2's design rests on and neither can be run here.
+- `dccore.ver` is 1.20.0.
+- **Docs:** `docs/ADMIN-CONSOLE.md` (copy the `dcx` folder with the script, a DCX section, `/dccore dcx` in the
+  command list), `docs/INSTALL.md` (the upgrade step), `scripts/mirc/dcx/README.md`.
+- **Tests:** `tests/test_the_bundled_dcx_dll_is_the_pinned_release.py` (the file's SHA-256 against the README and
+  the script, a 32-bit PE whose imports are Windows' own, the licence with its copyright line, the README's link and
+  release) and `tests/test_the_mirc_script_falls_back_when_dcx_cannot_load.py` (each reason in `dccore.dcx.why`, its
+  order, the error trap, the full-path calls, the option's default and its place in the window, the check window).
+
+### 🧱 Splitting `irc_loop`, step 1: the nick-refusal handler is its own function (#1287)
+
+The first step of "Splitting the largest functions" in `docs/FUTURE.md` (was #1150). The body of the 432/433/437
+handler, which steps down the nick ladder while registering and keeps the current name once registered, moved out of
+`irc_loop()` unchanged into `answer_nick_refusal(line, sock, registered, refusals)` in `irc.py`. It returns the
+refusal count, which the loop keeps per connection as before. The guard (`is_server_numeric(line, "433") or ...`)
+stays in the read loop where it was, so the order of the loop's checks is untouched. No behaviour changes.
+
+- **Tests:** `OnceRegisteredTheOldRuleStands` in `tests/test_a_third_nick_when_both_are_taken.py` read the loop's text.
+  It now calls the handler for four cases: the ladder while registering, a refusal once registered (no NICK sent, the
+  name and the count kept), the end of the ladder, and a 437 that names a channel. The guard tests in
+  `tests/test_membership_events.py` find the guard from the call line. `test_the_bots_own_nick_follows_the_server.py`
+  looks for `config.NICKNAME` assignments in the loop and the handler. The tests that drive `irc_loop()` against a
+  scripted server are unchanged and still cover the wiring.
+- **Mutation checks, 10/10 caught:**
+  - the loop drops the returned count;
+  - the loop always says registering, or always says registered;
+  - the guard drops 437;
+  - the branches are swapped;
+  - the ladder does not record the name it asked for;
+  - a channel 437 is not stepped aside;
+  - the count is not advanced;
+  - a registered bot answers with another NICK;
+  - a registered refusal resets the count.
+
+### 🧪 The script-version changelog test survives the next section (#1285)
+
+`test_the_public_changelog_names_one_script_version` (from the #1264 settings window) demanded that the topmost
+section of `docs/UPDATES-PUBLIC.md` ask for `dccore.mrc` 1.19.4. The v1.16.2 roll pointed it at the topmost
+section, which is right until the first change after the release opens `## Unreleased` above v1.16.2 - most
+changes don't touch the script, the new section names no version, and the test would fail on that PR.
+
+- **Now:** the topmost section names at most one script version, and the newest version the changelog asks for
+  anywhere equals the script's own `dccore.ver`. The second half also catches a script bump that ships without a
+  changelog bullet, which the old pinned `1.19.4` could not.
+- **Tests:** two more in `tests/test_the_mirc_settings_window.py` feed the helper a new `## Unreleased` with no
+  script bullet (must pass and find the version below it) and a section naming two versions (both seen). 5/5
+  mutations caught: script bumped without a bullet, two versions in the top section, newest looked for only in the
+  top section, top section run to the end of the file, the second section read as the top one.
+
 ## 🟩 v1.16.2 (2026-10-11) - "The Hardened Release"
 
 ### 🛡️ Admin access: the script's pairing token, the console's listener and logins, and what a rehash keeps
