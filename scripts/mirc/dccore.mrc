@@ -1849,7 +1849,8 @@ menu status,channel {
 ;      "x": DCX paints its background and its own controls, and those take
 ;      their colours here instead - dccore.theme.sys for the lines, frames
 ;      and tabs as dccore.sw.dcx makes them, and the texts, the lists and
-;      the background just after (dccore.theme.dcxset).
+;      the background just after (dccore.theme.dcxset) - or, for what is
+;      made later (a page's frames, the tables), as it is made.
 ;    - Not the right-click menus. Windows draws every menu of a program in
 ;      one style, so a dark menu here would be every menu in mIRC dark, and
 ;      other scripts' are not this script's to change. mIRC's own dark mode
@@ -2067,7 +2068,6 @@ alias dccore.theme.dcxset {
   .timerdccoreThemeBg -m 1 0 dccore.theme.dcxbg
   .timerdccoreThemeText -m 1 0 dccore.theme.dcxtexts
   .timerdccoreThemeLists -m 1 0 dccore.theme.dcxlists
-  .timerdccoreThemeFonts -m 1 0 dccore.theme.dcxfonts
 }
 alias dccore.theme.dcxbg { if ($dialog(dccore.set)) { dccore.dcx xdialog dccore.set -g +b $dccore.theme.rgb(bg) } }
 ; $1 a DCX text, $2 1 when it has no background of its own: light text, on
@@ -2076,7 +2076,7 @@ alias dccore.theme.dcxtext {
   dccore.dcx xdid dccore.set $1 -C +t $dccore.theme.rgb(fg)
   if ($2) { dccore.dcx xdid dccore.set $1 -C +b $dccore.theme.rgb(face) }
 }
-; Every DCX text of the window, from the layout's own ids (dccore.sw.data).
+; Every DCX text made at open, from the layout's own ids (dccore.sw.data).
 ; The quieter texts keep the grey dccore.sw.dcxhome and dcxstats gave them.
 alias dccore.theme.dcxtexts {
   if (!$dialog(dccore.set)) || (!$hget(dccore.swm)) { return }
@@ -2089,12 +2089,8 @@ alias dccore.theme.dcxtexts {
   ; the page's name and the side's name, over the window's background
   dccore.theme.dcxtext $gettok($dccore.sw.m(dcxtitle),1,32) 1
   dccore.theme.dcxtext $gettok($dccore.sw.m(dcxcrumb),1,32) 1
-  ; the frames' titles: the control after each frame's ring
-  %i = 1
-  while (%i <= $hfind(dccore.swm,fr.*,0,w)) {
-    dccore.theme.dcxtext $calc($gettok($dccore.sw.m($hfind(dccore.swm,fr.*,%i,w)),1,32) + 1)
-    inc %i
-  }
+  ; the frames' titles take theirs as a page's frames are made, the first
+  ; time it is shown (dccore.sw.dcxframes)
   ; the pills' names, and the arrow of the way back
   %i = 1
   while (%i <= $dccore.sw.m(home.n)) {
@@ -2120,51 +2116,18 @@ alias dccore.theme.dcxtexts {
     inc %i
   }
 }
-; DCX's texts and tables without ClearType. ClearType tints the edges of
-; each letter red and blue, and light letters on the dark background look
-; blurred by it. dccore_ui.dll gives mIRC's own controls a font without it;
-; DCX draws with the font xdid -f gave it, so each DCX text and table gets
-; its own font again with the flag a (anti-aliased, no ClearType). Only
-; where the DLL darkens the window: in mIRC's own dark mode mIRC's controls
-; keep ClearType, and DCX's keep it with them.
-alias dccore.theme.dcxfonts {
-  if (!$dialog(dccore.set)) || ($dccore.theme.mircdark) || ($dccore.theme.uiwhy != $null) { return }
-  var %n = $dccore.dcx(_xdialog,dccore.set id 0), %i = 1, %id, %f, %fl
-  if (%n !isnum 1-) { return }
-  while (%i <= %n) {
-    %id = $dccore.dcx(_xdialog,dccore.set id %i)
-    ; nested: an if evaluates all of its conditions, and DCX halts on a bad id
-    if (%id isnum) {
-      if ($istok(text listview,$dccore.dcx(_xdid,dccore.set %id type),32)) {
-        ; +flags charset size name
-        %f = $dccore.dcx(_xdid,dccore.set %id font)
-        %fl = $gettok(%f,1,32)
-        if ($left(%fl,1) == +) && (a !isincs %fl) && ($gettok(%f,4,32) != $null) {
-          dccore.dcx xdid dccore.set %id -f $+(+a,$remove($mid(%fl,2),d)) $gettok(%f,2-,32)
-        }
-      }
-    }
-    inc %i
-  }
-  ; xdid -f does not redraw: the DLL once more, which redraws the whole window
-  dccore.theme.dialog dccore.set
-}
-; The page list and the tables: a listview's colours are -i, not -C
+; The page list's colours. The tables get theirs as they are made, the
+; first time they are needed (dccore.sw.lv.make) - enabled, as
+; dccore.sw.enable keeps them in the dark theme.
 alias dccore.theme.dcxlists {
   if (!$dialog(dccore.set)) || (!$hget(dccore.swm)) { return }
-  var %ids = $gettok($dccore.sw.m(dcxpages),1,32), %lvs = $dccore.sw.m(lvs), %i = 1
-  while (%i <= $numtok(%lvs,32)) { %ids = %ids $gettok($dccore.sw.m(lv. $+ $gettok(%lvs,%i,32)),1,32) | inc %i }
-  %i = 1
-  while (%i <= $numtok(%ids,32)) {
-    dccore.dcx xdid dccore.set $gettok(%ids,%i,32) -i +bk $dccore.theme.rgb(panel)
-    dccore.dcx xdid dccore.set $gettok(%ids,%i,32) -i +t $dccore.theme.rgb(fg)
-    inc %i
-  }
-  ; the tables enabled, as dccore.sw.enable keeps them in the dark theme
-  if ($dccore.theme.dialogsdark) {
-    %i = 2
-    while (%i <= $numtok(%ids,32)) { dccore.dcx xdid dccore.set $gettok(%ids,%i,32) -e | inc %i }
-  }
+  dccore.theme.dcxlist $gettok($dccore.sw.m(dcxpages),1,32)
+}
+; $1 a DCX listview: light text on the lists' colour - a listview's colours
+; are -i, not -C
+alias dccore.theme.dcxlist {
+  dccore.dcx xdid dccore.set $1 -i +bk $dccore.theme.rgb(panel)
+  dccore.dcx xdid dccore.set $1 -i +t $dccore.theme.rgb(fg)
 }
 ; The page list's icons: the whole file into its image list, so a page's
 ; icon is its number among dccore.ico.names - then its rows again, now
@@ -2234,7 +2197,8 @@ alias dccore.colours { return 00 white,01 black,02 navy,03 green,04 red,05 maroo
 alias dccore.groups { return request queued sends fail search joins bans info }
 
 ; The Script pages filled from dccore.ini: the line types' checks and
-; colours (1620 up, a check and a menu each), the colours of file names,
+; colours (1620 up, a check and a menu each - a menu's lines are added when
+; its page is first shown, dccore.sw.cb.fill), the colours of file names,
 ; console replies, panel headings, search text, nicks and channels (1640
 ; to 1645), the status line's minutes (1637), the font (1670, 1671), the
 ; background (1673), the finished downloads shown (1675), the bot's nick
@@ -2279,10 +2243,10 @@ alias dccore.sw.opt.fill {
 ; means for them (the checks among the locals have their own test)
 alias dccore.sw.opt.sig {
   var %i = 1, %s
-  while (%i <= 8) { %s = %s $did(dccore.set,$calc(1618 + 2 * %i)).state $did(dccore.set,$calc(1619 + 2 * %i)).sel | inc %i }
+  while (%i <= 8) { %s = %s $did(dccore.set,$calc(1618 + 2 * %i)).state $dccore.sw.cb.sel($calc(1619 + 2 * %i)) | inc %i }
   %i = 1640
-  while (%i <= 1645) { %s = %s $did(dccore.set,%i).sel | inc %i }
-  return %s $did(dccore.set,1637).text $did(dccore.set,1670).state $did(dccore.set,1671).text $did(dccore.set,1673).sel $did(dccore.set,1675).text $did(dccore.set,1681).text $did(dccore.set,1685).state $did(dccore.set,1691).sel $did(dccore.set,1692).state
+  while (%i <= 1645) { %s = %s $dccore.sw.cb.sel(%i) | inc %i }
+  return %s $did(dccore.set,1637).text $did(dccore.set,1670).state $did(dccore.set,1671).text $dccore.sw.cb.sel(1673) $did(dccore.set,1675).text $did(dccore.set,1681).text $did(dccore.set,1685).state $did(dccore.set,1691).sel $did(dccore.set,1692).state
 }
 alias dccore.sw.opt.dirty { return $iif($dccore.sw.opt.sig === $dccore.sw.s(opt.sig),$false,$true) }
 ; Apply: this mIRC's switches (the locals) and the pages above into
@@ -2293,19 +2257,19 @@ alias dccore.sw.opt.save {
   while (%i <= 8) {
     var %g = $gettok($dccore.groups,%i,32)
     hadd dccore show. $+ %g $did(dccore.set,$calc(1618 + 2 * %i)).state
-    hadd dccore col. $+ %g $calc($did(dccore.set,$calc(1619 + 2 * %i)).sel - 1)
+    hadd dccore col. $+ %g $calc($dccore.sw.cb.sel($calc(1619 + 2 * %i)) - 1)
     inc %i
   }
-  hadd dccore col.name $calc($did(dccore.set,1640).sel - 1)
-  hadd dccore col.console $calc($did(dccore.set,1641).sel - 1)
-  hadd dccore col.head $calc($did(dccore.set,1642).sel - 1)
+  hadd dccore col.name $calc($dccore.sw.cb.sel(1640) - 1)
+  hadd dccore col.console $calc($dccore.sw.cb.sel(1641) - 1)
+  hadd dccore col.head $calc($dccore.sw.cb.sel(1642) - 1)
   hadd dccore col.term $dccore.spanval(1643,name -1)
   hadd dccore col.nick $dccore.spanval(1644,-1 per)
   hadd dccore col.chan $dccore.spanval(1645,-1)
   hadd dccore statusmin $iif($did(dccore.set,1637).text isnum,$int($did(dccore.set,1637).text),5)
   hadd dccore font $did(dccore.set,1670).state
   if ($did(dccore.set,1671).text isnum) && ($did(dccore.set,1671).text >= 6) { hadd dccore fontsize $did(dccore.set,1671).text }
-  hadd dccore bg $calc($did(dccore.set,1673).sel - 2)
+  hadd dccore bg $calc($dccore.sw.cb.sel(1673) - 2)
   hadd dccore dlfinished $iif($did(dccore.set,1675).text isnum 1-15,$int($did(dccore.set,1675).text),15)
   if ($did(dccore.set,1681).text != $null) { hadd dccore bot $did(dccore.set,1681).text }
   ; the theme and the icons (#1368): saved as /dccore theme and /dccore
@@ -2343,18 +2307,18 @@ alias dccore.sw.opt.unpair {
   dialog -x dccore.set
   dccore unpair
 }
+; These three set a menu up: its lines are added the first time its page
+; is shown (dccore.sw.cb.fill, recipe bg, colours or span), its selection
+; is kept till then (dccore.sw.cb.select).
 ; $1 a menu: "none" first, then the sixteen colours - the selected line is the colour + 2
 alias dccore.fillbg {
-  var %i = 1
-  did -a dccore.set $1 none (mIRC's)
-  while (%i <= 16) { did -a dccore.set $1 $gettok($dccore.colours,%i,44) | inc %i }
-  did -c dccore.set $1 $calc($dccore.opt(bg) + 2)
+  dccore.sw.cb.lazy $1 bg
+  dccore.sw.cb.select $1 $calc($dccore.opt(bg) + 2)
 }
 ; $1 a menu, $2 the saved colour: the sixteen colours, colour C on line C + 1
 alias dccore.fillcombo {
-  var %i = 1
-  while (%i <= 16) { did -a dccore.set $1 $gettok($dccore.colours,%i,44) | inc %i }
-  did -c dccore.set $1 $calc($2 + 1)
+  dccore.sw.cb.lazy $1 colours
+  dccore.sw.cb.select $1 $calc($2 + 1)
 }
 ; The nick, channel and search text menus (#1259): their own lines first,
 ; then the sixteen colours. $1 the menu, $2 the saved value, $3- the values
@@ -2362,13 +2326,11 @@ alias dccore.fillcombo {
 ; "per nick", name "same as File names"). With N such lines, colour C is
 ; line C + N + 1.
 alias dccore.fillspan {
-  var %own = $3-, %n = $numtok(%own,32), %i = 1
-  while (%i <= %n) { did -a dccore.set $1 $dccore.spanlabel($gettok(%own,%i,32)) | inc %i }
-  %i = 1
-  while (%i <= 16) { did -a dccore.set $1 $gettok($dccore.colours,%i,44) | inc %i }
+  var %own = $3-, %n = $numtok(%own,32)
+  dccore.sw.cb.lazy $1 span %own
   var %at = $findtok(%own,$2,1,32)
   if (!%at) { %at = $iif($2 isnum 0-15,$calc($2 + %n + 1),1) }
-  did -c dccore.set $1 %at
+  dccore.sw.cb.select $1 %at
 }
 alias dccore.spanlabel {
   if ($1 == name) { return same as File names }
@@ -2378,7 +2340,7 @@ alias dccore.spanlabel {
 ; What the selected line of such a menu means: $1 the menu, $2 the same
 ; values dccore.fillspan was given, as one argument.
 alias dccore.spanval {
-  var %sel = $did(dccore.set,$1).sel, %n = $numtok($2,32)
+  var %sel = $dccore.sw.cb.sel($1), %n = $numtok($2,32)
   if (%sel <= %n) { return $gettok($2,$iif(%sel < 1,1,%sel),32) }
   return $calc(%sel - %n - 1)
 }
@@ -2680,26 +2642,27 @@ alias dccore.sw.init {
   if ($hget(dccore.live,sw.open)) { hdel dccore.live sw.open }
   .timerdccoreSwTick 0 5 dccore.sw.tick
   dccore.sw.start
+  ; what is made from here on is made after the init's dccore.theme.dialog
+  hadd dccore.sws inited 1
 }
 
 ; Every combo's lines: the choices with the dashboard's labels, the three
-; answers of a setting that may be unset, the sixteen colours.
+; answers of a setting that may be unset, the sixteen colours. A setting's
+; menu only gets its recipe here, and its lines the first time its page is
+; shown (dccore.sw.cb.fill). The bindings' Mode menus are filled now: the
+; rows are drawn again as the lists change.
 alias dccore.sw.combos {
+  var %modes = $dccore.sw.untext($dccore.sw.m(modelabels))
   var %j = 1
   while (%j <= $dccore.sw.m(keys.n)) {
     var %keys = $dccore.sw.m(keys. $+ %j), %i = 1
     while (%i <= $numtok(%keys,32)) {
       var %k = $gettok(%keys,%i,32), %id = $gettok($dccore.sw.m(k. $+ %k),1,32), %kind = $gettok($dccore.sw.m(k. $+ %k),2,32)
-      if (%kind == choice) {
-        var %c = 1
-        while (%c <= $numtok($dccore.sw.m(ch. $+ %k),32)) { did -a dccore.set %id $dccore.sw.untext($dccore.sw.m($+(cl.,%k,.,%c))) | inc %c }
-      }
-      elseif (%kind == tri) { dccore.sw.fillfrom %id $dccore.sw.untext($dccore.sw.m(tri)) }
+      if (%kind == choice) { dccore.sw.cb.lazy %id choice %k }
+      elseif (%kind == tri) { dccore.sw.cb.lazy %id tri }
       elseif (%kind == colour) {
-        did -a dccore.set %id $dccore.sw.untext($dccore.sw.m(themedefault))
-        dccore.sw.fillfrom %id $dccore.sw.untext($dccore.sw.m(colours))
-        did -a dccore.set $calc(%id + 1) $dccore.sw.untext($dccore.sw.m(keepprevious))
-        dccore.sw.fillfrom $calc(%id + 1) $dccore.sw.untext($dccore.sw.m(colours))
+        dccore.sw.cb.lazy %id colour themedefault
+        dccore.sw.cb.lazy $calc(%id + 1) colour keepprevious
       }
       inc %i
     }
@@ -2707,30 +2670,146 @@ alias dccore.sw.combos {
   }
   ; the Mode menus of the bindings rows, and of the row that adds one
   var %r = 1
-  while (%r <= 15) { dccore.sw.fillfrom $calc($dccore.sw.srv.rowbase(%r) + 2) $dccore.sw.untext($dccore.sw.m(modelabels)) | inc %r }
-  dccore.sw.fillfrom 1772 $dccore.sw.untext($dccore.sw.m(modelabels))
+  while (%r <= 15) { dccore.sw.fillfrom $calc($dccore.sw.srv.rowbase(%r) + 2) %modes | inc %r }
+  dccore.sw.fillfrom 1772 %modes
 }
-; $1 a combo, $2- its lines separated by commas
-alias dccore.sw.fillfrom {
-  var %i = 1
-  while (%i <= $numtok($2-,44)) { did -a dccore.set $1 $gettok($2-,%i,44) | inc %i }
+; $1 a combo, $2- its lines separated by commas: in one didtok
+alias dccore.sw.fillfrom { if ($2- != $null) { didtok dccore.set $1 44 $2- } }
+
+; ---- menus filled when their page is first shown (#1382) -------------
+;  A line of a combo costs mIRC some 0.6 ms, nearly 2 while the window is
+;  made, whichever command adds it: the panel's menus were about 1 s of
+;  every open. So a setting's menu and the mIRC side's colour menus get a
+;  recipe in dccore.sws at open (cb.<id>), and their lines the first time
+;  their page is shown (cbmade.<id>). Till then the line selected is kept
+;  as a number (cbsel.<id>, 0 for none), and a colour menu's 18th line "As
+;  set: ..." as its text (cbx.<id>). Every read and write of such a menu's
+;  selection goes through dccore.sw.cb.sel and dccore.sw.cb.select, which
+;  say the same thing either way.
+;  The recipes: choice <KEY> (the setting's labels), tri (the layout's three
+;  answers), colour <themedefault|keepprevious> (that line, then the
+;  layout's sixteen colours), colours (the sixteen of dccore.colours), bg
+;  ("none (mIRC's)", then those), span <values> (dccore.fillspan's own lines
+;  for those values, then those).
+
+; $1 a menu, $2- its recipe
+alias dccore.sw.cb.lazy { hadd dccore.sws cb. $+ $1 $2- }
+; Whether $1 is a menu still waiting for its lines
+alias dccore.sw.cb.waits { return $iif(($dccore.sw.s(cb. $+ $1) != $null) && (!$dccore.sw.s(cbmade. $+ $1)),$true,$false) }
+; $1 a menu: its selected line, 0 for none - as one number either way, so a
+; selection kept and the same one shown compare equal (the dirty checks)
+alias dccore.sw.cb.sel {
+  var %s = $dccore.sw.s(cbsel. $+ $1)
+  if (!$dccore.sw.cb.waits($1)) { %s = $did(dccore.set,$1).sel }
+  return $iif(%s isnum 1-,%s,0)
+}
+; $1 a menu, $2 a line to select, 0 or nothing to select none. A line the
+; menu has not got selects none, as did -c leaves a filled one (a colour
+; written into dccore.ini by hand): a waiting menu is measured against the
+; lines it will have (dccore.sw.cb.lines), so Apply and the dirty checks
+; read the same either way
+alias dccore.sw.cb.select {
+  var %n = $iif($2 isnum 1-,$2,0)
+  if ($dccore.sw.cb.waits($1)) {
+    if (%n > $dccore.sw.cb.lines($1)) { %n = 0 }
+    hadd dccore.sws cbsel. $+ $1 %n
+    return
+  }
+  if (%n) { did -c dccore.set $1 %n }
+  else { did -u dccore.set $1 }
+}
+; $1 a menu waiting for its lines: how many it will have, from its recipe
+; (as dccore.sw.cb.fill adds them), and the "As set" line kept for it
+alias dccore.sw.cb.lines {
+  var %r = $dccore.sw.s(cb. $+ $1), %k = $gettok(%r,1,32), %n = 0
+  if (%k == choice) { %n = $numtok($dccore.sw.m(ch. $+ $gettok(%r,2,32)),32) }
+  elseif (%k == tri) { %n = $numtok($dccore.sw.untext($dccore.sw.m(tri)),44) }
+  elseif (%k == colour) { %n = $calc(1 + $numtok($dccore.sw.untext($dccore.sw.m(colours)),44)) }
+  elseif (%k == colours) { %n = $numtok($dccore.colours,44) }
+  elseif (%k == bg) { %n = $calc(1 + $numtok($dccore.colours,44)) }
+  elseif (%k == span) { %n = $calc($numtok($gettok(%r,2-,32),32) + $numtok($dccore.colours,44)) }
+  if ($dccore.sw.s(cbx. $+ $1) != $null) { inc %n }
+  return %n
+}
+; $1 a colour menu, $2- the text of its 18th line ("As set: ..."), or
+; nothing for none: the line there is taken away, and this one added
+alias dccore.sw.cb.extra {
+  if ($dccore.sw.cb.waits($1)) { dccore.sw.keep cbx. $+ $1 $2- | return }
+  if ($did(dccore.set,$1).lines >= 18) { did -d dccore.set $1 18 }
+  if ($2- != $null) { did -a dccore.set $1 $2- }
+}
+; $1 a page: its menus' lines, the first time it is shown. Its controls are
+; the layout's own list of them (p.<page>.<n>).
+alias dccore.sw.cb.page {
+  if ($dccore.sw.s(cbpage. $+ $1)) { return }
+  hadd dccore.sws cbpage. $+ $1 1
+  var %j = 1
+  while (%j <= $dccore.sw.m(p. $+ $1 $+ .n)) {
+    var %ids = $dccore.sw.m($+(p.,$1,.,%j)), %i = 1
+    while (%i <= $numtok(%ids,44)) {
+      if ($dccore.sw.cb.waits($gettok(%ids,%i,44))) { dccore.sw.cb.fill $gettok(%ids,%i,44) }
+      inc %i
+    }
+    inc %j
+  }
+}
+; $1 a menu: its lines from its recipe, each list in one didtok - where a
+; line is a label of its own, joined on $chr(7), which no label has, so a
+; label with a comma stays one line - then the "As set" line kept for it,
+; and the line kept as selected. Once: marked before, so a failure is not
+; a second set of lines.
+alias dccore.sw.cb.fill {
+  if (!$dccore.sw.cb.waits($1)) { return }
+  hadd dccore.sws cbmade. $+ $1 1
+  var %r = $dccore.sw.s(cb. $+ $1), %k = $gettok(%r,1,32)
+  if (%k == choice) {
+    var %key = $gettok(%r,2,32), %c = 1, %l
+    while (%c <= $numtok($dccore.sw.m(ch. $+ %key),32)) { %l = $+(%l,$chr(7),$dccore.sw.untext($dccore.sw.m($+(cl.,%key,.,%c)))) | inc %c }
+    if (%l != $null) { didtok dccore.set $1 7 $mid(%l,2) }
+  }
+  elseif (%k == tri) { dccore.sw.fillfrom $1 $dccore.sw.untext($dccore.sw.m(tri)) }
+  elseif (%k == colour) { didtok dccore.set $1 7 $+($dccore.sw.untext($dccore.sw.m($gettok(%r,2,32))),$chr(7),$replace($dccore.sw.untext($dccore.sw.m(colours)),$chr(44),$chr(7))) }
+  elseif (%k == colours) { didtok dccore.set $1 44 $dccore.colours }
+  elseif (%k == bg) {
+    did -a dccore.set $1 none (mIRC's)
+    didtok dccore.set $1 44 $dccore.colours
+  }
+  elseif (%k == span) {
+    var %own = $gettok(%r,2-,32), %i = 1, %l
+    while (%i <= $numtok(%own,32)) { %l = $+(%l,$chr(44),$dccore.spanlabel($gettok(%own,%i,32))) | inc %i }
+    if (%l != $null) { didtok dccore.set $1 44 $mid(%l,2) }
+    didtok dccore.set $1 44 $dccore.colours
+  }
+  var %x = $dccore.sw.s(cbx. $+ $1), %sel = $dccore.sw.s(cbsel. $+ $1)
+  if (%x != $null) { did -a dccore.set $1 %x }
+  if (%sel isnum 1-) { did -c dccore.set $1 %sel }
 }
 
 ; $1 a page, $2 -h or -v: every control of the page hidden or shown - and
 ; with DCX its tables' listviews with them, their native lists kept hidden,
-; and the page's name put in the title (#1288)
+; and the page's name put in the title (#1288). A page's DCX frames and
+; tables are made the first time it is shown (#1382), so hiding one never
+; shown touches no DCX id: there is none yet, and DCX halts on a missing one
 alias dccore.sw.showpage {
+  ; its menus' lines the first time, in either window, before it shows
+  if ($2 == -v) { dccore.sw.cb.page $1 }
   var %j = 1
   while (%j <= $dccore.sw.m(p. $+ $1 $+ .n)) { did $2 dccore.set $dccore.sw.m($+(p.,$1,.,%j)) | inc %j }
   if (!$dccore.sw.s(dcx)) { return }
   ; the frames: the native boxes stay hidden, their DCX lines and titles
   ; come and go with the page
   var %bx = $dccore.sw.m(p. $+ $1 $+ .bx)
-  if (%bx != $null) { did -h dccore.set %bx | dccore.dcx xdid dccore.set $dccore.sw.m(p. $+ $1 $+ .fr) $iif($2 == -v,-s,-h) }
+  if (%bx != $null) {
+    did -h dccore.set %bx
+    if ($2 == -v) { dccore.sw.dcxframes $1 }
+    if ($dccore.sw.s(frmade. $+ $1)) { dccore.dcx xdid dccore.set $dccore.sw.m(p. $+ $1 $+ .fr) $iif($2 == -v,-s,-h) }
+  }
+  ; the tables: lv.id makes one the first time (dccore.sw.lv.need)
   var %lvs = $dccore.sw.m(p. $+ $1 $+ .lv), %i = 1
   while (%i <= $numtok(%lvs,32)) {
-    did -h dccore.set $gettok(%lvs,%i,32)
-    dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) $iif($2 == -v,-s,-h)
+    var %lv = $gettok(%lvs,%i,32)
+    did -h dccore.set %lv
+    if ($2 == -v) || ($dccore.sw.s(lvmade. $+ %lv)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id(%lv) $iif($2 == -v,-s,-h) }
     inc %i
   }
   if ($2 == -v) { dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxtitle),1,32) -t $dccore.sw.untext($dccore.sw.m(p. $+ $1)) }
@@ -2751,9 +2830,14 @@ alias dccore.sw.enable {
   if ($dccore.sw.s(dcx)) {
     ; a disabled listview is drawn light grey whatever its colours, so in
     ; the dark theme the tables stay enabled: their rows do nothing by
-    ; themselves, the buttons that act on them are what is disabled
+    ; themselves, the buttons that act on them are what is disabled. A
+    ; table not made yet is left alone: dccore.sw.lv.make gives it lv.e
     var %lvs = $dccore.sw.m(lvs), %i = 1, %e = $iif(($1) || ($dccore.theme.dialogsdark),-e,-b)
-    while (%i <= $numtok(%lvs,32)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) %e | inc %i }
+    hadd dccore.sws lv.e %e
+    while (%i <= $numtok(%lvs,32)) {
+      if ($dccore.sw.s(lvmade. $+ $gettok(%lvs,%i,32))) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) %e }
+      inc %i
+    }
   }
 }
 
@@ -2838,6 +2922,13 @@ alias dccore.sw.dcx {
   if ($dccore.dcx.why != $null) { return }
   dccore.dcx Mark dccore.set dccore.sw.dcxcb
   hadd dccore.sws dcx 1
+  ; the theme as the window is made, asked once (each asking may check the
+  ; dll's hash again): dark, its dialogs drawn dark - what is made later
+  ; takes its dark colours from this - and noct, dccore_ui.dll is what draws
+  ; them so: DCX's texts then get their fonts without ClearType
+  ; (dccore.sw.fontflags), mIRC's own dark mode keeps it
+  hadd dccore.sws dark $iif($dccore.theme.dialogsdark,1,0)
+  hadd dccore.sws noct $iif(($dccore.sw.s(dark)) && (!$dccore.theme.mircdark),1,0)
   ; every line of the window is the script's own, in one colour - the
   ; system's, so a theme is followed: Windows draws its tabs and frames in
   ; light greys, and the first tab with no left edge. The native tabs and
@@ -2849,26 +2940,49 @@ alias dccore.sw.dcx {
   while (%i <= $dccore.sw.m(groups)) { did -h dccore.set $calc(1000 + %i) | inc %i }
   %i = 1
   while (%i <= $dccore.sw.m(slots)) { did -h dccore.set $calc(1019 + %i) | inc %i }
-  ; the body frame under the tabs, every page's frames, then the tab strip
-  ; - after the frame, since the chosen tab stands on its top line
+  ; the body frame under the tabs, then the tab strip - after the frame,
+  ; since the chosen tab stands on its top line. A page's own frames are
+  ; made the first time it is shown (dccore.sw.showpage)
   var %b = $dccore.sw.m(dcxbody)
   dccore.sw.dcxring $gettok(%b,1,32) $dccore.sw.dcxrect($gettok(%b,2-5,32))
-  %i = 1
-  while (%i <= $dccore.sw.m(pages)) { dccore.sw.dcxframes %i | inc %i }
   dccore.sw.dcxtabs
   dccore.sw.dcxhome
   ; the chosen tab's pages, where the page buttons were: filled by dccore.sw.tab
   var %t = $dccore.sw.m(dcxpages), %id = $gettok(%t,1,32), %rect = $dccore.sw.dcxrect($gettok(%t,2-5,32))
   dccore.dcx xdialog dccore.set -c %id listview %rect report noheader singlesel fullrow showsel
   dccore.dcx xdid dccore.set %id -t +l 0 $calc($gettok(%rect,3,32) - 4) Pages
+  dccore.sw.dcxaa %id listview
   ; the page's name, bold, between the tabs and the page
   %t = $dccore.sw.m(dcxtitle)
   dccore.dcx xdialog dccore.set -c $gettok(%t,1,32) text $dccore.sw.dcxrect($gettok(%t,2-5,32)) nowrap noprefix noformat
-  dccore.dcx xdid dccore.set $gettok(%t,1,32) -f +b default 9 Tahoma
-  ; the tables
-  var %lvs = $dccore.sw.m(lvs)
-  %i = 1
-  while (%i <= $numtok(%lvs,32)) { dccore.sw.lv.make $gettok(%lvs,%i,32) | inc %i }
+  dccore.dcx xdid dccore.set $gettok(%t,1,32) -f $dccore.sw.fontflags(b) default 9 Tahoma
+  ; the tables are made when first needed (dccore.sw.lv.need)
+}
+; DCX's texts and tables without ClearType. ClearType tints the edges of
+; each letter red and blue, and light letters on the dark background look
+; blurred by it. dccore_ui.dll gives mIRC's own controls a font without it;
+; DCX draws with the font xdid -f gave it, so where the DLL darkens the
+; window (noct, dccore.sw.dcx) each DCX text and table is given its font
+; with the flag a (anti-aliased, no ClearType) as it is made. In mIRC's own
+; dark mode mIRC's controls keep ClearType, and DCX's keep it with them.
+; $1 the other flags, b for bold: "+b", or "+ab" there.
+alias dccore.sw.fontflags { return $+(+,$iif($dccore.sw.s(noct),a),$1) }
+; $1 a DCX text or listview just made with no font of its own, $2 its type,
+; text or listview: where fonts go without ClearType (fontflags), the font
+; DCX gave it, again with the flag a. That font is asked of the first one
+; of each type a window makes, and kept: DCX gives every one of a type the
+; same. One already anti-aliased, or a font with no name, stays as it is.
+alias dccore.sw.dcxaa {
+  if (!$dccore.sw.s(noct)) { return }
+  var %f = $dccore.sw.s(deffont. $+ $2)
+  if (%f == $null) {
+    ; +flags charset size name
+    var %q = $dccore.dcx(_xdid,dccore.set $1 font), %fl = $gettok(%q,1,32)
+    %f = -
+    if ($left(%fl,1) == +) && (a !isincs %fl) && ($gettok(%q,4,32) != $null) { %f = $+(+a,$remove($mid(%fl,2),d)) $gettok(%q,2-,32) }
+    hadd dccore.sws deffont. $+ $2 %f
+  }
+  if (%f != -) { dccore.dcx xdid dccore.set $1 -f %f }
 }
 ; $1 a DCX id, $2- a rectangle in pixels: a panel there in the line colour
 alias dccore.sw.dcxline {
@@ -2906,15 +3020,21 @@ alias dccore.sw.dcxpoly {
   return %tl %tr %br %bl
 }
 ; $1 a page: each of its frames drawn - the ring, and over its top line the
-; title on the window's face - hidden until the page is shown, when the
-; native box under it is hidden instead (dccore.sw.showpage)
+; title on the window's face, in the dark theme light - hidden until the
+; page is shown, when the native box under it is hidden instead
+; (dccore.sw.showpage). Once a window, the first time the page is shown:
+; a DCX id made twice is an error.
 alias dccore.sw.dcxframes {
+  if ($dccore.sw.s(frmade. $+ $1)) { return }
+  hadd dccore.sws frmade. $+ $1 1
   var %bx = $dccore.sw.m(p. $+ $1 $+ .bx), %i = 1
   while (%i <= $numtok(%bx,44)) {
     var %f = $dccore.sw.m(fr. $+ $gettok(%bx,%i,44)), %base = $gettok(%f,1,32), %title = $calc(%base + 1)
     dccore.sw.dcxring %base $dccore.sw.dcxrect($gettok(%f,2-5,32))
     dccore.dcx xdialog dccore.set -c %title text $dccore.sw.dcxrect($gettok(%f,6-9,32)) nowrap center noprefix noformat
+    dccore.sw.dcxaa %title text
     dccore.dcx xdid dccore.set %title -C +b $dccore.sw.s(face)
+    if ($dccore.sw.s(dark)) { dccore.theme.dcxtext %title }
     dccore.dcx xdid dccore.set %title -t $gettok(%f,10-,32)
     dccore.dcx xdid dccore.set $+(%base,-,%title) -h
     inc %i
@@ -2930,6 +3050,7 @@ alias dccore.sw.dcxtabs {
     dccore.sw.dcxline %id 0 0 1 1
     dccore.dcx xdialog dccore.set -c $calc(%id + 1) panel 0 0 1 1
     dccore.dcx xdialog dccore.set -c $calc(%id + 2) text 0 0 1 1 nowrap center noprefix noformat
+    dccore.sw.dcxaa $calc(%id + 2) text
     dccore.dcx xdid dccore.set $calc(%id + 2) -t $dccore.sw.m(g. $+ %i)
     inc %i
   }
@@ -2981,7 +3102,8 @@ alias dccore.sw.dcxpill {
 alias dccore.sw.dcxlabel {
   dccore.dcx xdialog dccore.set -c $1 text $2 $3 $4 $dccore.sw.dcxth nowrap center noprefix noformat
   dccore.dcx xdid dccore.set $1 -C +b $dccore.sw.s(light)
-  if ($5) { dccore.dcx xdid dccore.set $1 -f +b default 8 Tahoma }
+  if ($5) { dccore.dcx xdid dccore.set $1 -f $dccore.sw.fontflags(b) default 8 Tahoma }
+  else { dccore.sw.dcxaa $1 text }
   dccore.dcx xdid dccore.set $1 -t $6-
 }
 ; a line of dialog text, in pixels
@@ -2996,7 +3118,7 @@ alias dccore.sw.dcxhome {
   dccore.sw.dcxlabel $calc($gettok(%b,1,32) + 2) $calc($gettok(%r,1,32) + 1) $calc($gettok(%r,2,32) + $int($calc(($gettok(%r,4,32) - %th) / 2))) $calc($gettok(%r,3,32) - 2) 1 $chr(8592)
   var %c = $dccore.sw.m(dcxcrumb)
   dccore.dcx xdialog dccore.set -c $gettok(%c,1,32) text $dccore.sw.dcxrect($gettok(%c,2-5,32)) nowrap noprefix noformat
-  dccore.dcx xdid dccore.set $gettok(%c,1,32) -f +b default 8 Tahoma
+  dccore.dcx xdid dccore.set $gettok(%c,1,32) -f $dccore.sw.fontflags(b) default 8 Tahoma
   var %i = 1
   while (%i <= $dccore.sw.m(home.n)) {
     var %p = $dccore.sw.m(home. $+ %i), %id = $gettok(%p,1,32)
@@ -3019,6 +3141,7 @@ alias dccore.sw.dcxstats {
     var %f = $dccore.sw.m(home.f. $+ %i), %title = $gettok(%f,2,32)
     dccore.sw.dcxring $gettok(%f,1,32) $dccore.sw.dcxrect($gettok(%f,3-6,32))
     dccore.dcx xdialog dccore.set -c %title text $dccore.sw.dcxrect($gettok(%f,7-10,32)) nowrap center noprefix noformat
+    dccore.sw.dcxaa %title text
     dccore.dcx xdid dccore.set %title -C +b $dccore.sw.s(face)
     dccore.dcx xdid dccore.set %title -t $gettok(%f,12-,32)
     var %j = 1
@@ -3026,11 +3149,13 @@ alias dccore.sw.dcxstats {
       var %r = $dccore.sw.m($+(home.f.,%i,.r.,%j)), %k = $gettok(%r,1,32), %v = $gettok(%r,2,32)
       dccore.dcx xdialog dccore.set -c %k text $dccore.sw.dcxrect($gettok(%r,3-6,32)) nowrap noprefix noformat
       if (%v) {
+        dccore.sw.dcxaa %k text
         dccore.dcx xdid dccore.set %k -C +t %grey
         dccore.dcx xdid dccore.set %k -t $gettok(%r,11-,32)
         dccore.dcx xdialog dccore.set -c %v text $dccore.sw.dcxrect($gettok(%r,7-10,32)) nowrap noprefix noformat endellipsis
+        dccore.sw.dcxaa %v text
       }
-      else { dccore.dcx xdid dccore.set %k -f + default 8 Lucida Console }
+      else { dccore.dcx xdid dccore.set %k -f $dccore.sw.fontflags default 8 Lucida Console }
       inc %j
     }
     inc %i
@@ -3209,7 +3334,12 @@ alias dccore.sw.dcxrect {
   return $round($calc($gettok(%r,1,32) * %sx),0) $round($calc($gettok(%r,2,32) * %sy),0) $round($calc($gettok(%r,3,32) * %sx),0) $round($calc($gettok(%r,4,32) * %sy),0)
 }
 ; $1 a native list: hidden, and the DCX listview with its columns made over
-; its place - hidden too, until its page is shown
+; its place - hidden too, until its page is shown. Made when first needed
+; (dccore.sw.lv.need), so it takes here what the window gave the others:
+; its font, the state dccore.sw.enable last gave the tables (lv.e; made
+; enabled) and in the dark theme the lists' colours. Made after the window
+; was, where dccore_ui.dll darkens it, the dll once more: it gives a
+; listview its dark scroll bars and header (dccore.sw.lv.dark).
 alias dccore.sw.lv.make {
   var %l = $dccore.sw.m(lv. $+ $1), %id = $gettok(%l,1,32), %rect = $dccore.sw.dcxrect($gettok(%l,2-5,32))
   did -h dccore.set $1
@@ -3224,7 +3354,23 @@ alias dccore.sw.lv.make {
     inc %i
   }
   dccore.dcx xdid dccore.set %id -t %out
+  dccore.sw.dcxaa %id listview
+  if ($dccore.sw.s(lv.e) == -b) { dccore.dcx xdid dccore.set %id -b }
+  if ($dccore.sw.s(dark)) { dccore.theme.dcxlist %id }
   dccore.dcx xdid dccore.set %id -h
+  ; in a timer, so a failure there halts nothing of this; 250 ms, and the
+  ; same name restarts it, so tables made close together - the settings
+  ; snapshot's and the served lists' - usually share one pass of the dll
+  if ($dccore.sw.s(inited)) && ($dccore.sw.s(noct)) { .timerdccoreThemeLv -m 1 250 dccore.sw.lv.dark }
+}
+; The dll once more over the control panel, for the tables made since it
+; opened - only while the theme it opened with still holds. The panel takes
+; a theme change only when it opens again: dccore.theme.dialog reads the
+; theme now, and after /dccore theme light it would turn mIRC's controls
+; light under DCX parts that stay dark. (An if evaluates all of its
+; conditions; each of these is safe to ask with the window gone.)
+alias dccore.sw.lv.dark {
+  if ($dialog(dccore.set)) && ($dccore.sw.s(noct)) && ($dccore.theme.dialogsdark) && (!$dccore.theme.mircdark) { dccore.theme.dialog dccore.set }
 }
 ; $1 the page now shown: its row selected in the list, without that
 ; selection being taken as a click
@@ -3259,10 +3405,25 @@ alias dccore.sw.dcxcb {
 ; ---- the tables ------------------------------------------------------
 ;  Each table is a native list control, with DCX hidden under a listview
 ;  with columns (dccore.sw.lv.make). Everything that reads or writes one
-;  goes through these, which say the same thing to either.
+;  goes through these, which say the same thing to either, and every DCX
+;  command on a table takes its id from dccore.sw.lv.id.
 
-; $1 a native list: the control to address - the listview over it, or itself
-alias dccore.sw.lv.id { return $iif($dccore.sw.s(dcx),$gettok($dccore.sw.m(lv. $+ $1),1,32),$1) }
+; $1 a native list: the control to address - the listview over it, made
+; the first time it is needed, or itself
+alias dccore.sw.lv.id {
+  if (!$dccore.sw.s(dcx)) { return $1 }
+  dccore.sw.lv.need $1
+  return $gettok($dccore.sw.m(lv. $+ $1),1,32)
+}
+; $1 a native list: with DCX, its listview made once a window, the first
+; time its page shows it or anything reads or writes it (#1382) - not at
+; open, where each one costs time and some GDI objects that DCX never gives
+; back (#1381). A page shown, the bot's rows or an Apply may come first.
+alias dccore.sw.lv.need {
+  if (!$dccore.sw.s(dcx)) || ($dccore.sw.s(lvmade. $+ $1)) { return }
+  hadd dccore.sws lvmade. $+ $1 1
+  dccore.sw.lv.make $1
+}
 alias dccore.sw.lv.clear {
   if ($dccore.sw.s(dcx)) { dccore.dcx xdid dccore.set $dccore.sw.lv.id($1) -r }
   else { did -r dccore.set $1 }
@@ -3861,12 +4022,9 @@ alias dccore.sw.fill {
     if (%v == true) { did -c dccore.set %id }
     else { did -u dccore.set %id }
   }
-  elseif (%kind == tri) { did -c dccore.set %id $iif(%v == true,2,$iif(%v == false,3,1)) }
-  elseif (%kind == choice) {
-    var %at = $findtok($dccore.sw.m(ch. $+ $1),%v,1,32)
-    if (%at) { did -c dccore.set %id %at }
-    else { did -u dccore.set %id }
-  }
+  elseif (%kind == tri) { dccore.sw.cb.select %id $iif(%v == true,2,$iif(%v == false,3,1)) }
+  ; a value the choices do not have: nothing selected
+  elseif (%kind == choice) { dccore.sw.cb.select %id $findtok($dccore.sw.m(ch. $+ $1),%v,1,32) }
   elseif (%kind == colour) { dccore.sw.colourfill %id %v }
   elseif (%kind == chanlist) {
     dccore.sw.lv.clear %id
@@ -3904,25 +4062,29 @@ alias dccore.sw.fillall {
 ; a colour is picked over it. (\x2C is a comma, which would end $regex's
 ; argument.)
 alias dccore.sw.colourfill {
-  if ($did(dccore.set,$1).lines >= 18) { did -d dccore.set $1 18 }
-  var %bg = 1
-  if ($2 == $null) { did -c dccore.set $1 1 }
-  elseif ($regex(dccoresw,$2,/^\\x03(\d\d?)$/)) && ($regml(dccoresw,1) <= 15) { did -c dccore.set $1 $calc($regml(dccoresw,1) + 2) }
+  var %fg = 1, %bg = 1, %x
+  if ($2 == $null) { %fg = 1 }
+  elseif ($regex(dccoresw,$2,/^\\x03(\d\d?)$/)) && ($regml(dccoresw,1) <= 15) { %fg = $calc($regml(dccoresw,1) + 2) }
   elseif ($regex(dccoresw,$2,/^\\x03(\d\d?)\x2C(\d\d?)$/)) && ($regml(dccoresw,1) <= 15) && ($regml(dccoresw,2) <= 15) {
-    did -c dccore.set $1 $calc($regml(dccoresw,1) + 2)
+    %fg = $calc($regml(dccoresw,1) + 2)
     %bg = $calc($regml(dccoresw,2) + 2)
   }
   else {
-    did -a dccore.set $1 As set: $2-
-    did -c dccore.set $1 18
+    %x = As set: $2-
+    %fg = 18
   }
-  did -c dccore.set $calc($1 + 1) %bg
+  ; the 18th line first - taken away, or "As set" - then the selections:
+  ; a menu waiting for its lines counts line 18 only once it is kept
+  dccore.sw.cb.extra $1 %x
+  dccore.sw.cb.select $1 %fg
+  dccore.sw.cb.select $calc($1 + 1) %bg
   dccore.sw.colourbg $1
 }
 ; No background without a foreground: "\x03,05" is not a colour.
 alias dccore.sw.colourbg {
-  if ($did(dccore.set,$1).sel > 1) && ($did(dccore.set,$1).sel < 18) { did -e dccore.set $calc($1 + 1) }
-  else { did -c dccore.set $calc($1 + 1) 1 | did -b dccore.set $calc($1 + 1) }
+  var %fg = $dccore.sw.cb.sel($1)
+  if (%fg > 1) && (%fg < 18) { did -e dccore.set $calc($1 + 1) }
+  else { dccore.sw.cb.select $calc($1 + 1) 1 | did -b dccore.set $calc($1 + 1) }
 }
 
 ; $1 a setting: what its control shows now, to compare with what it showed
@@ -3930,8 +4092,8 @@ alias dccore.sw.colourbg {
 alias dccore.sw.shown {
   var %m = $dccore.sw.m(k. $+ $1), %id = $gettok(%m,1,32), %kind = $gettok(%m,2,32)
   if (%kind == bool) { return $did(dccore.set,%id).state }
-  if (%kind == tri) || (%kind == choice) { return $did(dccore.set,%id).sel }
-  if (%kind == colour) { return $did(dccore.set,%id).sel $+ / $+ $did(dccore.set,$calc(%id + 1)).sel }
+  if (%kind == tri) || (%kind == choice) { return $dccore.sw.cb.sel(%id) }
+  if (%kind == colour) { return $dccore.sw.cb.sel(%id) $+ / $+ $dccore.sw.cb.sel($calc(%id + 1)) }
   if (%kind == chanlist) { return $dccore.sw.chans }
   return $did(dccore.set,%id).text
 }
@@ -3965,18 +4127,18 @@ alias dccore.sw.value {
   var %m = $dccore.sw.m(k. $+ $1), %id = $gettok(%m,1,32), %kind = $gettok(%m,2,32), %f = $gettok(%m,3,32)
   if (%kind == bool) { return $iif($did(dccore.set,%id).state == 1,true,false) }
   if (%kind == tri) {
-    if ($did(dccore.set,%id).sel == 2) { return true }
-    if ($did(dccore.set,%id).sel == 3) { return false }
+    if ($dccore.sw.cb.sel(%id) == 2) { return true }
+    if ($dccore.sw.cb.sel(%id) == 3) { return false }
     return
   }
   ; nothing selected (a value the choices do not have): the value as loaded,
   ; never $gettok(...,0,32), which is the number of choices
   if (%kind == choice) {
-    if (!$did(dccore.set,%id).sel) { return $dccore.sw.dec($mid($dccore.sw.s(v. $+ $1),2)) }
-    return $gettok($dccore.sw.m(ch. $+ $1),$did(dccore.set,%id).sel,32)
+    if (!$dccore.sw.cb.sel(%id)) { return $dccore.sw.dec($mid($dccore.sw.s(v. $+ $1),2)) }
+    return $gettok($dccore.sw.m(ch. $+ $1),$dccore.sw.cb.sel(%id),32)
   }
   if (%kind == colour) {
-    var %fg = $did(dccore.set,%id).sel, %bg = $did(dccore.set,$calc(%id + 1)).sel
+    var %fg = $dccore.sw.cb.sel(%id), %bg = $dccore.sw.cb.sel($calc(%id + 1))
     if (%fg == 18) { return $dccore.sw.dec($mid($dccore.sw.s(v. $+ $1),2)) }
     if (%fg <= 1) { return }
     var %code = \x03 $+ $base($calc(%fg - 2),10,10,2)
@@ -3995,8 +4157,8 @@ alias dccore.sw.value {
 ; exactly as the bot sent it.
 alias dccore.sw.wire {
   var %m = $dccore.sw.m(k. $+ $1), %id = $gettok(%m,1,32), %kind = $gettok(%m,2,32), %f = $gettok(%m,3,32)
-  if (%kind == choice) && (!$did(dccore.set,%id).sel) { return $mid($dccore.sw.s(v. $+ $1),2) }
-  if (%kind == colour) && ($did(dccore.set,%id).sel == 18) { return $mid($dccore.sw.s(v. $+ $1),2) }
+  if (%kind == choice) && (!$dccore.sw.cb.sel(%id)) { return $mid($dccore.sw.s(v. $+ $1),2) }
+  if (%kind == colour) && ($dccore.sw.cb.sel(%id) == 18) { return $mid($dccore.sw.s(v. $+ $1),2) }
   if ($istok(bool tri choice colour chanlist,%kind,32)) { return $dccore.sw.enc($dccore.sw.value($1)) }
   if (%f > 1) && ($did(dccore.set,%id).text isnum) { return $round($calc($did(dccore.set,%id).text * %f),0) }
   return $dccore.sw.enc($did(dccore.set,%id).text)

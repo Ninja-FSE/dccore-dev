@@ -391,7 +391,10 @@ class TheThreeMenusOnTheScriptTab(unittest.TestCase):
         back = statements(alias("dccore.spanval"))
         self.assertIn("var %at = $findtok(%own,$2,1,32)", fill)
         self.assertIn("if (!%at) { %at = $iif($2 isnum 0-15,$calc($2 + %n + 1),1) }", fill)
-        self.assertIn("did -c dccore.set $1 %at", fill)
+        # selected, and read back, through the helpers of the menus filled
+        # when their page is first shown (#1382)
+        self.assertIn("dccore.sw.cb.select $1 %at", fill)
+        self.assertEqual(back[0], "var %sel = $dccore.sw.cb.sel($1), %n = $numtok($2,32)")
         self.assertIn("if (%sel <= %n) { return $gettok($2,$iif(%sel < 1,1,%sel),32) }", back)
         self.assertIn("return $calc(%sel - %n - 1)", back)
 

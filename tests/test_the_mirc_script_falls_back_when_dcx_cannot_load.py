@@ -329,7 +329,8 @@ class TheMockupLayout(unittest.TestCase):
         self.assertGreaterEqual(x, self.builder.CONTENT_X)
         body = alias("dccore.sw.dcx")
         self.assertIn("-c $gettok(%t,1,32) text $dccore.sw.dcxrect($gettok(%t,2-5,32)) nowrap noprefix noformat", body)
-        self.assertIn("-f +b default 9 Tahoma", body)
+        # bold, its flags from dccore.sw.fontflags: "+ab" without ClearType (#1382)
+        self.assertIn("dccore.dcx xdid dccore.set $gettok(%t,1,32) -f $dccore.sw.fontflags(b) default 9 Tahoma", body)
         show = alias("dccore.sw.showpage")
         self.assertIn("if ($2 == -v) { dccore.dcx xdid dccore.set $gettok($dccore.sw.m(dcxtitle),1,32) -t "
                       "$dccore.sw.untext($dccore.sw.m(p. $+ $1)) }", show)
@@ -353,7 +354,8 @@ class TheMockupLayout(unittest.TestCase):
         # the chosen tab stands on the body frame's top line: made after it
         self.assertLess(lines.index("dccore.sw.dcxring $gettok(%b,1,32) $dccore.sw.dcxrect($gettok(%b,2-5,32))"),
                         lines.index("dccore.sw.dcxtabs"))
-        self.assertIn("while (%i <= $dccore.sw.m(pages)) { dccore.sw.dcxframes %i | inc %i }", lines)
+        # a page's frames are made the first time it is shown, not here (#1382)
+        self.assertFalse([s for s in lines if "dccore.sw.dcxframes" in s], lines)
         line = alias("dccore.sw.dcxline")
         self.assertIn("-c $1 panel $2 $3 $4 $5", line)
         self.assertIn("-C +b $dccore.sw.s(line)", line)
@@ -496,7 +498,7 @@ class TheMockupLayout(unittest.TestCase):
         stats = alias("dccore.sw.dcxstats")
         self.assertIn("dccore.sw.dcxring $gettok(%f,1,32) $dccore.sw.dcxrect($gettok(%f,3-6,32))", stats)
         self.assertIn("-c %v text $dccore.sw.dcxrect($gettok(%r,7-10,32)) nowrap noprefix noformat endellipsis", stats)
-        self.assertIn("else { dccore.dcx xdid dccore.set %k -f + default 8 Lucida Console }", stats)
+        self.assertIn("else { dccore.dcx xdid dccore.set %k -f $dccore.sw.fontflags default 8 Lucida Console }", stats)
         side = statements(alias("dccore.sw.side"))
         self.assertIn("dccore.dcx xdid dccore.set %figures -s", side)
         self.assertIn("dccore.dcx xdid dccore.set %figures -h", side)
@@ -557,7 +559,8 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("dccore.dcx xdid dccore.set $calc($1 + 1) -R +p $dccore.sw.dcxpoly($4,$5,i,4)", pill)
         label = alias("dccore.sw.dcxlabel")
         self.assertIn("-c $1 text $2 $3 $4 $dccore.sw.dcxth nowrap center noprefix noformat", label)
-        self.assertIn("if ($5) { dccore.dcx xdid dccore.set $1 -f +b default 8 Tahoma }", label)
+        self.assertIn("if ($5) { dccore.dcx xdid dccore.set $1 -f $dccore.sw.fontflags(b) default 8 Tahoma }", label)
+        self.assertIn("else { dccore.sw.dcxaa $1 text }", label)
 
     def test_a_side_shows_its_own_and_hides_the_others(self):
         side = statements(alias("dccore.sw.side"))
@@ -688,9 +691,18 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("dccore.dcx xdid dccore.set %title -C +b $dccore.sw.s(face)", frames)
         self.assertIn("dccore.dcx xdid dccore.set %title -t $gettok(%f,10-,32)", frames)
         self.assertIn("dccore.dcx xdid dccore.set $+(%base,-,%title) -h", frames)
+        # made once a window (#1382): a DCX id made twice is an error
+        self.assertEqual(frames[:2], ["if ($dccore.sw.s(frmade. $+ $1)) { return }", "hadd dccore.sws frmade. $+ $1 1"])
+        # the native boxes stay hidden; the frames made as the page is first
+        # shown, and shown or hidden with it only once they are made
         show = statements(alias("dccore.sw.showpage"))
-        self.assertIn("if (%bx != $null) { did -h dccore.set %bx | dccore.dcx xdid dccore.set "
-                      "$dccore.sw.m(p. $+ $1 $+ .fr) $iif($2 == -v,-s,-h) }", show)
+        bx = show.index("if (%bx != $null) {")
+        self.assertEqual(show[bx + 1:bx + 5], [
+            "did -h dccore.set %bx",
+            "if ($2 == -v) { dccore.sw.dcxframes $1 }",
+            "if ($dccore.sw.s(frmade. $+ $1)) { dccore.dcx xdid dccore.set $dccore.sw.m(p. $+ $1 $+ .fr) "
+            "$iif($2 == -v,-s,-h) }",
+            "}"])
 
     def test_every_table_has_its_columns_and_a_listview_over_its_place(self):
         lists = [c for c in self.controls if c[0] == "list"]
@@ -717,8 +729,16 @@ class TheMockupLayout(unittest.TestCase):
         self.assertIn("dccore.dcx xdialog dccore.set -c %id listview %rect report singlesel fullrow showsel "
                       "$dccore.sw.m(lvx. $+ $1)", lines)
         self.assertIn("dccore.dcx xdid dccore.set %id -t %out", lines)
-        self.assertEqual(lines[-1], "dccore.dcx xdid dccore.set %id -h")
-        self.assertLess(lines.index("dccore.dcx xdid dccore.set %id -t %out"), len(lines) - 1)
+        # hidden last of all it is told: made when first needed (#1382), its
+        # font, state and colours come before it
+        told = [n for n, s in enumerate(lines) if "dccore.set %id " in s]
+        self.assertEqual(lines[told[-1]], "dccore.dcx xdid dccore.set %id -h")
+        self.assertLess(lines.index("dccore.dcx xdid dccore.set %id -t %out"), told[-1])
+        for given in ("dccore.sw.dcxaa %id listview", "if ($dccore.sw.s(lv.e) == -b) { dccore.dcx xdid dccore.set %id -b }",
+                      "if ($dccore.sw.s(dark)) { dccore.theme.dcxlist %id }"):
+            self.assertLess(lines.index(given), told[-1], given)
+        self.assertEqual(lines[-1], "if ($dccore.sw.s(inited)) && ($dccore.sw.s(noct)) "
+                                    "{ .timerdccoreThemeLv -m 1 250 dccore.sw.lv.dark }")
         # the last column takes what the others leave
         self.assertIn("if (%w == 0) { %w = %left }", lines)
 
@@ -731,8 +751,15 @@ class TheMockupLayout(unittest.TestCase):
             body = alias("dccore.sw.lv." + name)
             self.assertIn("$dccore.sw.s(dcx)", body, name)
             self.assertIn("$dccore.sw.lv.id($1)", body, name)
+        # the listview over it, made the first time it is needed (#1382)
         self.assertEqual(statements(alias("dccore.sw.lv.id")),
-                         ["return $iif($dccore.sw.s(dcx),$gettok($dccore.sw.m(lv. $+ $1),1,32),$1)"])
+                         ["if (!$dccore.sw.s(dcx)) { return $1 }",
+                          "dccore.sw.lv.need $1",
+                          "return $gettok($dccore.sw.m(lv. $+ $1),1,32)"])
+        self.assertEqual(statements(alias("dccore.sw.lv.need")),
+                         ["if (!$dccore.sw.s(dcx)) || ($dccore.sw.s(lvmade. $+ $1)) { return }",
+                          "hadd dccore.sws lvmade. $+ $1 1",
+                          "dccore.sw.lv.make $1"])
 
     def test_a_row_and_a_selection_say_the_same_to_either(self):
         add = alias("dccore.sw.lv.add")
@@ -747,14 +774,20 @@ class TheMockupLayout(unittest.TestCase):
     def test_the_listviews_follow_their_page_and_the_enable_state(self):
         show = alias("dccore.sw.showpage")
         self.assertIn("var %lvs = $dccore.sw.m(p. $+ $1 $+ .lv), %i = 1", show)
-        self.assertIn("did -h dccore.set $gettok(%lvs,%i,32)", show)
-        self.assertIn("dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) $iif($2 == -v,-s,-h)", show)
+        self.assertIn("var %lv = $gettok(%lvs,%i,32)", show)
+        self.assertIn("did -h dccore.set %lv", show)
+        # shown makes it (lv.id), hidden only once it was made (#1382)
+        self.assertIn("if ($2 == -v) || ($dccore.sw.s(lvmade. $+ %lv)) { dccore.dcx xdid dccore.set "
+                      "$dccore.sw.lv.id(%lv) $iif($2 == -v,-s,-h) }", show)
         # a disabled listview is drawn light grey whatever its colours, so in
         # the dark theme (#1368) the tables stay enabled: their rows do
         # nothing by themselves, the buttons that act on them are disabled
         enable = alias("dccore.sw.enable")
         self.assertIn("%e = $iif(($1) || ($dccore.theme.dialogsdark),-e,-b)", enable)
-        self.assertIn("dccore.dcx xdid dccore.set $dccore.sw.lv.id($gettok(%lvs,%i,32)) %e", enable)
+        # a table not made yet is left alone; lv.make gives it lv.e (#1382)
+        self.assertIn("hadd dccore.sws lv.e %e", enable)
+        self.assertIn("if ($dccore.sw.s(lvmade. $+ $gettok(%lvs,%i,32))) { dccore.dcx xdid dccore.set "
+                      "$dccore.sw.lv.id($gettok(%lvs,%i,32)) %e }", enable)
         # made after every page was hidden, before the first is shown
         init = statements(alias("dccore.sw.init"))
         self.assertLess(init.index("dccore.sw.enable 0"), init.index("dccore.sw.dcx"))
