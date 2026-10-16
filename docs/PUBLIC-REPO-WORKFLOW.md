@@ -2,8 +2,11 @@
 
 Two repositories, one project:
 
-- **`dccore-dev`** (this repo, private, full history) — where all development
-  happens. Every fix, every test, every PR.
+- **`dccore-dev`** (this repo, public, full history) — where all development
+  happens. Every fix, every test, every PR. Public means everything pushed
+  here - branches, commits, issues, PRs, comments - can be read by anyone the
+  moment it is pushed; see "Security fixes" for the one kind of work that
+  never starts here.
 - **`dccore`** (public, no shared history with this repo) — "the released,
   ready-to-run distribution." Only ever gets a fresh tree of the current
   state, extracted and pushed as a release. Nobody develops against it.
@@ -14,16 +17,18 @@ Neither repo's issue tracker or PR history means anything to the other —
 ## Handling an issue reported on `dccore`
 
 A user files an issue on the public repo. It stays there — do not transfer
-it. Transferring moves it into this private repo, and the reporter (who is
-not a collaborator here) loses all visibility into their own report.
+it. Transferring moves it into this repo, out of the tracker the reporter
+filed it in and is watching: it gets a new number, and the release repo's
+issue list loses it.
 
 1. **Triage on `dccore`.** Decide whether it needs a fix, same as any
    issue.
 2. **Do the actual work here, in `dccore-dev`,** on a normal branch/PR.
    Reference the public issue in the commit or PR description as
-   `Ninja-FSE/dccore#N` for traceability — it's just text across a private
-   repo boundary (GitHub won't cross-link it, since the target isn't
-   visible from here), but it tells the next reader why the change exists.
+   `Ninja-FSE/dccore#N` for traceability. Both repos are public, so GitHub
+   links it both ways: the public issue's timeline shows the PR here. That
+   is fine for an ordinary fix - and never done for a security fix, which
+   does not appear here at all until it ships ("Security fixes" below).
 3. **Ship it** through the normal extraction/release process (below).
 4. **Go back to the `dccore` issue** once the release is out: comment with
    what was done and a link to the relevant `docs/UPDATES.md` entry, then
@@ -242,14 +247,56 @@ that later sweeps caught by design, not luck. Specifically:
   trusting the rule is there.
 - Read the scrubbing/test code itself during a sweep, not just the
   production code and docs. The scrubber is shipped too.
+- **`dccore-dev` is public as well.** A name in a commit, an issue, a PR
+  or a comment here is published the moment it is pushed; the sweep of the
+  extracted tree at release time does not reach this repository's history,
+  and nothing takes it back out. Scrub before pushing, not before releasing.
 - **`README.md`'s document table deliberately does not list this file or
   `UPDATES-PUBLIC.md`.** README ships, and both of those are internal: one
   is export-ignored and the other is renamed to `UPDATES.md` at step 3, so
   listing either produced a link that resolves to nothing in the public
   tree — and the row naming the `dccore-dev` / `dccore` split pointed
-  strangers at a repository they cannot read. It lists `UPDATES.md`, which
+  readers of the release at the development repository, which is not where
+  they should look. It lists `UPDATES.md`, which
   is what the public tree ends up with. Do not add the rows back; the two
   of us do not need a table to find a file in `docs/`.
+
+## Security fixes
+
+A fix for a vulnerability never starts as a branch, an issue or a PR in
+`dccore-dev`. Both repos are public: a branch named for the hole, a test
+that reproduces it, or a commit message that explains it publishes the
+attack to everyone running a released bot before the fix reaches them.
+
+It goes through a **draft GitHub security advisory** on `dccore-dev` and the
+advisory's **temporary private fork** instead. Only the owner, the
+collaborators the advisory names and GitHub can see either.
+
+1. **Open a draft advisory** (`dccore-dev` → Security → Advisories → New
+   draft, or `POST repos/Ninja-FSE/dccore-dev/security-advisories`). Name the
+   other maintainer as a collaborator on it. A report that arrives through
+   private vulnerability reporting (`docs/SECURITY.md`) is an advisory
+   waiting for triage: accept it, and continue from step 2.
+2. **Create its temporary private fork** (the advisory's page, or
+   `POST .../security-advisories/{ghsa_id}/forks`) and push the fix branch
+   there - never to `origin`, not even for a moment. The first push can be
+   refused for about 20 seconds while the fork is set up; push again.
+3. **Review and test it there, as any PR.** Open the PR inside the fork; the
+   other maintainer reviews it there. CI does not run in an advisory's fork,
+   so run the full suite and `scripts/preflight.py` locally and say in the PR
+   what ran and what it gave, with the mutants that prove the old code fails
+   (`docs/CONVENTIONS.md`, rule 5).
+4. **Keep the words neutral until it ships.** The commit message and the
+   changelog fragment describe the behaviour ("copes better with ...", "no
+   longer ..."), not the attack; the advisory itself holds the details.
+5. **Ship it.** Merge the PR from the advisory page when the release that
+   carries it is ready, so the fix and the release go out together, then
+   publish the advisory. Only then may an issue, a release note or a comment
+   here describe what it was.
+
+Nothing in this repository is a safe place to park a security fix while it
+waits - a pushed branch is public, a draft PR is public, and a force-push
+does not unpublish what was already fetched.
 
 ## Access
 
