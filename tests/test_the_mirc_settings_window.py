@@ -939,9 +939,11 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
     def test_an_edit_is_sent_encoded_from_the_control(self):
         wire = statements(alias("dccore.sw.wire"))
         self.assertEqual(wire[-1], "return $dccore.sw.enc($did(dccore.set,%id).text)")
-        self.assertIn("if (%kind == choice) && (!$did(dccore.set,%id).sel) { return $mid($dccore.sw.s(v. $+ $1),2) }",
+        # the line selected through dccore.sw.cb.sel: a menu is filled when
+        # its page is first shown, its selection kept till then (#1382)
+        self.assertIn("if (%kind == choice) && (!$dccore.sw.cb.sel(%id)) { return $mid($dccore.sw.s(v. $+ $1),2) }",
                       wire)
-        self.assertIn("if (%kind == colour) && ($did(dccore.set,%id).sel == 18) { return $mid($dccore.sw.s(v. $+ $1),2) }",
+        self.assertIn("if (%kind == colour) && ($dccore.sw.cb.sel(%id) == 18) { return $mid($dccore.sw.s(v. $+ $1),2) }",
                       wire)
         for name in ("dccore.sw.apply", "dccore.sw.preview"):
             body = alias(name)
@@ -983,7 +985,15 @@ class TheReviewOfTheFirstVersion(unittest.TestCase):
                           "return $iif(%name != $null,$dccore.sw.untext(%name),$1)"])
 
     def test_an_as_set_colour_shows_all_of_itself(self):
-        self.assertIn("did -a dccore.set $1 As set: $2-", alias("dccore.sw.colourfill"))
+        # the whole value on the 18th line - added now, or when the menu is
+        # filled if its page was not shown yet (#1382)
+        fill = statements(alias("dccore.sw.colourfill"))
+        self.assertIn("%x = As set: $2-", fill)
+        self.assertIn("dccore.sw.cb.extra $1 %x", fill)
+        self.assertIn("if ($2- != $null) { did -a dccore.set $1 $2- }", alias("dccore.sw.cb.extra"))
+        self.assertIn("if ($dccore.sw.cb.waits($1)) { dccore.sw.keep cbx. $+ $1 $2- | return }",
+                      alias("dccore.sw.cb.extra"))
+        self.assertIn("if (%x != $null) { did -a dccore.set $1 %x }", alias("dccore.sw.cb.fill"))
 
     def test_a_new_start_forgets_the_old_waits(self):
         start = alias("dccore.sw.start")

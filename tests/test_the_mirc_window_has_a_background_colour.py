@@ -160,10 +160,13 @@ class TheDialogAndTheSave(unittest.TestCase):
         fill selects colour + 2 and the save stores line - 2, so a round trip
         through the window cannot move the colour."""
         source = script()
-        self.assertIn("did -c dccore.set $1 $calc($dccore.opt(bg) + 2)", alias_body(source, "dccore.fillbg"))
+        # through the helpers of a menu filled when its page is first shown
+        # (#1382): its recipe "bg", "none" then the colours
+        self.assertIn("dccore.sw.cb.select $1 $calc($dccore.opt(bg) + 2)", alias_body(source, "dccore.fillbg"))
+        self.assertIn("dccore.sw.cb.lazy $1 bg", alias_body(source, "dccore.fillbg"))
         self.assertIn("dccore.fillbg 1673", alias_body(source, "dccore.sw.opt.fill"))
-        self.assertIn("hadd dccore bg $calc($did(dccore.set,1673).sel - 2)", source)
-        self.assertIn("did -a dccore.set $1 none", source)
+        self.assertIn("hadd dccore bg $calc($dccore.sw.cb.sel(1673) - 2)", source)
+        self.assertIn("did -a dccore.set $1 none (mIRC's)", alias_body(source, "dccore.sw.cb.fill"))
 
     def test_it_defaults_to_no_picture(self):
         self.assertIn("dccore.default bg -1", script())
@@ -218,7 +221,7 @@ class ThePanelHeadingColour(unittest.TestCase):
     def test_the_menu_is_filled_and_saved_like_the_others(self):
         source = script()
         self.assertIn("dccore.fillcombo 1642 $dccore.opt(col.head)", source)
-        self.assertIn("hadd dccore col.head $calc($did(dccore.set,1642).sel - 1)", source)
+        self.assertIn("hadd dccore col.head $calc($dccore.sw.cb.sel(1642) - 1)", source)
 
     def test_it_sits_in_the_colours_frame_beside_its_label(self):
         source = script()

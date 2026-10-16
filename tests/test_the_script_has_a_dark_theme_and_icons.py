@@ -332,9 +332,16 @@ class TheDarkDialogs(unittest.TestCase):
         self.assertEqual(statements(alias_body("dccore.theme.sys"))[0],
                          "if ($dccore.theme.dialogsdark) { return $dccore.theme.rgb($1) }")
         self.assertIn("if (!$dccore.theme.dialogsdark) { return }", statements(alias_body("dccore.theme.dcxset")))
-        self.assertIn("if ($dccore.theme.dialogsdark) {", statements(alias_body("dccore.theme.dcxlists")))
+        # what is made after the window - a page's frames, the tables (#1382)
+        # - takes its dark colours from the same answer, asked once as the
+        # window is made
+        self.assertIn("hadd dccore.sws dark $iif($dccore.theme.dialogsdark,1,0)", statements(alias_body("dccore.sw.dcx")))
+        self.assertIn("if ($dccore.sw.s(dark)) { dccore.theme.dcxlist %id }", statements(alias_body("dccore.sw.lv.make")))
+        self.assertIn("if ($dccore.sw.s(dark)) { dccore.theme.dcxtext %title }",
+                      statements(alias_body("dccore.sw.dcxframes")))
         # nothing else of the control panel's DCX parts asks the theme alone
-        for name in ("dccore.theme.sys", "dccore.theme.dcxset", "dccore.theme.dcxlists", "dccore.sw.enable"):
+        for name in ("dccore.theme.sys", "dccore.theme.dcxset", "dccore.theme.dcxlists", "dccore.sw.enable",
+                     "dccore.sw.dcx", "dccore.sw.lv.make", "dccore.sw.dcxframes"):
             self.assertNotIn("$dccore.theme.dark)", alias_body(name), name)
 
     def test_a_colour_is_left_alone_unless_it_would_vanish(self):
