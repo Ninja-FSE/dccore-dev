@@ -1303,3 +1303,44 @@ class DCCoreTestCase(unittest.TestCase):
         self.set_config(FILE_DIRECTORY=tree.music, LOCAL_LIST_DIR=tree.lists,
                         TMP_ZIP_DIR=os.path.join(tree.root, "tmp_zips"))
         return tree
+
+
+def changelog_entry(number, public, opening=None):
+    """The changelog text issue `number` brought, wherever it is now (#1407's
+    release roll).
+
+    A PR writes its entry to docs/changes/<number>.md and, when users see the
+    change, <number>.public.md. A release roll (scripts/roll_changelog.py)
+    moves the text into docs/UPDATES.md and docs/UPDATES-PUBLIC.md and deletes
+    the files, so a test that read the file broke at every release. This reads
+    the file while it waits, and the rolled text after:
+
+      * internal (public=False): the "### ... (#<number>)" section of
+        docs/UPDATES.md, up to the next heading;
+      * public: the bullet of docs/UPDATES-PUBLIC.md that starts with
+        `opening`. A public bullet carries no issue number, so the caller
+        names its first words.
+
+    Raises AssertionError when the entry is in neither place.
+    """
+    import io as _io
+    name = f"{number}.public.md" if public else f"{number}.md"
+    fragment = os.path.join(REPO_ROOT, "docs", "changes", name)
+    if os.path.exists(fragment):
+        with _io.open(fragment, encoding="utf-8") as handle:
+            return handle.read()
+    changelog = "UPDATES-PUBLIC.md" if public else "UPDATES.md"
+    with _io.open(os.path.join(REPO_ROOT, "docs", changelog), encoding="utf-8") as handle:
+        text = handle.read()
+    if public:
+        if not opening:
+            raise AssertionError(f"#{number}'s public entry has been rolled: name its opening words")
+        for line in text.splitlines():
+            if line.startswith(opening):
+                return line + "\n"
+        raise AssertionError(f"#{number}'s public entry is neither in docs/changes/ nor in {changelog}")
+    for match in re.finditer(r"^### .*\(#%d\b[^\n]*$" % number, text, re.M):
+        rest = text[match.end():]
+        following = re.search(r"^#{2,3} ", rest, re.M)
+        return text[match.start():match.end() + (following.start() if following else len(rest))]
+    raise AssertionError(f"#{number}'s entry is neither in docs/changes/ nor in {changelog}")

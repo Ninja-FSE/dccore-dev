@@ -1576,8 +1576,9 @@ class WhereThingsLive(unittest.TestCase):
         unread = unread[:unread.index("\n\n")]
         for phrase in ("in the background", "*Flash on a new line*"):
             self.assertIn(phrase, unread)
-        with io.open(os.path.join(REPO_ROOT, "docs", "changes", "1393.public.md"), encoding="utf-8") as handle:
-            public = handle.read()
+        # The fragment until a release rolls it, the changelog's bullet after.
+        public = support.changelog_entry(1393, public=True,
+                                         opening="- **New (mIRC): DCCore Chat keeps a history")
         self.assertTrue(public.startswith("- **"))
         for phrase in ("`DCCore-Chat\\`", "on by default", "private conversations included", "100 days and 100 MB",
                        "*Keep a history file*", "*Flash on a new line*", "/reload -rs dccore.mrc"):
