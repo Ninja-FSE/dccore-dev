@@ -1577,7 +1577,7 @@ class WhereThingsLive(unittest.TestCase):
         for phrase in ("in the background", "*Flash on a new line*"):
             self.assertIn(phrase, unread)
         # The fragment until a release rolls it, the changelog's bullet after.
-        public = support.changelog_entry(1393, public=True,
+        public = support.changelog_entry(self, 1393, public=True,
                                          opening="- **New (mIRC): DCCore Chat keeps a history")
         self.assertTrue(public.startswith("- **"))
         for phrase in ("`DCCore-Chat\\`", "on by default", "private conversations included", "100 days and 100 MB",

@@ -997,9 +997,9 @@ class TheDocs(unittest.TestCase):
         two changelogs after (support.changelog_entry)."""
         fragments, problems = roll_changelog.load(REPO_ROOT)
         self.assertEqual([p for p in problems if p.startswith("1396")], [])
-        internal = support.changelog_entry(1396, public=False)
+        internal = support.changelog_entry(self, 1396, public=False)
         public = support.changelog_entry(
-            1396, public=True, opening="- **Fixed (mIRC): the control panel's start page said")
+            self, 1396, public=True, opening="- **Fixed (mIRC): the control panel's start page said")
         self.assertTrue(internal.startswith("### "))
         self.assertIn("(#1396)", internal.split("\n", 1)[0])
         self.assertTrue(public.startswith("- **"))

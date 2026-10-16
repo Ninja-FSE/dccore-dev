@@ -26,6 +26,15 @@ try:
 finally:
     sys.path.remove(os.path.join(REPO_ROOT, "scripts"))
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from exported_tree import _this_is_an_export  # noqa: E402
+
+# An extracted public tree has no docs/changes/ (export-ignored) and its one
+# changelog is docs/UPDATES.md, the public one renamed (docs/PUBLIC-REPO-WORKFLOW.md,
+# step 3): there is nothing there to roll or check (#1409).
+EXPORT_SKIP = ("an extracted public tree has no docs/changes/ and no "
+               "docs/UPDATES-PUBLIC.md to roll; checked in the development repository")
+
 
 def read(path):
     with io.open(path, encoding="utf-8") as handle:
@@ -46,6 +55,8 @@ class TheFragmentsInThisTree(unittest.TestCase):
     def test_no_changelog_keeps_an_unreleased_section(self):
         """Between releases the folder is "Unreleased". An entry written into
         the changelog again would conflict with every other open PR."""
+        if _this_is_an_export(self):
+            self.skipTest(EXPORT_SKIP)
         self.assertEqual(roll_changelog.unreleased_problems(REPO_ROOT), [])
 
     def test_the_folder_does_not_ship(self):
@@ -167,6 +178,8 @@ class TheRoll(unittest.TestCase):
 class TheCommandLine(unittest.TestCase):
 
     def test_check_on_this_tree_says_all_is_well(self):
+        if _this_is_an_export(self):
+            self.skipTest(EXPORT_SKIP)
         result = subprocess.run([sys.executable, os.path.join(REPO_ROOT, "scripts", "roll_changelog.py"), "--check"],
                                 capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

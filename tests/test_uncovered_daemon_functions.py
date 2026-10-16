@@ -33,6 +33,7 @@ import list as list_mod  # noqa: E402
 import runtime  # noqa: E402
 import update_list  # noqa: E402
 
+from tests.exported_tree import _this_is_an_export  # noqa: E402
 from tests.support import DCCoreTestCase, RecordingSocket, temp_dir  # noqa: E402
 
 
@@ -872,6 +873,12 @@ class CoverageScriptCase(unittest.TestCase):
     def setUp(self):
         import threading
 
+        # scripts/function_coverage.py is dev-only tooling, stripped at
+        # extraction (docs/PUBLIC-REPO-WORKFLOW.md, step 2): there is nothing
+        # to test in the public tree (#1409).
+        if _this_is_an_export(self):
+            self.skipTest("scripts/function_coverage.py is stripped from an extracted "
+                          "public tree; it is tested in the development repository")
         self.fc = load_function_coverage()
         self.root = temp_dir(self, prefix="dccore-coverage-")
         self.addCleanup(setattr, sys, "stderr", sys.stderr)
