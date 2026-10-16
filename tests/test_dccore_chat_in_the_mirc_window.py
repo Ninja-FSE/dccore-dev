@@ -128,7 +128,15 @@ class NothingAnswers(unittest.TestCase):
 
     REACHED = ["on ^*:TEXT:*:#:", "alias dccore.chat.feed", "alias dccore.chat.channels",
                "alias dccore.chat.listens", "alias dccore.chat.show", "alias dccore.chat.window",
-               "alias dccore.chat.sys", "alias dccore.chat.title"]
+               "alias dccore.chat.sys", "alias dccore.chat.title",
+               # The history and the unread count (#1393), reached from the
+               # feed, the window and the window's events.
+               "alias dccore.chat.hist.floor {", "alias dccore.chat.hist.add {",
+               "alias dccore.chat.hist.mkdir {", "alias dccore.chat.hist.trim {",
+               "alias dccore.chat.hist.replay {", "alias dccore.chat.hist.when {",
+               "alias dccore.chat.unread.add {", "alias dccore.chat.unread.clear {",
+               "alias dccore.chat.cut {", "alias dccore.chat.hist.clock {", "alias dccore.chat.hist.buf {",
+               "on *:ACTIVE:*:", "on *:APPACTIVE:", "on *:CLOSE:@DCCore-Chat:"]
 
     def test_no_send_anywhere_it_reaches(self):
         text = script()
