@@ -9,10 +9,6 @@
  *                                       and the title bar are touched.
  *   MenuIcons   <icon file>|off         icons in front of the script's own menu
  *                                       items, nobody else's: see below
- *   ThemeMenus  1|0                     dark or default popup menus for the whole
- *                                       mIRC process (undocumented uxtheme calls,
- *                                       Windows 10 1809 and later). The script
- *                                       does not use it: it changes every menu.
  *   Version                             "dccore_ui <version>"
  *
  * Every call returns its answer as the $dll() value ("OK" or "ERR ...").
@@ -34,9 +30,7 @@
  * it: no owner-draw, no other colours. An item another program draws itself
  * (MFT_OWNERDRAW) is skipped.
  *
- * Build (32-bit, for a 32-bit mIRC):
- *   i686-w64-mingw32-gcc -O2 -Wall -shared -o dccore_ui.dll dccore_ui.c \
- *       -Wl,--kill-at -static-libgcc -lcomctl32 -luxtheme -ldwmapi -lgdi32 -luser32
+ * Build: see ../README.md (32-bit, for a 32-bit mIRC).
  */
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_IE 0x0600
@@ -44,11 +38,10 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <vssym32.h>
-#include <dwmapi.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define DCCORE_UI_VERSION "dccore_ui 1.5"
+#define DCCORE_UI_VERSION "dccore_ui 1.6"
 
 #ifndef LOAD_LIBRARY_AS_IMAGE_RESOURCE
 #define LOAD_LIBRARY_AS_IMAGE_RESOURCE 0x00000020
@@ -96,40 +89,58 @@ static int track(HWND h, int on) {
 
 static int is_dcx(HWND h) { return h && GetPropW(h, L"dcx_cthis") != NULL; }
 
-/* ---------- undocumented uxtheme dark-mode entry points (Win10 1809+) ---------- */
-typedef int  (WINAPI *fnSetPreferredAppMode)(int);
-typedef BOOL (WINAPI *fnAllowDarkModeForApp)(BOOL);
-typedef void (WINAPI *fnFlushMenuThemes)(void);
-typedef LONG (WINAPI *fnRtlGetVersion)(OSVERSIONINFOW *);
-
-static DWORD os_build(void) {
-    static DWORD b;
-    if (!b) {
-        HMODULE nt = GetModuleHandleW(L"ntdll.dll");
-        fnRtlGetVersion f = nt ? (fnRtlGetVersion)GetProcAddress(nt, "RtlGetVersion") : NULL;
-        OSVERSIONINFOW vi; memset(&vi, 0, sizeof vi); vi.dwOSVersionInfoSize = sizeof vi;
-        b = (f && f(&vi) == 0) ? vi.dwBuildNumber : 1;
-    }
-    return b;
+static int any_tracked(void) {
+    int i;
+    for (i = 0; i < MAX_DLGS; i++) if (g_dlgs[i]) return 1;
+    return 0;
 }
 
-static int theme_menus(int dark) {
-    HMODULE ux;
-    if (os_build() < 17763) return 0;
-    ux = LoadLibraryW(L"uxtheme.dll");
-    if (!ux) return 0;
-    if (os_build() >= 18362) {
-        fnSetPreferredAppMode f = (fnSetPreferredAppMode)GetProcAddress(ux, MAKEINTRESOURCEA(135));
-        if (f) f(dark ? 2 /* ForceDark */ : 0 /* Default */);
-    } else {
-        fnAllowDarkModeForApp f = (fnAllowDarkModeForApp)GetProcAddress(ux, MAKEINTRESOURCEA(135));
-        if (f) f(dark ? TRUE : FALSE);
+/* the two brushes: made on demand by the first dark dialog, deleted when
+   the last one goes light and at unload */
+static void free_brushes(void) {
+    if (g_brBg)   { DeleteObject(g_brBg);   g_brBg = NULL; }
+    if (g_brEdit) { DeleteObject(g_brEdit); g_brEdit = NULL; }
+}
+
+/* ---------- the module stays mapped ----------
+ * A dialog event (an sclick, say) runs inside DlgProc or CtlProc; a /dll -u
+ * from there would free the module under them, and the return would land in
+ * memory that is gone. So the first ApplyTheme or MenuIcons pins the module:
+ * never unmapped for the life of the process. UnloadDll still takes the hook
+ * and every subclass off, as before.
+ */
+#ifndef GET_MODULE_HANDLE_EX_FLAG_PIN
+#define GET_MODULE_HANDLE_EX_FLAG_PIN 0x00000001
+#endif
+#ifndef GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+#define GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS 0x00000004
+#endif
+
+static void pin_module(void) {
+    static int pinned;
+    HMODULE me;
+    if (pinned) return;
+    pinned = 1;
+    /* any address inside this module names it: g_dlgs is one */
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)g_dlgs, &me);
+}
+
+/* ---------- the title bar: DWM's, where there is one ----------
+ * dwmapi.dll is looked up, not imported: a Windows without it loads this
+ * DLL all the same, and its title bars simply stay light. One LoadLibraryW,
+ * kept for the life of the process.
+ */
+typedef HRESULT (WINAPI *fnDwmSetWindowAttribute)(HWND hwnd, DWORD dwAttribute, LPCVOID pvAttribute, DWORD cbAttribute);
+
+static fnDwmSetWindowAttribute dwm_set_attribute(void) {
+    static fnDwmSetWindowAttribute f;
+    static int looked;
+    if (!looked) {
+        HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+        f = dwm ? (fnDwmSetWindowAttribute)GetProcAddress(dwm, "DwmSetWindowAttribute") : NULL;
+        looked = 1;
     }
-    {
-        fnFlushMenuThemes fl = (fnFlushMenuThemes)GetProcAddress(ux, MAKEINTRESOURCEA(136));
-        if (fl) fl();
-    }
-    return 1;
+    return f;
 }
 
 /* ---------- the dialog's subclass: dark backgrounds and light text ---------- */
@@ -212,7 +223,8 @@ static int hide_focus(HWND h)  { return (SendMessageW(h, WM_QUERYUISTATE, 0, 0) 
  * mIRC's controls share one twin per font (kept until the DLL unloads).
  * A DCX control gets a twin of its own: DCX deletes the font a control has
  * when it changes or ends it, so its twin is DCX's to delete then - or ours,
- * when the control gets its own font back.
+ * when the control gets its own font back. When DCX changes it, DCX deletes
+ * the font the control had before the twin as well: FontProc only lets go.
  */
 #define MAX_FONTS 32
 static struct { LOGFONTW lf; HFONT f; } g_fonts[MAX_FONTS];
@@ -249,6 +261,17 @@ static void untwin_font(HWND c, BOOL redraw);
 
 static LRESULT CALLBACK FontProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR ref) {
     if (m == WM_NCDESTROY) untwin_font(h, FALSE);   /* its own font back before it ends */
+    else if (m == WM_SETFONT && GetPropW(h, P_OWN) && (HANDLE)w != GetPropW(h, P_TWIN)) {
+        /* DCX replaces its control's font (xdid -f). Its setControlFont()
+           deletes both fonts itself: the one the control has (the twin) and
+           the one it keeps (the font from before the twin). Neither is ours
+           to delete again, so the control is only let go of: untwin_font then
+           finds no twin and touches nothing. A WM_SETFONT of the twin itself
+           (twin_font's own), or on a control whose twin is a shared plain
+           font (no P_OWN), changes nothing. */
+        RemovePropW(h, P_FONT); RemovePropW(h, P_TWIN); RemovePropW(h, P_OWN);
+        RemoveWindowSubclass(h, FontProc, FONT_ID);
+    }
     return DefSubclassProc(h, m, w, l);
 }
 
@@ -327,14 +350,22 @@ static void shape_big(HDC dc, int W, int H, const SHAPE *s) {
     }
 }
 
+/* the drawn size is capped: at SS times MAX_SHAPE_W x MAX_SHAPE_H the big
+   DIB is 16 MB. A larger control gets its shape drawn at the cap's size, at
+   its top left; none in the script's dialogs comes near it. */
+#define MAX_SHAPE_W 1024
+#define MAX_SHAPE_H 256
 static void draw_shape(HDC hdc, const RECT *at, const SHAPE *s) {
-    int w = at->right - at->left, h = at->bottom - at->top, W = w * SS, H = h * SS, x, y;
+    int w = at->right - at->left, h = at->bottom - at->top, W, H, x, y;
     BITMAPINFO bi;
     DWORD *big = NULL, *small = NULL;
     HBITMAP hb, hs;
     HDC mb, ms;
     HGDIOBJ ob, os;
-    if (w <= 0 || h <= 0 || w > 2000 || h > 400) return;
+    if (w <= 0 || h <= 0) return;
+    if (w > MAX_SHAPE_W) w = MAX_SHAPE_W;
+    if (h > MAX_SHAPE_H) h = MAX_SHAPE_H;
+    W = w * SS; H = h * SS;
     memset(&bi, 0, sizeof bi);
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bi.bmiHeader.biPlanes = 1;
@@ -724,7 +755,15 @@ static BOOL CALLBACK EnumChild(HWND c, LPARAM lp) {
         return TRUE;
     }
     st = GetWindowLongA(c, GWL_STYLE);
-    if (dark) twin_font(c, 0); else untwin_font(c, TRUE);
+    if (dark) twin_font(c, 0);
+    else {
+        /* the subclass off first, whichever branch below put it there and
+           whether the control's class and style still match that branch:
+           one left behind would outlive the theme, and the unload could not
+           find it once the dialog is untracked */
+        RemoveWindowSubclass(c, CtlProc, CHILD_ID);
+        untwin_font(c, TRUE);
+    }
     if (!lstrcmpiA(cls, "Button")) {
         DWORD t = st & BS_TYPEMASK;
         int pic = (st & (BS_ICON | BS_BITMAP)) != 0;
@@ -781,21 +820,33 @@ static BOOL CALLBACK UnpaintChild(HWND c, LPARAM lp) {
     return TRUE;
 }
 
-static void apply(HWND dlg, int dark, DWORD flags) {
-    BOOL v;
-    if (dark && !track(dlg, 1)) return;
-    v = dark ? TRUE : FALSE;
-    if (dark && !g_brBg) { g_brBg = CreateSolidBrush(CLR_BG); g_brEdit = CreateSolidBrush(CLR_EDIT); }
+/* NULL when done; otherwise the answer for the script, and the dialog was
+   left as it was */
+static const char *apply(HWND dlg, int dark, DWORD flags) {
+    BOOL v = dark ? TRUE : FALSE;
+    fnDwmSetWindowAttribute dwm = dwm_set_attribute();
+    if (dark) {
+        if (!track(dlg, 1)) return "ERR no room for another dark dialog";
+        if (!g_brBg)   g_brBg   = CreateSolidBrush(CLR_BG);
+        if (!g_brEdit) g_brEdit = CreateSolidBrush(CLR_EDIT);
+        if (!SetWindowSubclass(dlg, DlgProc, SUBCLASS_ID, (DWORD_PTR)flags)) {
+            track(dlg, 0);
+            if (!any_tracked()) free_brushes();
+            return "ERR cannot subclass the dialog";
+        }
+    } else {
+        RemoveWindowSubclass(dlg, DlgProc, SUBCLASS_ID);
+        track(dlg, 0);
+        if (!any_tracked()) free_brushes();   /* the last dark dialog */
+    }
 
-    if (FAILED(DwmSetWindowAttribute(dlg, DWMWA_USE_IMMERSIVE_DARK_MODE, &v, sizeof v)))
-        DwmSetWindowAttribute(dlg, 19, &v, sizeof v); /* Windows 10 before 2004 */
-
-    if (dark) SetWindowSubclass(dlg, DlgProc, SUBCLASS_ID, (DWORD_PTR)flags);
-    else      { RemoveWindowSubclass(dlg, DlgProc, SUBCLASS_ID); track(dlg, 0); }
+    if (dwm && FAILED(dwm(dlg, DWMWA_USE_IMMERSIVE_DARK_MODE, &v, sizeof v)))
+        dwm(dlg, 19, &v, sizeof v); /* Windows 10 before 2004 */
 
     EnumChildWindows(dlg, EnumChild, (LPARAM)dark);
     SetWindowPos(dlg, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     RedrawWindow(dlg, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+    return NULL;
 }
 
 /* ---------- menu icons ---------- */
@@ -899,6 +950,7 @@ static void mark_menu(HMENU hm) {
         MENUITEMINFOW mii;
         const WCHAR *rest;
         int num;
+        buf[0] = 0;   /* not the previous item's text, should this one have none */
         memset(&mii, 0, sizeof mii);
         mii.cbSize = sizeof mii;
         mii.fMask = MIIM_FTYPE | MIIM_STRING;
@@ -951,6 +1003,7 @@ __declspec(dllexport) int __stdcall UnloadDll(int mTimeout) {
         }
     menus_off();
     free_fonts();
+    free_brushes();
     return 1;
 }
 
@@ -962,10 +1015,15 @@ MIRC_PROC(ApplyTheme) {
     unsigned long hv = strtoul(data, &p, 10);
     long mode = strtol(p, &p, 10);
     DWORD flags = 0;
+    HWND dlg = (HWND)(ULONG_PTR)hv;
+    const char *err;
+    pin_module();
     while (*p) { if (*p == 'x' || *p == 'X') flags |= F_DCX; p++; }
-    if (!hv || !IsWindow((HWND)(ULONG_PTR)hv)) { lstrcpyA(data, "ERR bad hwnd"); return 3; }
-    apply((HWND)(ULONG_PTR)hv, mode ? 1 : 0, flags);
-    lstrcpyA(data, "OK");
+    if (!hv || !IsWindow(dlg)) { lstrcpyA(data, "ERR bad hwnd"); return 3; }
+    /* a subclass runs on the window's thread: another thread's window is refused */
+    if (GetWindowThreadProcessId(dlg, NULL) != GetCurrentThreadId()) { lstrcpyA(data, "ERR not this thread's window"); return 3; }
+    err = apply(dlg, mode ? 1 : 0, flags);
+    lstrcpyA(data, err ? err : "OK");
     return 3;
 }
 
@@ -973,8 +1031,13 @@ MIRC_PROC(ApplyTheme) {
 MIRC_PROC(MenuIcons) {
     WCHAR path[MAX_PATH * 2];
     HMODULE m;
+    pin_module();
     if (!lstrcmpiA(data, "off")) { menus_off(); lstrcpyA(data, "OK"); return 3; }
-    if (!MultiByteToWideChar(CP_ACP, 0, data, -1, path, MAX_PATH * 2)) { lstrcpyA(data, "ERR bad path"); return 3; }
+    /* mIRC hands a non-Unicode DLL UTF-8, so a script folder with letters
+       outside the ANSI code page reads right that way; a path that is not
+       valid UTF-8 is read in the ANSI code page instead */
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, data, -1, path, MAX_PATH * 2) &&
+        !MultiByteToWideChar(CP_ACP, 0, data, -1, path, MAX_PATH * 2)) { lstrcpyA(data, "ERR bad path"); return 3; }
     m = LoadLibraryExW(path, NULL, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
     if (!m) { lstrcpyA(data, "ERR cannot read the icon file"); return 3; }
     free_bitmaps();
@@ -983,12 +1046,6 @@ MIRC_PROC(MenuIcons) {
     if (!g_hook) g_hook = SetWindowsHookExW(WH_CALLWNDPROCRET, RetProc, g_hinst, GetCurrentThreadId());
     if (!g_hook) { FreeLibrary(g_icons); g_icons = NULL; lstrcpyA(data, "ERR no menu hook"); return 3; }
     lstrcpyA(data, "OK");
-    return 3;
-}
-
-/* data = "1" or "0" */
-MIRC_PROC(ThemeMenus) {
-    lstrcpyA(data, theme_menus(atoi(data) ? 1 : 0) ? "OK" : "ERR needs Windows 10 1809 or later");
     return 3;
 }
 
