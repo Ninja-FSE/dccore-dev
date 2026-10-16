@@ -108,7 +108,7 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 
 ### The website
 
-- **A one-page site** (#1309, was #875): `site/index.html` says what DCCore is, how people use it and how to start, and links to the public repository, the releases and the changelog. It makes no third-party requests. `.github/workflows/pages.yml` deploys `site/` alone from the public repository; the job is skipped here. It starts on the github.io address; a custom domain is a Pages setting plus one DNS record. Real screenshots from a test install can be added later.
+- **The project page** (#1309, was #875), at `ninja-fse.github.io/dccore`: five pages - an overview, the channel commands and the admin console, the web dashboard, the mIRC script and getting started - with pictures of the channel, the dashboard and the mIRC window drawn in HTML and CSS. No image files, scripts or third-party requests. Its source is `site/`, which stays out of the public tree; it is published by hand to the public repository's orphan `gh-pages` branch, so a clone of that repository holds no website. Features newer than the current release are marked **Next release**.
 
 ### Quality
 

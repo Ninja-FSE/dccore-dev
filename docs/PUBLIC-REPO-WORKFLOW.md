@@ -226,14 +226,37 @@ the omissions surface, because it is the last point at which they are cheap.
    were invisible from here — every one of them a test whose assumptions
    only held on this side of the extraction. `dccore-dev`'s own green CI
    does not prove the tree steps 1-3 produce is green; only running it does.
-5. **The website** (`site/`, #1309) publishes itself. `.github/workflows/pages.yml`
-   deploys `site/` on a push to `dccore`'s `main` that touches it; its deploy
-   job is guarded to `Ninja-FSE/dccore`, so here it is skipped. Once, before
-   the first release that carries it: in `dccore`'s Settings > Pages set
-   **Source** to **GitHub Actions**. The site is then at
-   `ninja-fse.github.io/dccore`. A custom domain is that same page's
-   **Custom domain** box plus one DNS record (a `CNAME` for a subdomain,
-   pointing at `ninja-fse.github.io`); no file in the tree changes.
+5. **The website** (`site/`, #1309): the project page at
+   `https://ninja-fse.github.io/dccore/`. GitHub Pages serves it from the
+   orphan **`gh-pages`** branch of `dccore`, "Deploy from a branch", root.
+   That branch is the one exception to "nothing but release trees reaches
+   `dccore`": it shares no history with `main`, so a clone of `dccore`
+   holds no website, and `site/` itself is export-ignored here. Publish it
+   when a release changes what the page says, and only with the operator's
+   go-ahead, like any push to `dccore`:
+
+   - In `site/`, take the **Next release** mark off every feature the
+     release carries, and check the pages against the release's README,
+     INSTALL and ADMIN-CONSOLE. Merge that here first, as a normal PR.
+   - Copy `site/` onto `gh-pages` and push:
+
+     ```bash
+     git clone --branch gh-pages --single-branch https://github.com/Ninja-FSE/dccore.git /tmp/dccore-pages
+     cd /tmp/dccore-pages
+     git rm -rq . && cp -a <dccore-dev>/site/. . && git add -A
+     git commit -m "The project page for vX.Y.Z"
+     git push origin gh-pages
+     ```
+
+   - The push starts a Pages build (a minute or so); `gh api
+     repos/Ninja-FSE/dccore/pages/builds/latest` says when it is `built`.
+
+   The pages are scanned by the identifier sweep like any other file, but
+   only here: run the suite before copying. A custom domain is the
+   **Custom domain** box in `dccore`'s Settings > Pages plus one DNS record
+   (a `CNAME` for a subdomain, pointing at `ninja-fse.github.io`); that
+   setting writes a `CNAME` file to `gh-pages`, which the `git rm` above
+   removes: put it back with `git checkout HEAD -- CNAME` before the commit.
 
 ## Identity scrubbing — what actually failed before
 
