@@ -1208,18 +1208,28 @@ title and its first lines say so.
   and it is **on by default** - also when you only update the script. Every
   chat line the window shows, **private conversations included**, is written
   as plain text to mIRC's *log* folder (`//echo -a $logdir` shows where; it
-  can be outside the mIRC folder), in `DCCore-Chat\`: one file per channel
-  (`#channel.log`), one per private conversation (`@nick.log`),
-  `every-channel.log` for your own lines said in several channels at once,
-  and `recent.txt`, the last few hundred lines of them all. Only
-  `recent.txt` is cut back; the `.log` files are never trimmed and keep
-  growing until you delete them. When the window opens it says where the
-  history is kept, and shows the last 200 lines again in grey, from the
-  channels you listen on, your private conversations and your own lines,
-  so closing it or restarting mIRC loses nothing. Untick right-click →
-  *Keep a history file* to stop writing and replaying (the files already
-  written are left alone); *Open the history folder* opens it. Anyone who
-  can read your log folder can read these files.
+  can be outside the mIRC folder), in `DCCore-Chat\`: a folder per channel
+  (`#channel\`), per private conversation (`@nick\`) and `every-channel\`
+  for your own lines said in several channels at once, each with a file per
+  month (`2026-10.log`), and `recent.txt`, the last few hundred lines of them
+  all. When the window opens it says where the history is kept, and shows
+  the last 200 lines again in grey, from the channels you listen on, your
+  private conversations and your own lines, so closing it or restarting
+  mIRC loses nothing. Untick right-click → *Keep a history file* to stop
+  writing and replaying; *Open the history folder* opens it. Anyone who can
+  read your log folder can read these files.
+- **How long and how much (#1401):** the bot's settings
+  `CHAT_HISTORY_DAYS` (**100** days out of the box) and
+  `CHAT_HISTORY_MAX_MB` (**100** MB for the whole history folder), on the
+  dashboard under **Settings → Private messages** and in the control
+  panel's **mIRC** side; 0 is no limit. The bot sends them to the script
+  (`DCCORE CHATHIST`), which keeps the last ones in `dccore.ini`. Whole
+  months go: every month that ended more than the days ago, then, while the
+  folder is over the size, the oldest months - never the month running.
+  This happens when the chat window opens (once a day at most) and when
+  the bot sends new limits, also to the files of a history you turned off.
+  A bot from before these settings sends no limits, and then nothing is
+  deleted.
 - **Unread:** a line from another bot that arrives while the window is not
   the one you are looking at - or while mIRC is in the background - is
   counted in the window's title (*3 unread*) until you are back in it. The

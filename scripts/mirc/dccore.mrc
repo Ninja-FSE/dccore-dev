@@ -764,6 +764,9 @@ alias dccore.structured {
   ; DCCore Chat (#371): a line said in one of the bot's channels, and the
   ; channels it can chat in (after HELLO, and on `chat` with nothing after it).
   if (%type == CHAT) { dccore.chat.feed $2- | return }
+  ; <days> <max_mb>: how long and how much chat history is kept (#1401),
+  ; the bot's settings; after HELLO and when they change
+  if (%type == CHATHIST) { dccore.chat.hist.limits $2- | return }
   if (%type == CHANNELS) { dccore.chat.channels $2- | return }
   if (%type == PEERS) { dccore.chat.peerline $2- | return }
   if (%type == SLOT) { hadd dccore.live slot. $+ $dccore.st(nslots) $2- | hinc dccore.live nslots | dccore.panel.soon | return }
@@ -6966,11 +6969,12 @@ alias dccore.sw.data {
 ;  window draws - private conversations included; not the bot's own
 ;  remarks, not the script's grey lines - goes into mIRC's LOG folder
 ;  ($logdir, which can be outside the mIRC folder), in DCCore-Chat\:
-;    #channel.log        one per channel, "@nick.log" for a private
-;                        conversation, every-channel.log for your own line
-;                        said with `chat *` in several channels at once -
-;                        "yyyy-mm-dd HH:nn:ss channel nick text", plain
-;                        text, and never cut back: they only grow
+;    #channel\YYYY-MM.log  a folder per channel, a file per month, "@nick\"
+;                        for a private conversation, every-channel\ for your
+;                        own line said with `chat *` in several channels at
+;                        once - "yyyy-mm-dd HH:nn:ss channel nick text",
+;                        plain text; whole months are deleted by the
+;                        history's limits (#1401, below)
 ;    recent.txt          the last lines of all of them together, as
 ;                        "<id> <channel> <nick> own|other <text>", cut back
 ;                        to the last 200 once it passes 400
@@ -6983,8 +6987,18 @@ alias dccore.sw.data {
 ;  clock ran ahead, or from before the PC's clock was put back, would
 ;  otherwise hold chat.last above every line to come, and the window would
 ;  draw and keep nothing more. Such a line is still drawn. Turning the
-;  history off stops the writing and the replay; the files are left as
-;  they are.
+;  history off stops the writing and the replay; the files stay, until the
+;  limits remove them.
+;
+;  Limits (#1401). How long and how much is kept are the BOT's settings,
+;  CHAT_HISTORY_DAYS and CHAT_HISTORY_MAX_MB - on its dashboard under
+;  Settings -> Private messages, and on the control panel's mIRC side -
+;  sent as DCCORE CHATHIST <days> <max_mb> after HELLO and when they change.
+;  The last values are kept in dccore.ini, so they hold before the next
+;  connection too; until a bot has sent them nothing is deleted, and 0 is
+;  no limit. They delete whole month files: every month that ended more
+;  than the days ago, then, while the folder is over the size, the oldest
+;  months - never the month running. recent.txt is not touched.
 ;
 ;  Unread (#1393). A line from another bot drawn while the window is not
 ;  the active one - or while mIRC itself is in the background - counts in
@@ -7024,6 +7038,7 @@ alias dccore.chat.window {
   dccore.chat.sys What you type is said by $iif($dccore.bot,$dccore.bot,your bot) in the channels where it has seen other DCCore bots. Right-click to send to one channel instead, and to choose the ones to listen on.
   dccore.chat.sys Double-click a bot in the list on the right (or right-click it) to message it privately instead.
   dccore.chat.hist.replay
+  dccore.chat.hist.daily
   dccore.chat.peers.redraw
 }
 alias dccore.chat.title {
@@ -7279,16 +7294,20 @@ menu @DCCore-Chat {
 ; ---- History and unread (#1393) ---------------------------------------
 
 ; The folder, in mIRC's own log folder ($logdir, which ends with "\"), and
-; the files in it. A channel's file is its name made safe for a file name
-; ($mkfn); a private conversation's is its "@<nick>" channel the same way -
-; the "@" also keeps a nick such as CON or NUL from naming a Windows device;
-; and your own line said in several channels at once ("-") goes to
-; every-channel.log. Paths are quoted ($qt) wherever a command takes one.
+; the files in it. A line's file (#1401): $1 its channel as the bot sent it,
+; $2 its id - a folder per channel, a file per month ("2026-10.log"), so the
+; history's limits delete whole months (dccore.chat.hist.prune) instead of
+; rewriting a file that only grows. A channel's folder is its name made
+; safe for a file name ($mkfn); a private conversation's is its "@<nick>"
+; channel the same way - the "@" also keeps a nick such as CON or NUL from
+; naming a Windows device; and your own line said in several channels at
+; once ("-") goes to every-channel. Paths are quoted ($qt) wherever a
+; command takes one.
 alias dccore.chat.hist.dir { return $+($logdir,DCCore-Chat) }
 alias dccore.chat.hist.recent { return $+($dccore.chat.hist.dir,\recent.txt) }
 alias dccore.chat.hist.file {
-  if ($1 == -) { return $+($dccore.chat.hist.dir,\every-channel.log) }
-  return $+($dccore.chat.hist.dir,\,$mkfn($1),.log)
+  var %who = $iif($1 == -,every-channel,$mkfn($1))
+  return $+($dccore.chat.hist.dir,\,%who,\,$asctime($int($calc($2 / 1000)),yyyy-mm),.log)
 }
 ; How many lines of recent.txt the window replays. The file is cut back to
 ; that many once it holds twice as many.
@@ -7321,7 +7340,9 @@ alias dccore.chat.hist.mkdir {
 alias dccore.chat.hist.add {
   if (!$dccore.opt(chat.history)) { return }
   if (!$dccore.chat.hist.mkdir) { return }
-  write $qt($dccore.chat.hist.file($2)) $asctime($int($calc($1 / 1000)),yyyy-mm-dd HH:nn:ss) $iif($2 == -,*,$2) $3 $strip($5-)
+  var %f = $dccore.chat.hist.file($2,$1)
+  if (!$isdir($nofile(%f))) { mkdir $qt($left($nofile(%f),-1)) }
+  write $qt(%f) $asctime($int($calc($1 / 1000)),yyyy-mm-dd HH:nn:ss) $iif($2 == -,*,$2) $3 $strip($5-)
   var %r = $dccore.chat.hist.recent
   write $qt(%r) $1 $2 $3 $4 $strip($5-)
   if ($lines(%r) > $calc(2 * $dccore.chat.hist.keep)) { dccore.chat.hist.trim }
@@ -7422,9 +7443,111 @@ alias dccore.chat.unread.clear {
 }
 
 ; The right-click menu's three.
+; ---- The history's limits (#1401) -------------------------------------
+
+; DCCORE CHATHIST <days> <max_mb>, the bot's CHAT_HISTORY_DAYS and
+; CHAT_HISTORY_MAX_MB: kept in dccore.ini, and acted on at once when they
+; changed. Anything but two whole numbers of 0 or more is ignored.
+alias dccore.chat.hist.limits {
+  if ($1 !isnum) || ($2 !isnum) { return }
+  var %days = $int($1)
+  var %mb = $int($2)
+  if (%days < 0) || (%mb < 0) { return }
+  if (%days == $dccore.opt(chat.hist.days)) && (%mb == $dccore.opt(chat.hist.mb)) { return }
+  hadd dccore chat.hist.days %days
+  hadd dccore chat.hist.mb %mb
+  dccore.save
+  dccore.chat.hist.prune
+}
+; Once a day at most, when the chat window opens: the limits applied. The
+; day is marked whatever the pass finds - no limits yet, no folder - so the
+; window opens without it again until tomorrow.
+alias dccore.chat.hist.daily {
+  if ($dccore.st(chat.pruned) == $asctime($ctime,yyyymmdd)) { return }
+  hadd dccore.live chat.pruned $asctime($ctime,yyyymmdd)
+  dccore.chat.hist.prune
+}
+; The month files that are over the limits, deleted: every month that ended
+; more than the days ago - a month before the one the limit falls in ended
+; before it - then, while the folder is over the size, the oldest months,
+; never the month running. Only files named for a month ("2026-10.log") in
+; the history folder and its channel folders are looked at; recent.txt and
+; anything else there is not touched. Nothing at all before a bot has sent
+; the limits, or while both are 0. A file that cannot be deleted stops this
+; pass, and the next one tries again.
+alias dccore.chat.hist.prune {
+  var %days = $dccore.opt(chat.hist.days)
+  var %mb = $dccore.opt(chat.hist.mb)
+  if (%days !isnum) { var %days = 0 }
+  if (%mb !isnum) { var %mb = 0 }
+  if (%days <= 0) && (%mb <= 0) { return }
+  var %dir = $dccore.chat.hist.dir
+  if (!$isdir(%dir)) { return }
+  if ($hget(dccore.chathist)) { hfree dccore.chathist }
+  hmake dccore.chathist 100
+  hadd dccore.chathist n 0
+  noop $findfile(%dir,????-??.log,0,2,dccore.chat.hist.seen $1-)
+  var %months = $null
+  var %total = 0
+  var %i = 1
+  while (%i <= $hget(dccore.chathist,n)) {
+    var %row = $hget(dccore.chathist,f $+ %i)
+    var %total = $calc(%total + $gettok(%row,2,32))
+    var %months = $addtok(%months,$gettok(%row,1,32),32)
+    inc %i
+  }
+  var %months = $sorttok(%months,32,n)
+  if (%days > 0) {
+    var %cut = $asctime($calc($ctime - %days * 86400),yyyymm)
+    var %j = 1
+    while (%j <= $numtok(%months,32)) {
+      if ($gettok(%months,%j,32) < %cut) { var %total = $calc(%total - $dccore.chat.hist.drop($gettok(%months,%j,32))) }
+      inc %j
+    }
+  }
+  if (%mb > 0) {
+    var %max = $calc(%mb * 1048576)
+    var %now = $asctime($ctime,yyyymm)
+    var %j = 1
+    while (%total > %max) && (%j <= $numtok(%months,32)) && ($gettok(%months,%j,32) < %now) {
+      var %total = $calc(%total - $dccore.chat.hist.drop($gettok(%months,%j,32)))
+      inc %j
+    }
+  }
+  hfree dccore.chathist
+  return
+  :error
+  reseterror
+  if ($hget(dccore.chathist)) { hfree dccore.chathist }
+}
+; A file $findfile found, kept as "<yyyymm> <bytes> <path>" when its name is
+; a month's; anything else in the folder is passed over.
+alias dccore.chat.hist.seen {
+  var %name = $nopath($1-)
+  var %m = $remove(%name,-,.log)
+  if ($len(%name) != 11) || (%m !isnum) { return }
+  hinc dccore.chathist n
+  hadd dccore.chathist f $+ $hget(dccore.chathist,n) %m $file($1-).size $1-
+}
+; Month $1 (yyyymm) deleted, every channel's file of it: the bytes it held.
+alias dccore.chat.hist.drop {
+  var %freed = 0
+  var %i = 1
+  while (%i <= $hget(dccore.chathist,n)) {
+    var %row = $hget(dccore.chathist,f $+ %i)
+    if ($gettok(%row,1,32) == $1) {
+      .remove $qt($gettok(%row,3-,32))
+      var %freed = $calc(%freed + $gettok(%row,2,32))
+      hdel dccore.chathist f $+ %i
+    }
+    inc %i
+  }
+  return %freed
+}
+
 alias dccore.chat.hist.toggle {
   dccore.set chat.history $iif($dccore.opt(chat.history),0,1)
-  dccore.chat.sys $iif($dccore.opt(chat.history),Keeping a history file in $dccore.chat.hist.dir $+ .,No longer keeping a history file: nothing more is written to it and nothing is replayed. The files already written are left as they are.)
+  dccore.chat.sys $iif($dccore.opt(chat.history),Keeping a history file in $dccore.chat.hist.dir $+ .,No longer keeping a history file: nothing more is written to it and nothing is replayed. The files already written stay, until the history's limits remove them.)
 }
 alias dccore.chat.flash.toggle {
   dccore.set chat.flash $iif($dccore.opt(chat.flash),0,1)

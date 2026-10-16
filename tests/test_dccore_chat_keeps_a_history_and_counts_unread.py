@@ -374,6 +374,12 @@ class Parser:
         raise AssertionError("a condition without its {: " + self.s[self.i:self.i + 80])
 
 
+def month(channel, line_id):
+    """The history file a line goes to since #1401: a folder per channel, a
+    file per month, both relative to the history folder."""
+    return os.path.join(channel, asctime(line_id // 1000, "yyyy-mm") + ".log")
+
+
 class Mirc:
     """dccore.mrc's own aliases, run against fake windows and a real temp folder."""
 
@@ -679,6 +685,12 @@ class Mirc:
         if number == 0:
             return str(len(lines))
         return lines[number - 1]["text"] if number <= len(lines) else ""
+
+    def id_nofile(self, path):
+        return path[:path.rfind("\\") + 1]
+
+    def id_nopath(self, path):
+        return path[path.rfind("\\") + 1:]
 
     def id_isfile(self, path):
         return "$true" if os.path.isfile(self.host(path)) else "$false"
@@ -999,7 +1011,7 @@ class EveryDrawnLineIsWrittenOnce(unittest.TestCase):
 
     def test_a_channel_line_goes_to_the_channel_file_and_recent_txt(self):
         self.s.feed(TODAY_ID, HEARD, PEER, "hello there")
-        self.assertEqual(self.s.lines_of(HEARD + ".log"),
+        self.assertEqual(self.s.lines_of(month(HEARD, TODAY_ID)),
                          ["%s %s %s hello there" % (asctime(TODAY_ID // 1000, "yyyy-mm-dd HH:nn:ss"), HEARD, PEER)])
         self.assertEqual(self.s.lines_of("recent.txt"), ["%d %s %s other hello there" % (TODAY_ID, HEARD, PEER)])
         self.assertEqual(self.s.drawn("hello there"), 1)
@@ -1013,15 +1025,16 @@ class EveryDrawnLineIsWrittenOnce(unittest.TestCase):
         self.s.feed(TODAY_ID, HEARD, BOT, "mine here")
         self.s.feed(TODAY_ID + 1, "@" + PEER, PEER, "just us")
         self.s.feed(TODAY_ID + 2, "-", BOT, "to everyone")
-        self.assertTrue(self.s.lines_of(HEARD + ".log")[0].endswith(" %s %s mine here" % (HEARD, BOT)))
-        self.assertTrue(self.s.lines_of("@%s.log" % PEER)[0].endswith(" @%s %s just us" % (PEER, PEER)))
-        self.assertTrue(self.s.lines_of("every-channel.log")[0].endswith(" * %s to everyone" % BOT))
+        self.assertTrue(self.s.lines_of(month(HEARD, TODAY_ID))[0].endswith(" %s %s mine here" % (HEARD, BOT)))
+        self.assertTrue(self.s.lines_of(month("@" + PEER, TODAY_ID + 1))[0].endswith(" @%s %s just us" % (PEER, PEER)))
+        self.assertTrue(self.s.lines_of(month("every-channel", TODAY_ID + 2))[0].endswith(" * %s to everyone" % BOT))
         self.assertEqual([row.split(" ")[3] for row in self.s.lines_of("recent.txt")], ["own", "other", "own"])
 
     def test_a_channel_name_is_made_safe_for_a_file_name(self):
         self.s.mirc.tables["dccore"]["chat.listen"] = "#lobby|two"
         self.s.feed(TODAY_ID, "#lobby|two", PEER, "piped")
-        self.assertEqual(sorted(os.listdir(self.s.folder)), ["#lobby_two.log", "recent.txt"])
+        self.assertEqual(sorted(os.listdir(self.s.folder)), ["#lobby_two", "recent.txt"])
+        self.assertTrue(os.path.isfile(self.s.path(month("#lobby_two", TODAY_ID))))
 
     def test_the_text_is_written_stripped(self):
         self.s.feed(TODAY_ID, HEARD, PEER, "\x0304red\x03 and \x02bold\x02")
@@ -1070,7 +1083,7 @@ class EveryDrawnLineIsWrittenOnce(unittest.TestCase):
         self.assertLess(add[0], unread[0])
 
     def test_a_file_that_cannot_be_written_loses_the_line_and_nothing_else(self):
-        os.makedirs(self.s.path(HEARD + ".log"))       # a folder where the file goes
+        os.makedirs(self.s.path(month(HEARD, TODAY_ID)))       # a folder where the file goes
         self.s.feed(TODAY_ID, HEARD, PEER, "still shown")
         self.assertEqual(self.s.drawn("still shown"), 1)
         self.assertEqual(self.s.live("chat.unread"), "1", "the feed went on after the failed write")
@@ -1546,17 +1559,18 @@ class WhereThingsLive(unittest.TestCase):
         """StartDoesNotConnect reads dccore.chat.window's own statements;
         the opener calls the replay, and the replay owns its window."""
         opener = statements(code_body(script_text(), "alias dccore.chat.window"))
-        self.assertEqual(opener[-2:], ["dccore.chat.hist.replay", "dccore.chat.peers.redraw"])
+        # then the history's limits, once a day (#1401)
+        self.assertEqual(opener[-3:], ["dccore.chat.hist.replay", "dccore.chat.hist.daily", "dccore.chat.peers.redraw"])
         self.assertFalse([s for s in opener if s.startswith("window -h") or "loadbuf" in s])
 
     def test_the_docs_say_where_the_files_are_and_how_to_stop_them(self):
         with io.open(os.path.join(REPO_ROOT, "docs", "ADMIN-CONSOLE.md"), encoding="utf-8") as handle:
             doc = handle.read()
         history = doc[doc.index("- **History (#1393):**"):doc.index("- **Unread:**")]
-        # where, what (private too), that it is on, that the .log files grow,
-        # and how to stop it
+        # where, what (private too), that it is on, how the files are laid out
+        # (a file per month since #1401) and how to stop it
         for phrase in ("`DCCore-Chat\\`", "$logdir", "**on by default**", "**private conversations included**",
-                       "never trimmed", "*Keep a history file*", "*Open the history folder*"):
+                       "a file per\n  month", "*Keep a history file*", "*Open the history folder*"):
             self.assertIn(phrase, history)
         unread = doc[doc.index("- **Unread:**"):]
         unread = unread[:unread.index("\n\n")]
@@ -1565,7 +1579,7 @@ class WhereThingsLive(unittest.TestCase):
         with io.open(os.path.join(REPO_ROOT, "docs", "changes", "1393.public.md"), encoding="utf-8") as handle:
             public = handle.read()
         self.assertTrue(public.startswith("- **"))
-        for phrase in ("`DCCore-Chat\\`", "on by default", "private conversations included", "never trimmed",
+        for phrase in ("`DCCore-Chat\\`", "on by default", "private conversations included", "100 days and 100 MB",
                        "*Keep a history file*", "*Flash on a new line*", "/reload -rs dccore.mrc"):
             self.assertIn(phrase, public)
 
