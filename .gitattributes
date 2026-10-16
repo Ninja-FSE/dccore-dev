@@ -78,3 +78,10 @@ docs/changes/** export-ignore
 # so shipping them publishes exactly what they exist to hide. Two of this
 # operator's channels were recovered from the shipped list by hand.
 tests/forbidden_identifiers.py    export-ignore
+
+# The project page (#1309) is published from the orphan gh-pages branch of
+# the public repository, not from its main: a clone of dccore stays the bot
+# and its docs, with no website in it. site/ is its source, kept here and
+# copied to gh-pages by hand (docs/PUBLIC-REPO-WORKFLOW.md, step 5). The
+# directory itself, not site/**: that leaves an empty site/ in the archive.
+/site export-ignore

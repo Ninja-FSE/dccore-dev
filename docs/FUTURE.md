@@ -106,6 +106,10 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 - **Running without its window.** `BOT_WINDOW` starts it minimised or with no window at all on Windows; everything the window would show also goes to a log file (`data/logs/dccore.log`, rotated); and it can be stopped without the window - `start-dccore stop`, the dashboard's Tools page, the console's `shutdown now`, the mIRC menu - each the same clean shutdown as Ctrl-C.
 - **The on-connect commands are checked.** If they set a user mode such as `+x`, the bot checks after joining that it took (for `+x`, that the host really is hidden) and sends them again if not - a net split can swallow an X login; **Resend commands** on the dashboard sends them at once.
 
+### The website
+
+- **The project page** (#1309, was #875), at `ninja-fse.github.io/dccore`: five pages - an overview, the channel commands and the admin console, the web dashboard, the mIRC script and getting started - with pictures of the channel, the dashboard and the mIRC window drawn in HTML and CSS. No image files, scripts or third-party requests. Its source is `site/`, which stays out of the public tree; it is published by hand to the public repository's orphan `gh-pages` branch, so a clone of that repository holds no website. Features newer than the current release are marked **Next release**.
+
 ### Quality
 
 - **9761 tests**, on Linux, Windows and macOS, Python 3.10, 3.12 and 3.14, in CI on every push and pull request — and a preflight script that runs the whole suite twice, the second time with the host's own tooling hidden, so a test that only passes on a developer's machine fails before it is pushed.
@@ -233,7 +237,6 @@ To settle first: whether the bots share a network, which decides whether a bot i
 
 - **Multi-network** — real in OmenServe, and it would touch every socket path here.
 - **Choosing the list's folder prefix** (was #1116). Every folder heading in the list starts with the fixed `D:\MEDIA\` (`list.LIST_FOLDER_PREFIX`), then the folder's label and the path below it. Real paths stay out on purpose: they show the account name and the disk layout to everyone who downloads the list, and requests are resolved by label. Making the fixed part a setting is safe for AutoQ, which reads only the last part of a folder, but the read side must keep recognising every prefix the bot has used (remembered in `data/`), or every `!rar` row in lists already out there stops resolving the moment it changes. A drive letter, `:\` and plain ASCII segments only, taking effect at the next rebuild. Not decided: whether a cosmetic change is worth it at all, and whether to offer presets.
-- **A one-page site** (was #875): what DCCore is, why it is different, three steps to start, a few screenshots, and links to the repository and the releases. One static page, no build step. Agreed in principle, and the shape is settled: a `site/` folder published by a GitHub Pages workflow in the public repository, so the raw docs are not served beside it, with the deploy job guarded by the repository name so it does nothing in the development repository. It starts on the github.io address and moves to a subdomain of the project's own domain once reviewed. In the same pull request: `.html` joins the identifier sweep's file types, the screenshots come from a test install and are scrubbed like the docs, and every link on the page resolves in both trees. It waits until after 1.15.0 because it is not release work.
 
 ---
 
