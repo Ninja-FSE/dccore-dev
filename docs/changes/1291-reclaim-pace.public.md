@@ -1,1 +1,0 @@
-- **Changed: the bot asks for its main nick back only when that nick is actually freed, and at most every 30 seconds.** It no longer asks each time the client holding the nick leaves a channel, which the server always refused.

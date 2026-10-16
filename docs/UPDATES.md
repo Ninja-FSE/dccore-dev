@@ -2126,6 +2126,22 @@ stays in the read loop where it was. No behaviour changes.
   - the ask renames the bot;
   - a failed send escapes.
 
+### 🔁 The main nick is asked back only when it is freed, and at most every 30 seconds (#1291 follow-up)
+
+Security advisory GHSA-x9w3-xf6g-9747 (medium), fixed in its private fork and merged with this release.
+
+When the bot is on its alternative nick, it asks for its main nick back as soon as the client holding it lets
+go. It asked on a PART too, which frees no nick, so the server refused every one of those asks, and each was a
+`NICK` written straight to the socket, outside the outbound pacer.
+
+- **Only when the nick is freed:** `irc_loop()` calls `reclaim_main_nick()` on the holder's QUIT and NICK, no
+  longer on PART.
+- **Spaced:** `reclaim_main_nick()` asks at most once every `NICK_RECLAIM_GAP_SECONDS` (30 s), however often the
+  holder comes and goes. Somebody else leaving does not use up the gap, and a clock set back does not stop the
+  asks.
+- **Kept across a rehash:** the time of the last ask is `runtime.nick_reclaim_asked_at`, so a `!rehash` that
+  reloads irc.py does not reset the gap.
+
 ### 🪟 dccore.mrc: the settings window laid out as its mockup, with tables (#1288, phase 3)
 
 The window of phase 2 kept the first version's pages: label | control rows, the blank strip of the hidden tabs
