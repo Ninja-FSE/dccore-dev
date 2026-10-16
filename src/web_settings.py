@@ -77,7 +77,7 @@ SETTINGS_CATEGORIES = (
                                                 "ON_CONNECT_CHECK_MINUTES",
                                                 "ADMIN_NICK", "CHANNEL", "DEBUG_CHANNEL",
                                                 "CHECK_FOR_UPDATES"]),
-    ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "LARGE_FILE_MB", "MAX_USER_QUEUE",
+    ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "LARGE_FILE_MB", "SLOW_SEND_MIN_KB", "MAX_USER_QUEUE",
                                                 "MAX_GLOBAL_QUEUE", "SEARCH_ENABLED", "MAX_SEARCH_RESULTS",
                                                 "SEARCH_SHOW_FOLDER", "SEARCH_FOLDER_MAX_CHARS",
                                                 "PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE",
@@ -205,6 +205,7 @@ SETTINGS_LABELS = {
     "DEBUG_CHANNEL": "Debug channel",
 
     "MAX_DCC_SLOTS": "Max simultaneous sends",
+    "SLOW_SEND_MIN_KB": "Stop sends slower than (KB/s, 0 = off)",
     "LARGE_FILE_MB": "One large file at a time, from (MB, 0 = off)",
     "MAX_USER_QUEUE": "Max queue per user",
     "MAX_GLOBAL_QUEUE": "Max global queue",

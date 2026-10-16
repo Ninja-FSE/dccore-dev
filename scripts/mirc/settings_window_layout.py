@@ -138,7 +138,7 @@ GROUPS = (
         ("Search", (
             ("Sending", ("MAX_DCC_SLOTS",
                          {"key": "LARGE_FILE_MB", "label": "One large file from (MB, 0 = off)"},
-                         "MAX_USER_QUEUE", "MAX_GLOBAL_QUEUE")),
+                         "SLOW_SEND_MIN_KB", "MAX_USER_QUEUE", "MAX_GLOBAL_QUEUE")),
             ("Search (@find)", (
                 {"note": "How much the bot says back once it answers (the on/off switch is under "
                          "General > General Settings)."},

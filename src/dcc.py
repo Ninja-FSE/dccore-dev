@@ -1438,6 +1438,17 @@ class _ReceiverStalled(Exception):
         self.acked = acked
 
 
+class _TooSlowWhileOthersWait(Exception):
+    """Acknowledged under SLOW_SEND_MIN_KB over the last
+    SLOW_SEND_WINDOW_SECONDS, with every slot taken and someone waiting for
+    one (#1388). `speed` is that rate in bytes per second."""
+
+    def __init__(self, acked, speed):
+        super().__init__(acked, speed)
+        self.acked = acked
+        self.speed = speed
+
+
 class _ShortSend(Exception):
     """Raised to skip the completion bookkeeping when a send ended early.
 
@@ -4637,6 +4648,200 @@ def _wait_for_final_ack(conn, tracker, file_size):
     return tracker.last_advance_at
 
 
+# A SEND THAT CRAWLS WHILE OTHERS WAIT (#1388). The stall check above catches a
+# receiver that has stopped; one on a bad link that still moves a few KB/s
+# could hold a slot for hours while the queue behind it did not move. With
+# SLOW_SEND_MIN_KB above 0 such a send is stopped, as a failed attempt, but
+# only while every slot is taken and somebody is waiting for one: with a slot
+# free nobody is kept waiting, so it may take as long as it takes.
+#
+# Measured fairly: bytes the receiver ACKNOWLEDGED, over about the last minute
+# rather than since the start, so a burst that recovers is not punished - and
+# not at all for the first minute after it connects (TCP ramp-up, a resume
+# finding its feet). Never while the bot's own upload cap (#1352) is what holds
+# the sends back: then the cap is slow, not the receiver.
+#
+# SLOW HAS TO BE THE RECEIVER'S FAULT. A full uplink with no cap set, a slow
+# disk or a cap above what the line really does makes EVERY send slow, and
+# stopping each in turn would only burn everybody's MAX_SEND_FAILS. So each
+# send publishes its window rate on its transfer row ("acked_bps"), and one is
+# stopped only while ANOTHER running send moved at least the floor over its
+# own window - proof the bot's side can deliver right now - and only if it is
+# the slowest of the rated sends, ties kept: one stop per decision. With one
+# slot, or one rated send, it never fires; that is the deliberate safe side.
+#
+# AND NOT TWICE FOR THE SAME TRADE. A row stopped for its speed carries
+# "stopped_for_speed", and a nick waiting with such a row at its head does not
+# count as waiting: two slow receivers would otherwise take the slot from
+# each other in turn. The mark lives on the queue row, so it is saved in
+# dcc_queue.txt with it, survives a restart, and goes when the row does.
+SLOW_SEND_GRACE_SECONDS = 60.0   # not judged until this long after it connected
+SLOW_SEND_WINDOW_SECONDS = 60.0  # its speed is what was acknowledged over about this long
+SLOW_SEND_CHECK_SECONDS = 0.5    # looked at no more often than this, not once per chunk
+# The upload cap binds while every send together moves at least this share of it.
+SLOW_SEND_CAP_NEAR = 0.9
+# The transfer-row key a send publishes its window rate under (bytes/s), and
+# the queue-row mark of a row stopped for its speed.
+ACKED_RATE = "acked_bps"
+STOPPED_FOR_SPEED = "stopped_for_speed"
+
+# The watch's clock. A module-level name so a test can drive it, the way
+# _AckTracker.stalled() takes now=.
+_slow_send_clock = time.monotonic
+
+
+def slow_send_floor():
+    """SLOW_SEND_MIN_KB in bytes per second; 0 when it is off. A value that is
+    not a positive number is off. Read the way the speed caps are: the same
+    KB/s setting, the same rule for an odd value."""
+    return speed_cap.rate("SLOW_SEND_MIN_KB")
+
+
+def upload_cap_binds(total_bps):
+    """Is the bot's own upload cap (#1352) what holds the sends back? True
+    while MAX_UPLOAD_KB is set and every send together (`total_bps`) moves
+    at least SLOW_SEND_CAP_NEAR of it."""
+    cap = speed_cap.rate(speed_cap.UPLOAD)
+    return bool(cap) and total_bps >= cap * SLOW_SEND_CAP_NEAR
+
+
+def others_wait_for_a_slot():
+    """Is every slot taken, with a nick waiting that a freed one could go to?
+
+    Takes queue_lock, so it is asked only once a send is already too slow.
+    The waiting nicks are nicks_waiting_for_a_slot()'s - in a channel, not
+    frozen, nothing running - which is who the dispatcher would hand the
+    slot to; a nick whose next row is a folder pack counts only while no
+    pack is being made, as check_queue_and_send() has it. A nick whose next
+    row was itself stopped for its speed does not count (STOPPED_FOR_SPEED).
+    """
+    with queue_lock:
+        if len(config.active_transfers) < config.MAX_DCC_SLOTS:
+            return False
+        packs_can_start = not getattr(config, "rar_inprogress", False)
+        for key in nicks_waiting_for_a_slot(plain_files_only=not packs_can_start):
+            head = config.dcc_queue.get(key, [None])[0]
+            if not (isinstance(head, dict) and head.get(STOPPED_FOR_SPEED)):
+                return True
+        return False
+
+
+def the_slowest_while_another_delivers(row, speed, floor):
+    """Is the bot's side delivering, and this send the one that is slow?
+
+    True while another running send's published window rate ("acked_bps")
+    is at least `floor`, and `speed` is under every other published rate -
+    a tie is kept. `row` is this send's transfer row; without one, or with no
+    other rated send (one slot), the answer is no. Reads a copy of
+    active_transfers, no lock: a send joining or leaving mid-read changes
+    nothing that the next half-second does not see.
+    """
+    if row is None:
+        return False
+    others = [tx.get(ACKED_RATE) for tx in list(config.active_transfers) if tx is not row]
+    others = [rate for rate in others if isinstance(rate, (int, float))]
+    return (any(rate >= floor for rate in others)
+            and all(speed < rate for rate in others))
+
+
+def _bytes_uploaded():
+    """Every byte the bot's sends have put on the wire this session
+    (oserve.total_sent_bytes), 0 without the daemon loaded."""
+    oserve = sys.modules.get("oserve")
+    return int(getattr(oserve, "total_sent_bytes", 0) or 0) if oserve else 0
+
+
+class _SlowSendWatch:
+    """Is this send crawling while others wait for its slot? (#1388)
+
+    check() is called after every chunk and costs one clock read; at most
+    every SLOW_SEND_CHECK_SECONDS it takes a sample - when, what the receiver
+    has acknowledged, what every send together has moved - publishes its
+    window rate on `row` once past the grace, and judges.
+    `clock` is _slow_send_clock unless a test hands it one.
+    """
+
+    def __init__(self, acked, clock=None, row=None):
+        self.clock = clock or _slow_send_clock
+        self.row = row
+        now = self.clock()
+        self.connected_at = now
+        self.next_check_at = now + SLOW_SEND_CHECK_SECONDS
+        # (when, acknowledged, the bot's total sent), oldest first. The first
+        # is where the window starts until a minute has passed.
+        self.samples = collections.deque([(now, int(acked), _bytes_uploaded())])
+
+    def check(self, acked):
+        """The acknowledged rate in bytes per second when the send should be
+        stopped; None to let it go on."""
+        now = self.clock()
+        if now < self.next_check_at:
+            return None
+        self.next_check_at = now + SLOW_SEND_CHECK_SECONDS
+        uploaded = _bytes_uploaded()
+        self.samples.append((now, int(acked), uploaded))
+        # The oldest sample kept is the last one at or before the window's
+        # start, so the rate always covers at least the whole window.
+        while len(self.samples) > 1 and self.samples[1][0] <= now - SLOW_SEND_WINDOW_SECONDS:
+            self.samples.popleft()
+        if now - self.connected_at < SLOW_SEND_GRACE_SECONDS:
+            return None
+        then, acked_then, uploaded_then = self.samples[0]
+        span = now - then
+        if span <= 0:
+            return None
+        speed = (int(acked) - acked_then) / span
+        # Published whether or not the setting is on, so turning it on finds
+        # every running send already rated.
+        if self.row is not None:
+            self.row[ACKED_RATE] = speed
+        floor = slow_send_floor()
+        if not floor or speed >= floor:
+            return None
+        # Cheapest first; the lock last.
+        if upload_cap_binds((uploaded - uploaded_then) / span):
+            return None
+        if not the_slowest_while_another_delivers(self.row, speed, floor):
+            return None
+        if not others_wait_for_a_slot():
+            return None
+        return speed
+
+
+def too_slow_reason(speed, to_the_user=False):
+    """Why a send was stopped for speed (#1388): "sent at N KB/s, under
+    SLOW_SEND_MIN_KB (M KB/s) while others waited for a slot" for the log
+    and the feed; without the setting's name `to_the_user`."""
+    floor = getattr(config, "SLOW_SEND_MIN_KB", 0)
+    if to_the_user:
+        return (f"it was arriving at {speed / 1024:.1f} KB/s, under this bot's minimum of "
+                f"{floor} KB/s while every slot was taken and others waited for one")
+    return (f"sent at {speed / 1024:.1f} KB/s, under SLOW_SEND_MIN_KB ({floor} KB/s) "
+            f"while others waited for a slot")
+
+
+def tell_them_it_was_too_slow(user, file_name, speed):
+    """Tell a nick its send was stopped for its speed and the file is still
+    queued (#1388). A row that was dropped instead is told by
+    release_queue_entry(), with too_slow_reason(to_the_user=True) as the
+    reason."""
+    oserve_mod = sys.modules.get("oserve")
+    if not oserve_mod:
+        return
+    floor = getattr(config, "SLOW_SEND_MIN_KB", 0)
+
+    def _build(shown_name):
+        return (f"NOTICE {user} :{config.C_BOLD}Stopped{config.C_RESET}: {shown_name} was "
+                f"arriving at {speed / 1024:.1f} KB/s, under this bot's minimum of {floor} KB/s "
+                f"while every slot is taken and others are waiting, so the slot went to the "
+                f"next in line. It stays in your queue, and your client can resume it when "
+                f"your turn comes again.\r\n")
+    try:
+        oserve_mod.queue_message(user, announce.fit_irc_line(_build, str(file_name)))
+    except Exception as notify_err:
+        print(f"[DCC QUEUE] Could not notify {user}: {notify_err}")
+
+
 def drop_an_unshared_row(user, row, lock_key=None):
     """Refuse a claimed queue row whose file is no longer shared (#1268).
 
@@ -4737,8 +4942,8 @@ SentFile = collections.namedtuple("SentFile", (
     "row", "user", "next_file", "file_path", "file_name", "file_size", "resume_offset", "bytes_sent",
     "transfer_completed", "already_held", "offered_at", "start_time", "transfer_finished_at",
     "channel", "irc_sock", "owns_packer", "outcome_identity", "outcome_status", "acked",
-    "never_connected", "assigned_port", "conn", "dcc_sock"),
-    defaults=(None, None, False, None, None, 0, False, None, None, None))
+    "never_connected", "assigned_port", "conn", "dcc_sock", "too_slow_bps"),
+    defaults=(None, None, False, None, None, 0, False, None, None, None, None))
 SentFile.__doc__ = """What start_dcc_send() knows about a send once it has ended (#1328): the
 transfer row, the nick, the queue row, the file and its size, where it
 resumed, the bytes sent, whether the receiver acknowledged the whole file or
@@ -4747,7 +4952,10 @@ already held it, and when it was offered, started and finished.
 Since #1336 also what finish_send() needs to wind it up: the channel and the
 IRC socket, whether it owns the packer, the outcome's identity and status,
 the bytes the receiver acknowledged, whether it never connected, the port,
-and the two sockets. record_completed_send() leaves those at their defaults."""
+and the two sockets. record_completed_send() leaves those at their defaults.
+
+too_slow_bps (#1388) is the rate a send was stopped at for crawling while
+others waited for a slot, None for any other ending."""
 
 
 def record_completed_send(sent):
@@ -4983,6 +5191,14 @@ def finish_send(sent):
             settled_reason = "transfer complete"
         elif sent.never_connected:
             settled_reason = never_connected_advice()
+        elif sent.too_slow_bps is not None:
+            settled_reason = too_slow_reason(sent.too_slow_bps, to_the_user=True)
+            # Marked before the settle saves the queue, so the mark is in
+            # dcc_queue.txt with the row: waiting with it, this nick cannot
+            # cost another crawling send its slot (see STOPPED_FOR_SPEED).
+            if isinstance(sent.next_file, dict):
+                with queue_lock:
+                    sent.next_file[STOPPED_FOR_SPEED] = True
         else:
             settled_reason = "transfer did not complete"
         row_retained = release_queue_entry(
@@ -4990,6 +5206,10 @@ def finish_send(sent):
             reason=settled_reason)
     except Exception as pop_err:
         print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
+    # A row dropped above has already told them why; one kept is told here,
+    # or a send cut off for its speed would read as the bot failing (#1388).
+    if sent.too_slow_bps is not None and row_retained:
+        tell_them_it_was_too_slow(sent.user, sent.file_name, sent.too_slow_bps)
 
     # 5. The RAR cache and the send lock
     try:
@@ -5044,8 +5264,12 @@ def finish_send(sent):
     # 3-second completion timer as the retry timer would hammer a broken entry three
     # times in nine seconds, each pass emitting a NOTICE and a VIP notice while the VIP
     # queue drains slower than that. Back off instead.
+    #
+    # Not after a send stopped for its speed (#1388): it was stopped so that
+    # somebody waiting gets the slot, and its nick has just gone to the back,
+    # so the sweep hands the slot to the next in line rather than retrying it.
     retry_delay = 3
-    if row_retained and isinstance(sent.next_file, dict):
+    if row_retained and isinstance(sent.next_file, dict) and sent.too_slow_bps is None:
         retry_delay = 15 * max(1, int(sent.next_file.get('send_fails', 1)))
 
     def delayed_queue_trigger_fallback():
@@ -5251,8 +5475,12 @@ def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user)
     catches it still knows how far the send got. Each chunk also moves the
     transfer row's bytes_sent and the bot's total.
 
+    Raises _TooSlowWhileOthersWait when it crawls while every slot is taken
+    and others wait (#1388); its _SlowSendWatch publishes the send's window
+    rate on `row` for the other sends' watches to compare against.
+
     start_dcc_send()'s send loop until #1350, step 4 of splitting it
-    (docs/FUTURE.md). Moved unchanged.
+    (docs/FUTURE.md).
     """
     with open(platform_compat.long_path(file_path), 'rb') as f:
         if resume_offset:
@@ -5266,6 +5494,8 @@ def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user)
         # The timeout covers one whole sendall() of `block` bytes, so it
         # scales with the block; see SEND_TIMEOUT_SECONDS.
         conn.settimeout(_send_timeout(block))
+        # From here the send is connected: the slow-send grace runs from now.
+        slow = _SlowSendWatch(acks.acked, row=row)
         while True:
             # The bot's upload cap (#1352), read per chunk so a change
             # reaches a send already running: under a cap the chunk is a
@@ -5291,6 +5521,10 @@ def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user)
                 raise _ReceiverGone(acks.acked)
             if acks.stalled() and acks.acked < bytes_sent:
                 raise _ReceiverStalled(acks.acked)
+            # Crawling while every slot is taken and others wait (#1388).
+            too_slow = slow.check(acks.acked)
+            if too_slow is not None:
+                raise _TooSlowWhileOthersWait(acks.acked, too_slow)
             for tx in config.active_transfers:
                 if _is_this_send(tx, row, user):
                     tx['bytes_sent'] += len(chunk)
@@ -5375,6 +5609,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
     transfer_completed = False
     # A completed send that moved nothing: see where it is set below.
     already_held = False
+    # The rate a send was stopped at for crawling while others waited (#1388).
+    too_slow_bps = None
 
     # #430: `irc_sock` is whatever socket was live when the caller captured
     # it - which can be several minutes stale by the time this actually
@@ -5725,6 +5961,17 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             acked=stalled.acked, total=file_size)
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
+    except _TooSlowWhileOthersWait as slow:
+        # A failed attempt like a stall (#1388): finish_send() keeps the row
+        # against MAX_SEND_FAILS, sends the nick to the back and hands the
+        # slot to the next in line.
+        too_slow_bps = slow.speed
+        report_failure(user, file_name,
+            f"{too_slow_reason(slow.speed)}; stopped at {slow.acked:,} of "
+            f"{file_size:,} bytes so the next in line gets the slot.",
+            acked=slow.acked, total=file_size)
+        oserve = sys.modules.get('oserve')
+        if oserve: oserve.send_fails_count += 1
     except socket.timeout:
         # FIXED (issue #30): previously silent. This is the SEND side blocking:
         # the kernel buffer is full and the peer has not drained it within the
@@ -5759,4 +6006,4 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
             outcome_identity=outcome_identity, outcome_status=outcome_status,
             acked=_here['acks'].acked if 'acks' in _here else 0,
             never_connected=never_connected, assigned_port=assigned_port,
-            conn=conn, dcc_sock=dcc_sock))
+            conn=conn, dcc_sock=dcc_sock, too_slow_bps=too_slow_bps))

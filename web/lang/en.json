@@ -556,6 +556,7 @@
   "settings.field.CHANNEL": "Channels",
   "settings.field.DEBUG_CHANNEL": "Debug channel",
   "settings.field.MAX_DCC_SLOTS": "Max simultaneous sends",
+  "settings.field.SLOW_SEND_MIN_KB": "Stop sends slower than (KB/s, 0 = off)",
   "settings.field.LARGE_FILE_MB": "One large file at a time, from (MB, 0 = off)",
   "settings.field.MAX_USER_QUEUE": "Max queue per user",
   "settings.field.MAX_GLOBAL_QUEUE": "Max global queue",
