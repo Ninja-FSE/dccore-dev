@@ -5644,6 +5644,12 @@ dialog dccore.set {
   box "DCCore Chat (public)", 1180, 110 38 370 36
   check "Listen on every channel the bot is in, not only the ticked ones", 2633, 116 48 358 10
   check "Open the chat window when a line arrives", 2637, 116 59 358 10
+  box "History", 1181, 110 78 370 79
+  text "Whole months of the history file are deleted: those that ended longer ago than the days, then the oldest while the folder is over the size. 0 is no limit.", 1182, 116 88 358 16
+  text "Keep for (days)", 2640, 116 107 358 8
+  edit "", 2641, 116 116 358 11, autohs
+  text "At most (MB)", 2644, 116 130 358 8
+  edit "", 2645, 116 139 358 11, autohs
 }
 alias dccore.sw.data {
   if ($hget(dccore.swm)) { hfree dccore.swm }
@@ -5786,6 +5792,7 @@ alias dccore.sw.data {
   hadd dccore.swm fr.1176 228 110 227 370 48 116 223 56 9 Settings window
   hadd dccore.swm fr.1178 230 110 42 370 74 116 38 15 9 Bot
   hadd dccore.swm fr.1180 232 110 42 370 32 116 38 72 9 DCCore Chat (public)
+  hadd dccore.swm fr.1181 234 110 82 370 75 116 78 27 9 History
   hadd dccore.swm lv.1520 910 116 135 250 168
   hadd dccore.swm lvc.1520 0 Channel
   hadd dccore.swm lvx.1520 noheader
@@ -5973,10 +5980,10 @@ alias dccore.sw.data {
   hadd dccore.swm p.27 Chat
   hadd dccore.swm p.27.layout roomy 1
   hadd dccore.swm p.27.n 1
-  hadd dccore.swm p.27.1 1180,2633,2637
-  hadd dccore.swm p.27.bx 1180
-  hadd dccore.swm p.27.fr 232-233
-  hadd dccore.swm keys.n 10
+  hadd dccore.swm p.27.1 1180,2633,2637,1181,1182,2640,2641,2644,2645
+  hadd dccore.swm p.27.bx 1180,1181
+  hadd dccore.swm p.27.fr 232-235
+  hadd dccore.swm keys.n 11
   hadd dccore.swm keys.1 SERVER PORT NICKNAME ALT_NICKNAME REJOIN_ATTEMPTS ON_CONNECT_CHECK_MINUTES SEARCH_ENABLED ANNOUNCE_TRANSFERS PRIVATE_MESSAGES_ENABLED WEBUI_ENABLED CTCP_VERSION_REPLY CHECK_FOR_UPDATES DEBUG_CHANNEL CHANNEL ADMIN_NICK
   hadd dccore.swm keys.2 THEME CUSTOM_THEME_BORDER CUSTOM_THEME_SEPARATOR CUSTOM_THEME_TEXTBOX CUSTOM_THEME_VALUE CUSTOM_THEME_ALERT CUSTOM_THEME_ACCENT ANNOUNCE_INTERVAL BROADCAST_SEARCH_CHANNEL BROADCAST_SEARCH_COOLDOWN MSG_DELAY DEBUG_MSG_DELAY LIST_BASE_NAME LIST_FORMAT LIST_IGNORED_EXTENSIONS
   hadd dccore.swm keys.3 SEPARATE_VIDEO_LIST LIST_VIDEO_EXTENSIONS LIST_VIDEO_COMPANION_EXTENSIONS RAR_ENABLED RAR_EXTENSIONS RAR_BINARY MAX_RAR_FOLDER_SIZE RAR_TIMEOUT LIST_HEADER_FILE LIST_HEADER_MAX_BYTES LIST_SHOW_AUDIO_INFO LIST_REBUILD_SCHEDULE LIST_UPDATE_TIMEOUT LIST_UPDATE_STALL_SECONDS LIST_AUDIO_INFO_MINUTES
@@ -5987,6 +5994,7 @@ alias dccore.sw.data {
   hadd dccore.swm keys.8 ADMIN_CHAT_COLOURS WEBUI_HOST WEBUI_PORT WEBUI_ALLOWED_HOSTS WEBUI_CONSOLE_ENABLED WEBUI_OPEN_BROWSER WEBUI_FOLDER_BROWSER_ENABLED CONSOLE_SHOW_REQUESTS CONSOLE_SHOW_QUEUE CONSOLE_SHOW_SENDS CONSOLE_SHOW_FAILURES CONSOLE_SHOW_SEARCHES DEBUG_CHANNEL_FEED DEBUG_MODE DEBUG_TO_CHANNEL
   hadd dccore.swm keys.9 DEBUG_TO_CONSOLE CONSOLE_TIMESTAMP_FORMAT CONSOLE_LOG_FILE CONSOLE_LOG_MAX_MB CONSOLE_LOG_KEEP BOT_WINDOW PROJECT_URL TMP_ZIP_DIR LOCAL_LIST_DIR FETCHED_FILES_DIR LIBRARY_FOLDERS_FILE LISTS_FILE BANS_FILE HARD_BANS_FILE STATS_FILE
   hadd dccore.swm keys.10 KNOWN_BOTS_FILE FETCHED_BOT_LISTS_FILE LIST_INDEX_FILE LIST_AUDIO_INFO_CACHE FETCH_HISTORY_FILE DOWNLOAD_COUNTS_FILE TRANSFER_LOG_FILE LIST_SIZE_FILE LIST_RAWBYTES_FILE LIST_PROGRESS_FILE ADMIN_TOKENS_FILE ON_CONNECT_FILE NOTICES_FILE PRIVATE_MESSAGES_FILE DCC_QUEUE_FILE
+  hadd dccore.swm keys.11 CHAT_HISTORY_DAYS CHAT_HISTORY_MAX_MB
   hadd dccore.swm k.SERVER 2001 str 1 2000
   hadd dccore.swm pg.SERVER 1
   hadd dccore.swm n.SERVER IRC server
@@ -6613,6 +6621,14 @@ alias dccore.sw.data {
   hadd dccore.swm pg.DCC_QUEUE_FILE 23
   hadd dccore.swm n.DCC_QUEUE_FILE DCC queue file
   hadd dccore.swm h.DCC_QUEUE_FILE Where the per-user send queue is saved. The single-instance lock lives beside it.
+  hadd dccore.swm k.CHAT_HISTORY_DAYS 2641 int 1 2640
+  hadd dccore.swm pg.CHAT_HISTORY_DAYS 27
+  hadd dccore.swm n.CHAT_HISTORY_DAYS Keep for (days)
+  hadd dccore.swm h.CHAT_HISTORY_DAYS How many days dccore.mrc keeps DCCore Chat's history on your PC: whole months are deleted once they ended more than this many days ago. 0 keeps everything. The bot sends this to the script; a script that never had it deletes nothing.
+  hadd dccore.swm k.CHAT_HISTORY_MAX_MB 2645 int 1 2644
+  hadd dccore.swm pg.CHAT_HISTORY_MAX_MB 27
+  hadd dccore.swm n.CHAT_HISTORY_MAX_MB At most (MB)
+  hadd dccore.swm h.CHAT_HISTORY_MAX_MB How big DCCore Chat's history folder on your PC may grow~2C in MB: past it~2C the oldest months are deleted first~2C never the month running. 0 is no limit.
   hadd dccore.swm i.2000 SERVER
   hadd dccore.swm i.2001 SERVER
   hadd dccore.swm i.2004 PORT
@@ -6927,6 +6943,10 @@ alias dccore.sw.data {
   hadd dccore.swm i.2629 @nodcx
   hadd dccore.swm i.2633 @chat.all
   hadd dccore.swm i.2637 @chat.popup
+  hadd dccore.swm i.2640 CHAT_HISTORY_DAYS
+  hadd dccore.swm i.2641 CHAT_HISTORY_DAYS
+  hadd dccore.swm i.2644 CHAT_HISTORY_MAX_MB
+  hadd dccore.swm i.2645 CHAT_HISTORY_MAX_MB
   hadd dccore.swm lo.start.main 2025
   hadd dccore.swm h.@start.main This mIRC's own setting~2C kept in dccore.ini beside the script - not the bot's. Saved by Apply or OK.
   hadd dccore.swm lo.start.chat 2029
@@ -6982,7 +7002,7 @@ alias dccore.sw.data {
   hadd dccore.swm bot.3 1751,1752,1753,1754,1755,1756,1757,1758,1759,1774,1770,1771,1772,1773,1567,1568,2121,2125,2129,2133,2137,2141,2145,2149,2153,2154,2157,2161,2165,2166,2169,2173,2177,2181,2185,2189,2193,2197,2201,2205,2209,2213,2217,2221,2225,2229,2233,2237,2241,2245
   hadd dccore.swm bot.4 2249,2253,2257,2261,2265,2269,2273,2277,2281,2285,2289,2293,2297,2301,2305,2309,2313,2317,2321,2325,2329,2333,2337,2341,2345,2349,2353,2357,2361,2365,2369,2373,2377,2381,2385,2389,2393,2397,1580,1583,1584,1585,1586,1587,1581,1582,1595,1597,1598,1596
   hadd dccore.swm bot.5 2401,2405,2409,2413,2417,2421,2425,2429,2433,2437,2441,2445,2449,2453,2457,2461,2465,2469,2473,2477,2481,2485,2489,2493,2497,2501,2502,2505,2509,2513,2517,2521,2522,2525,2526,2529,2530,2533,2534,2537,2538,2541,2542,2545,2546,2549,2550,2553,2554,2557
-  hadd dccore.swm bot.6 2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598,2601,2602,2605,2606,2609,2610
+  hadd dccore.swm bot.6 2558,2561,2562,2565,2566,2569,2570,2573,2574,2577,2578,2581,2582,2585,2586,2589,2590,2593,2594,2597,2598,2601,2602,2605,2606,2609,2610,2641,2645
   hadd dccore.swm confirm TMP_ZIP_DIR LOCAL_LIST_DIR FETCHED_FILES_DIR LIBRARY_FOLDERS_FILE LISTS_FILE BANS_FILE HARD_BANS_FILE STATS_FILE KNOWN_BOTS_FILE FETCHED_BOT_LISTS_FILE LIST_INDEX_FILE LIST_AUDIO_INFO_CACHE FETCH_HISTORY_FILE DOWNLOAD_COUNTS_FILE TRANSFER_LOG_FILE LIST_SIZE_FILE LIST_RAWBYTES_FILE LIST_PROGRESS_FILE ADMIN_TOKENS_FILE ON_CONNECT_FILE NOTICES_FILE PRIVATE_MESSAGES_FILE DCC_QUEUE_FILE
   hadd dccore.swm t.1500 Sent once the server has registered the bot~2C before it joins: one command per line~2C exactly as typed into a client. ~25nick~25 is the nickname the server gave it.
   hadd dccore.swm t.2404 That reply's wording (~25admin becomes the admin nick)
