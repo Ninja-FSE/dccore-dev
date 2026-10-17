@@ -297,7 +297,7 @@ PLAIN_HELP = {
     'TMP_ZIP_DIR': 'Where packed folders and list archives are built before sending. Cleaned up after each transfer.',
     'LOCAL_LIST_DIR': 'Where your published list files are kept.',
     'FETCHED_FILES_DIR': 'Where files you download from other bots are saved. Kept separate from your shared folders so they are not offered to others.',
-    'FETCHED_FILES_PER_BOT': "Save what you download from each bot in a folder named after it, inside the fetched files directory - files from SomeBot go to SomeBot/. Applies to new downloads; files already downloaded stay where they are. Fetched lists keep their own place.",
+    'FETCHED_FILES_PER_BOT': "Save what you download from each bot in a folder named after it, inside the fetched files directory - files from SomeBot go to SomeBot/. Applies to new downloads; files already downloaded stay where they are. Fetched lists keep their own place. A nick a folder name cannot hold, like [Bot], gets a tag: Bot-de3914.",
     'BANS_FILE': 'Where timed bans are saved.',
     'HARD_BANS_FILE': 'Where permanent bans (from !ban) are saved.',
     'DCC_QUEUE_FILE': 'Where the per-user send queue is saved. The single-instance lock lives beside it.',

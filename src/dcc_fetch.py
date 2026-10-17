@@ -2737,14 +2737,35 @@ def bot_folder_name(bot):
     when nothing usable is left of it. The same cleaning a fetched file's name
     gets (_sanitize_offer_filename(): no separators, no "..", no control codes,
     Windows' reserved device names made safe), and never a name DCCore itself
-    uses there (_RESERVED_FETCHED_NAMES - "lists" holds every fetched list)."""
-    cleaned = _sanitize_offer_filename(str(bot or "").strip())
-    if not str(bot or "").strip() or cleaned == "fetched_file":
+    uses there (_RESERVED_FETCHED_NAMES - "lists" holds every fetched list).
+
+    THE CLEANING IS NOT ONE-TO-ONE (#1438). It drops the nick characters a
+    file name cannot hold, []{}|^`, so "[Alfa]" and "Alfa" both cleaned to
+    "Alfa": two bots' files in one folder the operator reads as Alfa's. So a
+    name that is not its own proof of being unique carries "-" and a digest
+    of the real nick - the rule and the digest the list directories use
+    (list_fetch._needs_dir_tag(), _name_digest()), so the two cannot drift
+    apart. A nick that cleans to itself keeps exactly its name. The digest is
+    of the lower-cased nick: two spellings of one nick that differ only in
+    case still share a folder.
+
+    The tag is six hex digits. It keeps two bots' nicks from landing in one
+    folder by accident; it is not a defence against a bot that searches for a
+    nick with the same tag.
+
+    list_fetch is imported here, not at module top, as everywhere else in this
+    module (see _handle_completed_list_fetch())."""
+    import list_fetch
+    real = str(bot or "").strip()
+    cleaned = _sanitize_offer_filename(real)
+    if not real or cleaned == "fetched_file":
         return None
-    cleaned = _fit_name_component(cleaned)
-    if cleaned.casefold() in _RESERVED_FETCHED_NAMES:
-        cleaned = cleaned + "_"
-    return cleaned
+    fitted = _fit_name_component(cleaned)
+    if (list_fetch._needs_dir_tag(fitted, real)
+            or fitted.casefold() in _RESERVED_FETCHED_NAMES):
+        tag = "-" + list_fetch._name_digest(real)
+        fitted = _truncate_utf8(cleaned, MAX_NAME_BYTES - len(tag)) + tag
+    return fitted
 
 
 def _bot_folder_for_locked(queue, row):
@@ -2752,15 +2773,25 @@ def _bot_folder_for_locked(queue, row):
     off or for a list, otherwise its bot's folder. One bot, one folder: a nick
     that differs only in case reuses the folder a row of the same bot already
     has - read from the rows in memory, not from the disk, since this runs
-    under _fetch_lock(), which a slow mount must never hold. Caller holds it."""
+    under _fetch_lock(), which a slow mount must never hold. Caller holds it.
+
+    The FOLDER NAMES are compared, with str.lower() as _name_digest() and the
+    bot's identity fold case (#1438). casefold() went further than either: a
+    nick spelled with "ss" reused the folder of the same nick spelled with an
+    eszett, and one with a long s (U+017F) reused the folder of the one with
+    an "s" - two nicks in one folder, and no filesystem safety bought, since
+    NTFS keeps those names apart.
+    Comparing folder names, not nicks, also means a tagged name never reuses
+    an untagged folder some row has from before the tag."""
     if not getattr(config, "FETCHED_FILES_PER_BOT", False) or row.get("request_type") == "list":
         return None
     name = bot_folder_name(row.get("bot"))
     if name is None:
         return None
+    key = name.lower()
     for other in queue.values():
         folder = other.get("fetched_folder")
-        if folder and other is not row and str(folder).casefold() == name.casefold():
+        if folder and other is not row and str(folder).lower() == key:
             return str(folder)
     return name
 
