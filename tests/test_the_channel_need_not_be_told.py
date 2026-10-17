@@ -124,16 +124,29 @@ class TheChannelNoticeCanBeTurnedOff(DCCoreTestCase):
             source = f.read()
         body = source.split("def send_transfer_complete(", 1)[1] \
                      .split("\ndef ", 1)[0]
+        lines = body.split("\n")
 
-        gated = body.split('if getattr(config, "ANNOUNCE_TRANSFERS", True) and _channel_may_be_told(channel, user):', 1)[1]
-        self.assertIn('oserve.queue_message("channel_announce", msg)',
-                      gated.split("\n    else:", 1)[0])
+        # The gate is found as a STATEMENT - a whole line, at the function's
+        # top level - not as text: the same words in a comment or a string
+        # are not the gate. Since #1444 the tickbox is read once, under
+        # runtime.config_reload_lock, into announce_on.
+        gate = "    elif announce_on and _channel_may_be_told(channel, user):"
+        at = [number for number, line in enumerate(lines) if line == gate]
+        self.assertEqual(len(at), 1, "the channel gate is not one statement")
+        gated = []
+        for line in lines[at[0] + 1:]:
+            if line.strip() and not line.startswith("        "):
+                break
+            gated.append(line.strip())
+        self.assertIn('oserve.queue_message("channel_announce", msg)', gated)
+        self.assertIn('announce_on = getattr(config, "ANNOUNCE_TRANSFERS", True)',
+                      [line.strip() for line in lines])
         # feed_event("SENT", ...) since #550 - it sends the debug line and
         # the structured event together; the property is the same: it sits
         # OUTSIDE the channel gate.
-        self.assertIn('feed_event("SENT"', body)
-        self.assertNotIn("feed_event(", gated.split("\n    else:", 1)[0])
-        self.assertNotIn("send_debug(", gated.split("\n    else:", 1)[0])
+        self.assertTrue(any(line.strip().startswith('feed_event("SENT"') for line in lines))
+        self.assertFalse([line for line in gated if "feed_event(" in line])
+        self.assertFalse([line for line in gated if "send_debug(" in line])
 
     def test_off_still_says_so_in_the_log(self):
         """Silence in the channel is wanted; silence in the operator's own
