@@ -3708,41 +3708,70 @@ def activation_watchdog(conn):
     if config.connection_epoch != epoch:
         print("[WATCHDOG] Connection changed before the timeout elapsed. Standing down.")
         return
-    if conn.joined and not getattr(config, 'activation_triggered', False):
-        # THE WIDER SET (#510). target_channels is CHANNEL only, and
-        # deliberately so - activation must not wait on the debug
-        # channel, or one broken debug channel silences every advert.
-        # But "what never confirmed" is a different question from
-        # "may we start advertising", and answering it with the
-        # narrow set is why a debug channel lost to a truncated JOIN
-        # was not even in the list of things that went missing.
-        missing = channels_we_should_be_in_set() - conn.channels_confirmed
+    if not conn.joined:
+        return
+    # THE WIDER SET (#510). target_channels is CHANNEL only, and
+    # deliberately so - activation must not wait on the debug
+    # channel, or one broken debug channel silences every advert.
+    # But "what never confirmed" is a different question from
+    # "may we start advertising", and answering it with the
+    # narrow set is why a debug channel lost to a truncated JOIN
+    # was not even in the list of things that went missing.
+    missing = channels_we_should_be_in_set() - conn.channels_confirmed
+    if not getattr(config, 'activation_triggered', False):
         config.activation_triggered = True
-        if missing:
-            print(f"[WARNING] Activating the advert despite {len(missing)} unconfirmed channel(s): {', '.join(sorted(missing))}")
-            # TRIED AGAIN, not just reported (#510). This set is
-            # already exactly the right answer and was only ever
-            # printed; feeding it to the retry machinery gives a
-            # channel that never let us in the same bounded second
-            # chance a channel that threw us out has had since #191.
-            for unconfirmed in sorted(missing):
-                note_join_unconfirmed(unconfirmed)
-            try:
-                # notice="error", which send_debug() turns into a
-                # dashboard notice (#510). Without it the ONLY
-                # operator-facing copy of this went to the debug
-                # channel - which, when a truncated JOIN is the cause,
-                # is routinely one of the channels that went missing.
-                # The message about losing channels cannot be
-                # delivered only to one of them.
-                announce.send_debug(
-                    f"Activated after {int(ACTIVATION_TIMEOUT)}s with {config.C_BOLD}{len(missing)}{config.C_RESET} channel(s) never confirmed via NAMES: {', '.join(sorted(missing))}. Retrying them on the advert timer.",
-                    category="PART", notice="error")
-            except Exception as watchdog_debug_err:
-                print(f"[WARNING] Could not send the watchdog debug notice: {watchdog_debug_err}")
-        else:
+        if not report_unconfirmed_channels(missing, activating=True):
             print(f"[INFO] Watchdog: every channel confirmed just in time.")
         threading.Thread(target=delayed_activate, args=(conn,), daemon=True).start()
+    else:
+        # ACTIVATED ALREADY, AND STILL ASKED (#1421). Every CHANNEL
+        # answered, so answer_end_of_names() activated the advert before
+        # this woke - and the question above was never asked, because it
+        # sat behind "not activated yet". The debug channel is in the wider
+        # set and not in what activation waits on: one the bot did not get
+        # into went unreported and was never tried again.
+        report_unconfirmed_channels(missing, activating=False)
+
+
+def report_unconfirmed_channels(missing, activating):
+    """Say which channels never confirmed via NAMES, and hand them to the
+    retry machinery (note_join_unconfirmed(), so channels_to_rejoin() asks
+    for them again). `activating` says the watchdog is starting the advert
+    without them; otherwise the advert was started by every CHANNEL
+    answering, and only the others - the debug channel - are missing
+    (#1421). Returns the channels reported, sorted."""
+    import announce
+    missing = sorted(missing)
+    if not missing:
+        return []
+    names = ', '.join(missing)
+    if activating:
+        print(f"[WARNING] Activating the advert despite {len(missing)} unconfirmed channel(s): {names}")
+    else:
+        print(f"[WARNING] {len(missing)} channel(s) never confirmed via NAMES, though the advert is running: {names}")
+    # TRIED AGAIN, not just reported (#510). This set is
+    # already exactly the right answer and was only ever
+    # printed; feeding it to the retry machinery gives a
+    # channel that never let us in the same bounded second
+    # chance a channel that threw us out has had since #191.
+    for unconfirmed in missing:
+        note_join_unconfirmed(unconfirmed)
+    try:
+        # notice="error", which send_debug() turns into a
+        # dashboard notice (#510). Without it the ONLY
+        # operator-facing copy of this went to the debug
+        # channel - which, when a truncated JOIN is the cause,
+        # is routinely one of the channels that went missing.
+        # The message about losing channels cannot be
+        # delivered only to one of them.
+        lead = (f"Activated after {int(ACTIVATION_TIMEOUT)}s with" if activating
+                else f"{int(ACTIVATION_TIMEOUT)}s after the JOIN,")
+        announce.send_debug(
+            f"{lead} {config.C_BOLD}{len(missing)}{config.C_RESET} channel(s) never confirmed via NAMES: {names}. Retrying them on the advert timer.",
+            category="PART", notice="error")
+    except Exception as watchdog_debug_err:
+        print(f"[WARNING] Could not send the watchdog debug notice: {watchdog_debug_err}")
+    return missing
 
 
 def delayed_activate(conn):
