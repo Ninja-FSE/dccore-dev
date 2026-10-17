@@ -8,7 +8,8 @@ saved in FETCHED_FILES_DIR/SomeBot/. Off - the default - nothing changes.
 Checked here on the real code, in a temp FETCHED_FILES_DIR:
 
   * the folder name: the nick, cleaned as a fetched file's name is, never a
-    separator, "..", a Windows device name or "lists";
+    separator, "..", a Windows device name or "lists" - and tagged with a
+    digest of the nick when cleaning changed it (#1438);
   * which folder a row gets: none with the setting off or for a list; one
     bot, one folder, whatever the case of its nick;
   * a row's folder is never outside FETCHED_FILES_DIR, whatever the history
@@ -58,13 +59,26 @@ class TheFolderName(unittest.TestCase):
         self.assertEqual(dcc_fetch.bot_folder_name("SomeBot"), "SomeBot")
         self.assertEqual(dcc_fetch.bot_folder_name("Some-Bot_2"), "Some-Bot_2")
 
-    def test_cleaned_as_a_fetched_files_name_is(self):
-        """One rule for both: what a fetched file's name may hold, a folder
-        name may hold - brackets go, as they do from a file name."""
+    def test_cleaned_as_a_fetched_files_name_is_and_then_tagged(self):
+        """What a fetched file's name may hold, a folder name may hold -
+        brackets go, as they do from a file name. But a nick the cleaning
+        changed also carries "-" and list_fetch._name_digest() of the real
+        nick (#1438).
+
+        This test used to assert bot_folder_name(nick) ==
+        _sanitize_offer_filename(nick), and that equality WAS the defect:
+        "Some[Bot]", "Some|Bot", "Some{Bot}" and "SomeBot" all got the one
+        folder "SomeBot". tests/test_two_bots_never_share_a_fetch_folder.py
+        covers the rule in full."""
+        import list_fetch
         for nick in ("Some[Bot]", "Some|Bot", "Some{Bot}"):
             with self.subTest(nick=nick):
                 self.assertEqual(dcc_fetch.bot_folder_name(nick),
-                                 dcc_fetch._sanitize_offer_filename(nick))
+                                 dcc_fetch._sanitize_offer_filename(nick)
+                                 + "-" + list_fetch._name_digest(nick))
+        names = {dcc_fetch.bot_folder_name(nick).casefold()
+                 for nick in ("Some[Bot]", "Some|Bot", "Some{Bot}", "SomeBot")}
+        self.assertEqual(len(names), 4, names)
 
     def test_no_separator_and_no_climb_survive(self):
         for nick in ("../evil", "..\\evil", "a/b", "a\\b", ".."):

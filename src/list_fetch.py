@@ -203,7 +203,9 @@ _DIR_TAG_RE = re.compile(r"-[0-9a-f]{6}$", re.IGNORECASE)
 
 def _name_digest(text):
     """Six hex digits of `text`, lower-cased first: IRC compares nicks and
-    channels without case, and every caller lower-cases the directory."""
+    channels without case, and every caller here lower-cases the directory.
+    Also dcc_fetch.bot_folder_name()'s tag (#1438): a change here renames
+    every tagged per-bot fetch folder too."""
     return hashlib.sha1(str(text).strip().lower().encode("utf-8", "replace")).hexdigest()[:6]
 
 
@@ -217,6 +219,9 @@ def _needs_dir_tag(name, real):
     either replaced the other's list. Only a name that came through unchanged
     is its own proof of uniqueness; any other is tagged with a digest of the
     real one, as list.list_slug() does for list names.
+
+    Also dcc_fetch.bot_folder_name() (#1438): what this tags, a per-bot fetch
+    folder tags too.
     """
     lowered = name.lower()
     return (name != real
