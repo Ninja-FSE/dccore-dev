@@ -327,6 +327,14 @@ dropped reply again, once. The bot's log shows a `[QUEUE]` line each time.
 There is nothing to set: if you see that line often, a larger `MSG_DELAY`
 makes it rarer.
 
+Joining a channel counts too, and Undernet remembers how many new targets
+a connection had left across a reconnect: a bot restarted after hours in many
+channels can be refused the last few JOINs. Each one gets a `[JOIN WAIT]`
+line saying when it is asked for again - just after the wait the server
+gave, one channel per wait - and the rest of the JOIN burst waits its turn
+behind it instead of being refused too (#1415). A channel the bot was kicked
+from keeps its slower rejoin, with the advert.
+
 ### Starting with the system
 
 Once the bot runs by hand, it can start by itself. Each script has a twin
