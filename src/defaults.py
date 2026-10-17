@@ -1040,8 +1040,9 @@ MAX_SEND_FAILS: int = 3        # Attempts per queued file before it is dropped (
 # connection before it had the whole file. Not counted: a pack cancelled by
 # the operator or withdrawn by the user, a send the bot stops itself, or a
 # failure on the bot's side (the file vanished). Admins (ADMIN_NICK) are never
-# paused. Kept in memory: a restart forgives. The console's `status` shows who
-# is paused, and `unpause <nick>` lifts it.
+# paused. Kept in memory: a restart forgives. A nick change does not: the
+# count and the pause follow the nick, like its queue. The console's `status`
+# shows who is paused, and `unpause <nick>` lifts it.
 DAILY_SEND_FAILS_LIMIT: int = 0  # Failed sends in a day that pause a nick until midnight; 0 is off
 # HOW LONG AN OFFER STANDS. After the DCC SEND handshake the bot listens for
 # the receiver to connect; when nobody has by this deadline the offer is
