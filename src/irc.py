@@ -490,6 +490,8 @@ def _answer_target_change(line):
         return None
     target, seconds = parsed
     runtime.outbound_pacer.hold_for(seconds)
+    # A channel the bot is not in: it was a JOIN that was refused (#1415).
+    note_join_target_wait(target, seconds)
     entry = runtime.take_paced_line(target, fold=irc_lower)
     if entry is None:
         outcome = "nothing to resend."
@@ -1643,10 +1645,116 @@ def note_joined(channel):
     """A join succeeded, so stop tracking it. Returns what was cleared."""
     name = channel_key(channel)
     with runtime.kicked_channels_lock:
+        runtime.join_waits.pop(name, None)
         return config.kicked_channels.pop(name, None)
 
 
-def channels_to_rejoin(limit=None):
+# JOINS THE SERVER SAID TO WAIT FOR (#1415). ircu answers a JOIN with 439,
+# "target change too fast", when the client has no free target, and it
+# remembers how few a client had across a reconnect - so a bot restarted after
+# hours of advertising comes back with almost none. A channel it was refused
+# is asked for again only once the server's wait is over, plus this margin;
+# the advert worker's rejoin (channels_to_rejoin()) skips it until then, and
+# irc_loop() asks for it as soon as the wait ends (ask_again_after_join_waits()).
+# One target frees per wait, so a second channel refused in the same burst
+# waits for the first one's turn and then a wait of its own.
+JOIN_WAIT_MARGIN = 5.0
+
+
+def _in_channel(name):
+    """Whether the bot is in channel `name` (a channel_key) now: its member
+    list exists - the server's echo of our own JOIN starts it - and it is not
+    one the bot was thrown out of or never got into."""
+    with runtime.channel_users_lock():
+        listed = name in config.channel_users
+    with runtime.kicked_channels_lock:
+        return listed and name not in config.kicked_channels
+
+
+def note_join_target_wait(target, seconds, now=None):
+    """The server refused `target` with "target change too fast" and asked for
+    `seconds`. When `target` is a channel the bot should be in and is not,
+    that was a JOIN: remember when it may be asked for again, and return that
+    time. None for anything else - a message to a nick, or to a channel the
+    bot is in, which only holds the pacer (_answer_target_change())."""
+    name = channel_key(target)
+    if not name or name not in channels_we_should_be_in_set() or _in_channel(name):
+        return None
+    now = time.time() if now is None else now
+    seconds = max(0.0, float(seconds))
+    with runtime.kicked_channels_lock:
+        waits = runtime.join_waits
+        waits.pop(name, None)
+        # After every channel already waiting: each needs a target of its own.
+        latest = max(waits.values(), default=0.0)
+        due = max(now + seconds, latest + seconds) + JOIN_WAIT_MARGIN
+        waits[name] = due
+        runtime.join_wait_seconds = seconds
+    print(f"[JOIN WAIT] {name}: the server refused the JOIN (target change too fast). "
+          f"Asking again in {due - now:.0f} s, at {time.strftime('%H:%M:%S', time.localtime(due))}.")
+    return due
+
+
+def defer_joins_after_a_refusal(channels, now=None):
+    """`channels`, about to be asked for in the rest of a JOIN burst, are put
+    behind the server's wait instead when a JOIN of this burst has just been
+    refused for "target change too fast" (#1415): sent now, they would only
+    spend the targets the refused ones are waiting for. Returns the channels
+    deferred - none when nothing is waiting."""
+    with runtime.kicked_channels_lock:
+        waiting = bool(runtime.join_waits)
+        seconds = runtime.join_wait_seconds
+    if not waiting:
+        return []
+    if seconds is None:
+        seconds = TARGET_CHANGE_HOLD_DEFAULT
+    deferred = []
+    for channel in channels:
+        if note_join_target_wait(channel, seconds, now) is not None:
+            deferred.append(channel_key(channel))
+    return deferred
+
+
+def forget_join_waits():
+    """A new connection: the old one's waits mean nothing to it."""
+    with runtime.kicked_channels_lock:
+        runtime.join_waits.clear()
+        runtime.join_wait_seconds = None
+
+
+def ask_again_after_join_waits(now=None, send=None):
+    """Ask again for every channel whose server wait is over (#1415), and
+    return them. Called by irc_loop() on every pass, so a refused JOIN is
+    asked for again within one read timeout of its wait ending, not at the
+    next advert.
+
+    Only for a channel the bot never got into. One it was kicked from keeps
+    the advert worker's slower rhythm (channels_to_rejoin()), as a kick
+    always has: an instant rejoin after a kick reads as a fight."""
+    now = time.time() if now is None else now
+    with runtime.kicked_channels_lock:
+        due = sorted(name for name, when in runtime.join_waits.items() if when <= now)
+        for name in due:
+            runtime.join_waits.pop(name, None)
+        reasons = {name: (config.kicked_channels.get(name) or {}).get("reason") for name in due}
+    if send is None:
+        oserve_mod = sys.modules.get("oserve")
+        if oserve_mod is None:
+            return []
+        send = lambda line: oserve_mod.queue_message("channel_announce", line)  # noqa: E731
+    asked = []
+    for name in due:
+        if reasons[name] not in (None, "never confirmed") or _in_channel(name):
+            continue
+        if name not in channels_we_should_be_in_set():
+            continue
+        send(f"JOIN {name}\r\n")
+        asked.append(name)
+        print(f"[REJOIN] Asking for {name} again: the server's wait is over.")
+    return asked
+
+
+def channels_to_rejoin(limit=None, now=None):
     """The channels worth one more JOIN, in a stable order.
 
     A pure read, so the advert worker can ask this without holding anything
@@ -1665,10 +1773,14 @@ def channels_to_rejoin(limit=None):
     # gating on CHANNEL alone meant a debug channel that failed to join could
     # be tracked and never retried.
     wanted = channels_we_should_be_in_set()
+    # Not before the server's wait for it is over (#1415): asked earlier, it
+    # is refused again and the wait starts over.
+    now = time.time() if now is None else now
     with runtime.kicked_channels_lock:
         return sorted(name for name, entry in config.kicked_channels.items()
                       if name in wanted
-                      and int(entry.get("refusals", 0)) < limit)
+                      and int(entry.get("refusals", 0)) < limit
+                      and runtime.join_waits.get(name, 0.0) <= now)
 
 
 def channels_we_are_out_of():
@@ -3428,6 +3540,8 @@ def answer_welcome(line, conn):
     if is_server_numeric(line, "001"):
         adopt_registered_nick(line)
     conn.joined = True
+    # The last connection's "wait before asking" (#1415) is not this one's.
+    forget_join_waits()
     print(f"[INFO] Connected to the server. Waiting 5 seconds to settle before JOIN...")
     # The DCC address, looked at again for this
     # connection (#1271): the network is plainly up now,
@@ -3541,6 +3655,15 @@ def delayed_join(conn, channels):
         for index, payload in enumerate(batches):
             if index:
                 time.sleep(JOIN_BATCH_GAP)
+                # A JOIN of this burst was refused for "target change too
+                # fast" (#1415): the rest would only spend the targets it is
+                # waiting for. They wait their turn behind it instead.
+                rest = [channel for batch in batches[index:] for channel in batch.split(",")]
+                deferred = defer_joins_after_a_refusal(rest)
+                if deferred:
+                    print(f"[JOIN] The server is refusing JOINs for now; "
+                          f"{len(deferred)} channel(s) wait their turn: {', '.join(deferred)}.")
+                    break
             socket_conn.sendall(
                 f"JOIN {payload}\r\n".encode(
                     "utf-8", errors="ignore"))
@@ -4645,6 +4768,13 @@ def irc_loop():
         # one function so the 366 handler and the watchdog share it (issue #9).
         while True:
             try:
+                # JOINs the server said to wait for (#1415), asked for again
+                # as soon as the wait is over - here, on every pass, so
+                # within one read timeout of it. Never the read loop's end.
+                try:
+                    ask_again_after_join_waits()
+                except Exception as wait_err:
+                    print(f"[REJOIN ERROR] Could not ask again after a wait: {wait_err}")
                 try:
                     data = s.recv(SOCKET_READ_BYTES)
                 except socket.timeout:

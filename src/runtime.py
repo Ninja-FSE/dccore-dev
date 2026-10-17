@@ -559,6 +559,12 @@ private_messages_saver = None   # (thread, wake event) while one is waiting
 
 kicked_channels = {}
 kicked_channels_lock = threading.Lock()
+# Channels whose JOIN the server refused with "target change too fast" (439/707,
+# #1415): {channel_key: the time.time() it may be asked for again}. Under
+# kicked_channels_lock. join_wait_seconds is the last wait the server gave,
+# for the channels a cut-short JOIN burst left unasked.
+join_waits = {}
+join_wait_seconds = None
 
 # config.send_queue's lock (#665, audit L1). The per-user text lanes are
 # written by every request, search and reply thread (oserve.queue_message)

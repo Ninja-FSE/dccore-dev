@@ -151,6 +151,8 @@ RUNTIME_CONTAINERS = {
     # think it is banned from a channel it never left - and the advert worker
     # would try to rejoin it.
     "kicked_channels": dict,
+    # #1415: one test's refused JOIN must not hold back the next one's rejoin.
+    "join_waits": dict,
     # Operator notices. A leftover here is a badge in the next test
     # counting an event from the last one.
     "notices": list,
@@ -330,6 +332,8 @@ def reset_config(**overrides):
     runtime.known_bots_pruned_at = 0.0
     # A reclaim one test asked for must not space out the next test's.
     runtime.nick_reclaim_asked_at = None
+    # The last wait the server gave, beside join_waits (#1415).
+    runtime.join_wait_seconds = None
     for name, value in SETTINGS_DEFAULTS.items():
         setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():

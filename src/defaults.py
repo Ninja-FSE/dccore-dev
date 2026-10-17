@@ -1169,6 +1169,7 @@ whois_status      = runtime.whois_status       # Online status via WHO reply (Tr
 frozen_queues     = runtime.frozen_queues      # Saved timestamps for users in the freezer
 queue_waiting_since = runtime.queue_waiting_since  # When each nick began waiting for a slot
 kicked_channels   = runtime.kicked_channels    # Channels we were thrown out of, and rejoin refusals
+join_waits        = runtime.join_waits         # Refused JOINs and when they may be asked again (#1415)
 notices           = runtime.notices             # Operator-facing events, newest last
 notice_state      = runtime.notice_state        # {"seen_id": highest acknowledged}
 private_messages  = runtime.private_messages   # PMs nobody answered, newest last

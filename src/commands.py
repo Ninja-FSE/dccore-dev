@@ -756,6 +756,7 @@ PRESERVE_RUNTIME = (
     'kicked_channels',    # losing this restarts the rejoin count at zero on every
                           # rehash, so a channel that has refused us three times
                           # gets tried three more for each setting the operator saves
+    'join_waits',         # #1415: refused JOINs keep their wait across a rehash
     'fetch_queue',        # the cross-bot fetch pool. Losing it is the same failure the
                           # active_transfers comment above describes, in the other slot
                           # pool: count_active_fetches() counts rows here, so an empty
