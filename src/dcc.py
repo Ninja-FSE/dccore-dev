@@ -1764,7 +1764,8 @@ def daily_send_fails_limit():
 
 
 def _send_fails_key(nick):
-    """The dcc_queue key of `nick`: the count follows the queue it pauses."""
+    """The dcc_queue key of `nick`: the count follows the queue it pauses,
+    to a new nick too (irc.note_nick_change(), #1437)."""
     return str(nick or "").lower().strip()
 
 
