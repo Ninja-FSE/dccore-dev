@@ -1121,7 +1121,7 @@ NOTICE_EVENTS = (
     ("a list rebuild could not start",  "commands.py", "List update FAILED to start",      "error"),
     ("the audio reading failed",        "commands.py", "The background audio reading failed or went silent", "error"),
     ("activated with channels missing", "irc.py",      "channel(s) never confirmed via NAMES", "error"),
-    ("rejoined after a kick",           "irc.py",      "Rejoined {back.group(1)}",         "warning"),
+    ("rejoined after a kick",           "irc.py",      "Rejoined {channel}",               "warning"),
     ("kicked from a channel",           "irc.py",      "kicked_notice(kicked_chan, kicker)", "warning"),
     ("the server allows fewer channels", "irc.py",     "more than the server",             "error"),
     ("a join was refused",              "irc.py",      "Attempt {count}/{limit}",          "error"),

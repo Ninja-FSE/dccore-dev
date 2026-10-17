@@ -125,8 +125,9 @@ class TheDebugChannelIsSomewhereTheBotShouldBe(DCCoreTestCase):
         case-insensitive. " #Bot-Debug " and "#bot-debug" are one channel."""
         self.set_config(CHANNEL=" #One , #two ", DEBUG_CHANNEL="  #Bot-Debug  ")
 
+        # The debug channel first, as channels_we_should_be_in() joins it (#1424).
         self.assertEqual(commands._channels_to_sync(self.config),
-                         ["#one", "#two", "#bot-debug"])
+                         ["#bot-debug", "#one", "#two"])
 
     def test_a_blank_channel_setting_does_not_raise(self):
         """CHANNEL is in settings_file.REQUIRED, but this runs on a config

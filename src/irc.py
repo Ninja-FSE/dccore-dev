@@ -159,8 +159,15 @@ MAX_JOIN_LINE_BYTES = 510
 
 
 def channels_we_should_be_in():
-    """Every channel the bot belongs in: CHANNEL, in order, plus the debug
-    channel.
+    """Every channel the bot belongs in: the debug channel first, then CHANNEL,
+    in order.
+
+    THE DEBUG CHANNEL FIRST (#1424). It was last, and that put it where a
+    JOIN burst is most exposed: the line a server cuts (#510), the JOIN an
+    ircu target limit refuses at the end of the burst (#1415), and the 366
+    that arrives after the last CHANNEL's has already activated the advert.
+    First, the operator's own channel is in before anything can go wrong,
+    and is there to hear about it. Activation still does not wait for it.
 
     ONE DEFINITION, deliberately. irc.py's own connect path used to build this
     by joining CHANNEL and then sending a second JOIN for DEBUG_CHANNEL, and
@@ -178,7 +185,7 @@ def channels_we_should_be_in():
     seen = {irc_lower(name) for name in chans}
     debug_chan = str(getattr(config, "DEBUG_CHANNEL", "") or "").strip()
     if debug_chan and irc_lower(debug_chan) not in seen:
-        chans = chans + [debug_chan]
+        chans = [debug_chan] + chans
     return chans
 
 
@@ -4054,6 +4061,44 @@ def answer_quit(line):
             note_observed_departure(q_user, quit_chan)
 
 
+def answer_any_end_of_names(line, conn, sock, epoch):
+    """Every end of a member list (366), before the advert is activated and
+    after: the channel is confirmed, a channel being retried is cleared, and
+    a late member list may claim the channel sync. Returns the channel's key,
+    or None for a line that is not one.
+
+    CONFIRMED WHENEVER IT COMES (#1424). Only answer_end_of_names() - which
+    irc_loop() calls until activation - added to conn.channels_confirmed. A
+    366 after the last CHANNEL's (the debug channel's, joined last) was never
+    recorded, and since #1421 the watchdog read that set: it called a channel
+    the bot was in missing, and asked for it again every advert, for ever -
+    the server ignores a JOIN to a channel one is on, so nothing cleared it.
+    A server owes no order to its replies, so this does not rest on the
+    order the JOINs went out in.
+
+    A JOIN that worked, whether it was the first one or a rejoin, is cleared
+    here rather than in answer_end_of_names() because that one only runs
+    before activation - a channel rejoined hours later would otherwise stay
+    marked as kicked for the life of the process, and be retried on every
+    advert until it ran out of attempts.
+    """
+    import announce
+    # Anchored to the command's position, as is_server_numeric() is: channel
+    # text quoting "366" cannot confirm a channel.
+    back = re.match(r"^:\S+ 366 \S+ (\S+)", line)
+    if not back or not is_valid_irc_target(back.group(1)):
+        return None
+    channel = back.group(1)
+    conn.channels_confirmed.add(channel_key(channel))
+    if note_joined(channel) is not None:
+        announce.send_debug(f"Rejoined {channel}.", category="JOIN", notice="warning")
+    # The member list an activation that found nobody was waiting for
+    # (#1271) - see claim_channel_sync().
+    if runtime.channel_sync_waiting == epoch:
+        claim_channel_sync(sock, epoch, late=True)
+    return channel_key(channel)
+
+
 def answer_end_of_names(line, conn):
     """The end of a channel's member list (366): mark the channel confirmed, and
     activate once every target channel is.
@@ -5029,15 +5074,7 @@ def irc_loop():
                     # kicked for the life of the process, and be retried on
                     # every advert until it ran out of attempts.
                     if " 366 " in line:
-                        back = re.match(r"^:\S+ 366 \S+ (\S+)", line)
-                        if back and note_joined(back.group(1)) is not None:
-                            announce.send_debug(
-                                f"Rejoined {back.group(1)}.", category="JOIN",
-                                notice="warning")
-                        # The member list an activation that found nobody
-                        # was waiting for (#1271) - see claim_channel_sync().
-                        if back and runtime.channel_sync_waiting == my_epoch:
-                            claim_channel_sync(s, my_epoch, late=True)
+                        answer_any_end_of_names(line, conn, s, my_epoch)
 
                     if conn.joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
                         # answer_end_of_names() since #1332.
