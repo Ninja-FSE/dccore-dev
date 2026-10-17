@@ -100,8 +100,10 @@ the omissions surface, because it is the last point at which they are cheap.
   changing nothing, when a fragment is malformed. If commits have landed since
   the last release and `docs/changes/` is empty, something shipped without an
   entry — write it now from the merged PRs.
-- **Bump `SCRIPT_VERSION`** in `defaults.py` **and the version line in
-  `README.md`**. `SCRIPT_VERSION` is what the bot reports over CTCP VERSION,
+- **Bump `SCRIPT_VERSION`** in `defaults.py`, **the version line in
+  `README.md`**, **and the version on the project page** (`site/index.html`,
+  beside "Download the latest release"; so is `dccore.ver` beside the mIRC
+  script - `tests/test_the_site_page.py` fails until both match, #1430). `SCRIPT_VERSION` is what the bot reports over CTCP VERSION,
   prints in the advert and stamps on every generated list, so a stale one
   misreports itself in three places at once; `README.md`'s is the first thing
   a visitor to the public repo reads. This checklist named only the first of
@@ -254,7 +256,7 @@ and only there; the steps below say why each kind goes.
    go-ahead, like any push to `dccore`:
 
    - In `site/`, take the **Next release** mark off every feature the
-     release carries, and check the pages against the release's README,
+     release carries (the overview's versions were already bumped with the roll), and check the pages against the release's README,
      INSTALL and ADMIN-CONSOLE. Merge that here first, as a normal PR.
    - Copy `site/` onto `gh-pages` and push:
 

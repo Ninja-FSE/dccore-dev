@@ -222,6 +222,35 @@ class EveryPageHasTheSameMenuAndFooter(SiteTestCase):
                 self.assertEqual(self.footer(name), first)
 
 
+class TheVersionsOnThePageAreTheReleases(SiteTestCase):
+    """#1430: the overview says which version "Download the latest release"
+    is, and which script the mIRC download holds. Written into the page (it
+    loads nothing), so these hold it to the one place each fact lives: the
+    bot's SCRIPT_VERSION and the script's dccore.ver. A release roll that
+    bumps either fails here until the page follows."""
+
+    def version(self, which):
+        found = re.findall(r'data-version="%s">([^<]+)<' % which, self.page("index.html"))
+        self.assertEqual(len(found), 1, f"one {which} version on the page")
+        return found[0]
+
+    def test_the_bots_version_is_SCRIPT_VERSION(self):
+        import defaults
+        shipped = re.search(r"v\d+\.\d+\.\d+", defaults.SCRIPT_VERSION).group(0)
+        self.assertEqual(self.version("bot"), shipped)
+
+    def test_the_scripts_version_is_dccore_ver(self):
+        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+        try:
+            import build_mirc_zip
+        finally:
+            sys.path.remove(os.path.join(REPO_ROOT, "scripts"))
+        self.assertEqual(self.version("mirc"), "dccore.mrc " + build_mirc_zip.script_version())
+
+    def test_the_script_link_is_the_release_asset(self):
+        self.assertIn(PUBLIC_REPO + "/releases/latest/download/dccore-mirc.zip", self.links("index.html"))
+
+
 class TheSiteStaysOutOfThePublicTree(SiteTestCase):
 
     def test_site_has_an_export_ignore_rule(self):
