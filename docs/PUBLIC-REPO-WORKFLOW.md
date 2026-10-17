@@ -164,23 +164,28 @@ the omissions surface, because it is the last point at which they are cheap.
 
 ### The extraction
 
+**Steps 1-3 are one command** (#1418), and `--test` runs step 4's suite in the
+result:
+
+    python3 scripts/extract_public_tree.py origin/main /tmp/dccore-public --test
+
+It refuses, leaving no tree at all, when a step does not find exactly what it
+expects - a dev-only file that is gone, the `.gitattributes` line or a link
+moved - and names it. The list of what is stripped is `DEV_ONLY` in the script,
+and only there; the steps below say why each kind goes.
+
 1. On `main` here, `git archive --format=tar HEAD | tar -x` into a scratch
    tree — no `.git` history carried over.
-2. Strip dev-only tooling that has no shipped consumer: `scripts/preflight.py`,
-   `scripts/capture_adverts.py`, `scripts/function_coverage.py`,
-   `tests/uncovered_functions.txt`. Keep anything a shipped file's tests
+2. Strip dev-only tooling that has no shipped consumer (`DEV_ONLY` in
+   `scripts/extract_public_tree.py`: the preflight, the advert capture, the
+   coverage pass, the extraction script itself). Keep anything a shipped file's tests
    depend on (`scripts/gen_settings_sample.py`, `docs/CONVENTIONS.md`), and
    keep `scripts/run_tests_in_parallel.py` with `tests/module_durations.json`:
    the public tree's own CI runs the suite through them (#1146).
 
-   **Also strip the tests that exist only to cover `scripts/preflight.py`:**
-   `tests/test_preflight_checks_every_pass_for_state_writes.py`,
-   `tests/test_preflight_counts_what_was_skipped.py`,
-   `tests/test_preflight_hides_the_tooling_for_real.py`,
-   `tests/test_preflight_names_what_a_pass_leaves_in_temp.py`,
-   `tests/test_preflight_reads_its_children_in_utf8.py`,
-   `tests/test_preflight_runs_the_suite_in_parallel.py`,
-   `tests/test_preflights_note_names_the_pass_that_failed.py`. Removing the
+   **Also strip the tests that exist only to cover `scripts/preflight.py`**
+   (the `tests/test_preflight*.py` files, all in `DEV_ONLY`, and a test fails
+   when one is added that it does not name). Removing the
    script and not these left four test files importing a module that no
    longer exists - invisible until step "run the full suite in the scratch
    tree itself" (below) actually caught it, at the v1.13.0 release, the
