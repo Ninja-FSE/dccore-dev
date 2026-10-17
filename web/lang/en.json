@@ -658,6 +658,7 @@
   "settings.field.CUSTOM_THEME_ALERT": "Custom theme: alert colour",
   "settings.field.CUSTOM_THEME_ACCENT": "Custom theme: accent colour",
   "settings.field.ANNOUNCE_TRANSFERS": "Announce finished transfers in the channel",
+  "settings.field.ANNOUNCE_TRANSFERS_EXCLUDE": "Don't announce finished transfers in these channels",
   "settings.field.REJOIN_ATTEMPTS": "Rejoin attempts after a kick (0 = never)",
   "settings.field.ON_CONNECT_CHECK_MINUTES": "Check the on-connect commands worked every (minutes, 0 = never)",
   "settings.field.ANNOUNCE_INTERVAL": "Advert interval (seconds)",

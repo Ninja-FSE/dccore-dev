@@ -244,6 +244,7 @@ PLAIN_HELP = {
     'FETCH_HISTORY_MAX_ROWS': 'The most finished downloads kept in that table, whatever their age.',
     'ANNOUNCE_INTERVAL': 'How often the bot posts its advert in the channel, in seconds. 300 is every five minutes. 60 is the least it accepts - channels do not like a bot that advertises constantly.',
     'ANNOUNCE_TRANSFERS': 'Post a line in the channel each time a file has been sent. Everything else about a transfer is private to the person who asked; this is the only public part. A file asked for by private message is never announced.',
+    'ANNOUNCE_TRANSFERS_EXCLUDE': 'Channels where a finished transfer is not announced even with the announcement switched on, for channels whose rules forbid that kind of message. Leave it empty to post the line in every channel. Separate them with commas and write the # (for example #alpha, #beta); case does not matter. The advert still goes there.',
     'BROADCAST_SEARCH_CHANNEL': 'The one channel used when you search all bots at once from the dashboard. Leave empty to use your first channel.',
     'BROADCAST_SEARCH_COOLDOWN': 'How many seconds must pass between two of those search-all-bots searches, to be polite to the other bots in the channel.',
     'CTCP_VERSION_REPLY': 'Answer when somebody asks the bot what software it runs (a CTCP VERSION request). The answer goes only to the person who asked. Turn off to stay quiet about it.',

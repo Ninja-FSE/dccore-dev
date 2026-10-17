@@ -91,7 +91,7 @@ GROUPS = (
             )),
         )),
         ("Advertising", (
-            ("Advert", ("ANNOUNCE_INTERVAL",)),
+            ("Advert", ("ANNOUNCE_INTERVAL", "ANNOUNCE_TRANSFERS_EXCLUDE")),
             ("Broadcast search", ("BROADCAST_SEARCH_CHANNEL", "BROADCAST_SEARCH_COOLDOWN")),
             ("Timing", ("MSG_DELAY", "DEBUG_MSG_DELAY")),
         )),

@@ -556,6 +556,15 @@ ON_CONNECT_CHECK_MINUTES: int = 5
 #
 # Your own debug line still records every send either way.
 ANNOUNCE_TRANSFERS: bool = True
+# Channels where a finished transfer is NOT announced, even with
+# ANNOUNCE_TRANSFERS on - for a channel that does not allow that kind of
+# message but still wants the advert. Comma-separated, each written with its
+# "#" (e.g. "#alpha, #beta"); names are compared the way the IRC server
+# compares them, so case does not matter. A channel's Quiet or Request only
+# mode stops the announcement too, but stops the advert with it.
+#
+# Empty announces in every channel.
+ANNOUNCE_TRANSFERS_EXCLUDE: list = []
 
 # ---------------------------------------------------------------------
 # 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
