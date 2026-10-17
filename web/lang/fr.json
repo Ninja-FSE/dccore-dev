@@ -200,6 +200,7 @@
   "filelists.manyLists": "{count} listes",
   "filelists.matchesInLists": "{matches} dans {lists}",
   "filelists.noMatchesInAnyList": "Aucun résultat dans aucune liste que vous détenez",
+  "filelists.indexFilling": "L'index de recherche est encore en cours de remplissage depuis le démarrage du bot : le filtre ne peut pas encore répondre. Réessayez dans une minute.",
   "filelists.showingFirstNarrow": "— affichage des {files} premiers, affinez le terme pour voir le reste",
   "filelists.hideListsNoMatch": "Masquer les listes sans résultat",
   "filelists.showHiddenNoMatch": "Afficher {count} sans résultat",
