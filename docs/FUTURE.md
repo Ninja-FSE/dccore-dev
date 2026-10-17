@@ -100,7 +100,7 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 - **Every setting explains itself.** The **?** beside every setting on the dashboard — and the comment above it in `settings.conf.sample` — is written for the person running the bot, in English, French and Spanish; the dashboard itself is translated the same three ways.
 - **Two configuration mechanisms** — `admin_config.py` for Python, `settings.conf` for plain text; the dashboard and console both write to the latter.
 - **`!rehash`** reloads code and settings live, preserving queues and transfer state.
-- **Channel adverts** on a timer, with a per-bot theme (five presets, or your own colours).
+- **Channel adverts** on a timer, with a per-bot theme (five presets, or your own colours). A finished transfer is announced in its channel (`ANNOUNCE_TRANSFERS`), except in the channels listed in `ANNOUNCE_TRANSFERS_EXCLUDE` (#1444).
 - **Statistics** — totals, today and yesterday, per-file download counts, a speed record, and a live rate.
 - **A record of every finished transfer** (`data/transfers.db`), with the nick it went to or came from and no host or channel: shown on the Stats page for 24 hours, 7 days, 30 days or all time - the files sent most, speeds, the wait in the queue, the nicks sent to and received from most, and how transfers ended - completed, failed or cancelled, with a success rate per kind - with one nick or everyone forgotten on request (wiped from the file, not just unlinked) and a CSV export.
 - **History brought across** from OmenServe and KeepTrack: lifetime totals from mIRC's `vars.ini` (where both counted the same sends, the operator picks one) and KeepTrack's per-nick history from `KTData.txt`, hosts never kept.

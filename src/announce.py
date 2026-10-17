@@ -393,6 +393,39 @@ def _channel_may_be_told(channel, user):
         return True
 
 
+def _channel_excluded_from_announce(channel, excluded=None):
+    """True for a channel ANNOUNCE_TRANSFERS_EXCLUDE names: the operator
+    wants the advert there, but not the "Sent:" line.
+
+    `excluded` is the setting as send_transfer_complete() read it under
+    runtime.config_reload_lock; without it, it is read here, under the same
+    lock (see send_transfer_complete() for why).
+
+    Compared under the server's casemapping (irc.irc_lower()), as every
+    channel comparison is (#1271). irc is imported here, not at the top,
+    as the rest of this module does: irc imports dcc, which imports this
+    module, so a top-level import would be a cycle.
+    """
+    if excluded is None:
+        with runtime.config_reload_lock:
+            excluded = getattr(config, "ANNOUNCE_TRANSFERS_EXCLUDE", None)
+    excluded = excluded or []
+    if isinstance(excluded, str):
+        excluded = excluded.split(",")
+    name = str(channel or "").strip()
+    if not name or not excluded:
+        return False
+    try:
+        import irc
+        fold = irc.irc_lower
+    except Exception as err:
+        print(f"[ANNOUNCE] Could not read the server's case folding: {err}")
+        fold = str.lower
+    wanted = fold(name)
+    return any(fold(str(entry).strip()) == wanted for entry in excluded
+               if str(entry).strip())
+
+
 def send_transfer_complete(channel, user, file_name, file_size, start_time, actual_speed, duration=None,
                            private=False):
     """Send the block-styled transfer notice once a file has finished.
@@ -467,10 +500,29 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     # figures this function reads are used by both.
     # A Quiet or Request only channel is not told either (#1204): this line is
     # the bot speaking in the channel unasked, which is what those modes are for.
+    # Nor is a channel the operator listed in ANNOUNCE_TRANSFERS_EXCLUDE: one
+    # that takes the advert but not this line, which no mode expresses.
+    #
+    # Both settings are read under runtime.config_reload_lock (#1444). Every
+    # Settings save is a !rehash, and importlib.reload(defaults) re-runs
+    # `ANNOUNCE_TRANSFERS_EXCLUDE: list = []` a moment before
+    # settings_file.apply_to() puts the operator's list back: a transfer
+    # finishing in that window would be announced in a channel that asked not
+    # to be, and one such line can get the bot kicked. A blocking acquire, since
+    # the value wanted is the one after the reload, which takes milliseconds.
+    # The two reads alone are inside it, and the one caller - dcc.finish_send(),
+    # on the send's own thread - has released queue_lock before it calls, so
+    # it holds nothing the reload waits for.
+    with runtime.config_reload_lock:
+        announce_on = getattr(config, "ANNOUNCE_TRANSFERS", True)
+        excluded = getattr(config, "ANNOUNCE_TRANSFERS_EXCLUDE", None) or []
     if private:
         print(f"[ANNOUNCE] Transfer complete for {user} ({speed_str}) - asked for "
               f"by private message, so no channel is told.")
-    elif getattr(config, "ANNOUNCE_TRANSFERS", True) and _channel_may_be_told(channel, user):
+    elif announce_on and _channel_excluded_from_announce(channel, excluded):
+        print(f"[ANNOUNCE] Transfer complete for {user} ({speed_str}) - {channel} "
+              f"is not told (ANNOUNCE_TRANSFERS_EXCLUDE).")
+    elif announce_on and _channel_may_be_told(channel, user):
         msg = fit_irc_line(_build, file_name)
         if oserve:
             oserve.queue_message("channel_announce", msg)
