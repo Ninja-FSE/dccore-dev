@@ -891,8 +891,13 @@ it still works as a plain console, without the panel.
 
 ### First time
 
-Save the file anywhere (your mIRC folder is fine), with the `dcx` folder from
-`scripts/mirc/` beside it (see "DCX" below), and, in mIRC:
+Download **`dccore-mirc.zip`** from the latest release
+(<https://github.com/Ninja-FSE/dccore/releases/latest/download/dccore-mirc.zip>) and extract it
+into your mIRC folder (`//echo -a $mircdir` in mIRC says where that is): it
+holds `dccore.mrc` with the `dcx` and `dll` folders it loads beside it (see
+"DCX" and "Dark theme and icons" below), and a short README (#1412). From a
+copy of the repository, the same files are `scripts/mirc/dccore.mrc`,
+`scripts/mirc/dcx/` and `scripts/mirc/dll/` without `dll/src/`. Then, in mIRC:
 
 ```
 /load -rs dccore.mrc
@@ -1285,10 +1290,12 @@ is lost.
 ### Updating the script
 
 A newer bot may send a line with a field the loaded script does not know
-about. Save the new `dccore.mrc` over the old one, with the `dcx` and `dll`
-folders from `scripts/mirc/` beside it - the control panel draws with the
-first and the dark theme and icons come from the second; without them the
-script uses the plain settings window and light dialogs - then in mIRC:
+about. Extract the new `dccore-mirc.zip` over the old files, where
+`dccore.mrc` already is: it replaces the script and its `dcx` and `dll`
+folders - the control panel draws with the first and the dark theme and icons
+come from the second; without them the script uses the plain settings window
+and light dialogs - and has no `dccore.ini`, so your settings and the token
+stay as they are. Then in mIRC:
 
 ```
 /reload -rs dccore.mrc
