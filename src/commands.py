@@ -1391,10 +1391,16 @@ def handle_rehash_request(user, target_chan, authorised=False, user_host=None,
     triggers it, and the rehash already running may have read the file
     before that write landed. Dropping it would silently lose the
     operator's change; waiting applies it.
+
+    RETURNS WHETHER THE RELOAD WORKED (#1434): True once the modules are
+    reloaded, False when the reload failed (the body catches that itself and
+    says "Rehash FAILED") or the caller was refused. A settings save reports
+    the result: without it, the console told the mIRC settings window the
+    new values were in effect after a reload that had failed.
     """
     if not authorised and not is_admin(user, user_host):
         print(f"[REHASH SECURITY] Ignored a rehash attempt from an unauthorised user: {user}")
-        return
+        return False
 
     if not runtime.rehash_lock.acquire(blocking=False):
         print("[REHASH] Another rehash is still running - waiting for it "
@@ -1408,7 +1414,11 @@ def handle_rehash_request(user, target_chan, authorised=False, user_host=None,
 
 
 def _handle_rehash_request(user, target_chan, confirmed_debug_removal=False):
-    """The rehash itself. Only ever called with runtime.rehash_lock held."""
+    """The rehash itself. Only ever called with runtime.rehash_lock held.
+
+    True when the reload went through, False when it failed and was caught
+    below. A channel sync that fails after the reload still counts as True:
+    the reload is what was asked for, and it happened."""
     import importlib
     import sys
     import defaults as config
@@ -1849,7 +1859,8 @@ def _handle_rehash_request(user, target_chan, confirmed_debug_removal=False):
             ).start()
         else:
             print("[REHASH ERROR] Could not wake the queue automatically: live_socket was not in memory.")
-        
+        return True
+
     except Exception as e:
         import announce
         announce.is_ready = True
@@ -1863,6 +1874,7 @@ def _handle_rehash_request(user, target_chan, confirmed_debug_removal=False):
             pass
         print(f"[REHASH CRITICAL ERROR] The files could not be reloaded live: {e}")
         announce.send_debug(f"Rehash FAILED (Notices Resumed for safety): {e}", category="INFO")
+        return False
 
 
 def handle_hard_ban_request(user, target_chan, msg_text, authorised=False, user_host=None):
