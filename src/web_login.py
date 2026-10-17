@@ -317,6 +317,18 @@ def _password_stamp(secret_key, stored_hash):
     return hmac.new(key, message, hashlib.sha256).hexdigest()[:32]
 
 
+def _admin_password_hash():
+    """ADMIN_PASSWORD_HASH as the operator configured it, read under
+    runtime.config_reload_lock. A rehash's reload of defaults puts it back to
+    "" for about a millisecond, until settings.conf is applied again (see that
+    lock's comment). A request read in that window took its own session for
+    one opened with a changed password and logged the operator out - most
+    often the Settings page's own re-fetch right after a save - and a correct
+    password checked there was refused and counted as a failure (#1433)."""
+    with runtime.config_reload_lock:
+        return getattr(config, "ADMIN_PASSWORD_HASH", "")
+
+
 def _origin_netloc(url):
     """host[:port] of an Origin, Referer or Host value, lower-cased, without
     a default port - a browser writes neither Origin nor Host with :80 or
