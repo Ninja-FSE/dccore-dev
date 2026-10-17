@@ -6245,7 +6245,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.DAILY_SEND_FAILS_LIMIT 2233 int 1 2232
   hadd dccore.swm pg.DAILY_SEND_FAILS_LIMIT 11
   hadd dccore.swm n.DAILY_SEND_FAILS_LIMIT Failed sends in a day before a nick is paused (0 = off)
-  hadd dccore.swm h.DAILY_SEND_FAILS_LIMIT 0 means off.
+  hadd dccore.swm h.DAILY_SEND_FAILS_LIMIT 0 means off. Someone whose downloads failed this many times today (never accepted~2C stalled~2C or closed before the end - their own cancel included) is paused until midnight: their queue is removed and new requests are refused~2C with a notice saying why.
   hadd dccore.swm k.MAX_DCC_SLOTS 2237 int 1 2236
   hadd dccore.swm pg.MAX_DCC_SLOTS 12
   hadd dccore.swm n.MAX_DCC_SLOTS Max simultaneous sends

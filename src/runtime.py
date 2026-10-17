@@ -124,7 +124,8 @@ dcc_address_found_at = None
 # Per-user bookkeeping -------------------------------------------------------
 # Failed sends per nick today (#1389, DAILY_SEND_FAILS_LIMIT), keyed like
 # dcc_queue: {nick_key: {"day": date, "fails": n, "paused": bool}}. Only
-# dcc.py's send-fail functions touch it, under failed_transfers_lock.
+# dcc.py's send-fail functions touch it, and irc.note_nick_change(), which
+# moves it to a new nick like the queue (#1437); under failed_transfers_lock.
 failed_transfers = {}    # Failed sends per nick today (#1389)
 failed_transfers_lock = threading.Lock()
 # The DAILY_SEND_FAILS_LIMIT circuit breaker (#1389), all under

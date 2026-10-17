@@ -1160,6 +1160,16 @@ def note_nick_change(old_nick, new_nick):
     involved at all: `user_processing_lock` and the `"user"` field on any
     matching `active_transfers` row now move too.
 
+    The DAILY_SEND_FAILS_LIMIT count follows the nick as well (#1437), and the
+    pause with it: `failed_transfers` is keyed like `dcc_queue`, and the
+    request gate reads only the asking nick's key, so a nick paused at its
+    last failed send that typed /nick was served again at once with its count
+    back at 0. (A reconnect under another nick is a QUIT and a new JOIN, no
+    NICK line, so it does not come through here: it is a new nick to the
+    bot.) A pause is not a sanction in the sense below - it is the bot's own
+    state about a receiver that keeps failing, and a new name does not mend
+    the receiver.
+
     NOT the sanctions. `muted_until` and `banned_users` are keyed on the nick
     too, and carrying those across would be a change of policy rather than a
     fix: DCCore already answers nick-hopping with hard bans, which match a
@@ -1277,6 +1287,30 @@ def note_nick_change(old_nick, new_nick):
                 db.save_dcc_queue()
             except Exception as save_err:
                 print(f"[NICK] Could not save the queue after {old_nick} -> {new_nick}: {save_err}")
+
+    # The failed sends today and the pause they made (#1437), under their own
+    # lock and not inside queue_lock: dcc.py never takes one inside the other.
+    # An entry is {"day", "fails", "paused"}, and one from an earlier day
+    # counts for nothing (dcc.send_fails_paused()), so it is dropped, not
+    # carried. When the new key holds today's entry too - the nick was someone
+    # else's earlier today, or this user's before an earlier rename - the
+    # larger count wins, whole: its "paused" says whether that count has
+    # already paused (dcc.note_failed_send()), so it belongs with the count.
+    # Never the sum, which would charge one person with another's failures.
+    # Equal counts keep a pause either entry had.
+    today = dcc._send_fails_today()
+    with runtime.failed_transfers_lock:
+        fails_store = runtime.failed_transfers
+        old_entry = fails_store.pop(old_key, None)
+        if old_entry and old_entry.get("day") == today:
+            new_entry = fails_store.get(new_key)
+            if not new_entry or new_entry.get("day") != today:
+                fails_store[new_key] = old_entry
+            elif int(old_entry["fails"]) > int(new_entry["fails"]):
+                fails_store[new_key] = old_entry
+            elif int(old_entry["fails"]) == int(new_entry["fails"]):
+                new_entry["paused"] = bool(new_entry.get("paused") or old_entry.get("paused"))
+            moved.append("failed_transfers")
 
     # Unchanged behaviour, kept here so one function owns the whole rename.
     send_queue = getattr(config, "send_queue", None)
