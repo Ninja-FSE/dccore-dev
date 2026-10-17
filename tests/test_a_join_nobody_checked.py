@@ -399,6 +399,9 @@ class AMemberListAfterActivationStillConfirms(WelcomeHarness):
         self.assertEqual(self.conn.channels_confirmed, before)
 
     def test_a_channel_being_retried_is_cleared_and_said(self):
+        # Its JOIN was echoed; only the 366 was late (a 366 alone is no
+        # proof: test_a_names_reply_is_not_a_rejoin).
+        irc.note_own_join("#beta")
         irc.note_join_unconfirmed("#beta")
         self.end_of_names("#beta")
 
