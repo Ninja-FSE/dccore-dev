@@ -139,6 +139,19 @@ the omissions surface, because it is the last point at which they are cheap.
   heading exactly. `v1.10.0` in the changelog and `v1.9.0-RC1` on the tag is
   the kind of mismatch nobody notices until someone reports a bug against a
   version that does not exist.
+- **Create the GitHub Release for the tag, with the mIRC zip** (#1412, #1404).
+  Notes: the release's section of the public changelog. Build the asset from
+  the merged tree and attach it under its fixed name, so
+  `releases/latest/download/dccore-mirc.zip` (the docs and the project page
+  link it) is the new script:
+
+      python3 scripts/build_mirc_zip.py --out dist/dccore-mirc.zip
+      gh release create vX.Y.Z -R Ninja-FSE/dccore --title "vX.Y.Z - Title" \
+          --notes-file <notes> --latest dist/dccore-mirc.zip
+
+  Then check `gh api repos/Ninja-FSE/dccore/releases/latest` names the new
+  tag: a tag with no Release is invisible to the update check (#572), which
+  asks for the latest release, and v1.16.2 shipped that way.
 - **Check `docs/FUTURE.md`** for anything the release implements that is still
   listed as planned or not-yet-done. A roadmap calling a shipped thing missing
   makes the changelog look like it is overclaiming — this drifted once and

@@ -152,7 +152,9 @@ class EveryLinkResolves(SiteTestCase):
         self.assertGreaterEqual(len(checked), 6)
 
     def test_any_other_repository_link_is_a_page_github_has(self):
-        allowed = {PUBLIC_REPO, PUBLIC_REPO + "/releases", PUBLIC_REPO + "/releases/latest"}
+        allowed = {PUBLIC_REPO, PUBLIC_REPO + "/releases", PUBLIC_REPO + "/releases/latest",
+                   # the mIRC script's zip, a release asset with a fixed name (#1412)
+                   PUBLIC_REPO + "/releases/latest/download/dccore-mirc.zip"}
         for name, href in self.all_links():
             if href.startswith(PUBLIC_REPO) and "/blob/main/" not in href:
                 with self.subTest(page=name, href=href):
