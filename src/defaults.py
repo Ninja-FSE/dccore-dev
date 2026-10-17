@@ -285,6 +285,12 @@ RAR_EXTENSIONS: list = [
 # must never be reachable through that path. They are dashboard-download-only
 # (GET /api/fetch/<id>/download in webserver.py).
 FETCHED_FILES_DIR: str = "./data/fetched"
+# EACH BOT'S FILES IN A FOLDER OF ITS OWN (#1423), the way mIRC can file a
+# download under its sender's name: a file or a packed folder fetched from
+# SomeBot is saved in FETCHED_FILES_DIR/SomeBot/. Off by default - turned on,
+# it applies to new fetches only, and files already fetched stay where they
+# are. Fetched lists are not affected: they have their own place (lists/).
+FETCHED_FILES_PER_BOT: bool = False  # Save each bot's files in a folder named after it, inside the fetched files directory
 
 # Safe, normalised paths into the data/ subdirectory
 BANS_FILE: str      = "./data/bans.txt"
