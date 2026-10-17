@@ -285,6 +285,69 @@ class TheWatchdogSaysSoWhereItIsRead(WelcomeHarness):
         self.assertIn("if target_channels.issubset(channels_confirmed):", code)
 
 
+class TheDebugChannelIsCheckedOnceTheAdvertRuns(WelcomeHarness):
+    """#1421: every CHANNEL answered, so the 366 handler activated the advert
+    before the watchdog woke - and the watchdog asked "what never confirmed"
+    only when it was the one activating. The debug channel is in the wider
+    set and not in what activation waits on, so one the bot did not get into
+    went unreported and was never asked for again. Seen at two restarts of a
+    real bot."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(CHANNEL="#alpha,#beta", DEBUG_CHANNEL="#thedebug",
+                        activation_triggered=True)
+        self.notices = []
+        self.patch(announce, "send_debug",
+                   lambda msg_text, category="INFO", notice=None: self.notices.append((notice, msg_text)))
+        self.conn.joined = True
+        self.conn.channels_confirmed.update({"#alpha", "#beta"})
+
+    def watch(self):
+        return self.quietly(irc.activation_watchdog, self.conn)[1]
+
+    def test_a_debug_channel_with_no_names_is_reported_and_retried(self):
+        said = self.watch()
+
+        self.assertIn("never confirmed via NAMES, though the advert is running: #thedebug", said)
+        self.assertEqual(config.kicked_channels["#thedebug"]["reason"], "never confirmed")
+        self.assertIn("#thedebug", irc.channels_to_rejoin())
+
+    def test_the_operator_hears_it_on_the_dashboard(self):
+        self.watch()
+
+        sent = [(notice, text) for notice, text in self.notices if "never confirmed via NAMES" in text]
+        self.assertEqual(len(sent), 1, self.notices)
+        self.assertEqual(sent[0][0], "error")
+        self.assertIn("#thedebug", sent[0][1])
+
+    def test_the_advert_is_not_started_a_second_time(self):
+        self.watch()
+
+        self.assertEqual(self.started(irc.delayed_activate), [])
+
+    def test_a_confirmed_debug_channel_says_nothing(self):
+        self.conn.channels_confirmed.add("#thedebug")
+        said = self.watch()
+
+        self.assertNotIn("never confirmed", said)
+        self.assertEqual(config.kicked_channels, {})
+        self.assertEqual(self.notices, [])
+
+    def test_with_no_debug_channel_nothing_changes(self):
+        self.set_config(DEBUG_CHANNEL="")
+        said = self.watch()
+
+        self.assertNotIn("never confirmed", said)
+        self.assertEqual(config.kicked_channels, {})
+
+    def test_a_dead_connection_is_left_alone(self):
+        self.set_config(connection_epoch=self.conn.epoch + 1)
+        self.watch()
+
+        self.assertEqual(config.kicked_channels, {})
+
+
 class WhatTheServerSaidIsNoLongerDiscarded(unittest.TestCase):
 
     def test_too_many_channels_is_a_refusal(self):
