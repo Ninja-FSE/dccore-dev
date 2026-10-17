@@ -565,6 +565,11 @@ kicked_channels_lock = threading.Lock()
 # for the channels a cut-short JOIN burst left unasked.
 join_waits = {}
 join_wait_seconds = None
+# Channels the server echoed the bot's own JOIN to on this connection, less
+# the ones it was kicked from or parted since: the proof it is in them that a
+# NAMES reply is not (irc.note_own_join()). Under kicked_channels_lock, and
+# emptied with join_waits for each new connection.
+joined_channels = set()
 
 # config.send_queue's lock (#665, audit L1). The per-user text lanes are
 # written by every request, search and reply thread (oserve.queue_message)
