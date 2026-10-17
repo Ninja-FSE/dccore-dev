@@ -403,6 +403,19 @@
 # (GET /api/fetch/<id>/download in webserver.py).
 #FETCHED_FILES_DIR = ./data/fetched
 
+# Save what you download from each bot in a folder named after it, inside the
+# fetched files directory - files from SomeBot go to SomeBot/. Applies to new
+# downloads; files already downloaded stay where they are. Fetched lists keep
+# their own place.
+#
+# EACH BOT'S FILES IN A FOLDER OF ITS OWN (#1423), the way mIRC can file a
+# download under its sender's name: a file or a packed folder fetched from
+# SomeBot is saved in FETCHED_FILES_DIR/SomeBot/. Off by default - turned on,
+# it applies to new fetches only, and files already fetched stay where they
+# are. Fetched lists are not affected: they have their own place (lists/).
+# Save each bot's files in a folder named after it, inside the fetched files directory
+#FETCHED_FILES_PER_BOT = false
+
 # Where timed bans are saved.
 #
 # Safe, normalised paths into the data/ subdirectory

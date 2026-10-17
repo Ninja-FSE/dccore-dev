@@ -176,7 +176,7 @@ SETTINGS_CATEGORIES = (
     # weekly.
     ("advanced",      "Advanced: file locations",
                                                ["TMP_ZIP_DIR", "LOCAL_LIST_DIR",
-                                                "FETCHED_FILES_DIR", "BANS_FILE", "HARD_BANS_FILE",
+                                                "FETCHED_FILES_DIR", "FETCHED_FILES_PER_BOT", "BANS_FILE", "HARD_BANS_FILE",
                                                 "STATS_FILE", "KNOWN_BOTS_FILE",
                                                 "FETCHED_BOT_LISTS_FILE", "LIST_INDEX_FILE",
                                                 "LIST_AUDIO_INFO_CACHE",
@@ -276,6 +276,7 @@ SETTINGS_LABELS = {
     "MAX_RAR_FOLDER_SIZE": "Largest folder !rar will pack (0 = no limit)",
     "LOCAL_LIST_DIR": "Master list directory",
     "FETCHED_FILES_DIR": "Fetched files directory",
+    "FETCHED_FILES_PER_BOT": "A folder for each bot's files",
     "BANS_FILE": "Bans file",
     "STATS_FILE": "Stats file",
     "HARD_BANS_FILE": "Hard bans file",

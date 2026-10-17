@@ -4970,6 +4970,7 @@
     MAX_RAR_FOLDER_SIZE: "settings.field.MAX_RAR_FOLDER_SIZE",
     LOCAL_LIST_DIR: "settings.field.LOCAL_LIST_DIR",
     FETCHED_FILES_DIR: "settings.field.FETCHED_FILES_DIR",
+    FETCHED_FILES_PER_BOT: "settings.field.FETCHED_FILES_PER_BOT",
     BANS_FILE: "settings.field.BANS_FILE",
     STATS_FILE: "settings.field.STATS_FILE",
     HARD_BANS_FILE: "settings.field.HARD_BANS_FILE",

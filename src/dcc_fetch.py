@@ -2710,7 +2710,62 @@ def _fit_name_component(name, limit=MAX_NAME_BYTES):
     return _truncate_utf8(stem, limit - ext_bytes) + ext
 
 
-def _resolve_destination_path(request_id, raw_filename):
+def fetched_files_root():
+    """FETCHED_FILES_DIR, absolute: the folder every fetched file is under."""
+    return os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+
+
+def fetched_dir_of(row):
+    """The folder `row`'s file is in (#1423): FETCHED_FILES_DIR, or the bot's
+    own folder inside it when the row was fetched with FETCHED_FILES_PER_BOT
+    on. None when the row names a folder that is not one inside
+    FETCHED_FILES_DIR - a hand-edited history file - so nothing is read or
+    deleted through it. Every reader of a row's file goes through here, so a
+    row fetched before the setting changed still finds its file."""
+    root = fetched_files_root()
+    folder = (row or {}).get("fetched_folder")
+    if not folder:
+        return root
+    path = os.path.join(root, str(folder))
+    if os.path.dirname(os.path.normpath(path)) != os.path.normpath(root) or not dcc.is_safe_path(root, path):
+        return None
+    return path
+
+
+def bot_folder_name(bot):
+    """`bot`'s nick as a folder name inside FETCHED_FILES_DIR (#1423), or None
+    when nothing usable is left of it. The same cleaning a fetched file's name
+    gets (_sanitize_offer_filename(): no separators, no "..", no control codes,
+    Windows' reserved device names made safe), and never a name DCCore itself
+    uses there (_RESERVED_FETCHED_NAMES - "lists" holds every fetched list)."""
+    cleaned = _sanitize_offer_filename(str(bot or "").strip())
+    if not str(bot or "").strip() or cleaned == "fetched_file":
+        return None
+    cleaned = _fit_name_component(cleaned)
+    if cleaned.casefold() in _RESERVED_FETCHED_NAMES:
+        cleaned = cleaned + "_"
+    return cleaned
+
+
+def _bot_folder_for_locked(queue, row):
+    """The folder `row` is fetched into (#1423): None with FETCHED_FILES_PER_BOT
+    off or for a list, otherwise its bot's folder. One bot, one folder: a nick
+    that differs only in case reuses the folder a row of the same bot already
+    has - read from the rows in memory, not from the disk, since this runs
+    under _fetch_lock(), which a slow mount must never hold. Caller holds it."""
+    if not getattr(config, "FETCHED_FILES_PER_BOT", False) or row.get("request_type") == "list":
+        return None
+    name = bot_folder_name(row.get("bot"))
+    if name is None:
+        return None
+    for other in queue.values():
+        folder = other.get("fetched_folder")
+        if folder and other is not row and str(folder).casefold() == name.casefold():
+            return str(folder)
+    return name
+
+
+def _resolve_destination_path(request_id, raw_filename, folder=None):
     """Build the on-disk path a completed fetch will be written to, or None
     if it fails the path-containment check. The request id is folded into
     the stored filename so two fetches that happen to share a cleaned
@@ -2724,11 +2779,13 @@ def _resolve_destination_path(request_id, raw_filename):
     "[Errno 22] Invalid argument" from open() - caught and reported as
     "transfer error", which names neither the length nor the name.
     """
-    dest_dir = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+    dest_dir = fetched_dir_of({"fetched_folder": folder})
+    if dest_dir is None:
+        return None, None
     clean_name = _sanitize_offer_filename(raw_filename)
     stored_name = _fit_name_component(f"{request_id}_{clean_name}")
     candidate = os.path.join(dest_dir, stored_name)
-    if not dcc.is_safe_path(dest_dir, candidate):
+    if not dcc.is_safe_path(fetched_files_root(), candidate):
         return None, None
     return dest_dir, stored_name
 
@@ -2785,9 +2842,13 @@ def files_other_rows_hold_locked(queue, directory, names, row=None):
     pass over the queue rather than one per name (a batch delete can carry
     hundreds, #1246). Caller holds _fetch_lock()."""
     held = {}
+    here = os.path.normcase(os.path.normpath(directory))
     for other in queue.values():
         name = other.get("stored_filename") if other is not row else None
-        if name:
+        # Only a row whose file is in this same folder (#1423): the same
+        # name in two bots' folders is two files.
+        folder = fetched_dir_of(other) if name else None
+        if name and folder and os.path.normcase(os.path.normpath(folder)) == here:
             held.setdefault(str(name).casefold(), []).append(name)
     return {name for name in names
             if name and any(names_one_file(directory, name, other)
@@ -2993,7 +3054,15 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
                   f"all {max_slots} fetch slots are in use. It is asked for again once one is free.")
             return
 
-        dest_dir, stored_name = _resolve_destination_path(request_id, offer["filename"])
+        # Into the bot's own folder with FETCHED_FILES_PER_BOT on (#1423),
+        # remembered on the row so its file is found again whatever the
+        # setting says later. A row asked for again with part of its file
+        # already on disk (a restart, #926) keeps the folder that part is in,
+        # so resuming finds it even if the setting changed in between.
+        if not (row.get("stored_filename") and "fetched_folder" in row):
+            row["fetched_folder"] = _bot_folder_for_locked(queue, row)
+        dest_dir, stored_name = _resolve_destination_path(request_id, offer["filename"],
+                                                          row["fetched_folder"])
         if stored_name is None:
             _mark_failed_locked(row, "unsafe destination path")
             print(f"[FETCH] Rejected offer from {from_nick}: sanitised filename escaped FETCHED_FILES_DIR.")

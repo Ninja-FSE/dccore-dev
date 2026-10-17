@@ -614,6 +614,7 @@
   "settings.field.MAX_RAR_FOLDER_SIZE": "Largest folder !rar will pack (0 = no limit)",
   "settings.field.LOCAL_LIST_DIR": "Master list directory",
   "settings.field.FETCHED_FILES_DIR": "Fetched files directory",
+  "settings.field.FETCHED_FILES_PER_BOT": "A folder for each bot's files",
   "settings.field.BANS_FILE": "Bans file",
   "settings.field.STATS_FILE": "Stats file",
   "settings.field.HARD_BANS_FILE": "Hard bans file",

@@ -1243,7 +1243,10 @@ if HAVE_FLASK:
             # touches the filesystem.
             with dcc_fetch._fetch_lock():
                 row = getattr(config, "fetch_queue", {}).get(request_id)
-                if row and row.get("state") == "complete" and row.get("stored_filename"):
+                # The row's own folder (#1423), read with its name.
+                directory = dcc_fetch.fetched_dir_of(row) if row else None
+                if (row and row.get("state") == "complete" and row.get("stored_filename")
+                        and directory is not None):
                     stored_filename = row["stored_filename"]
                     download_name = row.get("filename") or stored_filename
                 else:
@@ -1254,8 +1257,7 @@ if HAVE_FLASK:
             # selects a row, and the row's OWN already-validated
             # stored_filename (set by dcc_fetch.py after it ran the offer's
             # filename through dcc.is_safe_path()) is what actually gets
-            # opened.
-            directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+            # opened - in the folder the row was fetched into.
 
             # NOT send_from_directory(), and the reason is specific.
             #
