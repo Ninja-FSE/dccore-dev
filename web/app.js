@@ -3738,6 +3738,11 @@
           // is two phrases whichever side you split it on.
           state.filelistsMatchTerms = filter ? (payload.terms || []) : [];
           renderFilelistGroups(groups, !!filter);
+          // Still being filled after a restart (#1416): said here, rather
+          // than "no matches", which it is not.
+          if (filter && payload && payload.filling) {
+            el.filelistsBody.innerHTML = emptyRow(5, t("filelists.indexFilling"));
+          }
         })
         .catch(function (err) {
           markConnection(false);
