@@ -571,7 +571,9 @@ MAX_DCC_SLOTS: int      = 3      # Maximum simultaneous live downloads
 # connected, and a stop counts against MAX_SEND_FAILS like a stall. Only the
 # slowest send, and only while another one moves at least this much - proof
 # the bot's side can deliver - so with one slot it never fires. Not while
-# MAX_UPLOAD_KB is what holds the sends back. See dcc._SlowSendWatch.
+# MAX_UPLOAD_KB is what holds it back: a send moving about an even share of a
+# full cap is kept, one far under it while others take the rest is not (#1436).
+# See dcc._SlowSendWatch.
 SLOW_SEND_MIN_KB: int   = 0      # In KB/s, 0 = off
 LARGE_FILE_MB: int      = 0      # A file of at least this many MB is large, and only one large file is sent at a time (0 = off)
 MAX_USER_QUEUE: int     = 100    # Most files a single user may queue

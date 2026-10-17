@@ -4,7 +4,8 @@ SLOW_SEND_MIN_KB, 0 (off) by default. Above 0, a send whose receiver has
 acknowledged less than that over about the last minute is stopped - judged
 from a minute after it connected, only while every slot is taken and a nick
 is waiting for one, and never while the bot's own upload cap (#1352) is what
-holds the sends back. The row is kept and charged against MAX_SEND_FAILS like
+holds that send back (#1436: only while it moves about an even share of a
+full cap). The row is kept and charged against MAX_SEND_FAILS like
 a stall, the nick goes to the back, it is told why, and the queue is woken
 three seconds later rather than after the failed-row back-off.
 
@@ -324,14 +325,136 @@ class TheWatch(WithEverySlotTaken):
         self.assertIsNone(self.drive(300, kb_per_second=0))
 
     # -- the bot's own cap ------------------------------------------------------
+    #
+    # A full cap shields only the sends it holds (#1436): a send is kept while
+    # it moves at least SLOW_SEND_CAP_NEAR of an even split of what every send
+    # together moved, over the same window; under that it is judged as with no
+    # cap at all.
 
-    def test_not_while_the_upload_cap_is_what_holds_the_sends_back(self):
+    def sends_bps(self, *bytes_per_second):
+        """sends(), with each rate in bytes per second, not KB/s."""
+        return self.sends(*(bps / KB for bps in bytes_per_second))
+
+    def drive_on_the_wire(self, sends, seconds):
+        """drive_all(), with every byte a send's receiver acknowledges also
+        put on the wire (oserve.total_sent_bytes), as a real send does - so
+        what every send together moved is the sum of the running sends."""
+        for _ in range(int(seconds)):
+            self.clock.t += 1.0
+            for send in sends:
+                if send.stopped_at is not None:
+                    continue
+                step = round(send.kb_per_second * KB)
+                send.acked += step
+                self.oserve.total_sent_bytes += step
+                if send.watch.check(send.acked) is not None:
+                    send.stopped_at = self.clock.t - send.watch.connected_at
+        return [send for send in sends if send.stopped_at is not None]
+
+    def test_the_audit_case_a_crawler_beside_two_sends_filling_the_cap_is_stopped(self):
+        """MAX_UPLOAD_KB=300, SLOW_SEND_MIN_KB=60, three slots: 140, 140 and
+        20 KB/s, the cap full at 300. The 20 is held by its own link, not the
+        cap (its even share is 100), and is stopped after the minute's grace
+        - just as it is with the cap off. Before #1436 it kept its slot for as
+        long as the two fast sends kept the cap full."""
+        for cap in (300, 0):
+            with self.subTest(MAX_UPLOAD_KB=cap):
+                self.set_config(MAX_UPLOAD_KB=cap, SLOW_SEND_MIN_KB=60)
+                fast, faster, crawler = self.sends(140, 140, 20)
+                self.assertEqual(self.drive_on_the_wire([fast, faster, crawler], 180), [crawler])
+                self.assertEqual(crawler.stopped_at, 60.0)
+                self.assertEqual(crawler.row[RATE], 20.0 * KB)
+
+    def test_a_crawler_beside_one_send_filling_the_cap_is_stopped(self):
+        """The case this module's cap test used to assert was KEPT: cap 100,
+        two slots, this send at 1 KB/s beside OTHER, every send together at
+        95 KB/s. That was the #1436 defect - OTHER filled the cap; this one
+        was held by its own link."""
         self.set_config(MAX_UPLOAD_KB=100)
-        self.assertIsNone(self.drive(300, kb_per_second=1, uploaded_per_second=0.95 * 100 * KB))
+        self.assertEqual(self.drive(120, kb_per_second=1, uploaded_per_second=0.95 * 100 * KB),
+                         (60.0, 1.0 * KB))
+
+    def test_equal_shares_of_a_full_cap_are_kept(self):
+        """The case #1388 meant to keep, at a full cap (150) and at exactly
+        SLOW_SEND_CAP_NEAR of it (135). Three sends the cap holds about evenly,
+        the slowest under the floor and another at it: the cap, not the
+        slowest receiver, is what makes it slow - and with the cap off the
+        same slowest send is stopped.
+
+        This test used to be "cap 100, this send 1 KB/s beside one at 100,
+        every send 95 KB/s: kept" - the #1436 defect itself, a crawler on its
+        own link shielded because another send filled the cap. That case is
+        now asserted stopped, above."""
+        for cap, kb_per_seconds, floor in ((150, (48, 50, 52), 51),
+                                           (150, (42, 45, 48), 46)):
+            with self.subTest(total=sum(kb_per_seconds), of_cap=cap):
+                self.set_config(MAX_UPLOAD_KB=cap, SLOW_SEND_MIN_KB=floor)
+                sends = self.sends(*kb_per_seconds)
+                self.assertEqual(self.drive_on_the_wire(sends, 300), [])
+                self.assertEqual([send.row[RATE] for send in sends],
+                                 [kbps * KB for kbps in kb_per_seconds], "every send was rated")
+                self.set_config(MAX_UPLOAD_KB=0)
+                sends = self.sends(*kb_per_seconds)
+                self.assertEqual(self.drive_on_the_wire(sends, 300), [sends[0]],
+                                 "without the cap the same slowest send is stopped")
+
+    def test_three_even_shares_under_the_floor_are_kept(self):
+        """Cap 150 full, floor 60, three at 50; and at exactly 90% of the cap,
+        three at 45. Kept by the cap and by nobody reaching the floor."""
+        for each in (50, 45):
+            with self.subTest(each=each):
+                self.set_config(MAX_UPLOAD_KB=150, SLOW_SEND_MIN_KB=60)
+                self.assertEqual(self.drive_on_the_wire(self.sends(each, each, each), 300), [])
+
+    def test_exactly_the_split_of_a_full_cap_is_kept_and_a_byte_under_it_is_not(self):
+        """Cap 300 KB/s, full; floor 100 KB/s; three sends. The even split's
+        share is SLOW_SEND_CAP_NEAR x 300 / 3 = 90 KB/s: a send at exactly
+        that is kept, one a byte per second under it - the slowest, the other
+        two over the floor - is stopped."""
+        self.set_config(MAX_UPLOAD_KB=300, SLOW_SEND_MIN_KB=100)
+        total = 300 * KB
+        split = dcc.SLOW_SEND_CAP_NEAR * total / 3
+        self.assertEqual(split, 90 * KB, "the boundary is exact in floating point")
+        for speed, stopped in ((split, False), (split - 1, True)):
+            with self.subTest(speed=speed):
+                rest = int(total - speed)
+                sends = self.sends_bps(rest // 2, rest - rest // 2, speed)
+                self.assertGreaterEqual(min(sends[0].kb_per_second, sends[1].kb_per_second), 100)
+                self.assertEqual(self.drive_on_the_wire(sends, 180), [sends[2]] if stopped else [])
+                self.assertEqual(sends[2].row[RATE], speed)
+                if stopped:
+                    self.assertEqual(sends[2].stopped_at, 60.0, "at its first check, the others rated just before")
+
+    def test_a_row_that_moves_nothing_yet_lowers_the_split(self):
+        """Four rows, one still connecting (nothing acknowledged, no rate):
+        cap 300 full, 80 / 110 / 110 KB/s, floor 100. The split is over every
+        running row, 0.9 x 300 / 4 = 67.5 KB/s, so the 80 is kept; split over
+        the three that move (90 KB/s) it would be stopped."""
+        self.set_config(MAX_UPLOAD_KB=300, SLOW_SEND_MIN_KB=100)
+        sends = self.sends(80, 110, 110)
+        connecting = {"user": "teal", "file": "teal.flac", "bytes_sent": 0}
+        config.active_transfers.append(connecting)
+        self.set_config(MAX_DCC_SLOTS=4)
+        self.assertEqual(self.drive_on_the_wire(sends, 300), [])
+        self.assertNotIn(RATE, connecting)
+        sends = self.sends(80, 110, 110)
+        self.assertEqual(self.drive_on_the_wire(sends, 300), [sends[0]],
+                         "and with the row gone the 80 is under its share")
 
     def test_a_cap_the_sends_are_nowhere_near_does_not_shield_it(self):
         self.set_config(MAX_UPLOAD_KB=100)
         self.assertIsNotNone(self.drive(120, kb_per_second=1, uploaded_per_second=0.2 * 100 * KB))
+
+    def test_a_cap_that_is_not_full_does_not_shield_even_a_near_even_share(self):
+        """45 and 50 KB/s under a 50 KB/s floor, 95 KB/s together: 45 is over
+        an even split's share (42.75) but the cap (1000, or none) is not full,
+        so it holds nobody back - the 45 is stopped."""
+        for cap in (1000, 0):
+            with self.subTest(MAX_UPLOAD_KB=cap):
+                self.set_config(MAX_UPLOAD_KB=cap, SLOW_SEND_MIN_KB=50)
+                sends = self.sends(50, 45)
+                self.assertEqual(self.drive_on_the_wire(sends, 180), [sends[1]])
+                self.assertEqual(sends[1].stopped_at, 60.0)
 
 
 class TheHelpers(WithEverySlotTaken):
@@ -351,6 +474,43 @@ class TheHelpers(WithEverySlotTaken):
         self.assertFalse(dcc.upload_cap_binds(cap * dcc.SLOW_SEND_CAP_NEAR - 1))
         self.set_config(MAX_UPLOAD_KB=0)
         self.assertFalse(dcc.upload_cap_binds(10 ** 9), "no cap, nothing it could bind")
+
+    def test_the_cap_holds_a_send_only_at_its_share_of_a_full_cap(self):
+        """upload_cap_holds_this_send(speed, total_bps) (#1436): the cap binds
+        AND speed >= SLOW_SEND_CAP_NEAR x total / every running row."""
+        self.set_config(MAX_UPLOAD_KB=150)
+        config.active_transfers[:] = [self.mine, self.other, {"user": "teal", "file": "c.flac"}]
+        holds = dcc.upload_cap_holds_this_send
+        edge = dcc.SLOW_SEND_CAP_NEAR * 150 * KB / 3
+        # Full: 150 KB/s by three, an even 50 each; a share of 45 is the edge.
+        self.assertTrue(holds(50 * KB, 150 * KB))
+        self.assertTrue(holds(edge, 150 * KB), "exactly the edge")
+        self.assertFalse(holds(edge - 1, 150 * KB))
+        self.assertFalse(holds(20 * KB, 150 * KB), "a crawler while the others fill the cap")
+        # At exactly SLOW_SEND_CAP_NEAR of the cap (135): split the measured
+        # total, 40.5 each, not the cap's 45.
+        self.assertTrue(holds(45 * KB, 135 * KB))
+        self.assertTrue(holds(42 * KB, 135 * KB), "over 0.9 x 135 / 3, under 0.9 x 150 / 3")
+        self.assertFalse(holds(40 * KB, 135 * KB))
+        # Under 90% of the cap it holds nobody, whatever the share.
+        self.assertFalse(holds(130 * KB, 135 * KB - 1))
+        self.assertFalse(holds(100 * KB, 100 * KB), "far from full, even the whole total")
+        # A fourth row, moving nothing yet, lowers the split to 0.9 x 150 / 4.
+        config.active_transfers.append({"user": "smew", "file": "d.flac"})
+        self.assertTrue(holds(34 * KB, 150 * KB))
+        self.assertFalse(holds(33 * KB, 150 * KB))
+        # One row (or, read mid-change, none): the split is the whole total.
+        config.active_transfers[:] = [self.mine]
+        whole = dcc.SLOW_SEND_CAP_NEAR * 150 * KB
+        self.assertTrue(holds(whole, 150 * KB))
+        self.assertFalse(holds(whole - 1, 150 * KB))
+        config.active_transfers[:] = []
+        self.assertTrue(holds(whole, 150 * KB), "no division by zero")
+        # No cap: nothing it could hold.
+        self.set_config(MAX_UPLOAD_KB=0)
+        config.active_transfers[:] = [self.mine, self.other]
+        self.assertFalse(holds(10 ** 9, 10 ** 9))
+        self.assertFalse(holds(0.0, 0.0))
 
     def test_others_wait_only_with_every_slot_taken_and_a_nick_present(self):
         self.assertTrue(dcc.others_wait_for_a_slot())
