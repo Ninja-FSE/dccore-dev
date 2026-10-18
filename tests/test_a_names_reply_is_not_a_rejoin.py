@@ -120,6 +120,22 @@ class TheRehashAsksNamesOfAChannelTheBotIsOutOf(Harness):
         self.assertIn("#beta", runtime.join_waits)
         self.assertIn("#beta", config.kicked_channels)
 
+    def test_a_join_wait_on_its_own_stays(self):
+        """A channel can wait with no retry entry: a 439 to the connect-time
+        JOIN, or one defer_joins_after_a_refusal() held back. The wait alone
+        marks it as out."""
+        with runtime.channel_users_lock():
+            config.channel_users.pop("#beta", None)
+        self.assertIsNotNone(irc.note_join_target_wait("#beta", 100))
+        self.assertNotIn("#beta", config.kicked_channels)
+
+        self.assertIsNone(self.names_reply("#beta"))
+
+        self.assertIn("#beta", runtime.join_waits)
+        self.assertNotIn("#beta", self.conn.channels_confirmed)
+        with runtime.channel_users_lock():
+            self.assertNotIn("#beta", config.channel_users)
+
     def test_before_activation_it_does_not_count_either(self):
         self.set_config(activation_triggered=False)
         self.conn.target_channels = {"#alpha", "#beta"}
@@ -179,6 +195,20 @@ class TheBotsOwnJoinIsTheProof(Harness):
         self.names_reply("#beta")
 
         self.assertIn("#beta", config.kicked_channels)
+
+    def test_a_kick_from_a_channel_not_ours_takes_it_back_too(self):
+        """note_kicked_from() returns early for a channel not in CHANNEL, but
+        the echo must still go: kept, it would vouch for the channel once the
+        operator adds it to CHANNEL, and a NAMES reply would rejoin it."""
+        irc.note_own_join("#gamma")
+
+        self.assertFalse(irc.note_kicked_from("#gamma", "someop"))
+
+        self.assertNotIn("#gamma", runtime.joined_channels)
+        self.set_config(CHANNEL="#alpha,#beta,#gamma")
+        irc.note_join_unconfirmed("#gamma")
+        self.assertIsNone(self.names_reply("#gamma"))
+        self.assertIn("#gamma", config.kicked_channels)
 
     def test_a_part_by_the_bot_takes_it_back(self):
         irc.note_own_join("#beta")
