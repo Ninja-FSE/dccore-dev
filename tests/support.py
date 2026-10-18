@@ -617,6 +617,48 @@ def silence_debug(announce_module):
     return captured
 
 
+def rehash_with_the_reload_stood_in(test, reload):
+    """Run the real commands.handle_rehash_request(), authorised, with only
+    its module reload, commands.reload_modules_in_order(), replaced by
+    `reload` (#1469).
+
+    A real importlib.reload() of the daemon's modules mid-suite would reset
+    state the rest of the run stands on, so `reload` stands in for it and
+    does what the test needs a reload to do: nothing, raise, reset what
+    defaults.py would reset, or let something happen meanwhile. Everything
+    else - the quiesce, the runtime restore, the pack interlocks, the lookup
+    forget, the resume and the wake - runs as it does in the daemon.
+
+    Whatever `reload` raises is caught by the rehash as a failed reload, an
+    AssertionError included: a check made inside it must be recorded and
+    asserted after the call, or it can never fail.
+
+    For a DCCoreTestCase. stdout is swallowed. The debug channel is silenced
+    unless the test has already captured announce.send_debug itself, in
+    which case its capture is left in place and keeps receiving the lines.
+    Put back when the test ends: the reload function, and the pause the
+    quiesce puts up, whatever the rehash did. NOT put back here, as with
+    every real rehash in the suite: announce.is_ready and
+    announce.last_announce_time, which the rehash sets, and the send_queue /
+    msg_queue / out_queue names it rebinds to fresh dicts on queue_mgr, irc
+    and defaults (the config side is reset for every test by reset_config()).
+    Returns what the rehash returns."""
+    import contextlib
+    import io
+    import commands
+
+    pristine_send_debug = next(original for module, name, original in _PRISTINE
+                               if module is announce and name == "send_debug")
+    if announce.send_debug is pristine_send_debug:
+        silence_debug(announce)
+    test.addCleanup(setattr, config, "transfers_paused", False)
+    real_reload = commands.reload_modules_in_order
+    commands.reload_modules_in_order = reload
+    test.addCleanup(setattr, commands, "reload_modules_in_order", real_reload)
+    with contextlib.redirect_stdout(io.StringIO()):
+        return commands.handle_rehash_request(config.ADMIN_NICK, config.CHANNEL, authorised=True)
+
+
 def no_disk_writes(db_module):
     """Stop a test touching the real data/ directory."""
     db_module.save_dcc_queue = lambda: None
