@@ -1496,6 +1496,7 @@ def note_kicked_from(channel, by=""):
     where it belongs.
     """
     name = channel_key(channel)
+    note_own_leave(name)
     if not name or name not in channels_we_should_be_in_set():
         return False
     with runtime.kicked_channels_lock:
@@ -1648,6 +1649,42 @@ def note_join_refused(channel):
     return count
 
 
+def note_own_join(channel):
+    """The server echoed the bot's own JOIN to `channel`: the bot is in it.
+
+    THE ECHO IS THE PROOF, NOT THE MEMBER LIST. A server answers NAMES for a
+    channel the client is not on as well - 366 always, 353 too for a public
+    channel - and the rehash's sync_channels() asks NAMES of every CHANNEL,
+    one the bot was kicked from included. Taking that 366 as a rejoin cleared
+    the kick, said "Rejoined", and stopped every attempt to get back in, while
+    the 353 filled a member list the bot then never saw a PART or QUIT from.
+    So a channel the bot knows it is out of counts as joined again only once
+    this echo has come (_known_out()).
+    """
+    with runtime.kicked_channels_lock:
+        runtime.joined_channels.add(channel_key(channel))
+
+
+def note_own_leave(channel):
+    """The bot was kicked from `channel`, or parted it: its JOIN no longer
+    vouches for it (note_own_join())."""
+    with runtime.kicked_channels_lock:
+        runtime.joined_channels.discard(channel_key(channel))
+
+
+def _known_out(name):
+    """Whether the bot knows it is not in channel `name` (a channel_key): it
+    is being retried or given up on - kicked, refused, or never confirmed -
+    or the server told it to wait, and no echo of its own JOIN vouches for it.
+
+    A channel retried as "never confirmed" whose JOIN was echoed is not out:
+    only its 366 was late, which is what answer_any_end_of_names() is there
+    to catch (#1424)."""
+    with runtime.kicked_channels_lock:
+        tracked = name in config.kicked_channels or name in runtime.join_waits
+        return tracked and name not in runtime.joined_channels
+
+
 def note_joined(channel):
     """A join succeeded, so stop tracking it. Returns what was cleared."""
     name = channel_key(channel)
@@ -1670,8 +1707,8 @@ JOIN_WAIT_MARGIN = 5.0
 
 def _in_channel(name):
     """Whether the bot is in channel `name` (a channel_key) now: its member
-    list exists - the server's echo of our own JOIN starts it - and it is not
-    one the bot was thrown out of or never got into."""
+    list exists - NAMES (answer_names()) or the rehash's sync starts it - and
+    it is not one the bot was thrown out of or never got into."""
     with runtime.channel_users_lock():
         listed = name in config.channel_users
     with runtime.kicked_channels_lock:
@@ -1723,9 +1760,11 @@ def defer_joins_after_a_refusal(channels, now=None):
 
 
 def forget_join_waits():
-    """A new connection: the old one's waits mean nothing to it."""
+    """A new connection: the old one's waits mean nothing to it, nor do the
+    JOINs it saw echoed (note_own_join())."""
     with runtime.kicked_channels_lock:
         runtime.join_waits.clear()
+        runtime.joined_channels.clear()
         runtime.join_wait_seconds = None
 
 
@@ -1796,9 +1835,10 @@ def channels_we_are_out_of():
 
     A pure read, like channels_to_rejoin(). kicked_channels is exactly this
     set: an entry is written by a kick or by the watchdog for a JOIN that was
-    never answered, and note_joined() removes it the moment a 366 says the
-    bot is back. A channel past REJOIN_ATTEMPTS stays in it, which is the
-    point - that is the one nothing will ever put the bot back into.
+    never answered, and note_joined() removes it at the 366 that follows the
+    echo of the bot's own JOIN there (note_own_join()). A channel past
+    REJOIN_ATTEMPTS stays in it, which is the point - that is the one
+    nothing will ever put the bot back into.
 
     Audit M29 (#631): the advert worker sent the advert and the CTCP SLOTS
     line into every channel in CHANNEL regardless, so a channel the bot had
@@ -3937,6 +3977,10 @@ def answer_names(line, sock):
         line)
     if name_match and is_valid_irc_target(name_match.group(1)):
         chan = channel_key(name_match.group(1))
+        # The server answers NAMES for a channel the bot is not on too: that
+        # list is not one the bot will see a PART or QUIT from (note_own_join()).
+        if _known_out(chan):
+            return
         names = [n.strip("@+~&%").lower() for n in name_match.group(2).split()]
         # A merge, except for the first line after a
         # kick - see learn_channel_names().
@@ -4029,6 +4073,8 @@ def answer_part(line):
     if part_match and is_valid_irc_target(part_match[1]):
         p_user = part_match[0].lower()
         p_chan = channel_key(part_match[1])
+        if p_user == str(config.NICKNAME).lower():
+            note_own_leave(p_chan)
         _forget_chat_peer(p_user, p_chan)
         with runtime.channel_users_lock():
             if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
@@ -4065,7 +4111,7 @@ def answer_any_end_of_names(line, conn, sock, epoch):
     """Every end of a member list (366), before the advert is activated and
     after: the channel is confirmed, a channel being retried is cleared, and
     a late member list may claim the channel sync. Returns the channel's key,
-    or None for a line that is not one.
+    or None for a line that is not one, or for a channel the bot is out of.
 
     CONFIRMED WHENEVER IT COMES (#1424). Only answer_end_of_names() - which
     irc_loop() calls until activation - added to conn.channels_confirmed. A
@@ -4081,6 +4127,11 @@ def answer_any_end_of_names(line, conn, sock, epoch):
     before activation - a channel rejoined hours later would otherwise stay
     marked as kicked for the life of the process, and be retried on every
     advert until it ran out of attempts.
+
+    NOT FOR A CHANNEL THE BOT IS OUT OF. A 366 also ends the answer to a
+    NAMES for a channel the bot is not on - the rehash asks one of every
+    CHANNEL - so a channel it was kicked from, refused, or told to wait for
+    is confirmed only once its own JOIN was echoed (note_own_join()).
     """
     import announce
     # Anchored to the command's position, as is_server_numeric() is: channel
@@ -4089,6 +4140,8 @@ def answer_any_end_of_names(line, conn, sock, epoch):
     if not back or not is_valid_irc_target(back.group(1)):
         return None
     channel = back.group(1)
+    if _known_out(channel_key(channel)):
+        return None
     conn.channels_confirmed.add(channel_key(channel))
     if note_joined(channel) is not None:
         announce.send_debug(f"Rejoined {channel}.", category="JOIN", notice="warning")
@@ -4119,7 +4172,8 @@ def answer_end_of_names(line, conn):
     # "^" in its name never had its 366 recognised, so it
     # never counted as confirmed at startup.
     m366 = re.match(r"^:\S+ 366 \S+ (\S+)", line)
-    if m366 and is_valid_irc_target(m366.group(1)):
+    # Not for a channel the bot is out of: see answer_any_end_of_names().
+    if m366 and is_valid_irc_target(m366.group(1)) and not _known_out(channel_key(m366.group(1))):
         confirmed_chan = channel_key(m366.group(1))
         channels_confirmed.add(confirmed_chan)
         print(f"[INFO] Received End of NAMES for {confirmed_chan} ({len(channels_confirmed & target_channels)}/{len(target_channels)} target channels confirmed)")
@@ -5113,6 +5167,13 @@ def irc_loop():
                     elif is_user_event(line, "JOIN") and event_source_nick(line) != config.NICKNAME.lower():
                         # answer_join() since #1330.
                         answer_join(line, s)
+
+                    # The bot's own JOIN, echoed: the proof it is in the
+                    # channel - see note_own_join().
+                    elif is_user_event(line, "JOIN"):
+                        own_join = parse_join(line)
+                        if own_join and is_valid_irc_target(own_join[1]):
+                            note_own_join(own_join[1])
                                 
                     # Anchored: as JOIN. This one removes people from channel_users, which
                     # freezes their queue and starts the five-minute delete timer.

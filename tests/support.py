@@ -334,6 +334,9 @@ def reset_config(**overrides):
     runtime.nick_reclaim_asked_at = None
     # The last wait the server gave, beside join_waits (#1415).
     runtime.join_wait_seconds = None
+    # The bot's own JOINs one test saw echoed (irc.note_own_join()): a channel
+    # left here would vouch for the next test's channel of the same name.
+    runtime.joined_channels.clear()
     for name, value in SETTINGS_DEFAULTS.items():
         setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():
