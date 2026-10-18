@@ -4878,7 +4878,17 @@ def _wait_for_final_ack(conn, tracker, file_size):
 # rather than since the start, so a burst that recovers is not punished - and
 # not at all for the first minute after it connects (TCP ramp-up, a resume
 # finding its feet). Never while the bot's own upload cap (#1352) is what holds
-# the sends back: then the cap is slow, not the receiver.
+# it back: then the cap is slow, not the receiver.
+#
+# THE CAP SHIELDS ONLY THE SENDS IT HOLDS (#1436). Every send reserves from one
+# shared clock under the cap, in chunks of one size, so a send the cap holds
+# back moves at least an even split of what the cap let through; one on a
+# slow link moves less, and the fast sends take what it leaves - the cap
+# stays full while it crawls. So
+# a full cap keeps a send only while that send moves at least
+# SLOW_SEND_CAP_NEAR of the even split, every send together divided by the
+# running sends; under that it is judged as if there were no cap, which is
+# what the cap-off case would have done with it.
 #
 # SLOW HAS TO BE THE RECEIVER'S FAULT. A full uplink with no cap set, a slow
 # disk or a cap above what the line really does makes EVERY send slow, and
@@ -4897,7 +4907,9 @@ def _wait_for_final_ack(conn, tracker, file_size):
 SLOW_SEND_GRACE_SECONDS = 60.0   # not judged until this long after it connected
 SLOW_SEND_WINDOW_SECONDS = 60.0  # its speed is what was acknowledged over about this long
 SLOW_SEND_CHECK_SECONDS = 0.5    # looked at no more often than this, not once per chunk
-# The upload cap binds while every send together moves at least this share of it.
+# The upload cap binds while every send together moves at least this share of
+# it, and holds a send back while that send moves at least this share of an
+# even split of it.
 SLOW_SEND_CAP_NEAR = 0.9
 # The transfer-row key a send publishes its window rate under (bytes/s), and
 # the queue-row mark of a row stopped for its speed.
@@ -4922,6 +4934,26 @@ def upload_cap_binds(total_bps):
     at least SLOW_SEND_CAP_NEAR of it."""
     cap = speed_cap.rate(speed_cap.UPLOAD)
     return bool(cap) and total_bps >= cap * SLOW_SEND_CAP_NEAR
+
+
+def upload_cap_holds_this_send(speed, total_bps):
+    """Is the upload cap (#1352) what holds THIS send to `speed`? (#1436)
+
+    True while the cap binds (upload_cap_binds(total_bps)) and `speed` is at
+    least SLOW_SEND_CAP_NEAR of an even split of `total_bps` between the
+    running sends (active_transfers, this one included). Every send reserves
+    from one clock under the cap, so a send the cap holds gets at least that
+    split; one under it is held by its own link while the others take the
+    rest. Both rates in bytes per second, over the same window. A row that
+    moves nothing yet (a claimed send still connecting, or one whose offer
+    is not accepted yet) counts as running and lowers the split - the safe
+    side. Reads active_transfers' length with no lock, as
+    the_slowest_while_another_delivers() reads the list.
+    """
+    if not upload_cap_binds(total_bps):
+        return False
+    running = max(1, len(config.active_transfers))
+    return speed >= SLOW_SEND_CAP_NEAR * total_bps / running
 
 
 def others_wait_for_a_slot():
@@ -5018,7 +5050,7 @@ class _SlowSendWatch:
         if not floor or speed >= floor:
             return None
         # Cheapest first; the lock last.
-        if upload_cap_binds((uploaded - uploaded_then) / span):
+        if upload_cap_holds_this_send(speed, (uploaded - uploaded_then) / span):
             return None
         if not the_slowest_while_another_delivers(self.row, speed, floor):
             return None
