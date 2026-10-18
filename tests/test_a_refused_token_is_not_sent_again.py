@@ -76,7 +76,7 @@ class TheRefusalMarksTheToken(unittest.TestCase):
         typed = typed[typed.index("if ($dccore.st(state) == password) {"):]
         # dccore.typedpass: auth, typed, then dccore.sendpass - the typed
         # password, its spaces kept (#1273).
-        self.assertIn("dccore.typedpass $1-", typed)
+        self.assertIn("dccore.typedpass @DCCore $1-", typed)
         self.assertIn("hadd dccore.live state auth\n  hadd dccore.live typed 1\n  dccore.sendpass $1-",
                       block("alias dccore.typedpass {"))
         connect = block("alias dccore.connect {")

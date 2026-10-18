@@ -348,7 +348,7 @@ alias dccore {
   ; %cmd branch for it, so it fell through to the help text instead.
   if (%cmd == consolefeed) { dccore.send consolefeed $2- | return }
   if (%cmd == raw) {
-    if ($dccore.st(state) == password) { dccore.typedpass $2- | return }
+    if ($dccore.st(state) == password) { dccore.typedpass - $2- | return }
     dccore.send $2-
     return
   }
@@ -587,26 +587,32 @@ alias dccore.send {
   .msg $+(=,$dccore.bot) $1-
 }
 
-; A password typed at the prompt (#1273). $1- has its runs of spaces closed
-; up and its leading and trailing ones dropped, so a password that has them
-; never arrived as typed. Such a password is read from the editbox as it
-; was typed and sent as DCCORE PASSWORD <value>, its spaces escaped as the
-; settings window escapes a value; the bot decodes it. Nested, never put in
-; a /var, which would close the spaces up again. Every other password goes
-; as it always did, which a bot from before this still accepts - and so
-; does one whose editbox does not hold the line $1- came from.
+; A password typed at the prompt (#1273). $1 is the window it was typed
+; in, - for none; $2- is the line. $2- has its runs of spaces closed up and
+; its leading and trailing ones dropped, so a password that has them never
+; arrived as typed. Such a password is read from that window's editbox as
+; it was typed and sent as DCCORE PASSWORD <value>, its spaces escaped as
+; the settings window escapes a value; the bot decodes it. Nested, never
+; put in a /var, which would close the spaces up again. Every other
+; password goes as it always did, which a bot from before this still
+; accepts - and so does one whose editbox does not hold the line $2- came
+; from. /dccore raw and the menu's console command have no editbox that
+; holds the password alone (mIRC gives them the line as parameters, and
+; $input's answer as a /var), so from there a password with runs of
+; spaces, or a space at either end, goes closed up.
 alias dccore.sendpass {
-  if ($gettok($editbox(@DCCore),1-,32) === $1-) && ($len($editbox(@DCCore)) > $len($1-)) {
-    dccore.send DCCORE PASSWORD $dccore.sw.enc($editbox(@DCCore))
+  if ($gettok($editbox($1),1-,32) === $2-) && ($len($editbox($1)) > $len($2-)) {
+    dccore.send DCCORE PASSWORD $dccore.sw.enc($editbox($1))
     return
   }
-  dccore.send $1-
+  dccore.send $2-
 }
 ; A line typed while the bot waits for the password is the password,
 ; whichever way it was typed (@DCCore, @DCCore-console, /dccore raw, the
 ; menu's console command): the prompt is answered (state auth, typed by
-; hand) and the line goes through dccore.sendpass. Never shown, never
-; stored; the caller shows ******** where it echoes what was typed.
+; hand) and the line goes through dccore.sendpass. $1 is the window it
+; was typed in (- for none), $2- the line. Never echoed, never stored;
+; the caller shows ******** where it echoes what was typed.
 alias dccore.typedpass {
   hadd dccore.live state auth
   hadd dccore.live typed 1
@@ -1726,7 +1732,7 @@ on *:INPUT:@DCCore: {
   }
   if ($dccore.st(state) == password) {
     ; the password, typed by hand: never shown, never stored
-    dccore.typedpass $1-
+    dccore.typedpass @DCCore $1-
     dccore.echo $dccore.prompt ********
     halt
   }
@@ -1738,7 +1744,7 @@ on *:INPUT:@DCCore: {
 on *:INPUT:@DCCore-console: {
   if ($left($1,1) == /) && ($left($1,2) != //) { return }
   if ($dccore.st(state) == password) {
-    dccore.typedpass $1-
+    dccore.typedpass @DCCore-console $1-
     echo -ti2 @DCCore-console $dccore.prompt ********
     halt
   }
@@ -1767,11 +1773,13 @@ alias dccore.ask {
   var %v = $input($2-,eo,DCCore)
   if (%v != $null) { dccore.send $1 %v }
 }
-; The same for a console command typed in full.
+; The same for a console command typed in full. At the password prompt
+; what is typed is the password, so the box hides it (p) as it is typed.
 alias dccore.askraw {
-  var %v = $input(Console command (see help),eo,DCCore)
+  var %how = $iif($dccore.st(state) == password,eop,eo)
+  var %v = $input(Console command (see help),%how,DCCore)
   if (%v != $null) {
-    if ($dccore.st(state) == password) { dccore.typedpass %v | return }
+    if ($dccore.st(state) == password) { dccore.typedpass - %v | return }
     dccore.send %v
   }
 }

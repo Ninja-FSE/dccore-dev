@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_the_start_page_says_when_the_bot_is_offline import (  # noqa: E402
     BOT, Mirc, _Return, body_of, roll_changelog, split_words)
+from test_the_mirc_settings_window import collapse, mirc_enc  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -51,7 +52,10 @@ IGNORED = "Ignored a login line that came before the password prompt was answere
 NOT_ANSWERED = (None, "opening", "waiting", "banner", "password", "closed", "taken")
 
 RUN = ("dccore.line", "dccore.peerok", "dccore.abandon", "dccore.set", "dccore.timers.off",
-       "dccore.typedpass")
+       "dccore.typedpass", "dccore.sendpass")
+
+# A password #1273 is about: runs of spaces, and one at either end.
+SPACED = "  example  pass word "
 
 
 class Chat(Mirc):
@@ -66,11 +70,16 @@ class Chat(Mirc):
             "dccore.client": lambda: "dccore.mrc-0000",
             "dccore.prompt": lambda: ">",
             "left": lambda text, n: text[:int(n)],
-            "input": lambda prompt, flags, title: self.answer,
+            "input": self.input,
+            "editbox": lambda window: self.editboxes.get(window, ""),
+            "len": lambda text: str(len(text)),
+            "dccore.sw.enc": mirc_enc,
         })
         self.host = host
         self.nick = BOT
         self.answer = ""
+        self.asked = []
+        self.editboxes = {}
         self.table("dccore").update({"bot": BOT, "wantopen": "1"})
         if token:
             self.table("dccore")["token"] = token
@@ -83,6 +92,10 @@ class Chat(Mirc):
         self.live(**{k: v for k, v in defaults.items() if v is not None})
         if defaults.get("state") is None:
             self.table("dccore.live").pop("state", None)
+
+    def input(self, prompt, flags, title):
+        self.asked.append(flags)
+        return self.answer
 
     def identifier(self, name, raw, frame):
         if name == "nick" and raw is None:
@@ -118,21 +131,32 @@ class Chat(Mirc):
         for line in lines:
             self.event("on ^*:CHAT:*: {", line)
 
+    def typed_in(self, window, line):
+        """`line` typed in `window`: its editbox holds it as typed, the
+        event's parameters hold it closed up."""
+        self.editboxes = {window: line}
+        self.event("on *:INPUT:%s: {" % window, collapse(line))
+        self.editboxes = {}
+
     def type(self, line):
         """A line typed in @DCCore."""
-        self.event("on *:INPUT:@DCCore: {", line)
+        self.typed_in("@DCCore", line)
 
     def type_console(self, line):
         """A line typed in @DCCore-console."""
-        self.event("on *:INPUT:@DCCore-console: {", line)
+        self.typed_in("@DCCore-console", line)
 
     def raw(self, line):
-        """/dccore raw <line>"""
-        self.call("dccore", ["raw"] + line.split(" "))
+        """/dccore raw <line>, typed in @DCCore: the editbox holds the whole
+        command, the alias gets its parameters closed up."""
+        self.editboxes = {"@DCCore": "/dccore raw " + line}
+        self.call("dccore", ["raw"] + collapse(line).split(" "))
+        self.editboxes = {}
 
     def menu(self, line):
-        """The menu's console command, answered with `line`."""
-        self.answer = line
+        """The menu's console command, answered with `line` (a /var holds
+        the answer closed up)."""
+        self.answer = collapse(line)
         self.call("dccore.askraw", [])
 
     @property
@@ -140,7 +164,7 @@ class Chat(Mirc):
         return self.table("dccore.live").get("state", "")
 
     def sent(self):
-        return [args for head, args in self.calls if head in ("dccore.send", "dccore.sendpass", "msg")]
+        return [args for head, args in self.calls if head in ("dccore.send", "msg")]
 
     def said(self):
         return [args for head, args in self.calls if head == "dccore.sys"]
@@ -344,7 +368,8 @@ class EveryWayOfTypingThePasswordAnswersThePrompt(unittest.TestCase):
                 self.assertEqual(chat.state, "auth")
                 self.assertEqual(chat.table("dccore.live")["typed"], "1")
                 self.assertEqual(chat.sent(), [PASSWORD])
-                self.assertIn(("dccore.sendpass", PASSWORD), chat.calls)
+                window = {"type": "@DCCore", "type_console": "@DCCore-console"}.get(route, "-")
+                self.assertIn(("dccore.sendpass", window + " " + PASSWORD), chat.calls)
                 shown = [args for head, args in chat.calls if head in ("echo", "dccore.echo", "dccore.sys")]
                 self.assertFalse([s for s in shown if PASSWORD in s], shown)
                 chat.hear(LOGIN)
@@ -372,6 +397,63 @@ class EveryWayOfTypingThePasswordAnswersThePrompt(unittest.TestCase):
         self.assertIn(("echo", "-ti2 @DCCore-console > status"), chat.calls)
         chat.type_console("unlock " + PASSWORD)
         self.assertIn(("echo", "-ti2 @DCCore-console > unlock ********"), chat.calls)
+
+
+class APasswordKeepsItsSpacesWhereTheEditboxHasThem(unittest.TestCase):
+    """#1273 on each route: the window it was typed in is the editbox
+    dccore.sendpass reads."""
+
+    def spaced(self, route):
+        chat = Chat(token=None, bothost=None, host="", byhand=1)
+        chat.hear(BANNER, PROMPT)
+        getattr(chat, route)(SPACED)
+        self.assertEqual(chat.state, "auth")
+        return chat.sent()
+
+    def test_typed_in_either_window_it_goes_encoded_as_typed(self):
+        for route in ("type", "type_console"):
+            with self.subTest(route=route):
+                self.assertEqual(self.spaced(route), ["DCCORE PASSWORD " + mirc_enc(SPACED)])
+
+    def test_the_console_window_reads_its_own_editbox(self):
+        """Not @DCCore's: with @DCCore's editbox holding something else, the
+        console window's password still keeps its spaces."""
+        chat = Chat(token=None, bothost=None, host="", byhand=1)
+        chat.hear(BANNER, PROMPT)
+        chat.editboxes = {"@DCCore": "something else", "@DCCore-console": SPACED}
+        chat.event("on *:INPUT:@DCCore-console: {", collapse(SPACED))
+        self.assertEqual(chat.sent(), ["DCCORE PASSWORD " + mirc_enc(SPACED)])
+
+    def test_raw_and_the_menu_send_it_closed_up(self):
+        """No editbox holds the password alone there: the line goes as mIRC
+        gives it, as ADMIN-CONSOLE.md says."""
+        for route in ("raw", "menu"):
+            with self.subTest(route=route):
+                self.assertEqual(self.spaced(route), [collapse(SPACED)])
+
+    def test_a_plain_password_goes_as_it_is_on_every_route(self):
+        for route in EveryWayOfTypingThePasswordAnswersThePrompt.ROUTES:
+            with self.subTest(route=route):
+                chat = Chat(token=None, bothost=None, host="", byhand=1)
+                chat.hear(BANNER, PROMPT)
+                getattr(chat, route)(PASSWORD)
+                self.assertEqual(chat.sent(), [PASSWORD])
+
+
+class TheMenuHidesAPasswordAsItIsTyped(unittest.TestCase):
+
+    def asked(self, state):
+        chat = Chat(state=state)
+        chat.menu("status")
+        return chat.asked
+
+    def test_at_the_password_prompt_the_box_is_a_password_box(self):
+        self.assertEqual(self.asked("password"), ["eop"])
+
+    def test_any_other_time_it_is_the_plain_box(self):
+        for state in ("in", "auth", "banner", "closed", None):
+            with self.subTest(state=state):
+                self.assertEqual(self.asked(state), ["eo"])
 
 
 class ALoggedInChatIsLeftAlone(unittest.TestCase):

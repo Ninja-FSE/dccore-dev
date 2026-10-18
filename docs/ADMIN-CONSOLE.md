@@ -678,7 +678,13 @@ Interface`, read only once `Enter Your Password:` in the same chat has been
 answered - the script sent the token after this check, or you typed the
 password. A password counts as typed wherever you type it: in `@DCCore`, in
 `@DCCore-console`, with `/dccore raw` or with the menu's console command, and
-none of them shows it. The bot always asks first and logs in only after the
+the line is never echoed (the windows show `********`). At the prompt the
+menu's box hides what you type. `/dccore raw <password>` is a command line, so
+it stays in mIRC's editbox history like any other: type the password on its own
+in either window instead. Typed on its own there, a password with runs of
+spaces or a space at either end arrives as typed (#1273); through
+`/dccore raw` or the menu, mIRC hands the script the line with those spaces
+closed up. The bot always asks first and logs in only after the
 answer. A login line in a chat whose prompt was not answered is ignored: the
 window says so, the chat is closed, and the script stops reconnecting until
 you `/dccore connect`. Until a login counts, no `DCCORE` line is read.
