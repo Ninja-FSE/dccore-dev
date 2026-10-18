@@ -273,7 +273,8 @@ class TheMacLauncherIsAWrapper(unittest.TestCase):
         the release extraction runs the suite in a tree with no .git (#1441),
         where `git ls-files` answers nothing, or answers for some other
         repository the folder sits in. That skips, saying what git said; the
-        extraction's own test checks the modes it reports, on every OS."""
+        dev repository's extraction test checks the modes it reports, on every
+        OS."""
         if os.name != "nt":
             self.assertTrue(os.access(MACOS, os.X_OK))
             return

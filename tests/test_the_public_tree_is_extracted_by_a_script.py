@@ -103,7 +103,7 @@ class OneExtraction(unittest.TestCase):
         extract._archive, extract._keep_the_executable_bit = archive_without_the_bit, recorded
         extract.subprocess = _Over(subprocess, run=run)
         try:
-            cls.out, cls.paths = extract.extract("HEAD", os.path.join(cls.home, "public"))
+            cls.out, cls.paths, cls.sha = extract.extract("HEAD", os.path.join(cls.home, "public"))
         except BaseException:  # no tearDownClass after a failed setUpClass
             shutil.rmtree(cls.home, ignore_errors=True)
             raise
@@ -119,6 +119,11 @@ class OneExtraction(unittest.TestCase):
 
     def test_no_dev_only_file_is_in_it(self):
         self.assertEqual(sorted(set(extract.DEV_ONLY) & self.names), [])
+
+    def test_it_returns_the_commit_it_read(self):
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True,
+                              text=True, timeout=60).stdout.strip()
+        self.assertEqual(self.sha, head)
 
     def test_nothing_but_those_and_the_changelog_swap_is_missing(self):
         """The rest of the archive is all there: the strip took only its list."""
@@ -198,7 +203,7 @@ class OneExtraction(unittest.TestCase):
         """main() on what this extraction returned: the real line."""
         saved = extract.extract
         self.addCleanup(setattr, extract, "extract", saved)
-        extract.extract = lambda rev, out: (self.out, self.paths)
+        extract.extract = lambda rev, out: (self.out, self.paths, self.sha)
         printed = io.StringIO()
         with contextlib.redirect_stdout(printed):
             code = extract.main(["HEAD", os.path.join(self.home, "unused")])
@@ -309,11 +314,20 @@ class ItNamesTheExecutables(unittest.TestCase):
         self.git(ls_tree(("100644", "blob", "my notes é.md"), ("100755", "blob", "bin/run.sh")))
         self.assertEqual(extract.executables("HEAD", self.tree), ["bin/run.sh"])
 
-    def test_a_leading_dash_and_dots_are_portable(self):
-        names = ["-n.sh", "scripts/.hidden/run.v2.sh"]
+    def test_dots_and_an_inner_dash_are_portable(self):
+        names = ["scripts/.hidden/run.v2.sh", "scripts/-n.sh"]
         self.files(*names)
         self.git(ls_tree(*[("100755", "blob", name) for name in names]))
         self.assertEqual(extract.executables("HEAD", self.tree), sorted(names))
+
+    def test_a_leading_dash_refuses(self):
+        """Windows PowerShell 5.1 splits a bare `-n.sh` at the dot before git
+        sees it, so step 4's line could not name it there, `--` or not."""
+        self.files("-n.sh")
+        self.git(ls_tree(("100755", "blob", "-n.sh")))
+        with self.assertRaises(extract.Refused) as caught:
+            extract.executables("HEAD", self.tree)
+        self.assertIn(ascii("-n.sh"), str(caught.exception))
 
     def test_a_failing_ls_tree_refuses(self):
         self.git(returncode=128, stderr=b"fatal: not a valid object name placeholder-rev")
@@ -460,7 +474,7 @@ class ItPrintsTheLineThatMarksThem(unittest.TestCase):
         def fake_extract(rev, out):
             if refuse:
                 raise extract.Refused(refuse)
-            return out, list(self.LAUNCHERS if paths is None else paths)
+            return out, list(self.LAUNCHERS if paths is None else paths), self.SHA
 
         def asked_again(*args, **kwargs):
             raise AssertionError("main() asked git for the executables again")
@@ -478,6 +492,15 @@ class ItPrintsTheLineThatMarksThem(unittest.TestCase):
         with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(errors):
             code = extract.main(["placeholder-rev", out] + list(flags))
         return code, printed.getvalue().splitlines(), errors.getvalue(), ran
+
+    SHA = "0123456789abcdef0123456789abcdef01234567"
+
+    def test_it_names_the_commit_it_read(self):
+        """The resolved commit, not only the revision asked for: that is what
+        #1442's mIRC zip is compared against."""
+        _code, lines, _err, _ran = self.main()
+        self.assertTrue(any("placeholder-rev (" + self.SHA + ") extracted into" in line
+                            for line in lines), lines)
 
     def test_without_test_it_is_the_last_line(self):
         code, lines, _err, ran = self.main()

@@ -26,8 +26,9 @@ cannot pair one commit's tree with another's modes). On POSIX the extraction
 sets the bit on them, and the command always ends by printing the
 `git update-index --chmod=+x -- ...` line step 4 runs after `git add` - a
 no-op where the bit survived, the only carrier where it did not. A 100755
-path outside [A-Za-z0-9._/-] refuses: the line then pastes the same into
-cmd, PowerShell and a POSIX shell, with nothing to quote.
+path outside [A-Za-z0-9._/-], or starting with '-', refuses: the line then
+pastes the same into cmd, PowerShell and a POSIX shell, with nothing to
+quote.
 
 ALL OR NOTHING. Everything happens in a scratch folder beside <out>, which
 becomes <out> only when every step found exactly what it expected: a
@@ -54,7 +55,9 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # An executable's path goes onto step 4's command line as it is: nothing in
 # it that cmd, PowerShell or a POSIX shell would read as anything but text.
-PORTABLE_PATH = re.compile(r"[A-Za-z0-9._/-]+")
+# Not even a leading '-': Windows PowerShell 5.1 splits a bare argument such
+# as `-n.sh` at the dot before git sees it, so `--` cannot help there.
+PORTABLE_PATH = re.compile(r"[A-Za-z0-9._/][A-Za-z0-9._/-]*")
 
 # Dev-only tooling with no shipped consumer, and the tests that exist only to
 # cover it (docs/PUBLIC-REPO-WORKFLOW.md, step 2, says why each kind goes).
@@ -193,8 +196,9 @@ def executables(rev, tree, repo=REPO_ROOT):
         if info.split(" ")[0] != "100755":
             continue
         if not PORTABLE_PATH.fullmatch(path):
-            raise Refused(f"the executable {ascii(path)} has a character outside [A-Za-z0-9._/-]:"
-                          " step 4's update-index line could not name it on every shell")
+            raise Refused(f"the executable {ascii(path)} has a character outside [A-Za-z0-9._/-],"
+                          " or starts with '-': step 4's update-index line could not name it on"
+                          " every shell")
         if os.path.isfile(os.path.join(tree, path)):
             found.append(path)
     return sorted(found)
@@ -211,14 +215,16 @@ def _keep_the_executable_bit(tree, paths):
 
 def mark_executable_command(paths):
     """The line step 4 runs after `git add` in the extracted tree. The paths
-    are executables()'s, so they need no quoting; `--` keeps a leading '-'
-    a path."""
+    are executables()'s, so they need no quoting and none starts with '-';
+    `--` is there as well."""
     return "git update-index --chmod=+x -- " + " ".join(paths)
 
 
 def extract(rev, out, repo=REPO_ROOT):
-    """Steps 1-3 into `out`, which must not exist yet. Returns `(out, paths)`,
-    `paths` being executables() of it: what step 4 marks after `git add`.
+    """Steps 1-3 into `out`, which must not exist yet. Returns
+    `(out, paths, sha)`: `paths` is executables() of it, what step 4 marks
+    after `git add`, and `sha` the commit `rev` resolved to, which is the one
+    read.
     Raises Refused, with no `out` left behind, when a step does not find
     what it expects."""
     out = os.path.abspath(out)
@@ -239,7 +245,7 @@ def extract(rev, out, repo=REPO_ROOT):
         shutil.rmtree(scratch, ignore_errors=True)
         raise
     os.replace(scratch, out)
-    return out, paths
+    return out, paths, sha
 
 
 def run_the_suite(tree, processes=2):
@@ -256,11 +262,13 @@ def main(argv=None):
     parser.add_argument("-j", type=int, default=2, help="test processes with --test (default 2)")
     args = parser.parse_args(argv)
     try:
-        out, paths = extract(args.rev, args.out)
+        out, paths, sha = extract(args.rev, args.out)
     except Refused as err:
         print(f"extract_public_tree: refused - {err}", file=sys.stderr)
         return 2
-    print(f"extract_public_tree: {args.rev} extracted into {out}", flush=True)
+    # The commit itself, not only what was asked for: `origin/main` names a
+    # different one tomorrow, and #1442's mIRC zip names its commit to match.
+    print(f"extract_public_tree: {args.rev} ({sha}) extracted into {out}", flush=True)
     code = run_the_suite(out, args.j) if args.test else 0
     # Last, so a long suite run does not scroll it away.
     if paths:
