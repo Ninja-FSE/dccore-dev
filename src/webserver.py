@@ -441,6 +441,8 @@ from web_list_update import (  # noqa: F401
 from web_settings import (  # noqa: F401
     CHOICE_LABELS,
     EDITED_ELSEWHERE,
+    REHASH_FAILED_SAID,
+    REHASH_FAILED_WHY,
     SETTINGS_CATEGORIES,
     SETTINGS_LABELS,
     SETTINGS_RESTART_ONLY,
@@ -451,6 +453,7 @@ from web_settings import (  # noqa: F401
     _settings_payload_unlocked,
     apply_settings_changes,
     build_password_change_result,
+    build_save_rehash_payload,
     build_settings_payload,
     build_theme_preview,
     console_is_enabled,
@@ -1317,6 +1320,12 @@ if HAVE_FLASK:
             body = json_object(request.get_json(silent=True))
             status, result = apply_settings_changes(body)
             return jsonify(result), status
+
+        @app.route("/api/settings/rehash")
+        def api_settings_rehash():
+            # Whether the rehash a save started went through (#1462): the
+            # Settings page asks after its save, by the save's "rehash_seq".
+            return jsonify(build_save_rehash_payload())
 
         @app.route("/api/folders")
         def api_folders():

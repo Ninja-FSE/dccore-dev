@@ -431,6 +431,14 @@ def reset_config(**overrides):
     # its lock, as the disconnect epilogue does, not rebound.
     with runtime.recent_paced_lock:
         runtime.recent_paced_lines.clear()
+    # #1462: the latest settings save's number and its rehash's outcome.
+    # Process-wide like the pacer: a save one test made would give the next
+    # test's first save the number 2, and an outcome one test recorded would
+    # be what the next test's GET /api/settings/rehash reports. A fresh one,
+    # not cleared in place: a save binds the record it was numbered in when
+    # it starts (_save_settings_and_rehash), so a rehash thread a test left
+    # running records into the old object, never into the next test's.
+    runtime.save_rehash = runtime.SaveRehashOutcome()
 
     config.debug_flood_lock = threading.Lock()
     config.fetch_queue_lock = threading.Lock()

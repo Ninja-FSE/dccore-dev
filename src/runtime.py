@@ -277,6 +277,57 @@ nick_reclaim_asked_at = None
 rehash_lock = threading.Lock()
 
 
+class SaveRehashOutcome:
+    """How the rehash the latest settings save started went (#1462).
+
+    A save writes settings.conf and starts a rehash on a thread of its own,
+    so its answer can only say "started". The dashboard's Settings page asks
+    here afterwards, by the number begin() gave the save, whether that rehash
+    reloaded the settings or failed (a syntax error in admin_config.py, say).
+
+    One record, not one per save: begin() moves it on to the newer save, and
+    a page waiting for an older number takes the newer one's answer. That
+    rehash started after both saves were written, so it read both. finish()
+    for an older number than the record's is dropped for the same reason -
+    the record already belongs to a rehash that read that save as well.
+
+    Here, not in web_settings.py, so a rehash does not forget the answer
+    while it reloads modules - this module is never reloaded.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._seq = 0              # the latest save's number; 0 = none yet
+        self._ok = None            # True/False once its rehash finished; None while it runs
+        self._finished_at = None   # time.time() when it finished
+
+    def begin(self):
+        """A save has been written and its rehash is about to start: its
+        number, one more than the last."""
+        with self._lock:
+            self._seq += 1
+            self._ok = None
+            self._finished_at = None
+            return self._seq
+
+    def finish(self, seq, ok):
+        """Record that save `seq`'s rehash finished; `ok` True only when it
+        reloaded. Ignored when a later save has begun since."""
+        with self._lock:
+            if seq != self._seq:
+                return
+            self._ok = ok is True
+            self._finished_at = time.time()
+
+    def snapshot(self):
+        """{"seq", "ok", "finished_at"}, read together."""
+        with self._lock:
+            return {"seq": self._seq, "ok": self._ok, "finished_at": self._finished_at}
+
+
+save_rehash = SaveRehashOutcome()
+
+
 # The cross-list search index's connection cache -----------------------------
 # list_index.py keeps one sqlite3 connection open and reuses it; this guards
 # that cache, not the database (sqlite3 serialises writers itself). Here for
