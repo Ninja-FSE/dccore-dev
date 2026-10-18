@@ -134,7 +134,7 @@ class Case(security.PathSecurityBase):
 
 
 class ALargeArchiveWaitsForTheLargeSend(Case):
-    """Case 1: a large send runs and a slot is free."""
+    """A large send runs and a slot is free."""
 
     def test_it_is_not_claimed_and_keeps_its_place(self):
         self.running(RUNNING_BIG)
@@ -172,7 +172,7 @@ class ALargeArchiveWaitsForTheLargeSend(Case):
 
 
 class WhenTheRuleDoesNotHoldItBack(Case):
-    """Cases 2, 3, 4 and 8: the archive is claimed and sent."""
+    """The archive is claimed and sent."""
 
     def assert_sent(self, row, result, log):
         self.assertIs(result, True, "the packer was not handed to the send")
@@ -215,7 +215,7 @@ class WhenTheRuleDoesNotHoldItBack(Case):
         self.assertEqual(row[dcc.QUEUED_SIZE_KEY], MB)
 
     def test_the_fresh_claim_is_the_large_send_before_any_size_is_read(self):
-        """Case 8: a dispatch right after the hand-off sees a large send
+        """A dispatch right after the hand-off sees a large send
         running, through the claim's queue row."""
         row = self.make_row()
 
@@ -232,7 +232,7 @@ class WhenTheRuleDoesNotHoldItBack(Case):
 
 
 class AReusedArchiveFollowsTheRuleToo(Case):
-    """Case 5: another nick's request has already packed the album, so the
+    """Another nick's request has already packed the album, so the
     archive is reused as it is and rar never runs."""
 
     def setUp(self):
@@ -284,7 +284,7 @@ class AReusedArchiveFollowsTheRuleToo(Case):
 
 
 class WithNoRoomTheArchiveWaitsAsALargeFile(Case):
-    """Case 6: every slot is busy when the pack ends. The archive waits as
+    """Every slot is busy when the pack ends. The archive waits as
     before, and is judged by its real size when the sweep reaches it."""
 
     def test_no_room_records_the_size_and_the_later_sweep_holds_it_back(self):
@@ -320,7 +320,7 @@ class WithNoRoomTheArchiveWaitsAsALargeFile(Case):
 
 
 class ARowWithdrawnDuringThePack(Case):
-    """Case 9: the user took the row out while rar ran."""
+    """The user took the row out while rar ran."""
 
     def test_it_is_not_sent_and_the_packer_reports_false(self):
         row = self.make_row()
@@ -337,7 +337,7 @@ class ARowWithdrawnDuringThePack(Case):
 
 
 class ThroughTheDispatcher(Case):
-    """Cases 7 and 10, through check_queue_and_send(): the wrapper releases
+    """Through check_queue_and_send(): the wrapper releases
     the packer once on the hold-back exit (#714), and the archive is sent by
     the trigger the large send's end starts - it is not stranded."""
 
