@@ -64,6 +64,11 @@ docs/UPDATES.md    export-ignore
 # two of us, not shipped.
 docs/PUBLIC-REPO-WORKFLOW.md    export-ignore
 
+# docs/PROJECT-BOARD.md is how the two of us use this repository's project
+# board (#1457): its link, its workflows and the IDs scripts set a Status
+# with. None of that means anything outside this repository.
+docs/PROJECT-BOARD.md    export-ignore
+
 # docs/changes/ holds the changelog entries waiting for a release (#1307).
 # The release roll joins them into the two changelogs and deletes them before
 # extraction; if a roll is ever forgotten, the internal entries - with this
