@@ -305,9 +305,10 @@ uplink is full or your disk is slow, every send is slow and none is stopped.
 Your **Max upload speed** is shared between the sends, evenly among those
 that can use their share, so while it is full a send getting about its even
 share is not stopped; one well under it - on the downloader's slow link,
-while the other sends take the rest - is. With one slot, or one send running, it never fires. Someone whose own
-send was stopped for its speed does not, while waiting, cost another slow
-send its slot, so two slow downloaders cannot keep trading it.
+while the other sends take the rest - is. With one slot, or one send
+running, it never fires. Someone whose own send was stopped for its speed
+does not, while waiting, cost another slow send its slot, so two slow
+downloaders cannot keep trading it.
 
 A stopped file that was waiting in the queue stays there: it counts as a
 failed try against **Max send failures** (`MAX_SEND_FAILS`), the person goes

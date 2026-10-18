@@ -20,7 +20,9 @@ Four layers, all without a socket or a real clock, so every runner runs them:
 the watch itself (dcc._SlowSendWatch) driven by a fake clock; the send loop
 (stream_the_file) with a connection whose every chunk takes a second of that
 clock; finish_send() with a real queue row; and start_dcc_send() whole, with
-a fake listener whose receiver connects and crawls.
+a fake listener whose receiver connects and crawls. Beside them, the real
+upload cap's clock (speed_cap.take()) on a fake time, whose measured rates
+are what upload_cap_holds_this_send() is asked about (#1436).
 
 Every nick, channel and file name here is invented.
 """
@@ -47,6 +49,7 @@ import db  # noqa: E402
 import dcc  # noqa: E402
 import defaults as config  # noqa: E402
 import runtime  # noqa: E402
+import speed_cap  # noqa: E402
 
 from tests import dcc_ports  # noqa: E402
 from tests.support import DCCoreTestCase, silence_debug  # noqa: E402
@@ -568,6 +571,110 @@ class TheHelpers(WithEverySlotTaken):
             sys.modules.pop("oserve", None)
             dcc.tell_them_it_was_too_slow(SENDER, "Some_Album.flac", 2048.0)
         self.assertEqual(self.oserve.queued, [])
+
+
+class ChunkSender:
+    """One send in TheSharedClock's drive: its thread calls speed_cap.take()
+    for a chunk, sleeps the wait it is given - its own sleep, which holds
+    only it - and then spends `link_bps` time getting the chunk to its
+    receiver before it asks for the next one."""
+
+    def __init__(self, name, link_bps, start):
+        self.name = name
+        self.link_bps = link_bps
+        self.ready_at = start       # when it next calls take()
+        self.slept = 0.0
+        self.delivered = []         # (acknowledged at, bytes)
+
+    def sleep(self, seconds):
+        self.slept += seconds
+
+    def rate(self, since, until):
+        """What its receiver acknowledged in [since, until), in bytes/s."""
+        moved = sum(n for at, n in self.delivered if since <= at < until)
+        return moved / (until - since)
+
+
+class TheSharedClock(DCCoreTestCase):
+    """upload_cap_holds_this_send() rests on how speed_cap.take() shares the
+    line (#1436): every send reserves an equal chunk (chunk_size(), from one
+    DCC_BLOCK_SIZE) from one clock, first come first served, so a send that
+    only the cap slows gets a chunk per round like every other and moves at
+    least an even split of what every send together moves. The other tests
+    here feed in made-up rates; this one runs the real clock - on a fake
+    time, one thread stepping every send in the order their calls would
+    reach take() - measures the rates it gives, and puts them to the real
+    decision."""
+
+    START = 1000.0
+    WARM_UP = 10.0
+    FAST_LINK = 10 * KB * KB    # 10 MB/s: far above any cap here
+    SLOW_LINK = 20 * KB         # 20 KB/s: the receiver is the bottleneck
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(DCC_BLOCK_SIZE=64 * KB, MAX_DCC_SLOTS=4, MAX_UPLOAD_KB=0)
+
+    def drive(self, sends, seconds):
+        """Every send, in the order its calls would reach take(), for
+        `seconds` of the fake clock; each one's next chunk is what the send
+        loop asks for, chunk_size(UPLOAD, dcc_block_size())."""
+        runtime.speed_cap_clocks.clear()
+        clock = FakeClock(self.START)
+        block = dcc.dcc_block_size()
+        end = self.START + seconds
+        while True:
+            send = min(sends, key=lambda s: s.ready_at)
+            if send.ready_at >= end:
+                return
+            clock.t = send.ready_at
+            nbytes = speed_cap.chunk_size(speed_cap.UPLOAD, block)
+            slept_before = send.slept
+            speed_cap.take(speed_cap.UPLOAD, nbytes, clock=clock, sleep=send.sleep)
+            waited = send.slept - slept_before
+            acked_at = send.ready_at + waited + nbytes / send.link_bps
+            send.delivered.append((acked_at, nbytes))
+            send.ready_at = acked_at
+
+    def test_a_send_only_the_cap_slows_moves_an_even_share_and_is_held(self):
+        """Three sends on fast links and one on a 20 KB/s link, every slot
+        taken, the cap full: over the watch's window each of the three moves
+        at least SLOW_SEND_CAP_NEAR of total / 4 - four, because
+        upload_cap_holds_this_send() splits by every running row - and is
+        held; the slow-link send moves far less and is not. 1000 KB/s also
+        covers a chunk clamped to the 64 KB block."""
+        for cap_kb in (150, 400, 1000):
+            with self.subTest(MAX_UPLOAD_KB=cap_kb):
+                self.set_config(MAX_UPLOAD_KB=cap_kb)
+                capped = [ChunkSender(f"capped{n}", self.FAST_LINK, self.START)
+                          for n in range(3)]
+                slow = ChunkSender("slowlink", self.SLOW_LINK, self.START)
+                sends = capped + [slow]
+                window = dcc.SLOW_SEND_WINDOW_SECONDS
+                self.drive(sends, self.WARM_UP + window)
+                since = self.START + self.WARM_UP
+                rates = {s.name: s.rate(since, since + window) for s in sends}
+                total = sum(rates.values())
+                cap = cap_kb * KB
+
+                # The clock is shared: together they fill the cap, no more.
+                self.assertTrue(dcc.upload_cap_binds(total), rates)
+                self.assertLessEqual(total, cap * 1.02, rates)
+
+                even = dcc.SLOW_SEND_CAP_NEAR * total / len(sends)
+                for send in capped:
+                    self.assertGreaterEqual(rates[send.name], even,
+                                            f"{send.name} is short of an even share: {rates}")
+                self.assertLess(rates[slow.name], even, rates)
+
+                # And the decision these rates feed: a row per running send.
+                config.active_transfers[:] = [{"user": s.name, "file": s.name + ".flac"}
+                                              for s in sends]
+                for send in capped:
+                    self.assertTrue(dcc.upload_cap_holds_this_send(rates[send.name], total),
+                                    f"{send.name} is held by the cap but not shielded: {rates}")
+                self.assertFalse(dcc.upload_cap_holds_this_send(rates[slow.name], total),
+                                 f"the slow link is shielded by a cap it never reaches: {rates}")
 
 
 def acking_everything(conn, tracker, wait=0.0):

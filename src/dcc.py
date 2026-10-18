@@ -4882,8 +4882,9 @@ def _wait_for_final_ack(conn, tracker, file_size):
 #
 # THE CAP SHIELDS ONLY THE SENDS IT HOLDS (#1436). Every send reserves from one
 # shared clock under the cap, in chunks of one size, so a send the cap holds
-# back moves at least an even split of what the cap let through; one on a slow link moves less, and
-# the fast sends take what it leaves - the cap stays full while it crawls. So
+# back moves at least an even split of what the cap let through; one on a
+# slow link moves less, and the fast sends take what it leaves - the cap
+# stays full while it crawls. So
 # a full cap keeps a send only while that send moves at least
 # SLOW_SEND_CAP_NEAR of the even split, every send together divided by the
 # running sends; under that it is judged as if there were no cap, which is
