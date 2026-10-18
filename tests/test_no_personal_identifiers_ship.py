@@ -255,13 +255,116 @@ def dashed_addresses(text):
     return found
 
 
-# .mrc (the mIRC script) and .command (the macOS launcher) are shipped text
-# too: a suffix missing from this list is a file nobody scans. Shared with
-# tests/test_no_conflict_marker_is_left_behind.py, which imports it, so a
-# new file type joins both sweeps with one edit.
-TEXT_SUFFIXES = (".py", ".js", ".md", ".css", ".html", ".txt", ".sample",
-                 ".conf", ".bat", ".sh", ".yml", ".yaml", ".json",
-                 ".mrc", ".command")
+# EVERY FILE IS READ UNLESS IT IS KNOWN NOT TO BE TEXT (#1443).
+#
+# This used to be the other way round: a list of TEXT suffixes, and a file
+# whose suffix was missing from it was a file nobody scanned. .mrc and
+# .command each shipped unscanned that way until somebody noticed, and the
+# mIRC DLL's C sources, the dotfiles and LICENSE were still unscanned when an
+# audit found the list. A list of what to read fails OPEN on every new kind
+# of file; a list of what to skip fails CLOSED, because a binary nobody listed
+# does not decode and read_text_files() reports it.
+#
+# Skipped by suffix without being opened, compared lowercased. Shared with
+# tests/test_no_conflict_marker_is_left_behind.py, which imports it. Every
+# `*.<suffix> binary` line in .gitattributes must have its suffix here too;
+# tests/test_every_shipped_text_file_is_swept.py checks that.
+BINARY_SUFFIXES = (".dll", ".exe", ".pyd", ".so", ".dylib", ".pyc",
+                   ".png", ".ico", ".gif", ".jpg", ".jpeg", ".bmp", ".webp",
+                   ".ttf", ".otf", ".woff", ".woff2",
+                   ".zip", ".rar", ".7z", ".gz", ".tar", ".pdf",
+                   ".flac", ".mp3", ".ogg", ".wav", ".m4a")
+
+# Files with no binary suffix that are allowed not to decode. EMPTY, and an
+# entry needs a reason: a file named here is never read, so a text file in an
+# encoding nobody expected must be re-saved as UTF-8, not listed.
+UNDECODABLE_BY_DESIGN = frozenset()
+
+
+def is_binary_name(name):
+    """True if `name` is skipped by suffix, unread."""
+    return name.lower().endswith(BINARY_SUFFIXES)
+
+
+def decode_text(data):
+    """`data` as text, or None if it is not text this sweep can read.
+
+    UTF-8, or UTF-16 when a byte-order mark says so - which is how Visual
+    Studio saves a resource script (.rc), the likeliest next file type in the
+    DLL's sources. Anything else is None, never a lossy errors="replace"
+    read: a file the sweep only half-read must not count as scanned.
+
+    A NUL in the result is None too. UTF-16 WITHOUT a byte-order mark is
+    valid UTF-8 whenever its text is ASCII - every other byte a NUL - and
+    WORD reads each letter between the NULs as a word of its own, so a name
+    in it would pass unseen. Most binaries carry NULs as well, so one that
+    is missing from BINARY_SUFFIXES is reported rather than read as text.
+    No tracked text file contains one.
+    """
+    text = _decode(data)
+    return None if text is None or "\0" in text else text
+
+
+def _decode(data):
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def read_text_files(names, root):
+    """({name: text}, unread) for the paths in `names`, relative to `root`.
+
+    THE ONE DEFINITION of which tracked file is scanned as text, for both
+    sweeps. A file is skipped unread if is_binary_name() says so, and read
+    otherwise. `unread` lists the files that were read but did not decode
+    and are not in UNDECODABLE_BY_DESIGN: each one is a file the sweep did
+    not look at, so the callers fail on it rather than pass it by silently.
+
+    `root` has no default on purpose: it must be the directory the caller
+    asked git for `names` in, and a default bound here would be a second
+    copy of that fact (CONVENTIONS rule 2).
+
+    A SYMLINK IS READ AS ITS LINK TEXT. That is what git stores and what
+    `git archive` ships, so it is what can carry a name; opening the path
+    would follow the link instead - to some other file's content, to a
+    directory (raises), or to nothing at all (a dangling link, which would
+    look like a deleted file and be skipped). A submodule (mode 160000) is a
+    directory and raises on open, loudly; none is tracked.
+    """
+    texts, unread = {}, []
+    for name in names:
+        path = os.path.join(root, name)
+        if os.path.islink(path):
+            texts[name] = os.readlink(path)
+            continue
+        if is_binary_name(name):
+            continue
+        try:
+            with io.open(path, "rb") as handle:
+                text = decode_text(handle.read())
+        except FileNotFoundError:
+            if os.path.lexists(path):
+                # Something is there and could not be opened: not scanned.
+                raise
+            if "\ufffd" in name:
+                # Not a deleted file: a name git listed in bytes that are
+                # not UTF-8, decoded with "replace" into a path that does
+                # not exist. Whatever is under the real name was not read.
+                unread.append(name)
+            # Otherwise tracked but deleted from the working tree and not
+            # yet committed: nothing there to ship or to scan.
+            continue
+        if text is not None:
+            texts[name] = text
+        elif name not in UNDECODABLE_BY_DESIGN:
+            unread.append(name)
+    return texts, unread
 
 
 def shipped_paths():
@@ -303,6 +406,8 @@ class NothingIdentifyingShips(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.shipped, cls.reason = shipped_paths()
+        # Read once for every test below, not once per test.
+        cls.texts, cls.unread = read_text_files(cls.shipped or [], REPO_ROOT)
 
     def setUp(self):
         if self.reason:
@@ -314,14 +419,23 @@ class NothingIdentifyingShips(unittest.TestCase):
         # to contain every forbidden string was the one file never checked -
         # and it shipped them. Hashing removed the exemption and the leak in
         # the same change.
-        for name in self.shipped:
-            if name.endswith(TEXT_SUFFIXES):
-                yield name
+        return iter(self.texts)
 
     def read(self, path):
-        with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", path), os.path.join(REPO_ROOT, "conf", path), os.path.join(REPO_ROOT, path)) if os.path.exists(p)), os.path.join(REPO_ROOT, path))), encoding="utf-8",
-                     errors="replace") as handle:
-            return handle.read()
+        return self.texts[path]
+
+    def test_every_shipped_file_is_read_or_known_binary(self):
+        """The half that makes reading everything fail closed (#1443).
+
+        A file that does not decode is a file no check below looked at. If
+        it is a binary, its suffix belongs on BINARY_SUFFIXES (or, with no
+        suffix to go by, its path in UNDECODABLE_BY_DESIGN); if it is text
+        in another encoding, it belongs in UTF-8.
+        """
+        self.assertEqual(self.unread, [],
+                         "these ship but were not scanned: they do not "
+                         "decode as UTF-8 text and their suffix is not on "
+                         "BINARY_SUFFIXES")
 
     def test_no_forbidden_identifier_is_in_the_export(self):
         if FORBIDDEN is None:
