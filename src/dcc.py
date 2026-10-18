@@ -879,7 +879,9 @@ def a_list_may_go_first(transfers=None):
 # been resolved, because stat() must not run under queue_lock (#605). A row
 # without one counts as small: rows from before this change and folder packs,
 # whose archive does not exist until it is made. So a guess never holds a
-# file back. The bot's own list is never large.
+# file back. A pack's row records its archive's size once it is packed, and
+# from then on follows the rule like any file (#1435). The bot's own list is
+# never large.
 QUEUED_SIZE_KEY = "queued_size"
 LARGE_FILE_WAIT_NOTE = "waiting: one large file at a time"
 
@@ -2477,7 +2479,18 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         # Looked at in the same hold that claims the slot, so
         # a removed folder is never sent - and its archive
         # goes unless another row is waiting for it.
+        #
+        # ONE LARGE FILE AT A TIME HERE TOO (#1435). The archive's
+        # size is known now, so the row records it as a queued
+        # file's does (#1387) - stat()ed above, outside the lock -
+        # and a large archive waits, keeping its place, while
+        # another large file is being sent: the same outcome as
+        # no room. The row is a plain file from here on, so the
+        # sweep the large send's end triggers dispatches it, and
+        # the claim below counts as large until the send reads
+        # its size.
         room = False
+        large_waits = False
         with queue_lock:
             withdrawn = not _row_is_still_queued(next_file)
             if withdrawn:
@@ -2486,11 +2499,14 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
             else:
                 if not reuse:
                     point_row_at_archive()
+                next_file[QUEUED_SIZE_KEY] = final_size
                 send_to = owner_nick()
                 room = len(config.active_transfers) < config.MAX_DCC_SLOTS
                 if room:
-                    config.active_transfers.append({"user": send_to, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename,
-                                                     "queue_row": next_file})
+                    large_waits = waits_for_a_large_send([next_file])
+                    if not large_waits:
+                        config.active_transfers.append({"user": send_to, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename,
+                                                         "queue_row": next_file})
         if withdrawn:
             print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
                   f"being packed; it is not sent.")
@@ -2500,6 +2516,14 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
             print(f"[DCC-BLOCK] {send_to}: all {config.MAX_DCC_SLOTS} slot(s) busy, "
                   f"the packed archive stays queued for the next trigger.")
             # Released by the wrapper's finally, once (#714).
+            return
+        if large_waits:
+            _say_a_large_file_waits(send_to, next_file)
+            # Released by the wrapper's finally, once (#714). Unlike section A's
+            # hold-back, no sweep follows for the slot left free: the plain
+            # files were offered it by the sweep that ran while rar did, other
+            # large heads are held as this one is, and a pack waiting on
+            # [RAR-HOLD] is woken by the wrapper (redispatch_waiting_pack()).
             return
         if oserve: oserve.active_downloads = len(config.active_transfers)
 
