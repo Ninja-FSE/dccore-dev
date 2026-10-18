@@ -1,13 +1,13 @@
 """#1412: dccore-mirc.zip, the mIRC script as one download.
 
 scripts/build_mirc_zip.py packs dccore.mrc with the dcx and dll folders it
-loads, for each GitHub release. Checked here on a zip built from the real
-scripts/mirc/ into a temp folder:
+loads, for each GitHub release. Checked here on a zip built from scripts/mirc/
+at HEAD (#1442: from git, not the working tree) into a temp folder:
 
   * it holds what mIRC loads - the script, both folders, their licences -
     and none of what builds them (the generator, the layout, the dll
-    sources, the icon preview), each member byte for byte the file it
-    came from;
+    sources, the icon preview), each member byte for byte the file at
+    that commit, with its .gitattributes line ending;
   * no top folder, so it extracts where dccore.mrc already is, and no
     dccore.ini, so an update keeps the operator's settings and token;
   * its README says the version dccore.mrc says, and the steps;
@@ -16,13 +16,13 @@ scripts/mirc/ into a temp folder:
 """
 
 import hashlib
-import io
 import os
 import re
-import shutil
+import subprocess
 import sys
 import unittest
 import zipfile
+from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
@@ -33,13 +33,19 @@ finally:
 
 from tests.support import temp_dir  # noqa: E402
 
-MIRC = os.path.join(REPO_ROOT, "scripts", "mirc")
 
-
-def built(test, source=MIRC):
+def built(test, rev="HEAD"):
     out = os.path.join(temp_dir(test, prefix="dccore-mirczip-"), "dccore-mirc.zip")
-    digest, count = build_mirc_zip.build(out, source)
+    try:
+        digest, count = build_mirc_zip.build(out, rev)
+    except build_mirc_zip.NotACheckout as err:
+        test.skipTest(f"the zip is built from git, and git cannot read this tree: {err}")
     return out, digest, count
+
+
+def git(*args):
+    return subprocess.run(["git", *args], cwd=REPO_ROOT, check=True, capture_output=True,
+                          timeout=120).stdout.decode("utf-8")
 
 
 def names(path):
@@ -70,13 +76,11 @@ class WhatIsInIt(unittest.TestCase):
         """The rule, read back from the tree: a file added to dcx/ or dll/
         ships without anyone remembering to list it."""
         expected = set()
-        for folder in ("dcx", "dll"):
-            for root, dirs, files in os.walk(os.path.join(MIRC, folder)):
-                dirs[:] = [d for d in dirs if d not in ("src", "__pycache__")]
-                for name in files:
-                    inside = os.path.relpath(os.path.join(root, name), MIRC).replace(os.sep, "/")
-                    if inside != "dll/icons-preview.png":
-                        expected.add(inside)
+        for path in git("ls-tree", "-r", "--name-only", "HEAD", "--",
+                        "scripts/mirc/dcx", "scripts/mirc/dll").splitlines():
+            inside = path[len("scripts/mirc/"):]
+            if not inside.startswith("dll/src/") and inside != "dll/icons-preview.png":
+                expected.add(inside)
         shipped = {n for n in self.names if n.startswith(("dcx/", "dll/"))}
         self.assertEqual(shipped, expected)
 
@@ -86,8 +90,12 @@ class WhatIsInIt(unittest.TestCase):
                 if name == "dccore-mirc-README.txt":
                     continue
                 with self.subTest(name=name):
-                    with open(os.path.join(MIRC, *name.split("/")), "rb") as handle:
-                        self.assertEqual(archive.read(name), handle.read())
+                    path = "scripts/mirc/" + name
+                    blob = subprocess.run(["git", "show", "HEAD:" + path], cwd=REPO_ROOT, check=True,
+                                          capture_output=True, timeout=120).stdout
+                    if git("check-attr", "--source=HEAD", "eol", "--", path).strip().endswith(": eol: crlf"):
+                        blob = blob.replace(b"\n", b"\r\n")
+                    self.assertEqual(archive.read(name), blob)
 
     def test_no_top_folder_and_no_settings_file(self):
         """Extracted where dccore.mrc is, an update overwrites the script and
@@ -111,8 +119,11 @@ class TheReadme(unittest.TestCase):
             self.text = archive.read("dccore-mirc-README.txt").decode("utf-8")
 
     def test_it_names_the_version_the_script_says(self):
-        with io.open(os.path.join(MIRC, "dccore.mrc"), encoding="latin-1") as handle:
-            said = re.search(r"alias dccore\.ver \{ return (\S+) \}", handle.read()).group(1)
+        """The script at HEAD, the commit the zip was built from - not the
+        working tree, where an uncommitted version bump would disagree."""
+        blob = subprocess.run(["git", "show", "HEAD:scripts/mirc/dccore.mrc"], cwd=REPO_ROOT,
+                              check=True, capture_output=True, timeout=120).stdout
+        said = re.search(r"alias dccore\.ver \{ return (\S+) \}", blob.decode("latin-1")).group(1)
         self.assertIn(f"dccore.mrc {said}", self.text.splitlines()[0])
 
     def test_it_says_how_to_load_pair_and_update(self):
@@ -150,11 +161,16 @@ class TheSameBytesEveryTime(unittest.TestCase):
 class AMissingFolderStopsIt(unittest.TestCase):
 
     def test_without_dcx_there_is_no_zip(self):
-        copy = os.path.join(temp_dir(self, prefix="dccore-mirczip-src-"), "mirc")
-        shutil.copytree(MIRC, copy, ignore=shutil.ignore_patterns("dcx"))
+        try:
+            files = build_mirc_zip.files_at(build_mirc_zip.resolve("HEAD"))
+        except build_mirc_zip.NotACheckout as err:
+            self.skipTest(f"the zip is built from git, and git cannot read this tree: {err}")
+        self.assertTrue(any(name.startswith("dcx/") for name in files))
+        without = {name: data for name, data in files.items() if not name.startswith("dcx/")}
         out = os.path.join(temp_dir(self, prefix="dccore-mirczip-out-"), "dccore-mirc.zip")
-        with self.assertRaises(SystemExit):
-            build_mirc_zip.build(out, copy)
+        with mock.patch.object(build_mirc_zip, "files_at", lambda sha, repo: without):
+            with self.assertRaises(SystemExit):
+                build_mirc_zip.build(out)
         self.assertFalse(os.path.exists(out))
 
 
