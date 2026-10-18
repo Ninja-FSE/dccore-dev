@@ -719,7 +719,7 @@ def _room_left_locked(queue, free, exclude=None):
     return free
 
 
-def _has_room(size, room):
+def has_room(size, room):
     """Whether a file of `size` fits in `room` and still leaves MIN_FREE_BYTES.
     Nothing to fit, or a disk that cannot be measured, is not held back - the
     write itself still fails safely."""
@@ -1720,7 +1720,7 @@ def check_fetch_queue():
             # A file already known not to fit waits until it does (#964),
             # weighed exactly as handle_incoming_offer() weighs the offer -
             # asked for sooner, its offer would only be held again.
-            if not why and not _has_room(row.get("needs_bytes"), room):
+            if not why and not has_room(row.get("needs_bytes"), room):
                 why = "disk-full"
             if not why and (row.get("retry_at") or 0) > now:
                 why = "retry"
@@ -3021,7 +3021,7 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         # count as low, and the loop never ended. Now it waits, pending,
         # until what it declared fits with MIN_FREE_BYTES to spare.
         room = _room_left_locked(queue, _free_bytes(), exclude=request_id)
-        if not _has_room(offer["size"], room):
+        if not has_room(offer["size"], room):
             _hold_for_space(row, offer["size"],
                             f"needs {_mb(offer['size'])} free and {_mb(room)} is - "
                             f"asking again once there is space")

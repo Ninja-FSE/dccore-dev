@@ -2346,7 +2346,10 @@ def waiting_archive_count():
     """How many packed archives wait in TMP_ZIP_DIR to be sent. Caller holds queue_lock.
 
     By path, so the rows of two nicks that name one archive count once. One
-    being sent is not waiting.
+    being sent is not waiting. Nor is one behind a folder pack in its own
+    nick's queue: it cannot be sent before that pack is made, and counted, it
+    could hold that very pack at the cap for ever. In practice the count is
+    of queue heads, and of what follows a head that is not a pack.
     """
     sending = set()
     for tx in config.active_transfers:
@@ -2356,8 +2359,10 @@ def waiting_archive_count():
     waiting = set()
     for rows in list(config.dcc_queue.values()):
         for row in rows or ():
+            if isinstance(row, dict) and row.get("is_unpacked_rar_folder"):
+                break
             if (isinstance(row, dict) and row.get("is_temporary_zip") is True
-                    and not row.get("is_unpacked_rar_folder") and row.get("path")):
+                    and row.get("path")):
                 key = _archive_key(row["path"])
                 if key not in sending:
                     waiting.add(key)
@@ -2434,7 +2439,7 @@ def _has_room_to_pack(size, free):
     rule fetching waits by (dcc_fetch.MIN_FREE_BYTES), for the same reason:
     a disk filled to nothing fails everything that writes to it."""
     import dcc_fetch
-    return dcc_fetch._has_room(size, free)
+    return dcc_fetch.has_room(size, free)
 
 
 def _room_needed_to_pack(size):
@@ -2568,7 +2573,7 @@ def _rar_list_file_lines(parent, leaf, members, separator=None, windows=None):
         of the line is trimmed, so `keep.flac ` takes `keep.flac` and a file
         `Sub ` the whole folder `Sub`;
       * a control character (a line break among them); with "/" as the
-        separator, a backslash, which rar may read as one; a path the UTF-16
+        separator, a backslash, which rar may read as one; a path the list
         file cannot hold (a POSIX name that is not valid text). U+0085,
         U+2028 and U+2029 are not among them: rar 7.22 takes a name holding
         one as it is, and lists it as one name.
@@ -2667,10 +2672,11 @@ def _what_the_archive_got_wrong(names, expected):
 
     THE LAST WORD ON WHAT A PACK HOLDS (#1376), whatever rar made of the list
     it was given and whatever changed in the folder between the walk and
-    rar's - a file turned into a folder or a link. Both ways: a pack missing
-    files is not what was asked for either, and an empty listing misses all
-    of them. A folder above an asked-for file is not stray - rar off Windows
-    may store one, with no data in it.
+    rar's - a file turned into a folder or a link. Both ways: the packer
+    refuses an archive with a stray name, or with none of what was asked for
+    (an empty listing misses all of it), and sends one short of a few asked-
+    for files, saying so. A folder above an asked-for file is not stray -
+    rar off Windows may store one, with no data in it.
     """
     folders = set()
     for name in expected:
@@ -2682,9 +2688,47 @@ def _what_the_archive_got_wrong(names, expected):
     return stray, missing
 
 
+def _members_inside_the_library(source_abs, members, islink=None, safe=None):
+    """(kept, left out): pack_members()' `members` of the folder `source_abs`,
+    less every file that is a link to somewhere outside the library folder
+    the folder is in.
+
+    rar packs what a file link points at. A request for the file on its own
+    is refused by is_safe_path(), which resolves it; a pack must not hand out
+    what the file would not be. Only links are resolved: the walk does not
+    go into a linked folder, so a file that is not a link is where it is.
+    `islink` and `safe` (is_safe_path()'s shape) are for the tests.
+    """
+    islink = os.path.islink if islink is None else islink
+    safe = is_safe_path if safe is None else safe
+    roots = [folder.path for folder in library.every_folder() if safe(folder.path, source_abs)]
+    kept, left_out = [], []
+    for member in members:
+        full = os.path.join(source_abs, member[0])
+        if islink(platform_compat.long_path(full)) and not any(safe(root, full) for root in roots):
+            left_out.append(member)
+        else:
+            kept.append(member)
+    return kept, left_out
+
+
+def _rar_list_file_bytes(lines, windows=None):
+    """(switch, bytes): the list file rar reads `lines` from, and the switch that
+    tells it the encoding.
+
+    UTF-16 with -scul on Windows, where rar 7.22 was checked with it. UTF-8
+    with -scfl elsewhere: rar 6.23 on Linux leaves out a name with a
+    character above U+FFFF read from a UTF-16 list (an emoji), and packs it
+    from a UTF-8 one, as it does U+2028. `windows` is for the tests."""
+    on_windows = platform_compat.IS_WINDOWS if windows is None else windows
+    if on_windows:
+        return "-scul", ("\ufeff" + "".join(line + "\r\n" for line in lines)).encode("utf-16-le")
+    return "-scfl", "".join(line + "\n" for line in lines).encode("utf-8")
+
+
 def _write_rar_list_file(lines):
-    """Write `lines` to a UTF-16 list file in TMP_ZIP_DIR, which rar reads
-    with -scul, and return its path. The caller removes it.
+    """Write `lines` to a list file in TMP_ZIP_DIR (_rar_list_file_bytes())
+    and return (its path, the switch rar reads it with). The caller removes it.
 
     One pack runs at a time, so a list file already there was left by a run
     that never got to remove its own: it goes first."""
@@ -2697,9 +2741,10 @@ def _write_rar_list_file(lines):
             pass
     handle, path = tempfile.mkstemp(prefix="pack-", suffix=".lst",
                                     dir=os.path.abspath(config.TMP_ZIP_DIR))
+    switch, data = _rar_list_file_bytes(lines)
     with os.fdopen(handle, "wb") as out:
-        out.write(("\ufeff" + "".join(line + "\r\n" for line in lines)).encode("utf-16-le"))
-    return path
+        out.write(data)
+    return path, switch
 
 
 def _pack_again_if_packed_before(row):
@@ -2734,6 +2779,22 @@ def _pack_again_if_packed_before(row):
     print(f"[DCC QUEUE] {row.get('user_raw') or 'A nick'}'s archive of {os.path.basename(source.rstrip('/' + chr(92)))} "
           f"was packed by an earlier version; the folder is packed again.")
     return True
+
+
+def pack_again_every_row_packed_before():
+    """Turn every packed archive's row that says nothing of what it was packed
+    without back into its folder's row (_pack_again_if_packed_before()), in
+    every queue and at every place. Called once the queue is loaded from
+    dcc_queue.txt; the dispatcher turns back a head it meets later as well.
+    Returns how many were turned back."""
+    turned = 0
+    with queue_lock:
+        for rows in list(config.dcc_queue.values()):
+            for row in list(rows or ()):
+                turned += bool(_pack_again_if_packed_before(row))
+    if turned:
+        print(f"[DCC QUEUE] {turned} queued archive(s) packed by an earlier version will be packed again.")
+    return turned
 
 
 def _row_is_still_queued(row):
@@ -2953,6 +3014,10 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
             source_abs = os.path.abspath(true_source_dir)
             parent, leaf = os.path.split(source_abs)
             members = update_list.pack_members(source_abs, ignored)
+            members, outside = _members_inside_the_library(source_abs, members)
+            if outside:
+                print(f"[SECURITY] {len(outside)} file(s) in {folder_leaf} are links to somewhere outside "
+                      f"the library and are left out of its archive.")
             packed_bytes = sum(size for _name, size in members)
 
             # ROOM FIRST (#1376). Nothing else asks whether the archive
@@ -2995,9 +3060,9 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
                 raise FileNotFoundError(
                     "rar executable not found - set config.RAR_BINARY or put rar on PATH")
             # -ep1 keeps the folder by its own name in the archive;
-            # -scul reads the list file as UTF-16.
-            list_file = _write_rar_list_file(lines)
-            cmd = [rar_bin, "a", "-ep1", "-scul", "-n@" + list_file, work_dir_switch,
+            # -scul or -scfl says how the list file is written.
+            list_file, list_charset = _write_rar_list_file(lines)
+            cmd = [rar_bin, "a", "-ep1", list_charset, "-n@" + list_file, work_dir_switch,
                    os.path.abspath(target_rar_path), source_abs]
             process = _run_rar(job, cmd, rar_timeout)
         except subprocess.TimeoutExpired:
@@ -3031,9 +3096,20 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
                 _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_PACK_FAILED, job=job)
                 return False
             stray, missing = _what_the_archive_got_wrong(names, expected)
-            if stray or missing:
-                # Not what was asked for: packing it again would make the
-                # same archive, holding every other pack meanwhile.
+            if missing and not stray and len(missing) < len(expected):
+                # SHORT OF A LISTED FILE, NOTHING ELSE IN IT: sent, and said
+                # loudly. It holds nothing the list leaves out; what it lacks
+                # (a file gone since the walk, a name rar would not take) can
+                # still be asked for by name.
+                print(f"[LINEAR RAR ERROR] The archive of {folder_leaf} lacks {len(missing)} of the "
+                      f"{len(expected)} file(s) asked for, and is sent without them: {missing[:5]}")
+                announce_mod.send_debug(
+                    f"Pack of {folder_leaf} for {owner_nick()} lacks {len(missing)} file(s); sent without them.",
+                    category="PACK")
+            elif stray or missing:
+                # A name nobody asked for, or nothing that was: packing it
+                # again would make the same archive, holding every other
+                # pack meanwhile.
                 print(f"[LINEAR RAR ERROR] The archive of {folder_leaf} is not what was asked for, so it "
                       f"is not sent: {len(stray)} name(s) nobody asked for {stray[:5]}, "
                       f"{len(missing)} asked-for file(s) missing {missing[:5]}.")
@@ -3152,7 +3228,7 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         return True
     else:
         error_msg = process.stderr.strip() if process.stderr else "Unknown RAR engine issue"
-        print(f"[LINJAR RAR ERROR] {error_msg}")
+        print(f"[LINEAR RAR ERROR] {error_msg}")
         _discard_partial_archive(target_rar_path, "rar exited " + str(process.returncode))
         announce_mod.send_debug(f"Pack FAILED in queue slot for {owner_nick()}: {error_msg}", category="PART")
         # Charge the failure to the retry budget instead of recursing. The old
@@ -3603,7 +3679,7 @@ def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
                                             told=PACK_FAILED_TO_USER)
                         _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_PACK_FAILED)
                     except Exception as packer_err:
-                        print("[LINJAR RAR ERROR] Packing failed for " + str(owner_nick()) + ": " + str(packer_err))
+                        print("[LINEAR RAR ERROR] Packing failed for " + str(owner_nick()) + ": " + str(packer_err))
                         # As a refusal: the user is told PACK_FAILED_TO_USER
                         # once the retries are spent, never the error, which
                         # can carry a path (#1376).

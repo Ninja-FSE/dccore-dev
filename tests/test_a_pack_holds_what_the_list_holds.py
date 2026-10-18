@@ -156,7 +156,8 @@ class StandInRar:
                 with io.open(switch[3:], "rb") as handle:
                     # At line ends alone, as rar reads it: a name may hold U+2028.
                     lines = [line[:-1] if line.endswith("\r") else line
-                             for line in handle.read().decode("utf-16").split("\n")]
+                             for line in handle.read().decode("utf-8" if "-scfl" in switches else "utf-16")
+                             .split("\n")]
                     lines = [line for line in lines if line]
                 masks = (masks or []) + lines
         names, used = [], set()
@@ -294,7 +295,7 @@ class TheArchiveHoldsTheListedFiles(PackCase):
         cmd = call["cmd"]
         self.assertEqual(call["sources"], [os.path.abspath(self.album)])
         self.assertIn("-ep1", cmd)
-        self.assertIn("-scul", cmd)
+        self.assertIn("-scul" if os.name == "nt" else "-scfl", cmd)
         self.assertEqual(len(call["list_files"]), 1, cmd)
         self.assertIsNone(call["cwd"], "rar is started where the bot runs")
         self.assertEqual(call["unmatched"], [])
@@ -565,13 +566,26 @@ class TheArchiveIsListedBeforeItIsSent(PackCase):
 
         self.assert_refused_once(row, "1 name(s) nobody asked for ['Some Album/01 - One.flac']")
 
-    def test_an_archive_missing_an_asked_for_file_is_refused_once(self):
+    def test_an_archive_short_of_an_asked_for_file_is_sent_and_said_so(self):
         self.lists_leaving_out(".flac")
         self.rar.leave_out = [os.path.join("Some Album", "02 - Two.mp3")]
         row = self.row()
 
-        self.assert_refused_once(row, "0 name(s) nobody asked for [], 1 asked-for file(s) missing "
-                                      "['Some Album/02 - Two.mp3']")
+        result, log = self.pack(row)
+
+        self.assertIs(result, True, log)
+        self.assertIn("[LINEAR RAR ERROR] The archive of Some Album lacks 1 of the 5 file(s) asked for, "
+                      "and is sent without them: ['Some Album/02 - Two.mp3']", log)
+        self.assertEqual([path for _nick, path, _name in self.sends()], [self.base_archive()])
+
+    def test_one_with_a_stray_name_as_well_is_refused(self):
+        self.lists_leaving_out(".flac")
+        self.rar.leave_out = [os.path.join("Some Album", "02 - Two.mp3")]
+        self.rar.extra = [os.path.join("Some Album", "01 - One.flac")]
+        row = self.row()
+
+        self.assert_refused_once(row, "1 name(s) nobody asked for ['Some Album/01 - One.flac'], "
+                                      "1 asked-for file(s) missing ['Some Album/02 - Two.mp3']")
 
     def test_an_empty_listing_is_refused(self):
         self.lists_leaving_out(".flac")
@@ -617,6 +631,43 @@ class TheArchiveIsListedBeforeItIsSent(PackCase):
         self.assertFalse(os.path.exists(self.base_archive()))
         self.assertEqual(row.get("send_fails"), 1, "a listing that failed was not tried again")
         self.assertEqual(config.dcc_queue["dave"], [row])
+
+
+class TheListFileIsWrittenAsRarReadsIt(unittest.TestCase):
+    """UTF-16 with -scul on Windows (rar 7.22), UTF-8 with -scfl elsewhere:
+    rar 6.23 on Linux leaves out a name above U+FFFF from a UTF-16 list."""
+
+    NAMES = ["/srv/lib/Album/plain.mp3", "/srv/lib/Album/\U0001F3B5.mp3", "/srv/lib/Album/a\u2028b.mp3"]
+
+    def test_off_windows(self):
+        switch, data = dcc._rar_list_file_bytes(self.NAMES, windows=False)
+        self.assertEqual(switch, "-scfl")
+        self.assertEqual(data, "".join(name + "\n" for name in self.NAMES).encode("utf-8"))
+
+    def test_on_windows(self):
+        switch, data = dcc._rar_list_file_bytes(self.NAMES, windows=True)
+        self.assertEqual(switch, "-scul")
+        self.assertEqual(data, ("\ufeff" + "".join(name + "\r\n" for name in self.NAMES)).encode("utf-16-le"))
+
+
+class AListFileInUtf8(PackCase):
+    """The pack as it runs off Windows, on any platform."""
+
+    def test_names_above_the_bmp_are_packed(self):
+        self.lists_leaving_out(".flac", ".jpg")
+        emoji = "\U0001F3B5 tune.mp3"
+        write(os.path.join(self.album, emoji))
+        real_bytes = dcc._rar_list_file_bytes
+        dcc._rar_list_file_bytes = lambda lines, windows=None: real_bytes(lines, windows=False)
+        self.addCleanup(setattr, dcc, "_rar_list_file_bytes", real_bytes)
+        row = self.row()
+
+        result, log = self.pack(row)
+
+        (call,) = self.rar.calls
+        self.assertIn("-scfl", call["cmd"])
+        self.assertIn(os.path.join("Some Album", emoji), call["names"])
+        self.assertIs(result, True, log)
 
 
 class TheListingIsReadAsRarWritesIt(unittest.TestCase):
@@ -739,6 +790,34 @@ class AnArchivePackedBeforeTheListsRule(PackCase):
         self.assertEqual(self.sends(), [])
         self.assertIn(("check_queue_and_send", (self.sock, "dave")), security.InlineThread.dispatched)
 
+    def test_every_one_in_a_loaded_queue_is_turned_back(self):
+        """Not only the head: one behind it would otherwise wait behind its own
+        pack at the waiting-archive cap."""
+        other_archive = os.path.join(config.TMP_ZIP_DIR, "Other.rar")
+        second = dict(self.row_, file="Other.rar", path=other_archive)
+        write(other_archive, 9)
+        config.dcc_queue["dave"].append(second)
+
+        with security.quiet():
+            self.assertEqual(dcc.pack_again_every_row_packed_before(), 2)
+
+        self.assertTrue(all(row["is_unpacked_rar_folder"] for row in config.dcc_queue["dave"]))
+        self.assertFalse(os.path.exists(other_archive), "the second earlier archive was left on disk")
+        self.assertEqual(second["path"], self.album)
+
+    def test_the_bot_turns_them_back_once_the_queue_is_loaded(self):
+        """oserve's start-up, read as code: the call follows the load."""
+        import ast
+        with io.open(os.path.join(REPO_ROOT, "oserve.py"), encoding="utf-8") as handle:
+            tree = support.parse_source(handle.read())
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)]
+        loads = [c.lineno for c in calls if (c.func.value.id, c.func.attr) == ("db", "load_dcc_queue")]
+        turns = [c.lineno for c in calls if (c.func.value.id, c.func.attr) == ("dcc", "pack_again_every_row_packed_before")]
+        self.assertEqual(len(loads), 1)
+        self.assertEqual(len(turns), 1, "the loaded queue is not turned back")
+        self.assertGreater(turns[0], loads[0])
+
     def test_one_being_sent_is_left_alone(self):
         config.active_transfers.append({"user": "dave", "file": "Some_Album.rar", "bytes_sent": 0,
                                         "queue_row": self.row_})
@@ -754,6 +833,44 @@ class AnArchivePackedBeforeTheListsRule(PackCase):
 
         self.assertEqual(self.rar.calls, [])
         self.assertEqual([path for _nick, path, _name in self.sends()], [self.old])
+
+
+class AFileLinkOutOfTheLibrary(PackCase):
+
+    def test_a_link_that_resolves_outside_is_left_out(self):
+        """The decision, with the link and its target given: runs everywhere."""
+        members = [("02 - Two.mp3", 64), ("link.mp3", 9), ("inner.mp3", 9)]
+        links = {os.path.join(self.album, "link.mp3"), os.path.join(self.album, "inner.mp3")}
+        outside = os.path.join(self.album, "link.mp3")
+
+        def islink(path):
+            return any(path.endswith(link) for link in links)
+
+        def safe(root, path):
+            return path != outside and dcc.is_safe_path(root, path)
+
+        kept, left_out = dcc._members_inside_the_library(self.album, members, islink=islink, safe=safe)
+
+        self.assertEqual(kept, [("02 - Two.mp3", 64), ("inner.mp3", 9)], "a link inside the library is packed")
+        self.assertEqual(left_out, [("link.mp3", 9)])
+
+    def test_a_real_link_is_left_out_of_the_archive(self):
+        self.lists_leaving_out(".flac", ".jpg")
+        secret = os.path.join(self.tree.root, "secret.txt")
+        write(secret, 9)
+        link = os.path.join(self.album, "link.mp3")
+        try:
+            os.symlink(secret, link)
+        except (OSError, NotImplementedError) as err:
+            self.skipTest(f"no file links here ({type(err).__name__}); the decision is tested above")
+        self.assertTrue(update_list.is_listed_file("link.mp3", update_list.ignored_extensions("Music")))
+        row = self.row()
+
+        result, log = self.pack(row)
+
+        (call,) = self.rar.calls
+        self.assertNotIn(os.path.join("Some Album", "link.mp3"), call["names"])
+        self.assertIn("[SECURITY] 1 file(s) in Some Album are links to somewhere outside the library", log)
 
 
 class TheMembers(DCCoreTestCase):

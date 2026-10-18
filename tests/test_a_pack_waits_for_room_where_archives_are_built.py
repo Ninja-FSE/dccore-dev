@@ -425,6 +425,49 @@ class TooManyArchivesWait(Case):
                 self.set_config(MAX_DCC_SLOTS=slots)
                 self.assertEqual(dcc.waiting_archive_cap(), cap)
 
+    def test_an_archive_behind_its_own_nicks_pack_does_not_wait(self):
+        """One slot, and gina's queue is a pack with her own archive behind
+        it: counted, the archive would hold the pack it waits behind for ever."""
+        self.set_config(MAX_DCC_SLOTS=1)
+        pack = {"file": "Album One.rar", "path": self.albums["dave"], "channel": CHANNEL, "user_raw": "gina",
+                "is_unpacked_rar_folder": True, "is_temporary_zip": True}
+        config.dcc_queue["gina"] = [pack]
+        self.waiting_archive("gina")
+        with dcc.queue_lock:
+            self.assertEqual(dcc.waiting_archive_count(), 0)
+            self.assertIsNone(dcc.pack_hold_reason(pack))
+            self.assertTrue(dcc.packs_can_start(pack))
+
+        self.trigger("gina")
+
+        self.assertEqual(len(self.rar_calls), 1, "gina's pack was held by the archive behind it")
+
+    def test_one_moved_behind_a_pack_stops_counting(self):
+        import commands
+        self.set_config(MAX_DCC_SLOTS=1)
+        self.waiting_archive("gina")
+        pack = {"file": "Album One.rar", "path": self.albums["dave"], "channel": CHANNEL, "user_raw": "gina",
+                "is_unpacked_rar_folder": True, "is_temporary_zip": True}
+        config.dcc_queue["gina"].append(pack)
+        with dcc.queue_lock:
+            self.assertEqual(dcc.waiting_archive_count(), 1)
+
+        ok, said = commands.move_queued_file("gina", 2, "up")
+
+        self.assertTrue(ok, said)
+        self.assertIs(config.dcc_queue["gina"][0], pack)
+        with dcc.queue_lock:
+            self.assertEqual(dcc.waiting_archive_count(), 0)
+            self.assertTrue(dcc.packs_can_start(pack))
+
+    def test_an_archive_behind_a_plain_file_still_waits(self):
+        self.set_config(MAX_DCC_SLOTS=1)
+        config.dcc_queue["gina"] = [{"file": "Song.mp3", "path": os.path.join(self.tree.music, "Song.mp3"),
+                                     "channel": CHANNEL, "user_raw": "gina", "is_temporary_zip": False}]
+        self.waiting_archive("gina")
+        with dcc.queue_lock:
+            self.assertEqual(dcc.waiting_archive_count(), 1)
+
     def test_held_at_the_cap_and_not_below_it(self):
         self.set_config(MAX_DCC_SLOTS=2)
         self.waiting_archive("gina")

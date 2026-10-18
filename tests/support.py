@@ -553,7 +553,7 @@ class FakeRarProcess:
 
 def rar_names_packed(cmd):
     """The archive names a `rar a -ep1 -n@<list> ... <archive> <folder>` asks
-    for: each line of the -n@ list file (UTF-16), from the folder's own name
+    for: each line of the -n@ list file (UTF-8 with -scfl, else UTF-16), from the folder's own name
     down, with "/" between the parts. None for a command with no such list."""
     lists = [part[3:] for part in cmd if str(part).startswith("-n@")]
     if not lists:
@@ -562,7 +562,8 @@ def rar_names_packed(cmd):
     names = []
     for path in lists:
         with open(path, "rb") as handle:
-            lines = handle.read().decode("utf-16").split("\n")
+            # UTF-8 with -scfl (off Windows), UTF-16 with -scul (#1376).
+            lines = handle.read().decode("utf-8" if "-scfl" in cmd else "utf-16").split("\n")
         for line in lines:
             line = line[:-1] if line.endswith("\r") else line
             if line:

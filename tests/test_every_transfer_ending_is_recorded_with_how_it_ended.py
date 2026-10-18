@@ -573,9 +573,10 @@ if sys.argv[1:2] == ["lb"]:
 asked = []
 base = os.path.dirname(os.path.abspath(sys.argv[-1]))
 for arg in sys.argv:
-    if arg.startswith("-n@"):
+    if arg.startswith("-n@") and os.path.exists(arg[3:]):
+        # Gone already when a pack is cancelled before this process reads it.
         with open(arg[3:], "rb") as listed:
-            for line in listed.read().decode("utf-16").split("\n"):
+            for line in listed.read().decode("utf-8" if "-scfl" in sys.argv else "utf-16").split("\n"):
                 line = line[:-1] if line.endswith("\r") else line
                 if line:
                     asked.append(os.path.relpath(line, base).replace(os.sep, "/"))
