@@ -347,7 +347,11 @@ alias dccore {
   ; whose feed was off to run this, and it did not exist - there was no
   ; %cmd branch for it, so it fell through to the help text instead.
   if (%cmd == consolefeed) { dccore.send consolefeed $2- | return }
-  if (%cmd == raw) { dccore.send $2- | return }
+  if (%cmd == raw) {
+    if ($dccore.st(state) == password) { dccore.typedpass $2- | return }
+    dccore.send $2-
+    return
+  }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
   if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for the DCCore it ships with and later. Pairs as $dccore.client $+ . $iif($dccore.opt(net),Bot on $dccore.opt(net) $+ .,) | return }
   if (%cmd == font) {
@@ -598,6 +602,16 @@ alias dccore.sendpass {
   }
   dccore.send $1-
 }
+; A line typed while the bot waits for the password is the password,
+; whichever way it was typed (@DCCore, @DCCore-console, /dccore raw, the
+; menu's console command): the prompt is answered (state auth, typed by
+; hand) and the line goes through dccore.sendpass. Never shown, never
+; stored; the caller shows ******** where it echoes what was typed.
+alias dccore.typedpass {
+  hadd dccore.live state auth
+  hadd dccore.live typed 1
+  dccore.sendpass $1-
+}
 
 ; ---------------------------------------------------------------------
 ;  Reading what the bot says
@@ -641,17 +655,17 @@ alias dccore.line {
     return
   }
   if (%text == Entering DCC Chat Admin Interface) {
-    ; The bot sends this only after its own "Enter Your Password:" and
-    ; the answer to it. The state becomes auth or password in the prompt
-    ; branch above (once the peer check passed, or in a chat the operator
-    ; opened), and elsewhere only from one of those two (a typed password,
-    ; a refused token); so the login counts only in one of the two, and in
-    ; any other state the chat is left as it is for a peer that fails the
-    ; check. In a chat that is already logged in, a second one changes
-    ; nothing.
-    if (!$istok(auth password,%state,32)) {
+    ; The bot sends this only once its own "Enter Your Password:" has
+    ; been answered. The state is auth only then: the token went out
+    ; after the peer check in the prompt branch above, or a password
+    ; was typed at the prompt (dccore.typedpass). In password the prompt
+    ; was shown and nothing has answered it; in any other state there
+    ; was no prompt. So the login counts only in auth, and in any other
+    ; state the chat is left as it is for a peer that fails the check.
+    ; In a chat that is already logged in, a second one changes nothing.
+    if (%state != auth) {
       if (%state == in) { return }
-      dccore.sys Ignored a login line from a chat that never asked for the password. The chat is closed and not reopened by itself; /dccore connect opens it again.
+      dccore.sys Ignored a login line that came before the password prompt was answered. The chat is closed and not reopened by itself; /dccore connect opens it again.
       dccore.abandon
       return
     }
@@ -1712,9 +1726,7 @@ on *:INPUT:@DCCore: {
   }
   if ($dccore.st(state) == password) {
     ; the password, typed by hand: never shown, never stored
-    hadd dccore.live state auth
-    hadd dccore.live typed 1
-    dccore.sendpass $1-
+    dccore.typedpass $1-
     dccore.echo $dccore.prompt ********
     halt
   }
@@ -1725,6 +1737,11 @@ on *:INPUT:@DCCore: {
 }
 on *:INPUT:@DCCore-console: {
   if ($left($1,1) == /) && ($left($1,2) != //) { return }
+  if ($dccore.st(state) == password) {
+    dccore.typedpass $1-
+    echo -ti2 @DCCore-console $dccore.prompt ********
+    halt
+  }
   echo -ti2 @DCCore-console $dccore.prompt $iif($1 == unlock,unlock ********,$1-)
   dccore.send $1-
   halt
@@ -1753,7 +1770,10 @@ alias dccore.ask {
 ; The same for a console command typed in full.
 alias dccore.askraw {
   var %v = $input(Console command (see help),eo,DCCore)
-  if (%v != $null) { dccore.send %v }
+  if (%v != $null) {
+    if ($dccore.st(state) == password) { dccore.typedpass %v | return }
+    dccore.send %v
+  }
 }
 ; Cancel the running pack (#1202): top of the right-click menu while one runs; named, so the prompt can say whose.
 alias dccore.packcancel {

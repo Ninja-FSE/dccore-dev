@@ -66,8 +66,11 @@ class TheScript(unittest.TestCase):
 
     def test_the_password_prompt_sends_through_sendpass(self):
         branch = password_branch()
-        self.assertIn("dccore.sendpass $1-", branch)
+        self.assertIn("dccore.typedpass $1-", branch)
         self.assertNotIn("dccore.send $1-", branch)
+        typedpass = settings_window.statements(settings_window.alias("dccore.typedpass"))
+        self.assertEqual(typedpass[-1], "dccore.sendpass $1-")
+        self.assertNotIn("dccore.send $1-", typedpass)
         self.assertIn("dccore.echo $dccore.prompt ********", branch)
 
     def test_a_spaced_password_goes_encoded_and_comes_back_as_typed(self):

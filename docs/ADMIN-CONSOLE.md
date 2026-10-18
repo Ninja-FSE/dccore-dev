@@ -674,13 +674,14 @@ script stops reconnecting until you `/dccore connect`. A script with no
 `bothost` yet learns the host the first time it is known, as for the token.
 
 "The login" above means one thing: the bot's `Entering DCC Chat Admin
-Interface`, read only after `Enter Your Password:` in the same chat, and only
-once the script went on from that prompt - sent the token after this check,
-or asked for the password (in a chat you opened, or after this check). The bot
-always sends the prompt first. A login line in a chat that never got that far
-is ignored: the window says so, the chat is closed, and the script stops
-reconnecting until you `/dccore connect`. Until a login counts, no `DCCORE`
-line is read.
+Interface`, read only once `Enter Your Password:` in the same chat has been
+answered - the script sent the token after this check, or you typed the
+password. A password counts as typed wherever you type it: in `@DCCore`, in
+`@DCCore-console`, with `/dccore raw` or with the menu's console command, and
+none of them shows it. The bot always asks first and logs in only after the
+answer. A login line in a chat whose prompt was not answered is ignored: the
+window says so, the chat is closed, and the script stops reconnecting until
+you `/dccore connect`. Until a login counts, no `DCCORE` line is read.
 
 What a token does **not** do is open the dashboard, or change the bot's
 settings. The web login checks the admin password hash and nothing else - the

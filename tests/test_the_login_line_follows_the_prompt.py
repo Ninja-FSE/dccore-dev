@@ -1,18 +1,25 @@
-"""dccore.mrc: the login line counts only after the password prompt.
+"""dccore.mrc: the login line counts only once the password prompt was answered.
 
-The bot always sends `Enter Your Password:` before `Entering DCC Chat Admin
-Interface`. The script's prompt branch is where the peer check runs and the
-only place a chat's state becomes `auth` (the token was sent) or `password`
-(the operator is asked to type it); a typed password and a refused token
-move only between those two. The script accepts the login line only in one
-of them: in any other state it says so in the window and leaves the chat
-as it leaves one whose peer check said no (dccore.abandon), and the chat
-never reaches state `in` - so nothing is sent, and no `DCCORE` line is read
-after it. A chat already logged in is left alone by a second login line.
+The bot always sends `Enter Your Password:`, and sends `Entering DCC Chat
+Admin Interface` only once that prompt has been answered. A chat's state is
+`auth` only then: the prompt branch sent the token after the peer check, or
+a password was typed at the prompt (dccore.typedpass, on every way a line
+can be typed: @DCCore, @DCCore-console, /dccore raw and the menu's console
+command). `password` means the prompt was shown and nothing has answered
+it. The script accepts the login line only in `auth`: in any other state it
+says so in the window and leaves the chat as it leaves one whose peer check
+said no (dccore.abandon), and the chat never reaches state `in` - so nothing
+is sent, and no `DCCORE` line is read after it. A chat already logged in is
+left alone by a second login line.
+
+The peer check before the password prompt is `$dccore.peerok(password)`:
+mIRC passes an identifier parameters only in parentheses, so the check has
+to be written that way for a failed one to stop the prompt branch.
 
 mIRC cannot run here. These tests RUN the script's own statements - on
 ^*:CHAT, dccore.line, dccore.peerok, dccore.abandon, dccore.set,
-dccore.timers.off and on *:INPUT:@DCCore - with the evaluator of
+dccore.timers.off, dccore.typedpass, both on *:INPUT handlers, /dccore and
+dccore.askraw - with the evaluator of
 tests/test_the_start_page_says_when_the_bot_is_offline.py, against fake
 tables and a fake chat. Identifiers it does not know are refused loudly.
 """
@@ -29,19 +36,22 @@ from test_the_start_page_says_when_the_bot_is_offline import (  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Placeholders, nobody's real host or token.
+# Placeholders, nobody's real host, token or password.
 HOST = "*!*@bot.example.invalid"
 ELSEWHERE = "*!*@elsewhere.example.invalid"
 TOKEN = "tok-example-0000"
+PASSWORD = "example-password"
 LOGIN = "Entering DCC Chat Admin Interface"
 PROMPT = "Enter Your Password:"
 BANNER = "Welcome to the example console"
-IGNORED = "Ignored a login line from a chat that never asked for the password."
+FEED = "DCCORE STATUS x"
+IGNORED = "Ignored a login line that came before the password prompt was answered."
 
-# Every state a chat can be in that is not auth, password or in.
-NOT_ASKED = (None, "opening", "waiting", "banner", "closed", "taken")
+# Every state a chat can be in where the prompt has not been answered.
+NOT_ANSWERED = (None, "opening", "waiting", "banner", "password", "closed", "taken")
 
-RUN = ("dccore.line", "dccore.peerok", "dccore.abandon", "dccore.set", "dccore.timers.off")
+RUN = ("dccore.line", "dccore.peerok", "dccore.abandon", "dccore.set", "dccore.timers.off",
+       "dccore.typedpass")
 
 
 class Chat(Mirc):
@@ -56,9 +66,11 @@ class Chat(Mirc):
             "dccore.client": lambda: "dccore.mrc-0000",
             "dccore.prompt": lambda: ">",
             "left": lambda text, n: text[:int(n)],
+            "input": lambda prompt, flags, title: self.answer,
         })
         self.host = host
         self.nick = BOT
+        self.answer = ""
         self.table("dccore").update({"bot": BOT, "wantopen": "1"})
         if token:
             self.table("dccore")["token"] = token
@@ -110,6 +122,19 @@ class Chat(Mirc):
         """A line typed in @DCCore."""
         self.event("on *:INPUT:@DCCore: {", line)
 
+    def type_console(self, line):
+        """A line typed in @DCCore-console."""
+        self.event("on *:INPUT:@DCCore-console: {", line)
+
+    def raw(self, line):
+        """/dccore raw <line>"""
+        self.call("dccore", ["raw"] + line.split(" "))
+
+    def menu(self, line):
+        """The menu's console command, answered with `line`."""
+        self.answer = line
+        self.call("dccore.askraw", [])
+
     @property
     def state(self):
         return self.table("dccore.live").get("state", "")
@@ -124,7 +149,7 @@ class Chat(Mirc):
         return [args for head, args in self.calls if head == "dccore.structured"]
 
 
-class ALoginLineBeforeThePromptIsIgnored(unittest.TestCase):
+class ALoginLineBeforeThePromptIsAnsweredIsIgnored(unittest.TestCase):
 
     def assertLeft(self, chat):
         """Left as a chat whose peer check said no: closed, not redialled."""
@@ -150,22 +175,39 @@ class ALoginLineBeforeThePromptIsIgnored(unittest.TestCase):
         self.assertLeft(chat)
         self.assertEqual(chat.sent(), [])
 
+    def test_right_after_the_prompt_with_nothing_typed(self):
+        """No token in use: the prompt asks for the password (in a chat
+        opened by hand with no peer check), and nothing answers it."""
+        for byhand, host, bothost in ((1, "", None), (1, ELSEWHERE, HOST), (0, HOST, HOST)):
+            with self.subTest(byhand=byhand, host=host):
+                chat = Chat(token=None, byhand=byhand, host=host, bothost=bothost)
+                chat.hear(BANNER, PROMPT)
+                self.assertEqual(chat.state, "password")
+                chat.hear(LOGIN)
+                self.assertLeft(chat)
+                chat.hear(FEED)
+                self.assertNotEqual(chat.state, "in")
+                self.assertIn(IGNORED, " ".join(chat.said()))
+                self.assertEqual(chat.table("dccore")["wantopen"], "0")
+                self.assertEqual(chat.sent(), [])
+                self.assertEqual(chat.structured(), [])
+
     def test_no_dccore_line_is_read_after_it(self):
         chat = Chat()
-        chat.hear(LOGIN, "DCCORE CHATHIST 1 1", "DCCORE LOCKED", "DCCORE CHAT #example SomeNick hi")
+        chat.hear(LOGIN, FEED, "DCCORE STATUS y")
         self.assertNotEqual(chat.state, "in")
         self.assertEqual(chat.structured(), [])
         self.assertEqual(chat.sent(), [])
 
-    def test_in_every_state_but_auth_password_and_in(self):
-        for state in NOT_ASKED:
+    def test_in_every_state_but_auth_and_in(self):
+        for state in NOT_ANSWERED:
             with self.subTest(state=state):
                 chat = Chat(state=state)
                 chat.call("dccore.line", LOGIN.split(" "))
                 self.assertLeft(chat)
                 self.assertEqual(chat.sent(), [])
 
-    def test_after_a_peer_check_that_said_no(self):
+    def test_after_a_peer_check_that_said_no_to_the_token(self):
         """The token is withheld and the chat left; a login line in it after
         that still does not log in."""
         chat = Chat(host=ELSEWHERE)
@@ -175,7 +217,7 @@ class ALoginLineBeforeThePromptIsIgnored(unittest.TestCase):
         chat.hear(LOGIN)
         self.assertEqual(chat.state, "closed")
         self.assertIn(IGNORED, " ".join(chat.said()))
-        chat.hear("DCCORE STATUS x")
+        chat.hear(FEED)
         self.assertNotEqual(chat.state, "in")
         self.assertEqual(chat.sent(), [])
         self.assertEqual(chat.structured(), [])
@@ -186,9 +228,42 @@ class ALoginLineBeforeThePromptIsIgnored(unittest.TestCase):
         self.assertNotIn(("dccore.echo", LOGIN), chat.calls)
 
 
-class ALoginAfterThePromptLogsIn(unittest.TestCase):
+class ThePeerCheckBeforeThePasswordPrompt(unittest.TestCase):
+    """No token, a chat the script dialled by itself, the nick at another
+    host than the bot's: the prompt is not passed on, and the chat is left."""
 
-    def assertIn_(self, chat):
+    def test_a_failed_check_stops_the_prompt_branch(self):
+        chat = Chat(token=None, host=ELSEWHERE, bothost=HOST, byhand=0)
+        chat.hear(BANNER, PROMPT)
+        self.assertEqual(chat.state, "closed")
+        said = " ".join(chat.said())
+        self.assertIn("NOT asking for the password", said)
+        self.assertNotIn("Type the admin password", said)
+        self.assertNotEqual(chat.table("dccore.live").get("vetted"), "1")
+        self.assertEqual(chat.table("dccore")["wantopen"], "0")
+        chat.hear(LOGIN, FEED)
+        self.assertNotEqual(chat.state, "in")
+        self.assertEqual(chat.structured(), [])
+        self.assertEqual(chat.sent(), [])
+
+    def test_an_unknown_host_also_stops_it(self):
+        chat = Chat(token=None, host="", bothost=None, byhand=0)
+        chat.hear(BANNER, PROMPT)
+        self.assertEqual(chat.state, "closed")
+        self.assertIn("Not asking for the password yet", " ".join(chat.said()))
+        self.assertNotIn("Type the admin password", " ".join(chat.said()))
+
+    def test_the_check_is_told_what_it_withholds(self):
+        """peerok's $1 reaches it: the window names the password, not the
+        token."""
+        chat = Chat(token=None, host=ELSEWHERE, bothost=HOST, byhand=0)
+        chat.hear(BANNER, PROMPT)
+        self.assertNotIn("sending the token", " ".join(chat.said()))
+
+
+class ALoginAfterThePromptWasAnsweredLogsIn(unittest.TestCase):
+
+    def assertLoggedIn(self, chat):
         self.assertEqual(chat.state, "in")
         self.assertIn("hello dccore.mrc 1.20.0", chat.sent())
         self.assertNotIn(IGNORED, " ".join(chat.said()))
@@ -199,8 +274,8 @@ class ALoginAfterThePromptLogsIn(unittest.TestCase):
         chat.hear(BANNER, PROMPT)
         self.assertEqual(chat.state, "auth")
         self.assertEqual(chat.sent(), [TOKEN])
-        chat.hear("", LOGIN, 'For help type "help"', "DCCORE STATUS x")
-        self.assertIn_(chat)
+        chat.hear("", LOGIN, 'For help type "help"', FEED)
+        self.assertLoggedIn(chat)
         self.assertEqual(chat.structured(), ["STATUS x"])
 
     def test_a_password_typed_in_a_chat_opened_by_hand(self):
@@ -210,20 +285,20 @@ class ALoginAfterThePromptLogsIn(unittest.TestCase):
         chat.hear(BANNER, PROMPT)
         self.assertEqual(chat.state, "password")
         self.assertEqual(chat.sent(), [])
-        chat.type("example-password")
+        chat.type(PASSWORD)
         self.assertEqual(chat.state, "auth")
-        self.assertEqual(chat.sent(), ["example-password"])
+        self.assertEqual(chat.sent(), [PASSWORD])
         chat.hear(LOGIN)
-        self.assertIn_(chat)
+        self.assertLoggedIn(chat)
 
     def test_a_password_typed_in_a_chat_the_script_dialled(self):
         chat = Chat(token=None)
         chat.hear(BANNER, PROMPT)
         self.assertEqual(chat.state, "password")
         self.assertEqual(chat.table("dccore.live")["vetted"], "1")
-        chat.type("example-password")
+        chat.type(PASSWORD)
         chat.hear(LOGIN)
-        self.assertIn_(chat)
+        self.assertLoggedIn(chat)
 
     def test_a_refused_token_then_a_typed_password(self):
         chat = Chat()
@@ -231,24 +306,72 @@ class ALoginAfterThePromptLogsIn(unittest.TestCase):
         self.assertEqual(chat.state, "password")
         chat.hear(PROMPT)
         self.assertEqual(chat.sent(), [TOKEN])
-        chat.type("example-password")
+        chat.type(PASSWORD)
         chat.hear(LOGIN)
-        self.assertIn_(chat)
+        self.assertLoggedIn(chat)
 
     def test_a_pairing_by_hand_sends_its_pair_after_the_login(self):
         chat = Chat(token=None, byhand=1, pairing=1)
         chat.hear(BANNER, PROMPT)
-        chat.type("example-password")
+        chat.type(PASSWORD)
         chat.hear(LOGIN)
-        self.assertIn_(chat)
+        self.assertLoggedIn(chat)
         self.assertIn("pair dccore.mrc-0000 1.20.0", chat.sent())
 
-    def test_in_state_auth_or_password(self):
-        for state in ("auth", "password"):
-            with self.subTest(state=state):
-                chat = Chat(state=state)
-                chat.call("dccore.line", LOGIN.split(" "))
-                self.assertIn_(chat)
+    def test_only_state_auth_logs_in(self):
+        chat = Chat(state="auth")
+        chat.call("dccore.line", LOGIN.split(" "))
+        self.assertLoggedIn(chat)
+        chat = Chat(state="password")
+        chat.call("dccore.line", LOGIN.split(" "))
+        self.assertEqual(chat.state, "closed")
+        self.assertIn(IGNORED, " ".join(chat.said()))
+
+
+class EveryWayOfTypingThePasswordAnswersThePrompt(unittest.TestCase):
+    """@DCCore, @DCCore-console, /dccore raw and the menu's console command:
+    a line sent at the prompt moves the chat to auth, typed by hand, goes
+    through dccore.sendpass, and is never shown."""
+
+    ROUTES = ("type", "type_console", "raw", "menu")
+
+    def test_each_route_then_the_login(self):
+        for route in self.ROUTES:
+            with self.subTest(route=route):
+                chat = Chat(token=None, bothost=None, host="", byhand=1)
+                chat.hear(BANNER, PROMPT)
+                getattr(chat, route)(PASSWORD)
+                self.assertEqual(chat.state, "auth")
+                self.assertEqual(chat.table("dccore.live")["typed"], "1")
+                self.assertEqual(chat.sent(), [PASSWORD])
+                self.assertIn(("dccore.sendpass", PASSWORD), chat.calls)
+                shown = [args for head, args in chat.calls if head in ("echo", "dccore.echo", "dccore.sys")]
+                self.assertFalse([s for s in shown if PASSWORD in s], shown)
+                chat.hear(LOGIN)
+                self.assertEqual(chat.state, "in")
+
+    def test_the_console_window_shows_it_masked(self):
+        chat = Chat(token=None, bothost=None, host="", byhand=1)
+        chat.hear(BANNER, PROMPT)
+        chat.type_console(PASSWORD)
+        self.assertIn(("echo", "-ti2 @DCCore-console > ********"), chat.calls)
+        self.assertEqual(chat.calls[-1], ("halt", ""))
+
+    def test_once_logged_in_each_route_sends_the_line_as_it_is(self):
+        for route in self.ROUTES:
+            with self.subTest(route=route):
+                chat = Chat(state="in")
+                getattr(chat, route)("status")
+                self.assertEqual(chat.state, "in")
+                self.assertEqual(chat.sent(), ["status"])
+                self.assertNotIn("dccore.typedpass", [head for head, _args in chat.calls])
+
+    def test_the_console_window_still_shows_a_command_and_masks_unlock(self):
+        chat = Chat(state="in")
+        chat.type_console("status")
+        self.assertIn(("echo", "-ti2 @DCCore-console > status"), chat.calls)
+        chat.type_console("unlock " + PASSWORD)
+        self.assertIn(("echo", "-ti2 @DCCore-console > unlock ********"), chat.calls)
 
 
 class ALoggedInChatIsLeftAlone(unittest.TestCase):
@@ -267,11 +390,11 @@ class ALoggedInChatIsLeftAlone(unittest.TestCase):
 class TheStructuredFeedNeedsTheLogin(unittest.TestCase):
 
     def test_only_state_in_reads_a_dccore_line(self):
-        for state in NOT_ASKED + ("auth", "password", "in"):
+        for state in NOT_ANSWERED + ("auth", "in"):
             with self.subTest(state=state):
                 chat = Chat(state=state)
-                chat.call("dccore.line", "DCCORE CHATHIST 1 1".split(" "))
-                self.assertEqual(chat.structured(), ["CHATHIST 1 1"] if state == "in" else [])
+                chat.call("dccore.line", FEED.split(" "))
+                self.assertEqual(chat.structured(), ["STATUS x"] if state == "in" else [])
 
 
 class TheEvaluatorReadsTheseLines(unittest.TestCase):
@@ -283,9 +406,21 @@ class TheEvaluatorReadsTheseLines(unittest.TestCase):
         self.assertTrue(chat.cond("(Session taken over from * iswm %t)", frame))
         self.assertFalse(chat.cond("(Unknown command: hello* iswm %t)", frame))
         chat.live(state="password")
-        chat.type("example-password")
+        chat.type(PASSWORD)
         self.assertEqual(chat.calls[-1], ("halt", ""))
-        self.assertEqual(chat.sent(), ["example-password"])
+        self.assertEqual(chat.sent(), [PASSWORD])
+
+    def test_an_identifier_gets_parameters_only_in_parentheses(self):
+        """As in mIRC: `$alias word` runs the alias with no parameters and
+        leaves `word` beside its value, so `(!$alias word)` is false
+        whatever the alias returns."""
+        frame = {"args": [], "vars": {}}
+        for written, failed in (("(!$dccore.peerok(password))", True), ("(!$dccore.peerok password)", False)):
+            with self.subTest(written=written):
+                chat = Chat(token=None, host=ELSEWHERE, bothost=HOST)
+                self.assertEqual(chat.cond(written, frame), failed)
+                said = " ".join(chat.said())
+                self.assertIn("asking for the password" if failed else "sending the token", said)
 
     def test_a_chat_from_another_nick_is_not_read(self):
         chat = Chat(state="auth")
