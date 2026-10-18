@@ -633,7 +633,7 @@ alias dccore.line {
     ; bot is known to have. (Nested: mIRC evaluates every identifier in an
     ; if-line, and peerok closes the chat when it says no.)
     if (!$dccore.st(byhand)) {
-      if (!$dccore.peerok password) { return }
+      if (!$dccore.peerok(password)) { return }
       hadd dccore.live vetted 1
     }
     hadd dccore.live state password
@@ -641,6 +641,20 @@ alias dccore.line {
     return
   }
   if (%text == Entering DCC Chat Admin Interface) {
+    ; The bot sends this only after its own "Enter Your Password:" and
+    ; the answer to it. The state becomes auth or password in the prompt
+    ; branch above (once the peer check passed, or in a chat the operator
+    ; opened), and elsewhere only from one of those two (a typed password,
+    ; a refused token); so the login counts only in one of the two, and in
+    ; any other state the chat is left as it is for a peer that fails the
+    ; check. In a chat that is already logged in, a second one changes
+    ; nothing.
+    if (!$istok(auth password,%state,32)) {
+      if (%state == in) { return }
+      dccore.sys Ignored a login line from a chat that never asked for the password. The chat is closed and not reopened by itself; /dccore connect opens it again.
+      dccore.abandon
+      return
+    }
     hadd dccore.live state in
     hdel dccore.live mode
     dccore.sys Logged in to $dccore.bot $+ . Saying hello...

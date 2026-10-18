@@ -1,0 +1,1 @@
+- **Fixed (mIRC): the script now accepts the bot's login only after asking for the password in the same chat.** The bot always asks first, so logging in works as before; a login line in a chat that never asked is ignored, the window says so, and the script stops reconnecting until you `/dccore connect`. Update `dccore.mrc` and reload it with `/reload -rs dccore.mrc`.
