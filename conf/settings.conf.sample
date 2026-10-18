@@ -822,6 +822,22 @@
 # Your own debug line still records every send either way.
 #ANNOUNCE_TRANSFERS = true
 
+# Channels, separated by commas and each with its # (for example #alpha,
+# #beta), where a finished transfer is not announced even with the
+# announcement switched on. Case does not matter; the advert still goes there.
+# Leave it empty to post the line in every channel. For channels whose rules
+# forbid that kind of message.
+#
+# Channels where a finished transfer is NOT announced, even with
+# ANNOUNCE_TRANSFERS on - for a channel that does not allow that kind of
+# message but still wants the advert. Comma-separated, each written with its
+# "#" (e.g. "#alpha, #beta"); names are compared the way the IRC server
+# compares them, so case does not matter. A channel's Quiet or Request only
+# mode stops the announcement too, but stops the advert with it.
+# 
+# Empty announces in every channel.
+#ANNOUNCE_TRANSFERS_EXCLUDE = 
+
 
 [channel advertising (the advert clock)]
 # How often the bot posts its advert in the channel, in seconds. 300 is every

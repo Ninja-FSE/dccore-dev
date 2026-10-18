@@ -142,14 +142,14 @@ Three things are deliberately *not* required:
 
 ### Values that are refused
 
-The Settings page, the admin console, `configure.py` and the browser setup all refuse these when you **save** one:
+The Settings page, the admin console, `configure.py` and the browser setup all refuse these when you **save** one, wherever they offer the setting (`configure.py` and the browser setup ask for only a few):
 
 - **`ANNOUNCE_INTERVAL`** below 60 seconds. There is no "0 = off" here: a 0 used to make the bot advert as fast as the channel would take it.
 - **`FILE_DIRECTORY`** that is not an existing folder (blank is fine - see above). A path in quotes is refused with the path to use instead.
-- **`CHANNEL`** entries that do not start with `#` (or `&`), or that hold a space - several channels are separated by commas. `DEBUG_CHANNEL` and `BROADCAST_SEARCH_CHANNEL` take one channel each.
+- **`CHANNEL`** entries that do not start with `#` (or `&`), or that hold a space - several channels are separated by commas. `DEBUG_CHANNEL` and `BROADCAST_SEARCH_CHANNEL` take one channel each. `ANNOUNCE_TRANSFERS_EXCLUDE` follows the same rule for each of its entries, and may be empty; it is set on the Settings page, in the admin console or in the mIRC settings window.
 - **`LIST_BASE_NAME`** with a character a file name cannot hold on every system, such as `|` or `\`. The refusal suggests the name to use (`DJ|Music` becomes `DJ_Music`), which is what the bot derives from a nickname like that anyway.
 
-A `settings.conf` written before these rules still **loads**, so a bot that ran before an update keeps running; the startup log names each value it had to change and its line. A `CHANNEL` list keeps its real channels and drops only the entries that are not (`#mychannel, jazz` joins `#mychannel`) - only a list with no channel in it at all is ignored. An `ANNOUNCE_INTERVAL` under 60 is used as 60. A `LIST_BASE_NAME` is kept as it is where this system can use it as a file name (a `|` on Linux or macOS), so the published list keeps its name, and sanitised where it cannot. A single `DEBUG_CHANNEL` or `BROADCAST_SEARCH_CHANNEL` that is not a channel is ignored, as before. Saving any of them again needs a value from the list above.
+A `settings.conf` written before these rules still **loads**, so a bot that ran before an update keeps running; the startup log names each value it had to change and its line. A `CHANNEL` list keeps its real channels and drops only the entries that are not (`#mychannel, jazz` joins `#mychannel`) - only a list with no channel in it at all is ignored. `ANNOUNCE_TRANSFERS_EXCLUDE` keeps its channels the same way. An `ANNOUNCE_INTERVAL` under 60 is used as 60. A `LIST_BASE_NAME` is kept as it is where this system can use it as a file name (a `|` on Linux or macOS), so the published list keeps its name, and sanitised where it cannot. A single `DEBUG_CHANNEL` or `BROADCAST_SEARCH_CHANNEL` that is not a channel is ignored, as before. Saving any of them again needs a value from the list above.
 
 With more than one list, the bot starts as long as any list has a folder it can read; a list whose folders are all missing (an unplugged drive) is named in a warning at startup and by the setup check, and its channels have nothing to serve until the drive is back.
 
@@ -338,6 +338,20 @@ line saying when it is asked for again - just after the wait the server
 gave, one channel per wait - and the rest of the JOIN burst waits its turn
 behind it instead of being refused too (#1415). A channel the bot was kicked
 from keeps its slower rejoin, with the advert.
+
+### A channel that does not want the "sent" line
+
+With **Announce finished transfers in the channel** (`ANNOUNCE_TRANSFERS`)
+on, the bot posts a line in the channel each time a file has been sent.
+Where a channel does not allow that kind of message, list it in **Don't
+announce finished transfers in these channels** (`ANNOUNCE_TRANSFERS_EXCLUDE`,
+on the Settings page under *Advertising & search* or in the mIRC settings
+window under *General > Advertising*): channels separated by commas,
+each with its `#`, such as `#alpha, #beta`. Case does not matter. The advert
+still goes there; only the "sent" line does not. A channel's *Quiet* or
+*Request only* mode also stops the line, but stops the advert too. Empty,
+the default, announces in every channel. Your own debug line still records
+every send, as it does with the announcement off.
 
 ### Starting with the system
 
