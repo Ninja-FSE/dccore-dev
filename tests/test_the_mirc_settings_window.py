@@ -1178,7 +1178,7 @@ class TheAuditOfBothHalves(unittest.TestCase):
     #    until `unlock <password>`.
 
     LOCKABLE = ("setcommit", "set", "served commit", "folders commit", "onconnect commit", "onconnect resend",
-                "onconnect", "pair", "unpair")
+                "onconnect", "checkupdates", "consolefeed", "pair", "unpair")
 
     def locked_line(self, what):
         session = FakeSession()
