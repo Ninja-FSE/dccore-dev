@@ -2870,7 +2870,7 @@ def _promote_clean_filename(dest_dir, stored_name, queue=None, row=None):
     downloading the zip and unzipping it on Windows produced a folder named
     after the ZIP FILE ITSELF (there is no folder recorded inside a plain
     list zip for Explorer to unpack "into", the way there would be for a
-    folder packed with rar's -ep1 - see dcc.py's own use of that flag), so
+    folder dcc.py packs, which keeps the folder by its own name), so
     the id rode all the way onto the operator's own disk.
 
     Never overwrites an existing file at the plain name - a fetch of the
@@ -3345,8 +3345,8 @@ def _handle_completed_list_fetch(row, zip_path):
     live: an operator downloaded one of these zips to their own machine and
     unzipped it, and the request id ended up in the resulting filename too
     - there is no folder recorded inside a plain list zip for an unzip tool
-    to extract "into" the way there would be for one packed with rar's
-    -ep1 (see dcc.py's own use of that flag), so Explorer named the result
+    to extract "into" the way there would be for a folder dcc.py packs
+    (it keeps the folder by its own name), so Explorer named the result
     after the zip itself. Removing the zip is the fix for that as much as
     for the disk space: the raw download was never the deliverable, the
     browsable list is, and it already exists on its own.
