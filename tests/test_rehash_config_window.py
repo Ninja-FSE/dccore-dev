@@ -36,9 +36,12 @@ JOIN that was never sent.
 import io
 import contextlib
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import unittest
+from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -53,6 +56,8 @@ import runtime  # noqa: E402
 import settings_file  # noqa: E402
 
 from tests.support import DCCoreTestCase, bots_in_the_channel  # noqa: E402
+from tests.test_the_send_loop_on_its_own import (  # noqa: E402
+    Connection as SendLoopConnection, changing_the_block)
 
 
 class TheDebugChannelIsSomewhereTheBotShouldBe(DCCoreTestCase):
@@ -956,27 +961,66 @@ class TheSocketSendBuffer(DCCoreTestCase):
 
         self.assertEqual(dcc.dcc_block_size(), 65536)
 
+    def _stream(self, content, **settings):
+        """stream_the_file() over `content`, with a receiver that acks it
+        all: the chunks the loop sent."""
+        tmp = tempfile.mkdtemp(prefix="dccore-send-block-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        path = os.path.join(tmp, "Some_Album.zip")
+        with io.open(path, "wb") as handle:
+            handle.write(content)
+        row = {"user": "kilo", "file": "Some_Album.zip", "bytes_sent": 0}
+        self.set_config(active_transfers=[row], **settings)
+        conn = SendLoopConnection()
+        with mock.patch.object(dcc, "_drain_acks", changing_the_block()):
+            sent = dcc.stream_the_file(conn, path, 0, 0, dcc._AckTracker(), row, "kilo")
+        self.assertEqual(b"".join(conn.chunks), content)
+        self.assertEqual(sent, len(content))
+        return [len(chunk) for chunk in conn.chunks]
+
     def test_the_send_loop_uses_it(self):
-        """Read out of the source: driving a real transfer needs a peer on a
-        socket, and what matters is that the loop reads the setting rather
-        than the literal it replaced."""
-        with io.open(os.path.join(REPO_ROOT, "src", "dcc.py"), encoding="utf-8") as handle:
-            code = handle.read()
+        """The loop sends in chunks of the setting, not of the 64 KB literal
+        it replaced - driven through stream_the_file(), not read out of it."""
+        content = bytes(range(256)) * 64          # 16 KB
 
-        self.assertIn("block = dcc_block_size()", code)
-        # Under a speed cap (#1352) a chunk is smaller, never larger than this.
-        self.assertIn("f.read(speed_cap.chunk_size(speed_cap.UPLOAD, block))", code)
-        self.assertNotIn("f.read(65536)", code,
-                         "the send loop still has the number hardcoded")
+        self.assertEqual(self._stream(content, DCC_BLOCK_SIZE=8192, MAX_UPLOAD_KB=0), [8192, 8192])
 
-    def test_it_is_resolved_once_per_transfer_not_once_per_pass(self):
-        """A getattr in the inner loop of a 4 GB send is a million lookups for
-        one answer that cannot change mid-file."""
-        with io.open(os.path.join(REPO_ROOT, "src", "dcc.py"), encoding="utf-8") as handle:
-            code = handle.read()
-        loop = code.split("block = dcc_block_size()", 1)[1].split("break", 1)[0]
+    def test_under_a_speed_cap_a_chunk_is_never_larger_than_the_setting(self):
+        """#1352: a cap makes a chunk smaller, never larger, than the block."""
+        content = bytes(range(256)) * 64
 
-        self.assertNotIn("dcc_block_size()", loop)
+        sizes = self._stream(content, DCC_BLOCK_SIZE=4096, MAX_UPLOAD_KB=100000)
+
+        self.assertTrue(sizes and max(sizes) <= 4096, sizes)
+
+    def test_a_rehash_reaches_a_send_already_running(self):
+        """#1461: the loop reads the setting every pass, not once per
+        transfer. This test used to grep the loop for the opposite - "a
+        getattr in the inner loop is a million lookups for one answer that
+        cannot change mid-file" - but a rehash does change it mid-file, and
+        a send that kept the block it started with took a bigger chunk of
+        the upload cap's shared clock than the sends started after it.
+
+        Driven through stream_the_file() itself: a send at 8 KB a pass whose
+        setting is lowered to 4 KB after the first chunk sends the rest in
+        4 KB chunks; read once per transfer it sent 8, 8."""
+        content = bytes(range(256)) * 64
+        tmp = tempfile.mkdtemp(prefix="dccore-rehash-block-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        path = os.path.join(tmp, "Some_Album.zip")
+        with io.open(path, "wb") as handle:
+            handle.write(content)
+        row = {"user": "kilo", "file": "Some_Album.zip", "bytes_sent": 0}
+        self.set_config(DCC_BLOCK_SIZE=8192, active_transfers=[row])
+        conn = SendLoopConnection()
+        acks = dcc._AckTracker()
+
+        with mock.patch.object(dcc, "_drain_acks", changing_the_block((1, 4096))):
+            sent = dcc.stream_the_file(conn, path, 0, 0, acks, row, "kilo")
+
+        self.assertEqual([len(chunk) for chunk in conn.chunks], [8192, 4096, 4096])
+        self.assertEqual(b"".join(conn.chunks), content)
+        self.assertEqual(sent, len(content))
 
 
 if __name__ == "__main__":
