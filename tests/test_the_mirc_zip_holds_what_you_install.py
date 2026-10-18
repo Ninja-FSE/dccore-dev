@@ -93,7 +93,9 @@ class WhatIsInIt(unittest.TestCase):
                     path = "scripts/mirc/" + name
                     blob = subprocess.run(["git", "show", "HEAD:" + path], cwd=REPO_ROOT, check=True,
                                           capture_output=True, timeout=120).stdout
-                    if git("check-attr", "--source=HEAD", "eol", "--", path).strip().endswith(": eol: crlf"):
+                    # --cached: the .gitattributes in the index, which in a
+                    # clean checkout is HEAD's (--source=HEAD needs git 2.40).
+                    if git("check-attr", "--cached", "eol", "--", path).strip().endswith(": eol: crlf"):
                         blob = blob.replace(b"\n", b"\r\n")
                     self.assertEqual(archive.read(name), blob)
 

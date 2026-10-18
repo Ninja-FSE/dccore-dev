@@ -134,7 +134,10 @@ def files_at(sha, repo=REPO_ROOT):
     data = _git(repo, "archive", "--format=tar", sha, "--", SOURCE_IN_GIT)
     prefix = SOURCE_IN_GIT + "/"
     found = {}
-    with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+    # UTF-8, as the ls-tree names below are read: tarfile would otherwise
+    # decode the names git wrote with the file system encoding, and on a
+    # machine where that is not UTF-8 a name outside ASCII would not match.
+    with tarfile.open(fileobj=io.BytesIO(data), encoding="utf-8") as archive:
         for entry in archive.getmembers():
             if entry.isdir() or not entry.name.startswith(prefix):
                 continue

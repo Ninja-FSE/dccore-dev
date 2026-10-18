@@ -13,12 +13,13 @@ like scripts/mirc/ with invented contents, so every case is deterministic:
     .gitattributes line endings (dccore.mrc CRLF, other text LF, binaries
     untouched), whatever the builder's own core.autocrlf says;
   * nothing in the working tree changes the zip: untracked files, a modified
-    DLL, an uncommitted or a staged edit;
+    DLL, an uncommitted or a staged edit, an uncommitted .gitattributes;
   * --rev packs that commit, and the README names that commit's version;
   * the revision is resolved once: a branch moving mid-build does not mix
     two commits;
   * the archive must hold exactly the commit's files (`git ls-tree`), so a
-    machine-local export-ignore is a refusal, not a smaller zip;
+    machine-local export-ignore is a refusal, not a smaller zip, and a name
+    outside ASCII matches whatever the file system encoding is;
   * NotACheckout (what the zip tests skip on) only where the folder has no
     .git of its own - git is not even asked - or git cannot start; a .git
     git refuses, a toplevel elsewhere, a timeout or a bad revision is a
@@ -287,6 +288,14 @@ class ADirtyWorkingTreeDoesNotShip(TempRepoCase):
                 self.git("add", "--", "scripts/mirc/dcx/LICENSE-DCX.txt"))),
             ("a tracked DLL deleted from disk", lambda: os.remove(
                 os.path.join(mirc, "dcx", "dcx.dll"))),
+            # The commit's attributes decide, not the working tree's: with
+            # `git archive --worktree-attributes` the first would make every
+            # member CRLF and the second drop a file.
+            ("an uncommitted .gitattributes making everything CRLF", lambda: self.write({
+                ".gitattributes": b"* text eol=crlf\n"})),
+            ("and in it an export-ignore under scripts/mirc/dcx/", lambda: self.write({
+                ".gitattributes": b"* text eol=crlf\n"
+                                  b"scripts/mirc/dcx/LICENSE-DCX.txt export-ignore\n"})),
         ]
         for n, (what, make_dirty) in enumerate(dirt):
             with self.subTest(dirt=what):
@@ -641,20 +650,57 @@ class ALocalAttributeCannotDropAFile(TempRepoCase):
         self.assertIn("dcx/LICENSE-DCX.txt", str(caught.exception))
         self.assertNoZip()
 
-    def test_a_name_outside_ascii_still_matches(self):
-        """ls-tree quotes such a name unless -z; the archive does not."""
+    OUTSIDE_ASCII = "dcx/LICENSE-éß.txt"
+
+    def commit_a_name_outside_ascii(self):
         self.write(tree())
         self.git("add", "-A")
         blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=self.repo,
                               input=b"placeholder licence\n", check=True, capture_output=True,
                               timeout=120).stdout.decode("ascii").strip()
         # Through the index, so no file system has to hold the name.
-        name = "scripts/mirc/dcx/LICENSE-éß.txt"
+        name = "scripts/mirc/" + self.OUTSIDE_ASCII
         self.git("update-index", "--add", "--cacheinfo", f"100644,{blob},{name}")
         self.git("commit", "-q", "-m", "a name outside ascii")
+
+    def test_a_name_outside_ascii_still_matches(self):
+        """ls-tree quotes such a name unless -z; the archive does not."""
+        self.commit_a_name_outside_ascii()
         self.build()
-        found = zip_members(self.out)
-        self.assertEqual(found["dcx/LICENSE-éß.txt"], b"placeholder licence\n")
+        self.assertEqual(zip_members(self.out)[self.OUTSIDE_ASCII], b"placeholder licence\n")
+
+    def test_a_name_outside_ascii_whatever_the_file_system_encoding(self):
+        """tarfile decodes names with the file system encoding unless told
+        otherwise, and ls-tree's are read as UTF-8: where that encoding is
+        ASCII (a C locale on Linux), the two names must still be one."""
+        self.commit_a_name_outside_ascii()
+        # What tarfile takes from sys.getfilesystemencoding() at import.
+        with mock.patch.object(tarfile.TarFile, "encoding", "ascii"):
+            self.build()
+        self.assertEqual(zip_members(self.out)[self.OUTSIDE_ASCII], b"placeholder licence\n")
+
+    def test_a_name_outside_ascii_in_a_python_whose_file_system_encoding_is_ascii(self):
+        """The same in a real Python started under the C locale, with neither
+        UTF-8 mode nor locale coercion to rescue it."""
+        if sys.platform in ("win32", "darwin"):
+            self.skipTest("Python's file system encoding is always UTF-8 on Windows and macOS")
+        self.commit_a_name_outside_ascii()
+        env = dict(os.environ, LC_ALL="C", LANG="C", PYTHONUTF8="0", PYTHONCOERCECLOCALE="0")
+        env.pop("PYTHONIOENCODING", None)
+        child = ("import sys, tarfile\n"
+                 "sys.path.insert(0, sys.argv[1])\n"
+                 "import build_mirc_zip\n"
+                 "print(sys.getfilesystemencoding(), tarfile.TarFile.encoding)\n"
+                 "build_mirc_zip.build(sys.argv[2], 'HEAD', sys.argv[3])\n")
+        ran = subprocess.run([sys.executable, "-X", "utf8=0", "-c", child,
+                              os.path.join(REPO_ROOT, "scripts"), self.out, self.repo],
+                             env=env, capture_output=True, timeout=120)
+        said = ran.stdout.decode("ascii", "replace").split()
+        if ran.returncode == 0 and said[:2] != ["ascii", "ascii"]:
+            self.skipTest(f"Python here would not start with an ASCII file system encoding ({said})")
+        self.assertEqual(ran.returncode, 0, ran.stderr.decode("utf-8", "replace"))
+        self.assertEqual(said[:2], ["ascii", "ascii"])
+        self.assertEqual(zip_members(self.out)[self.OUTSIDE_ASCII], b"placeholder licence\n")
 
 
 class TheCheckoutBoundary(TempRepoCase):

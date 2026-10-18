@@ -150,18 +150,16 @@ the omissions surface, because it is the last point at which they are cheap.
   cannot ship. The release names that revision explicitly: left out, it is
   this checkout's `HEAD`, which need not be what was extracted. A name is
   not enough either - `origin/main` moves with any fetch between the
-  extraction and this step. So resolve it once, before the extraction, and
-  give that one sha to both:
+  extraction and this step. So give it, as `<sha>`, the sha the extraction
+  printed beside the revision it read ("The extraction", below):
 
-      REV=$(git rev-parse --verify 'origin/main^{commit}')   # before the extraction
-      python3 scripts/extract_public_tree.py "$REV" ...       # the extraction, below
-      ...
-      python3 scripts/build_mirc_zip.py --rev "$REV" --out dist/dccore-mirc.zip
+      python3 scripts/build_mirc_zip.py --rev <sha> --out dist/dccore-mirc.zip
       gh release create vX.Y.Z -R Ninja-FSE/dccore --title "vX.Y.Z - Title" \
           --notes-file <notes> --latest dist/dccore-mirc.zip
 
-  The sha `build_mirc_zip.py` prints must be `$REV`; any other is a zip of a
-  tree that was not extracted - do not attach it. Then check `gh api repos/Ninja-FSE/dccore/releases/latest` names the new
+  The sha `build_mirc_zip.py` prints must be that `<sha>`; any other is a
+  zip of a tree that was not extracted - do not attach it. Then check
+  `gh api repos/Ninja-FSE/dccore/releases/latest` names the new
   tag: a tag with no Release is invisible to the update check (#572), which
   asks for the latest release, and v1.16.2 shipped that way.
 - **Check `docs/FUTURE.md`** for anything the release implements that is still
