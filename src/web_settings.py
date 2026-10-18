@@ -693,6 +693,15 @@ SETTINGS_RESTART_ONLY = {"WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
                          "SERVER", "PORT"}
 
 
+# What a settings save says when the rehash it started failed (#1434): the
+# console's SETAPPLYERR line carries REHASH_FAILED_WHY, and the console's
+# sentence and the dashboard's Settings page (#1462) both say
+# REHASH_FAILED_SAID. One sentence, so the two cannot come to disagree.
+REHASH_FAILED_WHY = ("The rehash that applies them failed, so the bot may not be running the "
+                     "saved values. The bot's log says why; fix that, then rehash.")
+REHASH_FAILED_SAID = f"The settings were saved to settings.conf. {REHASH_FAILED_WHY}"
+
+
 def _save_settings_and_rehash(changes, confirmed_debug_removal=False, source=None, on_applied=None):
     """Write `changes` to settings.conf and dispatch a rehash on its own
     daemon thread. The shared tail of apply_settings_changes() (POST
@@ -724,6 +733,12 @@ def _save_settings_and_rehash(changes, confirmed_debug_removal=False, source=Non
     `on_applied(ok)`, when given, is called on the rehash's thread once it
     has finished: `ok` False when the reload failed (#1434).
 
+    The save is numbered, and its rehash's outcome recorded under that number
+    in runtime.save_rehash (#1462): "rehash_seq" in the answer is the number,
+    for the dashboard to ask GET /api/settings/rehash about, and
+    "rehash_wait" is REHASH_TRANSFER_WAIT, the most the rehash first waits
+    for transfers, so the page knows how long to keep asking.
+
     Returns (http_status, payload_dict).
     """
     import settings_file
@@ -741,6 +756,17 @@ def _save_settings_and_rehash(changes, confirmed_debug_removal=False, source=Non
     # made from mIRC is not logged as the dashboard's.
     who, where = source or (WEB_DASHBOARD_SOURCE, WEB_DASHBOARD_SOURCE)
     rehash_kwargs = {"authorised": True, "confirmed_debug_removal": confirmed_debug_removal}
+    # Under the reload lock: another save's rehash may be reloading defaults
+    # right now, which puts every setting back to its shipped value (#1433).
+    with runtime.config_reload_lock:
+        rehash_wait = getattr(config, "REHASH_TRANSFER_WAIT", 0)
+    # Numbered after the write, so the rehash of any number starts after every
+    # save up to it was written: what lets a page take a later save's answer.
+    # The record is bound here, not looked up when the rehash finishes: a
+    # record replaced meanwhile (tests/support.py gives every test a fresh
+    # one) must not receive the outcome of a save it never numbered.
+    record = runtime.save_rehash
+    seq = record.begin()
 
     def rehash():
         # `on_applied` is told once the rehash has finished - the console's
@@ -758,13 +784,35 @@ def _save_settings_and_rehash(changes, confirmed_debug_removal=False, source=Non
         try:
             ok = commands.handle_rehash_request(who, where, **rehash_kwargs) is True
         finally:
-            if on_applied is not None:
-                on_applied(ok)
+            try:
+                record.finish(seq, ok)
+            finally:
+                if on_applied is not None:
+                    on_applied(ok)
 
     threading.Thread(target=rehash, daemon=True).start()
 
     restart_required = sorted(set(result["written"]) & SETTINGS_RESTART_ONLY)
-    return 200, dict(result, rehash="started", restart_required=restart_required)
+    return 200, dict(result, rehash="started", restart_required=restart_required,
+                     rehash_seq=seq, rehash_wait=rehash_wait)
+
+
+def build_save_rehash_payload():
+    """GET /api/settings/rehash (#1462): how the rehash the latest settings
+    save started went, for the Settings page to poll after its save.
+
+    {"seq": the latest save's number (0 before any), "ok": True/False once
+    its rehash finished and None while it runs, "finished_at": epoch seconds
+    or None, "message": REHASH_FAILED_SAID when ok is False, else None}.
+    A page waits until seq is at least its own save's "rehash_seq" and ok is
+    not None. Reads runtime only, never config, so it does not wait for the
+    reload lock while the rehash it asks about holds it. (The login gate in
+    front of the route does: it reads the password hash under that lock,
+    #1433, so a request may still wait out the reload's few milliseconds.)
+    """
+    outcome = runtime.save_rehash.snapshot()
+    outcome["message"] = REHASH_FAILED_SAID if outcome["ok"] is False else None
+    return outcome
 
 
 def apply_settings_changes(changes, source=None, on_applied=None):

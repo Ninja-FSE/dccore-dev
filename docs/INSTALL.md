@@ -129,6 +129,8 @@ Safe to run again later: every prompt shows what is already configured as its de
 
 Both are gitignored. `defaults.py` applies `admin_config.py` first and `settings.conf` second, so a value set in both takes the `settings.conf` one. The daemon says so at startup for every setting that `admin_config.py` sets to something `settings.conf` then overrides (`[CONFIG] settings.conf overrides WEBUI_HOST, which admin_config.py also sets ...`) — if an edit to `admin_config.py` seems to do nothing, that line is why.
 
+**A save starts a rehash, and says whether it worked.** Saving from the dashboard's Settings page, the admin console or the mIRC settings window writes `settings.conf` and then rehashes, which first waits up to `REHASH_TRANSFER_WAIT` seconds for running transfers. The Settings page says "Rehash started" at once, and when the rehash is done, whether the new settings are in effect. If the rehash failed - an `admin_config.py` with a syntax error, for one - all three say so in the same words: the settings were saved to `settings.conf`, but the bot may not be running the saved values, and its log says why. Fix that, then rehash.
+
 **One line `settings.conf` cannot read makes the whole file unreadable**, and every setting in it falls back to its default. The log names the file and the line (`[CONFIG] Could not read settings.conf, continuing with the built-in defaults: line 5 is not a setting: 'MAX_DCC_SLOTS 5' ...`), the setup check fails on it, and when the file held your nickname, channels or admin nick the bot refuses to start with that same line rather than offering the first-run setup again. `configure.py` says it too, before asking anything. Fix the line and start again.
 
 ### What must be set
