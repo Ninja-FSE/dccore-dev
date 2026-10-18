@@ -174,7 +174,8 @@ result:
 It refuses, leaving no tree at all, when a step does not find exactly what it
 expects - a dev-only file that is gone, the `.gitattributes` line or a link
 moved - and names it. The list of what is stripped is `DEV_ONLY` in the script,
-and only there; the steps below say why each kind goes.
+and only there; the steps below say why each kind goes. Its last line is the
+`git update-index --chmod=+x ...` command step 4 runs.
 
 1. On `main` here, `git archive --format=tar HEAD | tar -x` into a scratch
    tree — no `.git` history carried over.
@@ -237,8 +238,23 @@ and only there; the steps below say why each kind goes.
    tree — rewrite both links to point at `UPDATES.md` (`docs/UPDATES.md` /
    `UPDATES.md` respectively) before extraction moves on.
    `tests/test_docs_links.py` fails on the next step if either is missed.
-4. `git init`, push, PR into `dccore`'s `main`. Branch protection there
-   requires the CI matrix green before merge.
+4. `git init`, `git add -A`, then the `git update-index --chmod=+x ...`
+   line the extraction printed last, then commit, push, PR into `dccore`'s
+   `main`. Branch protection there requires the CI matrix green before
+   merge.
+
+   **Do not skip the `update-index` line, on any OS** (#1441). The
+   launchers are mode 100755, and NTFS has no executable bit: extracted on
+   Windows, they come out plain, and `git add` there (`core.filemode`
+   false) commits every one of them as 100644. Pushed like that, macOS
+   refuses to open `start-dccore.command` and `./start-dccore.sh` says
+   Permission denied - on every clone, and nothing on the Windows side
+   shows it. The line names the files git carries as executable in the
+   revision extracted, so it does not go stale as launchers come and go;
+   where the filesystem kept the bit it changes nothing. Before the commit,
+   check that `git ls-files -s | grep ^100755` (PowerShell:
+   `git ls-files -s | Select-String '^100755'`) lists exactly the paths the
+   line named.
 
    **Run the full test suite in the scratch tree itself before pushing**,
    not only in `dccore-dev`. Nothing in this checklist has run one until a

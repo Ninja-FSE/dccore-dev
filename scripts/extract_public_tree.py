@@ -16,6 +16,20 @@ docs/PUBLIC-REPO-WORKFLOW.md's "The extraction", steps 1-3, as one command:
 it is the one that caught #1409's fourteen failures before anything reached
 dccore).
 
+THE EXECUTABLE BIT (#1441). The launchers are mode 100755 in git; Finder
+refuses a .command without it and ./start-dccore.sh gets Permission denied.
+NTFS has no such bit, so an extraction on Windows loses it, and step 4's
+`git add` there (core.filemode false) would commit every launcher as 100644.
+The paths come from `git ls-tree` of the same commit `git archive` read
+(executables(); <rev> is resolved to one commit first, so a fetch in between
+cannot pair one commit's tree with another's modes). On POSIX the extraction
+sets the bit on them, and the command always ends by printing the
+`git update-index --chmod=+x -- ...` line step 4 runs after `git add` - a
+no-op where the bit survived, the only carrier where it did not. A 100755
+path outside [A-Za-z0-9._/-], or starting with '-', refuses: the line then
+pastes the same into cmd, PowerShell and a POSIX shell, with nothing to
+quote.
+
 ALL OR NOTHING. Everything happens in a scratch folder beside <out>, which
 becomes <out> only when every step found exactly what it expected: a
 DEV_ONLY file that is not there, a .gitattributes line or a link that is not
@@ -31,12 +45,19 @@ fails when a dev-only file exists that it does not name.
 import argparse
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# An executable's path goes onto step 4's command line as it is: nothing in
+# it that cmd, PowerShell or a POSIX shell would read as anything but text.
+# Not even a leading '-': Windows PowerShell 5.1 splits a bare argument such
+# as `-n.sh` at the dot before git sees it, so `--` cannot help there.
+PORTABLE_PATH = re.compile(r"[A-Za-z0-9._/][A-Za-z0-9._/-]*")
 
 # Dev-only tooling with no shipped consumer, and the tests that exist only to
 # cover it (docs/PUBLIC-REPO-WORKFLOW.md, step 2, says why each kind goes).
@@ -80,6 +101,19 @@ LINKS = (
 
 class Refused(Exception):
     """A step did not find what it expected; nothing was written."""
+
+
+def _commit(rev, repo):
+    """`rev` as the one commit sha every later git call reads."""
+    try:
+        result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"],
+                                cwd=repo, capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as err:
+        raise Refused(f"git rev-parse {rev} could not run: {err}")
+    sha = result.stdout.decode("ascii", "replace").strip()
+    if result.returncode != 0 or not sha:
+        raise Refused(f"{rev} is not a commit git knows here")
+    return sha
 
 
 def _archive(rev, into, repo):
@@ -142,26 +176,76 @@ def _swap_the_changelog(tree):
         _write(path, text)
 
 
+def executables(rev, tree, repo=REPO_ROOT):
+    """The files `rev` carries as mode 100755 that are in `tree`, sorted, as
+    forward-slash paths relative to it. Read from git, not from `tree`: the
+    filesystem it was extracted onto may have no executable bit to read.
+    Refuses a 100755 path, in the tree or not, that PORTABLE_PATH does not
+    match: a name that is not ASCII would otherwise drop out on Windows,
+    where it does not round-trip to the file, without a word."""
+    try:
+        result = subprocess.run(["git", "ls-tree", "-r", "-z", rev], cwd=repo,
+                                capture_output=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as err:
+        raise Refused(f"git ls-tree {rev} could not run: {err}")
+    if result.returncode != 0:
+        raise Refused(f"git ls-tree {rev} failed: {result.stderr.decode('utf-8', 'replace').strip()}")
+    found = []
+    for entry in result.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        info, _tab, path = entry.partition("\t")
+        if info.split(" ")[0] != "100755":
+            continue
+        if not PORTABLE_PATH.fullmatch(path):
+            raise Refused(f"the executable {ascii(path)} has a character outside [A-Za-z0-9._/-],"
+                          " or starts with '-': step 4's update-index line could not name it on"
+                          " every shell")
+        if os.path.isfile(os.path.join(tree, path)):
+            found.append(path)
+    return sorted(found)
+
+
+def _keep_the_executable_bit(tree, paths):
+    if os.name == "nt":  # NTFS has no bit to set: step 4's update-index carries it
+        return
+    for path in paths:
+        target = os.path.join(tree, path)
+        mode = os.stat(target).st_mode
+        os.chmod(target, mode | ((mode & 0o444) >> 2))  # +x wherever +r
+
+
+def mark_executable_command(paths):
+    """The line step 4 runs after `git add` in the extracted tree. The paths
+    are executables()'s, so they need no quoting and none starts with '-';
+    `--` is there as well."""
+    return "git update-index --chmod=+x -- " + " ".join(paths)
+
+
 def extract(rev, out, repo=REPO_ROOT):
-    """Steps 1-3 into `out`, which must not exist yet. Returns `out`.
+    """Steps 1-3 into `out`, which must not exist yet. Returns
+    `(out, paths, sha)`: `paths` is executables() of it, what step 4 marks
+    after `git add`, and `sha` the commit `rev` resolved to, which is the one
+    read.
     Raises Refused, with no `out` left behind, when a step does not find
     what it expects."""
     out = os.path.abspath(out)
     if os.path.exists(out):
         raise Refused(f"{out} is already there; the extraction makes it")
+    sha = _commit(rev, repo)
     scratch = out + ".partial"
     if os.path.exists(scratch):
         shutil.rmtree(scratch)
     os.makedirs(scratch)
     try:
-        _archive(rev, scratch, repo)
+        _archive(sha, scratch, repo)
         _strip(scratch)
         _swap_the_changelog(scratch)
+        paths = executables(sha, scratch, repo)
+        _keep_the_executable_bit(scratch, paths)
     except BaseException:
         shutil.rmtree(scratch, ignore_errors=True)
         raise
     os.replace(scratch, out)
-    return out
+    return out, paths, sha
 
 
 def run_the_suite(tree, processes=2):
@@ -178,14 +262,22 @@ def main(argv=None):
     parser.add_argument("-j", type=int, default=2, help="test processes with --test (default 2)")
     args = parser.parse_args(argv)
     try:
-        out = extract(args.rev, args.out)
+        out, paths, sha = extract(args.rev, args.out)
     except Refused as err:
         print(f"extract_public_tree: refused - {err}", file=sys.stderr)
         return 2
-    print(f"extract_public_tree: {args.rev} extracted into {out}")
-    if args.test:
-        return run_the_suite(out, args.j)
-    return 0
+    # The commit itself, not only what was asked for: `origin/main` names a
+    # different one tomorrow, and #1442's mIRC zip names its commit to match.
+    print(f"extract_public_tree: {args.rev} ({sha}) extracted into {out}", flush=True)
+    code = run_the_suite(out, args.j) if args.test else 0
+    # Last, so a long suite run does not scroll it away.
+    if paths:
+        print("extract_public_tree: after `git add` in it, step 4 marks the executables"
+              " (a no-op where the filesystem kept the bit):")
+        print("    " + mark_executable_command(paths))
+    else:
+        print(f"extract_public_tree: {args.rev} has no executable files to mark")
+    return code
 
 
 if __name__ == "__main__":
