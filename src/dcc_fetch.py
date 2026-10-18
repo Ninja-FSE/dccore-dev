@@ -2721,11 +2721,18 @@ def fetched_dir_of(row):
     on. None when the row names a folder that is not one inside
     FETCHED_FILES_DIR - a hand-edited history file - so nothing is read or
     deleted through it. Every reader of a row's file goes through here, so a
-    row fetched before the setting changed still finds its file."""
+    row fetched before the setting changed still finds its file.
+
+    Which folder strings are valid is decided by _fetched_folder_key() alone
+    (#1439), the same rule files_other_rows_hold_locked() compares by: a
+    folder it refuses (absolute, even one inside FETCHED_FILES_DIR, or with
+    a drive) is refused here too. The checks after it stay for symlinks."""
     root = fetched_files_root()
     folder = (row or {}).get("fetched_folder")
     if not folder:
         return root
+    if _fetched_folder_key(folder) is None:
+        return None
     path = os.path.join(root, str(folder))
     if os.path.dirname(os.path.normpath(path)) != os.path.normpath(root) or not dcc.is_safe_path(root, path):
         return None
@@ -2823,6 +2830,43 @@ def names_one_file(directory, name, other):
         return False
 
 
+def _fetched_folder_key(folder):
+    """A row's `fetched_folder` as the key files_other_rows_hold_locked()
+    compares (#1439), worked out from the string alone - no filesystem call.
+    "" for FETCHED_FILES_DIR itself (no folder), the folder casefolded when
+    it is one plain component inside it, and None for one that climbs,
+    nests, is absolute or names a drive (a hand-edited history file). Such
+    a row matches nothing here, and fetched_dir_of() refuses its folder
+    through this same key, so nothing is read or deleted through it either:
+    it fails closed, as "../x" always did.
+    Casefolded on every platform: a name that differs only in case counts
+    as the same folder, which only ever keeps a file."""
+    if not folder:
+        return ""
+    key = os.path.normpath(str(folder))
+    if (key in (".", "..") or os.sep in key or "/" in key
+            or os.path.isabs(key) or os.path.splitdrive(key)[0]):
+        return None
+    return key.casefold()
+
+
+def _directory_folder_key(directory):
+    """Which folder key (_fetched_folder_key()) `directory` is (#1439),
+    lexically: "" for FETCHED_FILES_DIR itself, a folder directly inside it
+    for that folder's name, and None for anywhere else, where no row's file
+    is. A trailing separator, mixed separators or (on Windows) case do not
+    change the answer."""
+    if not directory:
+        return None
+    here = os.path.normpath(os.path.abspath(str(directory)))
+    root = os.path.normcase(os.path.normpath(fetched_files_root()))
+    if os.path.normcase(here) == root:
+        return ""
+    if os.path.normcase(os.path.dirname(here)) != root:
+        return None
+    return _fetched_folder_key(os.path.basename(here))
+
+
 def another_row_holds_file_locked(queue, directory, stored_name, row=None):
     """Whether a row other than `row` names `stored_name`'s file as its own
     (#1269). Caller holds _fetch_lock().
@@ -2842,13 +2886,17 @@ def files_other_rows_hold_locked(queue, directory, names, row=None):
     pass over the queue rather than one per name (a batch delete can carry
     hundreds, #1246). Caller holds _fetch_lock()."""
     held = {}
-    here = os.path.normcase(os.path.normpath(directory))
+    here = _directory_folder_key(directory)
+    if here is None:
+        return set()
     for other in queue.values():
         name = other.get("stored_filename") if other is not row else None
         # Only a row whose file is in this same folder (#1423): the same
-        # name in two bots' folders is two files.
-        folder = fetched_dir_of(other) if name else None
-        if name and folder and os.path.normcase(os.path.normpath(folder)) == here:
+        # name in two bots' folders is two files. Compared as folder
+        # strings, never through fetched_dir_of() (#1439): that resolves
+        # every row on disk, and this runs under _fetch_lock(), which a
+        # slow mount must never hold (see _bot_folder_for_locked()).
+        if name and _fetched_folder_key(other.get("fetched_folder")) == here:
             held.setdefault(str(name).casefold(), []).append(name)
     return {name for name in names
             if name and any(names_one_file(directory, name, other)
