@@ -8,7 +8,8 @@ saved in FETCHED_FILES_DIR/SomeBot/. Off - the default - nothing changes.
 Checked here on the real code, in a temp FETCHED_FILES_DIR:
 
   * the folder name: the nick, cleaned as a fetched file's name is, never a
-    separator, "..", a Windows device name or "lists";
+    separator, "..", a Windows device name or "lists"; a nick that cleans to
+    nothing gets "bot (<16 hex digits>)", a name no nick cleans to;
   * which folder a row gets: none with the setting off or for a list; one
     bot, one folder, whatever the case of its nick;
   * a row's folder is never outside FETCHED_FILES_DIR, whatever the history
@@ -20,7 +21,9 @@ Checked here on the real code, in a temp FETCHED_FILES_DIR:
 
 import io
 import os
+import re
 import shutil
+import string
 import sys
 import types
 import unittest
@@ -87,6 +90,100 @@ class TheFolderName(unittest.TestCase):
         for nick in ("", "   ", None, "\x03\x02"):
             with self.subTest(nick=nick):
                 self.assertIsNone(dcc_fetch.bot_folder_name(nick))
+
+
+class NoFolderNameHasADot(unittest.TestCase):
+    """A fetched file is promoted to its plain name at the top of
+    FETCHED_FILES_DIR only when that name has a "." (_promote_clean_filename()),
+    so a bot's folder name never has one, whatever the nick."""
+
+    DOTTED = ("a.b", "a.", "a..", "a...", "a...b", ".a", ".a.", "a.b.c.",
+              "x . .", "Alfa.", "Alfa..", "[Alfa].", "aux.txt", "lists.",
+              "fetched.file", "a." * 200, "\x02a.b\x02")
+
+    def test_a_dot_in_the_nick_never_reaches_the_folder_name(self):
+        for nick in self.DOTTED:
+            with self.subTest(nick=nick[:24]):
+                name = dcc_fetch.bot_folder_name(nick)
+                self.assertIsNotNone(name)
+                self.assertNotIn(".", name)
+
+    def test_a_dot_inside_the_nick_becomes_an_underscore(self):
+        self.assertEqual(dcc_fetch.bot_folder_name("a.b"), "a_b")
+        self.assertEqual(dcc_fetch.bot_folder_name("x.y.z."), "x_y_z")
+
+    def test_the_folder_is_still_one_inside_the_fetched_files_folder(self):
+        for nick in self.DOTTED:
+            with self.subTest(nick=nick[:24]):
+                name = dcc_fetch.bot_folder_name(nick)
+                self.assertNotIn(os.sep, name)
+                self.assertLessEqual(len(name.encode("utf-8")), dcc_fetch.MAX_NAME_BYTES)
+                self.assertNotIn(name.casefold(), dcc_fetch._RESERVED_FETCHED_NAMES)
+
+
+# A folder name for a nick that cleans to nothing: "bot (" sixteen hex digits ")".
+HASHED_FOLDER = re.compile(r"bot \(([0-9a-f]{16})\)")
+
+# What an IRC nick is made of (RFC 2812: letters, digits, "-" and the
+# specials []\`_^{|}).
+NICK_CHARS = string.ascii_letters + string.digits + "-[]\\`_^{|}"
+
+
+class ANickWithNoUsableName(FolderCase):
+    """A nick that cleans to nothing gets a folder of its own, "bot (<digest>)",
+    rather than the top of FETCHED_FILES_DIR."""
+
+    def test_it_gets_a_hashed_folder(self):
+        for nick in ("[]", "^|`", "fetched_file", "FETCHED_FILE", "Fetched_File"):
+            with self.subTest(nick=nick):
+                self.assertRegex(dcc_fetch.bot_folder_name(nick), HASHED_FOLDER)
+                self.assertIsNotNone(HASHED_FOLDER.fullmatch(dcc_fetch.bot_folder_name(nick)))
+
+    def test_one_nick_in_either_case_is_one_folder(self):
+        self.assertEqual(dcc_fetch.bot_folder_name("fetched_file"),
+                         dcc_fetch.bot_folder_name("FETCHED_FILE"))
+
+    def test_two_such_nicks_get_two_folders(self):
+        names = {dcc_fetch.bot_folder_name(nick) for nick in ("[]", "^|`", "fetched_file", "{}|")}
+        self.assertEqual(len(names), 4, names)
+
+    def test_no_nick_at_all_is_still_no_folder(self):
+        for nick in ("", None, "   ", "\x03\x02", "\x0304,05"):
+            with self.subTest(nick=nick):
+                self.assertIsNone(dcc_fetch.bot_folder_name(nick))
+
+    def test_its_folder_is_one_inside_the_fetched_files_folder(self):
+        for nick in ("[]", "FETCHED_FILE"):
+            with self.subTest(nick=nick):
+                name = dcc_fetch.bot_folder_name(nick)
+                self.assertEqual(dcc_fetch.fetched_dir_of({"fetched_folder": name}),
+                                 os.path.join(self.root, name))
+
+    def test_a_row_from_it_gets_that_folder(self):
+        row = {"bot": "[]", "request_type": "file"}
+        self.assertEqual(dcc_fetch._bot_folder_for_locked({}, row), dcc_fetch.bot_folder_name("[]"))
+
+    def test_no_nick_shaped_string_gives_that_folder(self):
+        hashed = dcc_fetch.bot_folder_name("[]")
+        digest = HASHED_FOLDER.fullmatch(hashed).group(1)
+        spellings = ["bot-" + digest, "bot_" + digest + "_", "bot[" + digest + "]",
+                     "bot{" + digest + "}", "bot" + digest, "Bot|" + digest,
+                     "bot_" + digest.upper() + "_"]
+        spellings += ["x" + char + "y" for char in NICK_CHARS]
+        spellings += [char * 3 for char in NICK_CHARS]
+        for nick in spellings:
+            with self.subTest(nick=nick):
+                name = dcc_fetch.bot_folder_name(nick)
+                if HASHED_FOLDER.fullmatch(name):
+                    # Only a nick that cleans to nothing gets one, and then its own.
+                    self.assertNotEqual(name.casefold(), hashed.casefold())
+                    continue
+                self.assertNotEqual(name.casefold(), hashed.casefold())
+                for char in " ()":
+                    self.assertNotIn(char, name)
+
+    def test_its_folder_has_no_dot_so_no_file_is_promoted_to_it(self):
+        self.assertNotIn(".", dcc_fetch.bot_folder_name("[]"))
 
 
 class OffUnlessTurnedOn(unittest.TestCase):
