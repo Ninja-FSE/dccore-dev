@@ -13,15 +13,16 @@ Since #1376 a file type the list leaves out (`LIST_IGNORED_EXTENSIONS`, or a lis
   rules (`walk_with_sizes()`: no links or junctions followed; a folder with a backslash in its name left out; a
   file whose size cannot be read left out; `is_listed_file()` for the rest). A file that is a link to somewhere
   outside the library folder the album is in is left out too, and logged (`_members_inside_the_library()`): rar
-  packs what a link points at, and a request for that file on its own is refused by `is_safe_path()`. rar is run
-  as it always was, `rar a -ep1 -w<dir> <archive> <folder>`, with `-n@<list>`: a list file of those files'
+  packs what a link points at. rar is run as it always was, `rar a -ep1 -w<dir> <archive> <folder>`, with `-n@<list>`: a list file of those files'
   absolute paths, which keeps only them (`_rar_list_file_bytes()`): UTF-16 with `-scul` on Windows, UTF-8 with
   `-scfl` elsewhere - rar 6.23 on Linux leaves out a name with a character above U+FFFF (an emoji) read from a
   UTF-16 list, and packs it, and U+2028, from a UTF-8 one. rar walks the folder by its own absolute path, so a
   folder deeper than Windows' 260 characters packs as before (starting rar in the folder's parent was refused by
   Windows for such a folder, `WinError 267`, with or without `\\?\`). Checked with RAR 7.22 on Windows, on a
-  320-character folder too, and with RAR 6.23 on Linux (a review run): the archive's file names are the old
-  form's exactly, Unicode, hidden and leading-space names included, less what the list leaves out; folders are no
+  320-character folder too, and with RAR 6.23 on Linux (a review run); macOS was not checked. The UTF-8
+  charset switches (`-scfl` for the list off Windows, `-scfr` for the listing on Windows) need RAR 5.50 or later
+  ("Version 5.50: 'f' charset value in -sc", rar's whatsnew.txt): an older rar refuses them, and every pack would
+  fail where the folder form worked. The archive's file names are the old form's exactly, Unicode, hidden and leading-space names included, less what the list leaves out; folders are no
   longer stored as entries of their own (they come back with their files). Named rather than excluded with `-x`
   masks, because a mask that fails to match lets the file in, and rar's case rule is its platform's, not the
   list's.
@@ -30,7 +31,7 @@ Since #1376 a file type the list leaves out (`LIST_IGNORED_EXTENSIONS`, or a lis
   whole folder `Sub`, and on Windows `keep.flac.` took `keep.flac`), a `*` or `?` in a name also matches files
   in every folder below, and a folder named takes everything in it. So a path is left out of the archive, and the
   log counts it, when any part has a `*` or `?`, ends in a space or a tab (or a dot, on Windows), or holds a
-  control character, a backslash where `/` is the separator, or a name UTF-16 cannot hold; only files are ever
+  control character, a backslash where `/` is the separator, or a name the list file cannot hold; only files are ever
   named. A name holding U+0085, U+2028 or U+2029 is kept: rar 7.22 takes it as named and lists it as one name.
 - **The archive is checked before it is sent**, both ways. `rar lb` lists it (`_archive_names()`, through
   `_run_rar()` like the pack, with `-scfr` on Windows so rar writes UTF-8 to the pipe - checked with rar 7.22,
@@ -100,7 +101,7 @@ Since #1376 a file type the list leaves out (`LIST_IGNORED_EXTENSIONS`, or a lis
   and wildcards included, and refuses a start folder longer than 260 characters on every platform, as Windows
   does - holds the listed files only, upper-case extensions and subfolders included; names that end in a space
   or a dot, or hold a wildcard or a control character, take nothing left out, and one holding U+2028 is packed;
-  an archive holding a name nobody asked for, missing an asked-for file, or listed empty is refused once, and one
+  an archive holding a name nobody asked for, or listed empty, is refused once, and one
   that cannot be listed is tried again; the listing is read at line ends alone, both rar runs get the
   environment, and `LC_ALL=C.UTF-8` off Windows; the user is told one fixed line, once, with no path, size or
   `TMP_ZIP_DIR` in it, for refusals and for an error that names a path; with a real rar where there is one: the
@@ -113,7 +114,8 @@ Since #1376 a file type the list leaves out (`LIST_IGNORED_EXTENSIONS`, or a lis
   a pack read from a UTF-8 list on any platform with a name above U+FFFF; an archive short of an asked-for
   file sent with the log line, and refused when it also holds a stray name; a file link out of the library
   left out (a real link where links can be made, the decision with fakes everywhere); every earlier archive
-  row of a loaded queue turned back, and start-up doing it after the load; an archive behind its own nick's
+  row of a loaded queue turned back, and a start-up (`oserve.startup()`) that loads a saved queue turning back
+  both the head and one behind a pack, their archives gone; an archive behind its own nick's
   pack not counted - the pack starts - also after move_queued_file() puts it there, and one behind a plain
   file still counted. A rename does not merge two queues (note_nick_change() leaves the new nick's alone),
   so it cannot put an archive behind a pack. `support.fake_rar_runs()` answers the listing with the
@@ -124,7 +126,7 @@ Since #1376 a file type the list leaves out (`LIST_IGNORED_EXTENSIONS`, or a lis
   between tests. The waiting archives in `tests/test_serving_keeps_shared_archives_and_claims_straight.py` and
   `tests/test_a_finished_archive_follows_the_large_file_rule.py` now say what they were packed without, and
   `tests/test_path_security.py`'s control checks that rar is given the `-n@` list.
-- **Mutation checks, 58/58 caught**, among them: the gate without the list's types; `folder_holds_packable()`
+- **Mutation checks, 59/59 caught**, among them: the gate without the list's types; `folder_holds_packable()`
   or `pack_members()` ignoring them; rar given the folder without the `-n@` list; rar started in the folder's
   parent again (the long-path tests fail, the real rar with `WinError 267`); the wildcard guard removed or reduced
   to the entries beside a part; the trailing space and dot guard removed or limited to the last part; control
@@ -133,7 +135,7 @@ Since #1376 a file type the list leaves out (`LIST_IGNORED_EXTENSIONS`, or a lis
   `splitlines()`, run without `-scfr`, or sending what cannot be listed; `LC_ALL` not set or the environment not
   passed; the refusal's reason sent to the user; the room hold back to one for every pack; a folder bigger than
   the disk left to wait; a refusal using up retries; an earlier archive sent as it is, or only the head of a loaded
-  queue turned back; a UTF-16 list file off Windows; an archive short of a listed file refused again; the count
+  queue turned back, or the start-up call removed or put behind `if False:`; a UTF-16 list file off Windows; an archive short of a listed file refused again; the count
   taking archives behind their own pack; a file link out of the library packed; the room check removed or
   without its margin; the cap removed or off by one either way; a held pack never woken (six ways); and the whole
   earlier code.

@@ -38,6 +38,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+import db  # noqa: E402
 import dcc  # noqa: E402
 import defaults as config  # noqa: E402
 import library  # noqa: E402
@@ -47,6 +48,7 @@ from tests import support  # noqa: E402
 from tests import test_path_security as security  # noqa: E402
 from tests.support import DCCoreTestCase  # noqa: E402
 from tests.test_every_album_row_is_one_the_bot_packs import RowCase  # noqa: E402
+from tests.test_startup import BootCase  # noqa: E402
 
 CHANNEL = "#dccore-test"
 
@@ -805,19 +807,6 @@ class AnArchivePackedBeforeTheListsRule(PackCase):
         self.assertFalse(os.path.exists(other_archive), "the second earlier archive was left on disk")
         self.assertEqual(second["path"], self.album)
 
-    def test_the_bot_turns_them_back_once_the_queue_is_loaded(self):
-        """oserve's start-up, read as code: the call follows the load."""
-        import ast
-        with io.open(os.path.join(REPO_ROOT, "oserve.py"), encoding="utf-8") as handle:
-            tree = support.parse_source(handle.read())
-        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
-                 and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)]
-        loads = [c.lineno for c in calls if (c.func.value.id, c.func.attr) == ("db", "load_dcc_queue")]
-        turns = [c.lineno for c in calls if (c.func.value.id, c.func.attr) == ("dcc", "pack_again_every_row_packed_before")]
-        self.assertEqual(len(loads), 1)
-        self.assertEqual(len(turns), 1, "the loaded queue is not turned back")
-        self.assertGreater(turns[0], loads[0])
-
     def test_one_being_sent_is_left_alone(self):
         config.active_transfers.append({"user": "dave", "file": "Some_Album.rar", "bytes_sent": 0,
                                         "queue_row": self.row_})
@@ -871,6 +860,44 @@ class AFileLinkOutOfTheLibrary(PackCase):
         (call,) = self.rar.calls
         self.assertNotIn(os.path.join("Some Album", "link.mp3"), call["names"])
         self.assertIn("[SECURITY] 1 file(s) in Some Album are links to somewhere outside the library", log)
+
+
+class TheBootTurnsBackALoadedQueue(BootCase):
+    """oserve.startup() itself, as tests/test_startup.py drives it: a saved
+    queue holding archives an earlier version packed - one at a head, one
+    behind a folder pack - is loaded and every one of them turned back."""
+
+    def old_archive_row(self, nick, archive, album):
+        return {"file": os.path.basename(album) + ".rar", "path": archive, "source_path": album,
+                "channel": "#test-channel", "user_raw": nick,
+                "is_unpacked_rar_folder": False, "is_temporary_zip": True}
+
+    def test_every_earlier_archive_row_is_folder_row_again_after_the_boot(self):
+        album = os.path.join(self.tree.music, "Some Artist", "Old Album")
+        write(os.path.join(album, "01.mp3"))
+        os.makedirs(config.TMP_ZIP_DIR, exist_ok=True)
+        at_the_head = os.path.join(config.TMP_ZIP_DIR, "At_The_Head.rar")
+        behind_a_pack = os.path.join(config.TMP_ZIP_DIR, "Behind_A_Pack.rar")
+        for archive in (at_the_head, behind_a_pack):
+            write(archive, 9)
+        pack = {"file": "Old_Album.rar", "path": album, "channel": "#test-channel", "user_raw": "erin",
+                "is_unpacked_rar_folder": True, "is_temporary_zip": True}
+        saved = {"dave": [self.old_archive_row("dave", at_the_head, album)],
+                 "erin": [pack, self.old_archive_row("erin", behind_a_pack, album)]}
+        with io.open(db.DCC_QUEUE_FILE, "w", encoding="utf-8") as handle:
+            json.dump(saved, handle)
+
+        output = self.boot()
+
+        rows = [row for key in ("dave", "erin") for row in config.dcc_queue.get(key, [])]
+        self.assertEqual(len(rows), 3, output)
+        for row in rows:
+            with self.subTest(row=row["file"]):
+                self.assertTrue(row["is_unpacked_rar_folder"], "an earlier archive is still queued as one")
+                self.assertEqual(row["path"], album)
+        for archive in (at_the_head, behind_a_pack):
+            self.assertFalse(os.path.exists(archive), "an earlier archive was left on disk")
+        self.assertIn("2 queued archive(s) packed by an earlier version will be packed again", output)
 
 
 class TheMembers(DCCoreTestCase):
