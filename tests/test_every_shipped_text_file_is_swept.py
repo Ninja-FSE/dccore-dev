@@ -669,6 +669,12 @@ class TheConflictSweepOnATempTree(TreeMixin, unittest.TestCase):
         files = dict(self.PADDING, **{"native/plugin.c": A_CONFLICT.encode("utf-8")})
         root = self.make_tree(files)
         self.point(conflicts, "REPO_ROOT", root)
+        # Without the caller's GIT_* variables, for this git and the sweep's
+        # own: run from a git hook, GIT_DIR and GIT_INDEX_FILE would send
+        # `git add -A` to the outer repository's index, and the sweep would list
+        # that repository instead of this one.
+        for name in [k for k in os.environ if k.startswith("GIT_")]:
+            self.addCleanup(os.environ.__setitem__, name, os.environ.pop(name))
         try:
             for args in (["git", "init", "-q"], ["git", "add", "-A"]):
                 subprocess.run(args, cwd=root, check=True, capture_output=True,

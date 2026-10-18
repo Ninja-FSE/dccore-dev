@@ -409,6 +409,12 @@ class NothingIdentifyingShips(unittest.TestCase):
         # Read once for every test below, not once per test.
         cls.texts, cls.unread = read_text_files(cls.shipped or [], REPO_ROOT)
 
+    @classmethod
+    def tearDownClass(cls):
+        # Every shipped file's text - about 13 MB - is not kept for the rest
+        # of the process once these tests are done.
+        del cls.texts, cls.unread
+
     def setUp(self):
         if self.reason:
             self.skipTest(self.reason)
