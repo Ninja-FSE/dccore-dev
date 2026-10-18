@@ -1834,7 +1834,14 @@ def note_failed_send(nick):
     return fails
 
 
-def _pause_for_send_fails(nick, key, fails, queued_only=False):
+def _paused_pack_reason(nick):
+    """Why a folder row left the queue around its pack when `nick`'s pause
+    took it (#1468): the packer's log says this, not that the nick removed
+    the folder."""
+    return f"{nick} is paused for failed sends today"
+
+
+def _pause_for_send_fails(nick, key, fails, queued_only=False, stop_pack=True):
     """`nick` has reached DAILY_SEND_FAILS_LIMIT: drop its queued files, as
     !clearqueue would, and say why - to the nick and to the operator.
     Returns how many queued files went.
@@ -1842,7 +1849,16 @@ def _pause_for_send_fails(nick, key, fails, queued_only=False):
     `queued_only`: the dispatcher found rows under a nick already paused
     (drop_queues_of_paused_nicks(), #1460). With nothing left to drop by the
     time the lock is held, nothing is said - the nick was told when it was
-    paused."""
+    paused.
+
+    A folder among the dropped rows may be being packed right now: that pack
+    is stopped (#1468), as the user's own remove stops it (#1268), rather
+    than running rar to the end for nothing while every other pack waits.
+    `stop_pack=False` is the packer itself, whose pack has already ended.
+
+    Lock order (#1452): queue_lock is taken and released here, and only then
+    is runtime.pack_lock taken, by cancel_pack(). The two are never held
+    together, and the caller holds neither, nor failed_transfers_lock."""
     import db
     with queue_lock:
         rows = config.dcc_queue.get(key) or []
@@ -1854,6 +1870,12 @@ def _pause_for_send_fails(nick, key, fails, queued_only=False):
             config.dcc_queue.pop(key, None)
         if removed or not queued_only:
             getattr(config, "frozen_queues", {}).pop(key, None)
+    if stop_pack:
+        # Out of the queue first: a pack that ends before this lands finds
+        # its row gone and does not send. Nothing goes to the user from
+        # here or from the stopped packer: the NOTICE below says it all.
+        for row in rows:
+            cancel_pack(row=row, reason=_paused_pack_reason(nick))
     if queued_only and not removed:
         return 0
     if removed:
@@ -2456,7 +2478,12 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
     if withdrawn:
         # The user took the row out of their queue before the
         # pack began (#1268): nothing to pack, nothing to send.
-        print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} before it was packed.")
+        # Or their pause did (#1468), and the log says that.
+        if send_fails_paused(owner_nick()):
+            print(f"[LINEAR RAR] {folder_leaf} is not packed: "
+                  f"{_paused_pack_reason(owner_nick())}.")
+        else:
+            print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} before it was packed.")
         _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED)
         return False
 
@@ -2505,10 +2532,15 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
     if job is not None and job["cancelled"]:
         _discard_partial_archive(target_rar_path, "was cancelled")
         if job.get("withdrawn"):
-            # The user's own remove stopped it (#1268), and
-            # that remove already took the row and told them.
-            print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
-                  f"being packed; the pack is stopped.")
+            # The user's own remove stopped it (#1268), or their
+            # pause did (#1468, with its reason), and that already
+            # took the row and told them.
+            if job.get("stop_reason"):
+                print(f"[LINEAR RAR] The pack of {folder_leaf} for {owner_nick()} is "
+                      f"stopped: {job['stop_reason']}.")
+            else:
+                print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
+                      f"being packed; the pack is stopped.")
         else:
             announce_mod.send_debug(
                 f"Pack for {owner_nick()} cancelled: {folder_leaf}", category="PACK")
@@ -2591,13 +2623,23 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
                         config.active_transfers.append({"user": send_to, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename,
                                                          "queue_row": next_file})
         if withdrawn:
-            print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
-                  f"being packed; it is not sent.")
+            # Read again, outside queue_lock: a pause that landed after the
+            # read above took the row too (#1468), not the user.
+            if paused_fails or send_fails_paused(owner_nick()):
+                print(f"[LINEAR RAR] The packed {folder_leaf} is not sent: "
+                      f"{_paused_pack_reason(owner_nick())}.")
+            else:
+                print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
+                      f"being packed; it is not sent.")
             _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED, job=job)
             return False
         if paused_fails:
             print(f"[DCC PAUSE] {send_to} is paused; the packed {rar_filename} is not sent.")
-            _pause_for_send_fails(send_to, _send_fails_key(send_to), paused_fails, queued_only=True)
+            # stop_pack=False (#1468): this thread is the packer of this very
+            # row and its pack has ended (_end_pack_job() above); it still
+            # holds rar_inprogress, so no other pack is running to stop.
+            _pause_for_send_fails(send_to, _send_fails_key(send_to), paused_fails, queued_only=True,
+                                  stop_pack=False)
             with queue_lock:
                 dropped = not _row_is_still_queued(next_file)
             if dropped:
@@ -3811,7 +3853,7 @@ def _pack_status_of(job, now=None):
             "cancelled": bool(job["cancelled"])}
 
 
-def cancel_pack(row=None):
+def cancel_pack(row=None, reason=None):
     """Stop the pack that is running. Returns its status as it was, or None
     when nothing is packing - a cancel of nothing changes nothing (#1202).
 
@@ -3824,6 +3866,9 @@ def cancel_pack(row=None):
     user withdrawing it (#1268): their own remove has already taken the row
     and told them, so the packer neither settles it again nor says the
     operator cancelled it.
+
+    `reason`, with `row`: the row went for something other than the user's
+    remove - their pause (#1468) - and the packer logs that instead.
     """
     with runtime.pack_lock:
         job = runtime.pack_job
@@ -3833,6 +3878,8 @@ def cancel_pack(row=None):
             if job.get("row") is not row:
                 return None
             job["withdrawn"] = True
+            if reason:
+                job["stop_reason"] = str(reason)
         job["cancelled"] = True
         process = job["process"]
     status = _pack_status_of(job)
