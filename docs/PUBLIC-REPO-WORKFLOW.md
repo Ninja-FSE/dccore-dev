@@ -162,6 +162,15 @@ the omissions surface, because it is the last point at which they are cheap.
   `gh api repos/Ninja-FSE/dccore/releases/latest` names the new
   tag: a tag with no Release is invisible to the update check (#572), which
   asks for the latest release, and v1.16.2 shipped that way.
+- **Close the release on the board and the milestone** (`docs/PROJECT-BOARD.md`),
+  once the Release exists:
+  - Rename milestone "Next release" to the tag (`vX.Y.Z`), close it, and open a
+    new "Next release". Every PR merged since the last release should be in
+    it; one that is not, add before closing, or the release's map is short.
+  - Move every PR in Ready for release to Done. The board's Auto-archive
+    workflow then takes them, and the issues they closed, off the board after
+    a while - they stay findable under the board's Archived items. Nothing in
+    Todo or In Progress is touched: what did not ship stays for the next one.
 - **Check `docs/FUTURE.md`** for anything the release implements that is still
   listed as planned or not-yet-done. A roadmap calling a shipped thing missing
   makes the changelog look like it is overclaiming — this drifted once and

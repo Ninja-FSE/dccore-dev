@@ -94,12 +94,29 @@ PR, whatever its base (`.github/workflows/tests.yml`).
 
 ## At a release
 
-The operator does this. It is listed here so you know what the columns mean afterwards.
+The operator does this. It is listed here so you know what the columns mean afterwards. The steps are in
+`docs/PUBLIC-REPO-WORKFLOW.md`'s release checklist.
 
 - Every PR in Ready for release moves to Done.
 - The "Next release" milestone is renamed to the version (`v1.18.0`, say) and closed, and a new "Next release" is
   opened.
 - Issues labelled `release` are done or decided as part of the release.
+
+## Archiving: one board for every release
+
+The board is one project for good. It is not a new project per release, and it is not named after a version: the
+version is not known until the release is cut (1.16.2 became 1.17.0), and a new project would mean setting up its
+columns, colours, workflows and access again. What a release carries is its **milestone**, renamed to the version
+when it ships, so the closed milestones are the history of what went into each release.
+
+The board stays small because finished items leave it by themselves. The built-in **Auto-archive items** workflow is
+on (the board's `...` menu, **Workflows**; its filter is set there). It archives closed items once they have sat
+for a while: an issue a while after it closes, a PR a while after the release moves it to Done.
+
+- **An archived item is not deleted.** The issue or PR is untouched. It only leaves the board's views. The board's
+  `...` menu, **Archived items**, lists them, and one can be restored from there.
+- **Open items are never archived,** whatever their age, so nothing in Todo or In Progress disappears.
+- **To see what the next release carries,** filter a view with `milestone:"Next release"`.
 
 ## Security fixes never go on the board
 
