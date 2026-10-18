@@ -704,6 +704,17 @@ through a reverse proxy, the proxy must pass the `Host` header through
 unchanged (`proxy_set_header Host $host;` in nginx), or every login is refused
 with "This login was sent by another site".
 
+Three wrong passwords at the web login block the address they came from for
+fifteen minutes. Over IPv6 they are counted per /64 network: every device that
+shares a /64 shares the three. Wrong passwords from anywhere in one /48 also
+add up, and thirty of them block that whole /48 for fifteen minutes. A right
+password clears both counts. An IPv6 address that carries an IPv4 one
+(`::ffff:192.0.2.1` from a dual-stack socket, NAT64 `64:ff9b::192.0.2.1`, 6to4
+or Teredo) counts as that IPv4 address; a translator with a prefix of its own
+counts as an IPv6 network. Behind a reverse proxy every client
+counts as the proxy's address, since the proxy's is the address the dashboard
+sees.
+
 ```
 unpair                    list the paired clients and when they were paired
 unpair dccore.mrc-3f9a12c0   revoke one; its next login is a wrong password

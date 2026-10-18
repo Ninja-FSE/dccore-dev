@@ -1,0 +1,1 @@
+- **Failed dashboard logins over IPv6 are counted per /64 network, and per /48.** Three wrong passwords block the whole /64 for fifteen minutes, and thirty from anywhere in one /48 block that /48; an IPv4 client seen through an IPv6 socket or NAT64 counts as its IPv4 address.
