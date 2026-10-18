@@ -1288,29 +1288,11 @@ def note_nick_change(old_nick, new_nick):
             except Exception as save_err:
                 print(f"[NICK] Could not save the queue after {old_nick} -> {new_nick}: {save_err}")
 
-    # The failed sends today and the pause they made (#1437), under their own
-    # lock and not inside queue_lock: dcc.py never takes one inside the other.
-    # An entry is {"day", "fails", "paused"}, and one from an earlier day
-    # counts for nothing (dcc.send_fails_paused()), so it is dropped, not
-    # carried. When the new key holds today's entry too - the nick was someone
-    # else's earlier today, or this user's before an earlier rename - the
-    # larger count wins, whole: its "paused" says whether that count has
-    # already paused (dcc.note_failed_send()), so it belongs with the count.
-    # Never the sum, which would charge one person with another's failures.
-    # Equal counts keep a pause either entry had.
-    today = dcc._send_fails_today()
-    with runtime.failed_transfers_lock:
-        fails_store = runtime.failed_transfers
-        old_entry = fails_store.pop(old_key, None)
-        if old_entry and old_entry.get("day") == today:
-            new_entry = fails_store.get(new_key)
-            if not new_entry or new_entry.get("day") != today:
-                fails_store[new_key] = old_entry
-            elif int(old_entry["fails"]) > int(new_entry["fails"]):
-                fails_store[new_key] = old_entry
-            elif int(old_entry["fails"]) == int(new_entry["fails"]):
-                new_entry["paused"] = bool(new_entry.get("paused") or old_entry.get("paused"))
-            moved.append("failed_transfers")
+    # The failed sends today and the pause they made (#1437). dcc.py owns the
+    # entry and takes its own lock, so this is after queue_lock is released:
+    # dcc.py never takes one inside the other.
+    if dcc.carry_send_fails(old_key, new_key):
+        moved.append("failed_transfers")
 
     # Unchanged behaviour, kept here so one function owns the whole rename.
     send_queue = getattr(config, "send_queue", None)

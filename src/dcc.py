@@ -1765,7 +1765,7 @@ def daily_send_fails_limit():
 
 def _send_fails_key(nick):
     """The dcc_queue key of `nick`: the count follows the queue it pauses,
-    to a new nick too (irc.note_nick_change(), #1437)."""
+    to a new nick too (carry_send_fails(), #1437)."""
     return str(nick or "").lower().strip()
 
 
@@ -1869,6 +1869,35 @@ def unpause_send_fails(nick):
     with runtime.failed_transfers_lock:
         entry = runtime.failed_transfers.pop(key, None)
     return int(entry["fails"]) if entry and entry.get("day") == today else 0
+
+
+def carry_send_fails(old_key, new_key):
+    """Move today's failed sends, and the pause they made, from `old_key` to
+    `new_key` on a rename (irc.note_nick_change(), #1437). Both are
+    dcc_queue keys. True when the old nick had a count today.
+
+    Takes failed_transfers_lock only; call it outside queue_lock. An entry
+    from an earlier day counts for nothing (send_fails_paused()), so it is
+    dropped, not carried. When the new key holds today's entry too - the nick
+    was someone else's earlier today, or this user's before an earlier
+    rename - the larger count wins, whole: its "paused" says whether that
+    count has already paused (note_failed_send()), so it belongs with the
+    count. Never the sum, which would charge one person with another's
+    failures. Equal counts keep a pause either entry had."""
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        fails_store = runtime.failed_transfers
+        old_entry = fails_store.pop(old_key, None)
+        if not (old_entry and old_entry.get("day") == today):
+            return False
+        new_entry = fails_store.get(new_key)
+        if not new_entry or new_entry.get("day") != today:
+            fails_store[new_key] = old_entry
+        elif int(old_entry["fails"]) > int(new_entry["fails"]):
+            fails_store[new_key] = old_entry
+        elif int(old_entry["fails"]) == int(new_entry["fails"]):
+            new_entry["paused"] = bool(new_entry.get("paused") or old_entry.get("paused"))
+        return True
 
 
 def get_total_queued_count():
