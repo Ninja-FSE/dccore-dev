@@ -552,6 +552,7 @@ from web_login import (  # noqa: F401
     LOGIN_PAGE,
     WEB_MAX_LIVE_SESSIONS,
     WEB_PASSWORD_CHECK_WAIT_SECONDS,
+    _admin_password_hash,
     _check_web_password,
     _clear_bad_web_ip,
     _configured_dashboard_names,
@@ -793,7 +794,7 @@ if HAVE_FLASK:
             session["authenticated"] = True
             session["sid"] = sid
             session["pw"] = _password_stamp(
-                app.secret_key, getattr(config, "ADMIN_PASSWORD_HASH", ""))
+                app.secret_key, _admin_password_hash())
 
         def session_is_live():
             import hmac
@@ -802,8 +803,7 @@ if HAVE_FLASK:
             sid, stamp = session.get("sid"), session.get("pw")
             if not isinstance(sid, str) or not isinstance(stamp, str):
                 return False
-            current = _password_stamp(app.secret_key,
-                                      getattr(config, "ADMIN_PASSWORD_HASH", ""))
+            current = _password_stamp(app.secret_key, _admin_password_hash())
             if not hmac.compare_digest(stamp, current):
                 return False
             with runtime.web_sessions_lock:
@@ -820,7 +820,7 @@ if HAVE_FLASK:
             """After this session changed the password: it stays open, every
             other session opened with the old password does not."""
             session["pw"] = _password_stamp(
-                app.secret_key, getattr(config, "ADMIN_PASSWORD_HASH", ""))
+                app.secret_key, _admin_password_hash())
 
         @app.after_request
         def deny_framing(response):
@@ -899,7 +899,7 @@ if HAVE_FLASK:
                     outcome = None
                     try:
                         outcome = _check_web_password(
-                            getattr(config, "ADMIN_PASSWORD_HASH", ""),
+                            _admin_password_hash(),
                             request.form.get("password", ""))
                     finally:
                         _settle_web_login(ip, outcome)
