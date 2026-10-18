@@ -608,6 +608,164 @@ class TheIdentifierSweepOnATempTree(TreeMixin, unittest.TestCase):
         self.assertNotIn("native/plugin.c", failure)
 
 
+# Two more invented words, for the sweep of every tracked file: one on a
+# planted ALLOWED_OUTSIDE_THE_RELEASE, one not. Denied only inside the tests
+# that patch FORBIDDEN, under labels that are planted too.
+ALLOWED_PLANTED = "Qorvexallowedplaceholder"
+OTHER_PLANTED = "Wumbridgelistedplaceholder"
+ALLOWED_LABEL = "planted-label-allowed-outside-the-release"
+OTHER_LABEL = "planted-label-allowed-nowhere"
+TRACKED_SWEEP = "test_no_forbidden_identifier_is_tracked"
+
+
+def outcome_of(base, method):
+    """A unittest.TestResult for `method` of a copy of TestCase `base`, with
+    its setUpClass run - so a skip is seen as one, where failure_of() would
+    refuse it."""
+    probe = type("Probe", (base,), {})
+    probe.setUpClass()
+    try:
+        result = unittest.TestResult()
+        probe(method).run(result)
+        return result
+    finally:
+        probe.tearDownClass()
+
+
+class TheTrackedSweepOnATempTree(TreeMixin, unittest.TestCase):
+    """The real NothingIdentifyingIsTracked methods and tracked_hits(), on a
+    temp tree with a planted denylist and a planted allowance: an allowed
+    entry passes in an export-ignored file and nowhere else."""
+
+    def setUp(self):
+        self.point(sweep, "FORBIDDEN", {sweep.word_hash(ALLOWED_PLANTED): ALLOWED_LABEL,
+                                        sweep.word_hash(OTHER_PLANTED): OTHER_LABEL})
+        self.point(sweep, "ALLOWED_OUTSIDE_THE_RELEASE",
+                   frozenset({sweep.word_hash(ALLOWED_PLANTED)}))
+        # Labels or not is decided per test, never by the host this runs on.
+        environ = mock.patch.dict(os.environ)
+        environ.start()
+        self.addCleanup(environ.stop)
+        os.environ.pop("GITHUB_ACTIONS", None)
+
+    def point_sweep_at(self, files, ignored):
+        """`files` ({name: text}) tracked, the names in `ignored` export-ignored."""
+        self.point(sweep, "REPO_ROOT", self.make_tree(
+            {name: text.encode("utf-8") for name, text in files.items()}))
+        self.point(sweep, "tracked_paths", lambda: (list(files), set(ignored), None))
+
+    def failure(self):
+        return failure_of(sweep.NothingIdentifyingIsTracked, TRACKED_SWEEP)
+
+    def test_an_allowed_entry_in_an_export_ignored_file_passes(self):
+        self.point_sweep_at({"docs/INTERNAL.md": "about " + ALLOWED_PLANTED + "\n",
+                             "src/clean.py": "x = 1\n"}, {"docs/INTERNAL.md"})
+
+        self.assertIsNone(self.failure())
+
+    def test_the_same_entry_in_a_file_that_ships_fails(self):
+        self.point_sweep_at({"docs/INTERNAL.md": "about " + ALLOWED_PLANTED + "\n",
+                             "src/shipped.py": "x = 1\n# " + ALLOWED_PLANTED + "\n"},
+                            {"docs/INTERNAL.md"})
+
+        failure = self.failure()
+
+        self.assertIsNotNone(failure, "an allowed entry passed in a file that ships")
+        self.assertIn("src/shipped.py:2", failure)
+        self.assertNotIn("docs/INTERNAL.md", failure)
+
+    def test_an_entry_not_allowed_fails_in_an_export_ignored_file(self):
+        self.point_sweep_at({"docs/INTERNAL.md": "one\ntwo " + OTHER_PLANTED + "\n",
+                             "src/clean.py": "x = 1\n"}, {"docs/INTERNAL.md"})
+
+        failure = self.failure()
+
+        self.assertIsNotNone(failure, "an entry not allowed passed in an export-ignored file")
+        self.assertIn("docs/INTERNAL.md:2", failure)
+        self.assertIn(OTHER_LABEL, failure)
+
+    def test_on_github_actions_the_report_has_no_label(self):
+        self.point_sweep_at({"docs/INTERNAL.md": "two " + OTHER_PLANTED + "\n",
+                             "src/shipped.py": "# " + ALLOWED_PLANTED + "\n"},
+                            {"docs/INTERNAL.md"})
+        os.environ["GITHUB_ACTIONS"] = "true"
+
+        failure = self.failure()
+
+        self.assertIsNotNone(failure)
+        self.assertIn("docs/INTERNAL.md:1", failure)
+        self.assertIn("src/shipped.py:1", failure)
+        self.assertIn("a listed identifier", failure)
+        self.assertIn("which anyone can read", failure)
+        self.assertNotIn(OTHER_LABEL, failure)
+        self.assertNotIn(ALLOWED_LABEL, failure)
+
+    def test_control_elsewhere_the_report_names_the_labels(self):
+        self.point_sweep_at({"docs/INTERNAL.md": "two " + OTHER_PLANTED + "\n",
+                             "src/shipped.py": "# " + ALLOWED_PLANTED + "\n"},
+                            {"docs/INTERNAL.md"})
+
+        failure = self.failure()
+
+        self.assertIn(OTHER_LABEL, failure)
+        self.assertIn(ALLOWED_LABEL, failure)
+
+    def test_tracked_hits_on_its_own(self):
+        texts = {"docs/a.md": ALLOWED_PLANTED + "\n",
+                 "src/b.py": "\n" + ALLOWED_PLANTED + "\n",
+                 "docs/c.md": OTHER_PLANTED + "\n",
+                 "src/d.py": "clean\n"}
+
+        found = sweep.tracked_hits(texts, {"docs/a.md", "docs/c.md"}, sweep.FORBIDDEN)
+
+        self.assertEqual(found, {ALLOWED_LABEL: ["src/b.py:2"], OTHER_LABEL: ["docs/c.md:1"]})
+
+    def test_it_skips_with_the_reason_when_git_cannot_list_the_files(self):
+        def refusing_run(*args, **kwargs):
+            raise OSError("planted: no git here")
+        # The real tracked_paths(), with git unavailable to it.
+        self.point(sweep, "subprocess", types.SimpleNamespace(run=refusing_run))
+
+        for method in (TRACKED_SWEEP, "test_every_tracked_file_is_read_or_known_binary"):
+            with self.subTest(method):
+                result = outcome_of(sweep.NothingIdentifyingIsTracked, method)
+                self.assertEqual((result.failures, result.errors), ([], []))
+                self.assertEqual(len(result.skipped), 1)
+                self.assertIn("planted: no git here", result.skipped[0][1])
+
+    def test_it_skips_with_a_reason_when_git_lists_nothing(self):
+        self.point(sweep, "tracked_paths", lambda: ([], set(), None))
+
+        for method in (TRACKED_SWEEP, "test_every_tracked_file_is_read_or_known_binary"):
+            with self.subTest(method):
+                result = outcome_of(sweep.NothingIdentifyingIsTracked, method)
+                self.assertEqual((result.failures, result.errors), ([], []))
+                self.assertEqual(len(result.skipped), 1)
+                self.assertIn("lists no tracked file", result.skipped[0][1])
+
+
+class TheAllowanceIsPartOfTheDenylist(unittest.TestCase):
+    """ALLOWED_OUTSIDE_THE_RELEASE only lets entries of the real denylist
+    through: a hash on it that is no key of FORBIDDEN is a typo, or an entry
+    since removed, and allows nothing it was meant to. Reported by the
+    allowance's own hashes alone - nothing of the denylist is printed."""
+
+    def test_every_allowed_hash_is_a_denylist_entry(self):
+        if sweep.FORBIDDEN is None:
+            self.skipTest(f"{sweep.DENYLIST} is absent or defines no FORBIDDEN here, "
+                          "so there is no denylist to compare the allowance with")
+        missing = sorted(key for key in sweep.ALLOWED_OUTSIDE_THE_RELEASE
+                         if key not in sweep.FORBIDDEN)
+        self.assertEqual(missing, [], "on ALLOWED_OUTSIDE_THE_RELEASE but not in the denylist")
+
+    def test_every_allowed_hash_has_the_shape_of_one(self):
+        width = len(sweep.word_hash("placeholder"))
+        odd = sorted(key for key in sweep.ALLOWED_OUTSIDE_THE_RELEASE
+                     if not re.fullmatch("[0-9a-f]{%d}" % width, key))
+        self.assertTrue(sweep.ALLOWED_OUTSIDE_THE_RELEASE, "control: the allowance is not empty")
+        self.assertEqual(odd, [])
+
+
 class TheConflictSweepOnATempTree(TreeMixin, unittest.TestCase):
     """The real NothingTrackedCarriesOne method, pointed at a temp tree.
 
