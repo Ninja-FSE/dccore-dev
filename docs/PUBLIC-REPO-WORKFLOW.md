@@ -143,15 +143,23 @@ the omissions surface, because it is the last point at which they are cheap.
   version that does not exist.
 - **Create the GitHub Release for the tag, with the mIRC zip** (#1412, #1404).
   Notes: the release's section of the public changelog. Build the asset from
-  the merged tree and attach it under its fixed name, so
+  the revision you extracted and attach it under its fixed name, so
   `releases/latest/download/dccore-mirc.zip` (the docs and the project page
-  link it) is the new script:
+  link it) is the new script. It is built from git at `--rev`, never from the
+  working tree (#1442), so a stray or uncommitted file under `scripts/mirc/`
+  cannot ship. The release names that revision explicitly: left out, it is
+  this checkout's `HEAD`, which need not be what was extracted. A name is
+  not enough either - `origin/main` moves with any fetch between the
+  extraction and this step. So give it, as `<sha>`, the sha the extraction
+  printed beside the revision it read ("The extraction", below):
 
-      python3 scripts/build_mirc_zip.py --out dist/dccore-mirc.zip
+      python3 scripts/build_mirc_zip.py --rev <sha> --out dist/dccore-mirc.zip
       gh release create vX.Y.Z -R Ninja-FSE/dccore --title "vX.Y.Z - Title" \
           --notes-file <notes> --latest dist/dccore-mirc.zip
 
-  Then check `gh api repos/Ninja-FSE/dccore/releases/latest` names the new
+  The sha `build_mirc_zip.py` prints must be that `<sha>`; any other is a
+  zip of a tree that was not extracted - do not attach it. Then check
+  `gh api repos/Ninja-FSE/dccore/releases/latest` names the new
   tag: a tag with no Release is invisible to the update check (#572), which
   asks for the latest release, and v1.16.2 shipped that way.
 - **Check `docs/FUTURE.md`** for anything the release implements that is still
