@@ -198,7 +198,7 @@ class NamesAreComparedAsTheServerComparesThem(SentLineCase):
         runtime.server_casemapping = "rfc1459"
         self.set_config(ANNOUNCE_TRANSFERS_EXCLUDE=["#a[1]"])
 
-        self.assertTrue(announce._channel_excluded_from_announce("#a{1}"))
+        self.assertTrue(announce._channel_excluded_from_announce("#a{1}", ["#a[1]"]))
         self.assertIn(EXCLUDE_LOG, self.finish("#a{1}"))
         self.assertEqual(self.told(), [])
 
@@ -206,18 +206,20 @@ class NamesAreComparedAsTheServerComparesThem(SentLineCase):
         runtime.server_casemapping = "ascii"
         self.set_config(ANNOUNCE_TRANSFERS_EXCLUDE=["#a[1]"])
 
-        self.assertFalse(announce._channel_excluded_from_announce("#a{1}"))
-        self.assertTrue(announce._channel_excluded_from_announce("#A[1]"))
+        self.assertFalse(announce._channel_excluded_from_announce("#a{1}", ["#a[1]"]))
+        self.assertTrue(announce._channel_excluded_from_announce("#A[1]", ["#a[1]"]))
         printed = self.finish("#a{1}")
         self.assertEqual(len(self.told()), 1, printed)
 
     def test_blank_entries_and_a_blank_channel_match_nothing(self):
-        self.set_config(ANNOUNCE_TRANSFERS_EXCLUDE=["", "  ", "#alpha"])
+        listed = ["", "  ", "#alpha"]
 
-        self.assertFalse(announce._channel_excluded_from_announce(""))
-        self.assertFalse(announce._channel_excluded_from_announce(None))
-        self.assertFalse(announce._channel_excluded_from_announce("#beta"))
-        self.assertTrue(announce._channel_excluded_from_announce(" #alpha "))
+        self.assertFalse(announce._channel_excluded_from_announce("", listed))
+        self.assertFalse(announce._channel_excluded_from_announce(None, listed))
+        self.assertFalse(announce._channel_excluded_from_announce("#beta", listed))
+        self.assertTrue(announce._channel_excluded_from_announce(" #alpha ", listed))
+        self.assertFalse(announce._channel_excluded_from_announce("#alpha", []))
+        self.assertFalse(announce._channel_excluded_from_announce("#alpha", None))
 
 
 class WatchedLock:
@@ -356,31 +358,6 @@ class ASendDuringARehashWaitsForTheOperatorsList(SentLineCase):
         self.finished(worker)
         self.assertEqual(self.told(), [])
         self.assertIn("#alpha " + EXCLUDE_LOG, self.out.getvalue())
-
-    def test_the_helper_alone_reads_under_the_lock(self):
-        """Called without the value, _channel_excluded_from_announce() reads
-        the setting itself - under the same lock."""
-        self.set_config(ANNOUNCE_TRANSFERS_EXCLUDE=["#alpha"])
-        answer = []
-
-        self.lock.inner.acquire()
-        try:
-            config.ANNOUNCE_TRANSFERS_EXCLUDE = []
-            worker = threading.Thread(
-                target=lambda: answer.append(announce._channel_excluded_from_announce("#alpha")),
-                daemon=True)
-            worker.start()
-            self.addCleanup(worker.join, WAIT)
-            self.assertTrue(self.lock.asked.wait(WAIT), "the helper never asked for the lock")
-            self.assertEqual(answer, [])
-            config.ANNOUNCE_TRANSFERS_EXCLUDE = ["#alpha"]
-        finally:
-            self.lock.inner.release()
-
-        worker.join(WAIT)
-        self.assertFalse(worker.is_alive())
-        self.assertEqual(answer, [True])
-        self.assertFalse(announce._channel_excluded_from_announce("#alpha", []))
 
 
 class ItShipsEmpty(unittest.TestCase):

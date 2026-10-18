@@ -393,22 +393,19 @@ def _channel_may_be_told(channel, user):
         return True
 
 
-def _channel_excluded_from_announce(channel, excluded=None):
+def _channel_excluded_from_announce(channel, excluded):
     """True for a channel ANNOUNCE_TRANSFERS_EXCLUDE names: the operator
     wants the advert there, but not the "Sent:" line.
 
-    `excluded` is the setting as send_transfer_complete() read it under
-    runtime.config_reload_lock; without it, it is read here, under the same
-    lock (see send_transfer_complete() for why).
+    `excluded` is the setting as the caller read it, under
+    runtime.config_reload_lock (see send_transfer_complete() for why). It is
+    passed in rather than read here so the setting is read in one place.
 
     Compared under the server's casemapping (irc.irc_lower()), as every
     channel comparison is (#1271). irc is imported here, not at the top,
     as the rest of this module does: irc imports dcc, which imports this
     module, so a top-level import would be a cycle.
     """
-    if excluded is None:
-        with runtime.config_reload_lock:
-            excluded = getattr(config, "ANNOUNCE_TRANSFERS_EXCLUDE", None)
     excluded = excluded or []
     if isinstance(excluded, str):
         excluded = excluded.split(",")

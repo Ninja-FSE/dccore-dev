@@ -28,9 +28,12 @@ golden fixture moved with them, by stripping \\x02 and by nothing else, after
 proving that stripping it from each old line reproduced the new line exactly.
 """
 
+import contextlib
+import io
 import os
 import re
 import sys
+import time
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,7 +45,7 @@ import defaults as config  # noqa: E402
 import theme  # noqa: E402
 import webserver  # noqa: E402
 
-from tests.support import DCCoreTestCase  # noqa: E402
+from tests.support import DCCoreTestCase, silence_debug  # noqa: E402
 
 BOLD = "\x02"
 
@@ -97,8 +100,7 @@ class TheChannelNoticeCanBeTurnedOff(DCCoreTestCase):
 
     def sent_to_channel(self):
         """Every line the fake oserve was asked to queue for a channel."""
-        oserve = sys.modules.get("oserve")
-        return [msg for kind, msg in getattr(oserve, "queued", [])
+        return [msg for kind, msg, *_ in self.oserve.queued
                 if kind == "channel_announce"]
 
     def test_it_ships_on(self):
@@ -116,37 +118,33 @@ class TheChannelNoticeCanBeTurnedOff(DCCoreTestCase):
     def test_it_has_a_label_rather_than_showing_its_own_name(self):
         self.assertIn("ANNOUNCE_TRANSFERS", webserver.SETTINGS_LABELS)
 
-    def test_the_gate_is_around_the_channel_send_only(self):
-        """Asserted on the source because the alternative - gating the whole
-        function - would also take the operator's own debug line, and both
-        versions pass any test that only checks the channel went quiet."""
-        with open(os.path.join(REPO_ROOT, "src", "announce.py"), encoding="utf-8") as f:
-            source = f.read()
-        body = source.split("def send_transfer_complete(", 1)[1] \
-                     .split("\ndef ", 1)[0]
-        lines = body.split("\n")
+    def finish(self):
+        """One finished transfer, as dcc.py reports it."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            announce.send_transfer_complete("#somechannel", "someone", "A.flac",
+                                            4096, time.time() - 30, 1000,
+                                            duration=1.0)
 
-        # The gate is found as a STATEMENT - a whole line, at the function's
-        # top level - not as text: the same words in a comment or a string
-        # are not the gate. Since #1444 the tickbox is read once, under
-        # runtime.config_reload_lock, into announce_on.
-        gate = "    elif announce_on and _channel_may_be_told(channel, user):"
-        at = [number for number, line in enumerate(lines) if line == gate]
-        self.assertEqual(len(at), 1, "the channel gate is not one statement")
-        gated = []
-        for line in lines[at[0] + 1:]:
-            if line.strip() and not line.startswith("        "):
-                break
-            gated.append(line.strip())
-        self.assertIn('oserve.queue_message("channel_announce", msg)', gated)
-        self.assertIn('announce_on = getattr(config, "ANNOUNCE_TRANSFERS", True)',
-                      [line.strip() for line in lines])
-        # feed_event("SENT", ...) since #550 - it sends the debug line and
-        # the structured event together; the property is the same: it sits
-        # OUTSIDE the channel gate.
-        self.assertTrue(any(line.strip().startswith('feed_event("SENT"') for line in lines))
-        self.assertFalse([line for line in gated if "feed_event(" in line])
-        self.assertFalse([line for line in gated if "send_debug(" in line])
+    def test_the_gate_is_around_the_channel_send_only(self):
+        """Gating the whole function would also take the operator's own
+        record of the send, and pass any test that only checks the channel
+        went quiet - so the SENT event is counted on both sides of the
+        tickbox, by running the send. (This was a reading of the source
+        until #1444; it now runs the code, CONVENTIONS #5.)"""
+        debug = silence_debug(announce)
+        for on, lines in ((True, 1), (False, 0)):
+            with self.subTest(ANNOUNCE_TRANSFERS=on):
+                self.oserve.queued.clear()
+                debug.clear()
+                self.set_config(ANNOUNCE_TRANSFERS=on)
+
+                self.finish()
+
+                told = self.sent_to_channel()
+                self.assertEqual(len(told), lines, told)
+                sent = [text for category, text in debug if category == "SENT"]
+                self.assertEqual(len(sent), 1, debug)
+                self.assertIn("A.flac", sent[0])
 
     def test_off_still_says_so_in_the_log(self):
         """Silence in the channel is wanted; silence in the operator's own

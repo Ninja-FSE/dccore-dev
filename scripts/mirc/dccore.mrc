@@ -6107,7 +6107,7 @@ alias dccore.sw.data {
   hadd dccore.swm k.ANNOUNCE_TRANSFERS_EXCLUDE 2105 list 1 2104
   hadd dccore.swm pg.ANNOUNCE_TRANSFERS_EXCLUDE 6
   hadd dccore.swm n.ANNOUNCE_TRANSFERS_EXCLUDE Don't announce finished transfers in these channels
-  hadd dccore.swm h.ANNOUNCE_TRANSFERS_EXCLUDE Channels where a finished transfer is not announced even with the announcement switched on~2C for channels whose rules forbid that kind of message. Leave it empty to post the line in every channel.
+  hadd dccore.swm h.ANNOUNCE_TRANSFERS_EXCLUDE Channels~2C separated by commas and each with its ~23 (for example ~23alpha~2C ~23beta)~2C where a finished transfer is not announced even with the announcement switched on. Case does not matter; the advert still goes there. Leave it empty to post the line in every channel.
   hadd dccore.swm k.BROADCAST_SEARCH_CHANNEL 2109 str 1 2108
   hadd dccore.swm pg.BROADCAST_SEARCH_CHANNEL 6
   hadd dccore.swm n.BROADCAST_SEARCH_CHANNEL Broadcast search channel
