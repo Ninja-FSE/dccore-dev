@@ -1160,6 +1160,16 @@ def note_nick_change(old_nick, new_nick):
     involved at all: `user_processing_lock` and the `"user"` field on any
     matching `active_transfers` row now move too.
 
+    The DAILY_SEND_FAILS_LIMIT count follows the nick as well (#1437), and the
+    pause with it: `failed_transfers` is keyed like `dcc_queue`, and the
+    request gate reads only the asking nick's key, so a nick paused at its
+    last failed send that typed /nick was served again at once with its count
+    back at 0. (A reconnect under another nick is a QUIT and a new JOIN, no
+    NICK line, so it does not come through here: it is a new nick to the
+    bot.) A pause is not a sanction in the sense below - it is the bot's own
+    state about a receiver that keeps failing, and a new name does not mend
+    the receiver.
+
     NOT the sanctions. `muted_until` and `banned_users` are keyed on the nick
     too, and carrying those across would be a change of policy rather than a
     fix: DCCore already answers nick-hopping with hard bans, which match a
@@ -1277,6 +1287,12 @@ def note_nick_change(old_nick, new_nick):
                 db.save_dcc_queue()
             except Exception as save_err:
                 print(f"[NICK] Could not save the queue after {old_nick} -> {new_nick}: {save_err}")
+
+    # The failed sends today and the pause they made (#1437). dcc.py owns the
+    # entry and takes its own lock, so this is after queue_lock is released:
+    # dcc.py never takes one inside the other.
+    if dcc.carry_send_fails(old_key, new_key):
+        moved.append("failed_transfers")
 
     # Unchanged behaviour, kept here so one function owns the whole rename.
     send_queue = getattr(config, "send_queue", None)

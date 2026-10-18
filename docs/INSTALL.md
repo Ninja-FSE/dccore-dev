@@ -255,8 +255,9 @@ the downloader removes with `@<bot>-remove`, does not count. Nor does a
 failure on the bot's side, such as a file that vanished from the library or
 a network share that stopped answering while it was read. Admins
 (`ADMIN_NICK`) are never paused. The count is kept in memory, so a restart
-forgives it. The console's `status` shows who is paused, and `unpause <nick>`
-lifts it at once. 0, the default, is off.
+forgives it; a nick change does not, since the count and the pause follow
+the new nick like the queue does. The console's `status` shows who is
+paused, and `unpause <nick>` lifts it at once. 0, the default, is off.
 
 A send nobody connected to is often the bot's own problem rather than the
 downloader's: a wrong address (`MY_IP_OR_DOCK`), a port forward the router
