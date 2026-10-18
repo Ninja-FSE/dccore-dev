@@ -1834,9 +1834,15 @@ def note_failed_send(nick):
     return fails
 
 
-def _pause_for_send_fails(nick, key, fails):
+def _pause_for_send_fails(nick, key, fails, queued_only=False):
     """`nick` has reached DAILY_SEND_FAILS_LIMIT: drop its queued files, as
-    !clearqueue would, and say why - to the nick and to the operator."""
+    !clearqueue would, and say why - to the nick and to the operator.
+    Returns how many queued files went.
+
+    `queued_only`: the dispatcher found rows under a nick already paused
+    (drop_queues_of_paused_nicks(), #1460). With nothing left to drop by the
+    time the lock is held, nothing is said - the nick was told when it was
+    paused."""
     import db
     with queue_lock:
         rows = config.dcc_queue.get(key) or []
@@ -1846,7 +1852,10 @@ def _pause_for_send_fails(nick, key, fails):
             for temp_path in discard_orphaned_temp_archives(key):
                 print(f"[DCC PAUSE] Removed orphaned temp archive: {temp_path}")
             config.dcc_queue.pop(key, None)
-        getattr(config, "frozen_queues", {}).pop(key, None)
+        if removed or not queued_only:
+            getattr(config, "frozen_queues", {}).pop(key, None)
+    if queued_only and not removed:
+        return 0
     if removed:
         try:
             db.save_dcc_queue()
@@ -1861,6 +1870,40 @@ def _pause_for_send_fails(nick, key, fails):
     if oserve_mod:
         oserve_mod.queue_message(nick, f"NOTICE {nick} :{config.C_BOLD}"
                                        f"{announce.send_fails_paused_text(fails, removed)}{config.C_RESET}\r\n")
+    return removed
+
+
+def drop_queues_of_paused_nicks():
+    """The dispatcher's side of DAILY_SEND_FAILS_LIMIT (#1460): drop what is
+    still queued for a nick paused right now, as the pause itself does
+    (_pause_for_send_fails()), and return {nick_key: fails} of every paused
+    nick, for the claim sites to pass over.
+
+    The pause removes the queue when it begins, but the queue can still be
+    there: after a rename merges a pause onto a nick that has a queue of its
+    own, or when a NICK lands between note_failed_send() counting the
+    failure and the removal, which then looks under the old nick. Only the
+    request gate asked send_fails_paused(), so those rows were sent.
+
+    Dropped, not kept for midnight: the pause leaves a nick no queue, and it
+    would have left this one none had it found the rows. Rows kept would also
+    count as waiting in nicks_waiting_for_a_slot() while never being sent.
+
+    Lock order (#1452): the paused set is read under failed_transfers_lock,
+    which is released before queue_lock is taken. The two are never held
+    together."""
+    paused = paused_for_send_fails()
+    if not paused:
+        return paused
+    with queue_lock:
+        holding = []
+        for key, rows in config.dcc_queue.items():
+            if rows and _send_fails_key(key) in paused:
+                head = rows[0] if isinstance(rows[0], dict) else {}
+                holding.append((key, head.get("user_raw") or key))
+    for key, nick in holding:
+        _pause_for_send_fails(nick, key, paused[_send_fails_key(key)], queued_only=True)
+    return paused
 
 
 def unpause_send_fails(nick):
@@ -2519,6 +2562,13 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         # sweep the large send's end triggers dispatches it, and
         # the claim below counts as large until the send reads
         # its size.
+        #
+        # NOT TO A NICK PAUSED WHILE RAR RAN (#1460), by
+        # DAILY_SEND_FAILS_LIMIT - a rename can carry a pause
+        # onto the owner. Read before queue_lock, never inside
+        # it (#1452); the row is pointed at the archive all the
+        # same, so the drop below takes the archive with it.
+        paused_fails = send_fails_paused(owner_nick())
         room = False
         large_waits = False
         with queue_lock:
@@ -2532,6 +2582,9 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
                 next_file[QUEUED_SIZE_KEY] = final_size
                 send_to = owner_nick()
                 room = len(config.active_transfers) < config.MAX_DCC_SLOTS
+                if paused_fails:
+                    # No slot for a paused owner: dropped below (#1460).
+                    room = False
                 if room:
                     large_waits = waits_for_a_large_send([next_file])
                     if not large_waits:
@@ -2541,6 +2594,17 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
             print(f"[LINEAR RAR] {owner_nick()} removed {folder_leaf} while it was "
                   f"being packed; it is not sent.")
             _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED, job=job)
+            return False
+        if paused_fails:
+            print(f"[DCC PAUSE] {send_to} is paused; the packed {rar_filename} is not sent.")
+            _pause_for_send_fails(send_to, _send_fails_key(send_to), paused_fails, queued_only=True)
+            with queue_lock:
+                dropped = not _row_is_still_queued(next_file)
+            if dropped:
+                # Recorded by the folder it was packed from, not the archive.
+                folder_row = dict(next_file, path=next_file.get("source_path") or next_file.get("path"))
+                _record_pack_outcome(send_to, folder_row, transfer_log.STATUS_CANCELLED, job=job)
+            # The interlocks are released by the wrapper's finally (#714).
             return False
         if not room:
             print(f"[DCC-BLOCK] {send_to}: all {config.MAX_DCC_SLOTS} slot(s) busy, "
@@ -2584,7 +2648,7 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         return False
 
 
-def claim_next_in_line(passed_over=None):
+def claim_next_in_line(passed_over=None, paused=None):
     """Section B of check_queue_and_send(): under queue_lock, give a free
     slot to the next in line and claim them. Returns (promoted,
     promoted_key, pack_to_wake, absent_users):
@@ -2606,11 +2670,19 @@ def claim_next_in_line(passed_over=None):
     unchanged. Since #1387 a nick whose next file is large is passed over
     while another large file is being sent; `passed_over`, a list if given,
     gets the nick of each one, so the caller knows to fill the slot it left.
+
+    A nick paused by DAILY_SEND_FAILS_LIMIT is passed over (#1460) and the
+    sweep goes on to the next in line. `paused` is {nick_key: fails}, read
+    before queue_lock is taken (drop_queues_of_paused_nicks()); None reads
+    it here, before the lock too - failed_transfers_lock is never taken
+    inside queue_lock.
     """
     promoted = None
     promoted_key = None
     pack_to_wake = None
     absent_users = []
+    if paused is None:
+        paused = paused_for_send_fails()
     with queue_lock:
         # FIXED: re-check the slot count INSIDE the lock. The test above is already
         # stale by the time we acquire, so two concurrent callers could both pass it
@@ -2637,6 +2709,12 @@ def claim_next_in_line(passed_over=None):
             queue_key = str(waiting_user).lower()
 
             if hasattr(config, 'user_processing_lock') and queue_key in config.user_processing_lock:
+                continue
+
+            # Paused (#1460): never sent, and passed over before it can
+            # take the slot kept for a pack below. The dispatcher drops
+            # the rows (drop_queues_of_paused_nicks()).
+            if _send_fails_key(queue_key) in paused:
                 continue
 
             if not user_files or len(user_files) == 0 or queue_key in config.frozen_queues:
@@ -2863,13 +2941,20 @@ def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
                     print(f"[DCC QUEUE_CLEAN] {f_user} was frozen for over "
                           f"five minutes and never came back. Queue dropped.")
 
+    # A NICK PAUSED BY DAILY_SEND_FAILS_LIMIT IS SENT NOTHING (#1460). Its
+    # queue is dropped here, as the pause drops it, and both claims below
+    # pass it over: the request gate was the only place that asked, so rows
+    # a rename or a NICK left under a paused nick were sent. Read before
+    # queue_lock is taken, never inside it (#1452).
+    paused = drop_queues_of_paused_nicks()
+
     if user_key == "system_next_trigger_fallback":
         user_key = ""
 
     next_file = None
     with queue_lock:
         if user_key and user_key in config.dcc_queue and config.dcc_queue[user_key]:
-            if user_key not in config.frozen_queues:
+            if user_key not in config.frozen_queues and _send_fails_key(user_key) not in paused:
                 next_file = config.dcc_queue[user_key][0]  # FIXED: takes the top entry
 
     # THE FREED SLOT GOES TO WHO HAS WAITED LONGEST (#1032). Handing it straight
@@ -3172,7 +3257,8 @@ def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
     held_back = []
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
         # The sweep under queue_lock is claim_next_in_line() (#1304).
-        promoted, promoted_key, pack_to_wake, swept_absent = claim_next_in_line(passed_over=held_back)
+        promoted, promoted_key, pack_to_wake, swept_absent = claim_next_in_line(passed_over=held_back,
+                                                                                paused=paused)
         absent_users.extend(swept_absent)
 
     if promoted is not None and drop_an_unshared_row(promoted[0], promoted[4], lock_key=promoted_key):

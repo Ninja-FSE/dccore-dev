@@ -25,9 +25,11 @@ to fill with plain file sends, each of which re-checked correctly on its own
 way through. This was the one append that did not.
 """
 
+import io
 import os
 import sys
 import unittest
+from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -35,7 +37,11 @@ if REPO_ROOT not in sys.path:
 
 import dcc  # noqa: E402
 import defaults as config  # noqa: E402
+import platform_compat  # noqa: E402
+import runtime  # noqa: E402
 
+from tests import support  # noqa: E402
+from tests import test_path_security as security  # noqa: E402
 from tests.support import DCCoreTestCase  # noqa: E402
 
 
@@ -105,14 +111,81 @@ class ARunningPackCountsAsBusy(DCCoreTestCase):
         self.assertEqual(seen, [True])
 
 
-class ThePackRechecksItsSlotBeforeTakingOne(DCCoreTestCase):
-    """Asserted on the source, deliberately.
+class ThePackRechecksItsSlotWhenRarIsDone(security.PathSecurityBase):
+    """The capacity test between the pack finishing and the slot being
+    taken, evaluated: the real dispatcher and packer, with a stand-in for
+    the rar binary that writes the archive and lets every slot fill while
+    it runs. (Was a search of the source for the test's text, #1460.)"""
 
-    Reaching the append means running `rar` for real against a real album -
-    the branch is a subprocess call deep inside a 500-line function - and the
-    defect is precisely whether a capacity test stands between the pack
-    finishing and the slot being taken.
-    """
+    def setUp(self):
+        super().setUp()
+        config.channel_users = {"#dccore-test": {"dave"}}
+        self.set_config(MAX_DCC_SLOTS=2, rar_inprogress=False, transfers_paused=False,
+                        bot_joined_channel=True)
+        os.makedirs(config.TMP_ZIP_DIR, exist_ok=True)
+        patch = mock.patch.object(dcc.time, "sleep", lambda *_a: None)
+        patch.start()
+        self.addCleanup(patch.stop)
+        patch = mock.patch.object(platform_compat, "rar_command",
+                                  lambda configured=None: os.path.join(self.tree.root, "rar"))
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.addCleanup(setattr, runtime, "pack_owner", None)
+        self.addCleanup(setattr, runtime, "pack_job", None)
+        album = os.path.join(self.tree.music, "Some Artist", "Some Album")
+        os.makedirs(album, exist_ok=True)
+        with io.open(os.path.join(album, "01.flac"), "wb") as handle:
+            handle.write(b"\x00" * 1024)
+        self.row = {"file": "Some_Album.rar", "path": album, "channel": "#dccore-test",
+                    "user_raw": "dave", "is_unpacked_rar_folder": True, "is_temporary_zip": True}
+        self.slots_taken_while_rar_runs = 0
+
+        class Packed:
+            returncode = 0
+            stdout = stderr = ""
+
+        def rar_that_writes(cmd, *a, **kw):
+            with io.open([c for c in cmd if c.endswith(".rar")][0], "wb") as handle:
+                handle.write(b"Rar!")
+            for n in range(self.slots_taken_while_rar_runs):
+                config.active_transfers.append({"user": "other%d" % n, "file": "X.flac", "bytes_sent": 0})
+            return Packed()
+
+        support.fake_rar_runs(self, dcc.subprocess, rar_that_writes)
+
+    def dispatch(self):
+        config.dcc_queue["dave"] = [self.row]
+        with security.quiet():
+            dcc.check_queue_and_send(self.sock, "dave")
+
+    def sends(self):
+        return [args[1] for name, args in security.InlineThread.dispatched if name == "start_dcc_send"]
+
+    def test_slots_filled_while_rar_ran_are_not_overshot(self):
+        self.slots_taken_while_rar_runs = 2
+
+        self.dispatch()
+
+        self.assertEqual(len(config.active_transfers), 2, "the pack took a slot past MAX_DCC_SLOTS")
+        self.assertEqual(self.sends(), [])
+        self.assertEqual([r["file"] for r in config.dcc_queue["dave"]], ["Some_Album.rar"],
+                         "the archive no longer waits in the queue")
+        self.assertFalse(self.row["is_unpacked_rar_folder"], "the row does not name the archive")
+        self.assertFalse(config.rar_inprogress, "the interlock was not released")
+
+    def test_control_with_a_slot_left_the_archive_is_sent(self):
+        self.slots_taken_while_rar_runs = 1
+
+        self.dispatch()
+
+        self.assertEqual(self.sends(), ["dave"])
+        self.assertEqual(len(config.active_transfers), 2)
+
+
+class ThePackRechecksItsSlotBeforeTakingOne(DCCoreTestCase):
+    """Still asserted on the source. The capacity test itself is evaluated
+    above (ThePackRechecksItsSlotWhenRarIsDone), with rar a stand-in; the
+    checks left here could move onto the same fixture."""
 
     def source(self):
         """The packer first, then the wrapper that starts it: the packing has
@@ -124,13 +197,6 @@ class ThePackRechecksItsSlotBeforeTakingOne(DCCoreTestCase):
 
         return (inspect.getsource(dcc.pack_folder_for_request) + inspect.getsource(dcc.check_queue_and_send)
                 + inspect.getsource(dcc.claim_next_in_line))
-
-    def test_the_append_is_guarded_by_a_capacity_test(self):
-        source = self.source()
-
-        self.assertIn("room = len(config.active_transfers) < config.MAX_DCC_SLOTS",
-                      source)
-        self.assertIn("if room:", source)
 
     def test_it_is_taken_under_the_queue_lock(self):
         """Two dispatch threads reaching this together would otherwise both
