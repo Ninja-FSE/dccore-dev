@@ -862,7 +862,8 @@ first field, and its last field is always a sentence to show.
 | `DCCORE SETDONE error <message>` | | nothing was saved; the transaction is closed |
 | `DCCORE SETDONE confirm <question>` | | the commit clears `DEBUG_CHANNEL`, and the bot leaves that channel at once: ask, then send `setcommit confirm` (or `setabort`). A transaction from `setbegin` stays open meanwhile. After a lone `set` the question holds only until the next line: anything but `setcommit confirm` or `setabort` first ends it with `SETDONE aborted <n>`, and is then run as usual - so a later lone `set` saves at once, as it says |
 | `DCCORE SETDONE aborted <n>` | `setabort` | `n` buffered changes dropped |
-| `DCCORE SETAPPLIED` | after `SETDONE ok` with something written | the save's rehash has finished, so the new values are in effect - reload the page now, not at `SETDONE`: the rehash first waits up to `REHASH_TRANSFER_WAIT` for transfers, and until it reloads, `settings` still shows the old values. Always after the `SETDONE ok` it belongs to; none for a save that wrote nothing or failed |
+| `DCCORE SETAPPLIED` | after `SETDONE ok` with something written | the save's rehash has finished and its reload worked, so the new values are in effect - reload the page now, not at `SETDONE`: the rehash first waits up to `REHASH_TRANSFER_WAIT` for transfers, and until it reloads, `settings` still shows the old values. Always after the `SETDONE ok` it belongs to; none for a save that wrote nothing or failed, and none when the rehash failed (`SETAPPLYERR` instead) |
+| `DCCORE SETAPPLYERR <message>` | after `SETDONE ok` with something written, instead of `SETAPPLIED` | the save is in `settings.conf`, but the rehash that applies it failed (#1434) - an `admin_config.py` with a syntax error, for one - so the bot may not be running the saved values; the bot's log says why. Show the message, and do not say the settings are in effect. A line type of its own rather than a field of `SETAPPLIED`, so a script from before it, which reads every `SETAPPLIED` as success, shows it as a line it does not know instead. A plain console gets the same sentence, after "The settings were saved to settings.conf." |
 | `DCCORE PVBEGIN 2` / `DCCORE PVLINE <advert\|notice> <line>` / `DCCORE PVEND 2` | `setpreview` | the sample advert and transfer notice, encoded like every other value - colour codes as `%03`, runs of spaces as `%20` - so a client decodes it and echoes it in colour. (mIRC collapses runs of spaces in a chat line, and a theme's frame is made of them.) |
 | `DCCORE SRVBEGIN <lists> <source> <max>` / `DCCORE SRVLIST <n> <primary> <name>` / `DCCORE SRVCHAN <n> <channel> <mode>` / `DCCORE SRVFOLDER <n> <label> <path>` / `DCCORE SRVEND <lists> <channels> <folders>` | `served` | per list, in order: its `SRVLIST` (`n` from 1, `primary` `1` or `0`, the name last), then a `SRVCHAN` per channel bound to it (`channel` a token, `mode` `normal`, `quiet` or `request_only`), then a `SRVFOLDER` per folder (`label` a token, the path last). `source` is `file` (`lists.json`) or `implied` (none: one list over the served folders - sending it back unchanged does not create the file). `max` is how many lists there may be. A list's own file types to leave out (#1295) are not in the snapshot; a `served` commit keeps them |
 | `DCCORE SRVOPEN <dropped>` | `served begin` | then `served list <n> <0\|1> <name>` (`n` the next number), `served chan <n> <channel> <mode>`, `served folder <n> <label> <path>`, and `served commit` or `served abort` |
@@ -1090,8 +1091,12 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
   new connection starts locked again.
 - **After a save** the status line says *Applying...* until the bot has
   reloaded (it may first wait for transfers to finish), then *Saved and
-  applied*, and the page shows the bot's values. If the console reconnects
-  while you have changes not saved, they are kept: **Reload** discards them.
+  applied*, and the page shows the bot's values. If the reload fails - an
+  `admin_config.py` left with a syntax error, say - it says the settings were
+  saved to `settings.conf` but could not be applied, and `@DCCore` has the
+  bot's sentence; the bot's log says why. The page keeps what you saved, and
+  **Reload** shows what the bot is running. If the console reconnects while
+  you have changes not saved, they are kept: **Reload** discards them.
 - **Structured pages**: the on-connect commands on **IRC Server** (**Resend
   now** sends them again, **Unlock** shows them); **Lists**, a table with a row
   per list, where **Add list** and **Edit** open a window for one list's name,

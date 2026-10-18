@@ -606,12 +606,20 @@ def _commit(session, txn, confirmed, single):
     import threading
     reported = threading.Event()
 
-    def applied():
+    def applied(ok=True):
         # On the rehash's thread, once it has run: the window reloads its
         # page now, not at SETDONE, when config still held the old values.
         # After SETDONE, always - the rehash can finish first.
         reported.wait(10)
-        _say(session, "SETAPPLIED", "The rehash has finished: the new settings are in effect.")
+        if ok:
+            _say(session, "SETAPPLIED", "The rehash has finished: the new settings are in effect.")
+            return
+        # A failed reload (#1434) is a line type of its own, not a field of
+        # SETAPPLIED: a script from before it reads every SETAPPLIED as
+        # "in effect", whatever follows, and shows a type it does not know.
+        why = ("The rehash that applies them failed, so the bot may not be running the "
+               "saved values. The bot's log says why; fix that, then rehash.")
+        _say(session, f"SETAPPLYERR {why}", f"The settings were saved to settings.conf. {why}")
 
     try:
         status, result = webserver.apply_settings_changes(

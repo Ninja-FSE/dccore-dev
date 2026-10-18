@@ -721,6 +721,9 @@ def _save_settings_and_rehash(changes, confirmed_debug_removal=False, source=Non
     an OSError escape would surface as an unhandled 500 with a non-JSON body,
     which the frontend's postJson() cannot parse.
 
+    `on_applied(ok)`, when given, is called on the rehash's thread once it
+    has finished: `ok` False when the reload failed (#1434).
+
     Returns (http_status, payload_dict).
     """
     import settings_file
@@ -744,11 +747,19 @@ def _save_settings_and_rehash(changes, confirmed_debug_removal=False, source=Non
         # settings window reloads its page then (#1264), not at the save,
         # when config still holds the old values: the rehash first waits up
         # to REHASH_TRANSFER_WAIT for transfers to finish.
+        #
+        # And told WHETHER it worked (#1434): the rehash catches a failed
+        # reload itself, so finishing is not succeeding, and "in effect" after
+        # a reload that failed was a lie. FAILS CLOSED: only an explicit True
+        # is "in effect", so a bare `return` added one day somewhere in the
+        # rehash's several hundred lines says "not applied" rather than
+        # repeating this bug. A rehash that raised is a failure too.
+        ok = False
         try:
-            commands.handle_rehash_request(who, where, **rehash_kwargs)
+            ok = commands.handle_rehash_request(who, where, **rehash_kwargs) is True
         finally:
             if on_applied is not None:
-                on_applied()
+                on_applied(ok)
 
     threading.Thread(target=rehash, daemon=True).start()
 

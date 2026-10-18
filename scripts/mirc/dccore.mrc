@@ -844,6 +844,9 @@ alias dccore.structured {
   if (%type == DQBEGIN) { hdel -w dccore.live dq.* | hdel dccore.live dqend | hadd dccore.live dqn 1 | return }
   if (%type == DQROW) { hadd dccore.live dq. $+ $dccore.st(dqn) $2- | hinc dccore.live dqn | return }
   if (%type == DQEND) { hadd dccore.live dqcount $2 | hadd dccore.live dqend 1 | dccore.dq.draw | return }
+  ; A save's rehash that failed (#1434), when the settings window is not
+  ; waiting for it - closed, or the set typed here: said here, never dropped.
+  if (%type == SETAPPLYERR) && (!$dccore.sw.wants(%type)) { dccore.alert $dccore.tag(SETTINGS,fail) $dccore.bot $+ : the settings were saved to settings.conf. $2- | return }
   ; The settings window's lines (#1264), but only the ones it is waiting
   ; for (and, for a few seconds after it closes, its late replies): the
   ; same lines answering a command typed in this window - settings, set,
@@ -2547,7 +2550,7 @@ alias dccore.dcx.checkcb {
 
 ; The lines this window reads, routed here by dccore.structured while it is
 ; open (and for a few seconds after, so a late reply is not shown as noise).
-alias dccore.sw.types { return CAPS SETBEGIN SETF SETEND SETOPEN SETERR SETDONE SETAPPLIED LOCKED UNLOCKED UNLOCK PVBEGIN PVLINE PVEND SRVBEGIN SRVLIST SRVCHAN SRVFOLDER SRVEND SRVOPEN SRVERR SRVDONE FLDBEGIN FLDROW FLDEND FLDOPEN FLDERR FLDDONE OCBEGIN OCLINE OCEND OCOPEN OCERR OCDONE OCRESEND BANBEGIN BANP BANT BANEND }
+alias dccore.sw.types { return CAPS SETBEGIN SETF SETEND SETOPEN SETERR SETDONE SETAPPLIED SETAPPLYERR LOCKED UNLOCKED UNLOCK PVBEGIN PVLINE PVEND SRVBEGIN SRVLIST SRVCHAN SRVFOLDER SRVEND SRVOPEN SRVERR SRVDONE FLDBEGIN FLDROW FLDEND FLDOPEN FLDERR FLDDONE OCBEGIN OCLINE OCEND OCOPEN OCERR OCDONE OCRESEND BANBEGIN BANP BANT BANEND }
 
 ; Whether the window is waiting for a line of type $1: its phase, or the
 ; wait (w.<what>) or flag (saving.srv, saving.oc, resending.oc, unlocking,
@@ -2560,6 +2563,7 @@ alias dccore.sw.wants {
   if ($istok(SETBEGIN SETF SETEND,%t,32)) { return $iif(%phase == load,$true,$false) }
   if ($istok(SETOPEN SETERR SETDONE,%t,32)) { return $iif($istok(apply confirm aborting preview locked,%phase,32),$true,$false) }
   if (%t == SETAPPLIED) { return $iif($dccore.sw.s(applying) != $null,$true,$false) }
+  if (%t == SETAPPLYERR) { return $iif($dccore.sw.s(applying) != $null,$true,$false) }
   if ($istok(PVBEGIN PVLINE PVEND,%t,32)) { return $iif(%phase == preview,$true,$false) }
   if ($istok(SRVBEGIN SRVLIST SRVCHAN SRVFOLDER SRVEND,%t,32)) { return $iif($dccore.sw.s(w.served) != $null,$true,$false) }
   if ($istok(FLDBEGIN FLDROW FLDEND,%t,32)) { return $iif($dccore.sw.s(w.folders) != $null,$true,$false) }
@@ -3740,6 +3744,20 @@ alias dccore.sw.line {
     dccore.sw.load
     return
   }
+  ; the save's rehash failed (#1434): settings.conf holds the new values,
+  ; the bot may not. Not reloaded: the page shows what was saved, the
+  ; status says it is not in effect, and Reload shows what the bot runs.
+  ; The status control is one line of about 75 characters, so the bot's
+  ; own sentence goes to @DCCore, whole.
+  if (%t == SETAPPLYERR) {
+    dccore.sw.waited applied
+    ; no literal comma: var reads one as the start of another variable
+    var %said = Saved $dccore.sw.s(applying) setting(s) - could not apply them: the rehash failed.
+    hdel dccore.sws applying
+    dccore.sw.status %said See @DCCore.
+    dccore.alert $dccore.tag(SETTINGS,fail) $dccore.bot $+ : the settings were saved to settings.conf. $2- Reload in the settings window shows what it runs now.
+    return
+  }
   ; the lock: LOCKED <command> <sentence>, UNLOCKED, UNLOCK error <message>
   if (%t == LOCKED) { dccore.sw.locked $2- | return }
   if (%t == UNLOCKED) { dccore.sw.unlocked | return }
@@ -3942,7 +3960,8 @@ alias dccore.sw.done {
     if ($4 != -) { %said = %said Restart the bot to apply $replace($4,$chr(44),$chr(44) $+ $chr(32)) $+ . }
     if ($dccore.sw.s(close)) { dccore.sys Settings: %said | dccore.sw.maybeclose | return }
     ; something written: the bot applies it with a rehash, which may first
-    ; wait for transfers, and says SETAPPLIED when it has. Until then the
+    ; wait for transfers, and says SETAPPLIED when it has (SETAPPLYERR if
+    ; the rehash failed, #1434). Until then the
     ; values just sent are the baseline (a reload now would show the old
     ; ones); the page is reloaded at SETAPPLIED.
     if ($2 > 0) {
