@@ -1902,6 +1902,26 @@ def carry_send_fails(old_key, new_key):
         return True
 
 
+def carry_never_connected_streak(old_key, new_key):
+    """Move `old_key` to `new_key` in the never-connected streak's nicks on a
+    rename (irc.note_nick_change()), as carry_send_fails() moves the count:
+    one user renamed mid-streak is still one nick, not two
+    (never_connected_counts()). Both are dcc_queue keys, as
+    _send_fails_key() makes them. True when the old nick was in the streak.
+
+    Takes send_connected_lock only, and nothing inside it; call it outside
+    queue_lock. A new key already in the streak stays there once: the set
+    then counts this user once, which is the point. The streak's length is
+    left alone - the sends happened, under whichever name."""
+    with runtime.send_connected_lock:
+        nicks = runtime.never_connected_streak_nicks
+        if old_key not in nicks:
+            return False
+        nicks.discard(old_key)
+        nicks.add(new_key)
+        return True
+
+
 def get_total_queued_count():
     """The total number of files sitting in every personal queue right now.
 
