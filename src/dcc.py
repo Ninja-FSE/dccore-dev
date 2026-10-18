@@ -3523,9 +3523,10 @@ def offered_name_from_handshake(handshake):
 def dcc_block_size():
     """Bytes per read/write pass of a transfer, clamped to something sane.
 
-    Read through config on every transfer rather than captured once, like
-    every other tunable here: !rehash reloads config, and a value baked in at
-    import would keep the old one for the life of the process.
+    Read through config on every pass of a send (#1461), not captured once:
+    !rehash reloads config, and a send that kept the block it started with
+    took a bigger share of the upload cap's shared clock than the sends
+    started after it.
 
     CLAMPED, not trusted. This number is multiplied by the number of
     concurrent transfers to give the memory this bot holds in send buffers, so
@@ -5820,9 +5821,6 @@ def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user)
                 raise _SourceUnreadable(err) from err
         # mIRC's "packet size", and the reason raising it there is
         # noticeable: mIRC defaults to 4 KB and this has always been 64.
-        # Resolved once per transfer, not once per pass - the value cannot
-        # change mid-file, and a getattr in the inner loop of a 4 GB send
-        # is a million lookups for one answer.
         block = dcc_block_size()
         # The timeout covers one whole sendall() of `block` bytes, so it
         # scales with the block; see SEND_TIMEOUT_SECONDS.
@@ -5866,6 +5864,24 @@ def stream_the_file(conn, file_path, resume_offset, bytes_sent, acks, row, user)
                     tx['bytes_sent'] += len(chunk)
             oserve = sys.modules.get('oserve')
             if oserve: oserve.total_sent_bytes += len(chunk)
+            # The block for the next pass, read again every pass rather
+            # than once per transfer (#1461): DCC_BLOCK_SIZE changes on a
+            # rehash, and under the upload cap the chunk is bounded by it.
+            # A send that kept the block it started with took bigger (or
+            # smaller) chunks from the shared clock than the sends started
+            # after the change, so the newer ones moved less than an even
+            # split although only the cap held them - and
+            # upload_cap_holds_this_send() let the slow-send watch stop one
+            # as a crawler. One getattr a pass is nothing beside the read
+            # and the sendall(); the timeout is set again only when the
+            # block did change, before the chunk it covers goes out. In a
+            # !rehash's few milliseconds of shipped defaults
+            # (runtime.config_reload_lock) one pass may move the default
+            # 64 KB with its 60 s, and the next goes back.
+            now_block = dcc_block_size()
+            if now_block != block:
+                block = now_block
+                conn.settimeout(_send_timeout(block))
     return bytes_sent
 
 

@@ -579,12 +579,21 @@ class ChunkSender:
     only it - and then spends `link_bps` time getting the chunk to its
     receiver before it asks for the next one."""
 
-    def __init__(self, name, link_bps, start):
+    def __init__(self, name, link_bps, start, blocks=None):
         self.name = name
         self.link_bps = link_bps
         self.ready_at = start       # when it next calls take()
         self.slept = 0.0
         self.delivered = []         # (acknowledged at, bytes)
+        # The block each pass asks chunk_size() for (#1461), the last one
+        # kept for every pass after it; None reads dcc_block_size() every
+        # pass, as stream_the_file() does.
+        self.blocks = list(blocks) if blocks is not None else None
+
+    def next_block(self):
+        if self.blocks is None:
+            return dcc.dcc_block_size()
+        return self.blocks.pop(0) if len(self.blocks) > 1 else self.blocks[0]
 
     def sleep(self, seconds):
         self.slept += seconds
@@ -618,17 +627,17 @@ class TheSharedClock(DCCoreTestCase):
     def drive(self, sends, seconds):
         """Every send, in the order its calls would reach take(), for
         `seconds` of the fake clock; each one's next chunk is what the send
-        loop asks for, chunk_size(UPLOAD, dcc_block_size())."""
+        loop asks for, chunk_size(UPLOAD, block) - the block being
+        dcc_block_size() unless the send was given its own."""
         runtime.speed_cap_clocks.clear()
         clock = FakeClock(self.START)
-        block = dcc.dcc_block_size()
         end = self.START + seconds
         while True:
             send = min(sends, key=lambda s: s.ready_at)
             if send.ready_at >= end:
                 return
             clock.t = send.ready_at
-            nbytes = speed_cap.chunk_size(speed_cap.UPLOAD, block)
+            nbytes = speed_cap.chunk_size(speed_cap.UPLOAD, send.next_block())
             slept_before = send.slept
             speed_cap.take(speed_cap.UPLOAD, nbytes, clock=clock, sleep=send.sleep)
             waited = send.slept - slept_before
@@ -675,6 +684,153 @@ class TheSharedClock(DCCoreTestCase):
                                     f"{send.name} is held by the cap but not shielded: {rates}")
                 self.assertFalse(dcc.upload_cap_holds_this_send(rates[slow.name], total),
                                  f"the slow link is shielded by a cap it never reaches: {rates}")
+
+
+    # -- sends asking for different blocks (#1461) ---------------------------
+    #
+    # The even split rests on every send asking chunk_size() with the same
+    # block. A send started before a rehash lowered DCC_BLOCK_SIZE, if it kept
+    # the block it started with, took a bigger chunk per round of the shared
+    # clock than the sends started after the change; they moved less than an
+    # even split although only the cap held them. The issue's own table:
+    # (cap KB/s, the older send's block, the newer sends' block).
+    MIXED = ((400, 64 * KB, 8 * KB), (400, 64 * KB, 16 * KB), (150, 64 * KB, 4 * KB))
+
+    def rates_of(self, sends):
+        window = dcc.SLOW_SEND_WINDOW_SECONDS
+        self.drive(sends, self.WARM_UP + window)
+        since = self.START + self.WARM_UP
+        return {s.name: s.rate(since, since + window) for s in sends}
+
+    def held(self, sends, rates):
+        """upload_cap_holds_this_send() for each send, a row per send."""
+        config.active_transfers[:] = [{"user": s.name, "file": s.name + ".flac"} for s in sends]
+        total = sum(rates.values())
+        return {s.name: dcc.upload_cap_holds_this_send(rates[s.name], total) for s in sends}
+
+    def test_a_send_that_kept_a_bigger_block_starves_the_ones_after_it(self):
+        """The failure #1461 reports, on the real clock: one send at the old
+        64 KB block and two at the new smaller one, all on fast links under a
+        full cap. Each round of the clock moves one chunk of each, so the
+        rates split as the chunks do - 285 / 57 / 57 KB/s at 400 KB/s with
+        8 KB - and the newer two are short of SLOW_SEND_CAP_NEAR of an even
+        split and NOT held by upload_cap_holds_this_send(). With
+        SLOW_SEND_MIN_KB=60, every slot full and a nick waiting, the 57 KB/s
+        send would be stopped as a crawler while the 285 proves the bot
+        delivers - although its own link is fast and only the cap slowed it.
+
+        This drives the harness only, so it cannot fail on the old dcc.py;
+        it is the case stream_the_file() now prevents by asking every pass
+        for the current block (test_the_blocks_the_send_loop_asks_for_after_
+        a_change_share_the_cap_evenly, below, and
+        test_the_send_loop_on_its_own.py's TheBlockIsReadEveryPass)."""
+        for cap_kb, old_block, new_block in self.MIXED:
+            with self.subTest(MAX_UPLOAD_KB=cap_kb, old=old_block, new=new_block):
+                self.set_config(MAX_UPLOAD_KB=cap_kb)
+                before = ChunkSender("before", self.FAST_LINK, self.START, blocks=[old_block])
+                after = [ChunkSender(f"after{n}", self.FAST_LINK, self.START, blocks=[new_block])
+                         for n in range(2)]
+                sends = [before] + after
+                rates = self.rates_of(sends)
+                total = sum(rates.values())
+                self.assertTrue(dcc.upload_cap_binds(total), rates)
+
+                # The rates split as the chunks do.
+                big = speed_cap.chunk_size(speed_cap.UPLOAD, old_block)
+                small = speed_cap.chunk_size(speed_cap.UPLOAD, new_block)
+                self.assertGreater(big, small)
+                expected = cap_kb * KB * small / (big + 2 * small)
+                for send in after:
+                    self.assertAlmostEqual(rates[send.name], expected, delta=0.02 * cap_kb * KB,
+                                           msg=rates)
+
+                even = dcc.SLOW_SEND_CAP_NEAR * total / len(sends)
+                held = self.held(sends, rates)
+                self.assertTrue(held["before"], rates)
+                for send in after:
+                    self.assertLess(rates[send.name], even, rates)
+                    self.assertFalse(held[send.name], f"{send.name} at {rates[send.name]:.0f} B/s: {rates}")
+
+        # The issue's 57 KB/s, under a 60 KB/s floor that the older send clears.
+        self.set_config(MAX_UPLOAD_KB=400)
+        sends = [ChunkSender("before", self.FAST_LINK, self.START, blocks=[64 * KB])] + \
+                [ChunkSender(f"after{n}", self.FAST_LINK, self.START, blocks=[8 * KB]) for n in range(2)]
+        rates = self.rates_of(sends)
+        self.assertAlmostEqual(rates["after0"] / KB, 57, delta=2)
+        self.assertGreater(rates["before"], 60 * KB)
+        self.assertLess(rates["after0"], 60 * KB)
+
+    def test_one_block_for_every_send_shares_the_cap_evenly_and_holds_them(self):
+        """The counterpart: the same three sends, every one asking for the
+        same block - the new one, as each does from its next pass on after a
+        rehash - move an even split, and each is held."""
+        for cap_kb, _old_block, new_block in self.MIXED:
+            with self.subTest(MAX_UPLOAD_KB=cap_kb, block=new_block):
+                self.set_config(MAX_UPLOAD_KB=cap_kb)
+                sends = [ChunkSender(f"send{n}", self.FAST_LINK, self.START, blocks=[new_block])
+                         for n in range(3)]
+                rates = self.rates_of(sends)
+                total = sum(rates.values())
+                self.assertTrue(dcc.upload_cap_binds(total), rates)
+                even = dcc.SLOW_SEND_CAP_NEAR * total / len(sends)
+                for send in sends:
+                    self.assertGreaterEqual(rates[send.name], even, rates)
+                self.assertTrue(all(self.held(sends, rates).values()), rates)
+
+    def blocks_the_send_loop_asks_for(self, start_block, changed_to, passes):
+        """The block stream_the_file() passes to chunk_size() on each pass of
+        a send started at `start_block` whose DCC_BLOCK_SIZE is changed to
+        `changed_to` after its first chunk - read off the real loop, with no
+        cap so nothing waits."""
+        tmp = tempfile.mkdtemp(prefix="dccore-blocks-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        path = os.path.join(tmp, "Some_Album.flac")
+        with io.open(path, "wb") as handle:
+            handle.write(bytes(start_block + changed_to * passes))
+        row = {"user": SENDER, "file": "Some_Album.flac", "bytes_sent": 0}
+        self.set_config(DCC_BLOCK_SIZE=start_block, MAX_UPLOAD_KB=0, SLOW_SEND_MIN_KB=0,
+                        active_transfers=[row])
+        asked = []
+        real_chunk_size = speed_cap.chunk_size
+
+        def recording(direction, block):
+            asked.append(block)
+            return real_chunk_size(direction, block)
+
+        def changing(conn, tracker, wait=0.0):
+            acking_everything(conn, tracker, wait)
+            if conn.chunks == 1:
+                config.DCC_BLOCK_SIZE = changed_to
+
+        conn = OneSecondPerChunk(FakeClock())
+        with mock.patch.object(speed_cap, "chunk_size", recording), \
+                mock.patch.object(dcc, "_drain_acks", changing):
+            dcc.stream_the_file(conn, path, 0, 0, dcc._AckTracker(), row, SENDER)
+        return asked
+
+    def test_the_blocks_the_send_loop_asks_for_after_a_change_share_the_cap_evenly(self):
+        """The two tied together: the send started before the rehash is fed
+        the blocks the real stream_the_file() asks for when DCC_BLOCK_SIZE
+        goes from 64 KB to 8 KB after its first chunk, beside two sends
+        started after it at 8 KB. It asks for 64 KB once and 8 KB from then
+        on, so over the watch's window the three split the cap evenly and
+        every one is held. Read once per transfer, it asked for 64 KB every
+        pass, and the other two moved 57 KB/s each, unheld."""
+        asked = self.blocks_the_send_loop_asks_for(64 * KB, 8 * KB, passes=32)
+        self.assertEqual(asked[0], 64 * KB)
+        self.assertEqual(set(asked[1:]), {8 * KB}, "every pass after the change asks for the new block")
+
+        self.set_config(MAX_UPLOAD_KB=400, DCC_BLOCK_SIZE=8 * KB)
+        before = ChunkSender("before", self.FAST_LINK, self.START, blocks=asked)
+        after = [ChunkSender(f"after{n}", self.FAST_LINK, self.START) for n in range(2)]
+        sends = [before] + after
+        rates = self.rates_of(sends)
+        total = sum(rates.values())
+        self.assertTrue(dcc.upload_cap_binds(total), rates)
+        even = dcc.SLOW_SEND_CAP_NEAR * total / len(sends)
+        for send in sends:
+            self.assertGreaterEqual(rates[send.name], even, rates)
+        self.assertEqual(self.held(sends, rates), {s.name: True for s in sends}, rates)
 
 
 def acking_everything(conn, tracker, wait=0.0):
