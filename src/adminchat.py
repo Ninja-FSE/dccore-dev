@@ -432,7 +432,9 @@ def release_password_attempt(ip, reservation):
     one, and a block is lifted when, without this attempt, the count is
     under the limit. The last-failure time goes back to what it was when no
     other attempt was counted meanwhile; token logins side by side can
-    still move it forward, which only keeps the failures longer."""
+    still move it forward, which only keeps the failures longer, or, with a
+    wrong attempt counted between their releases, back by at most one token
+    check - which gives no attempt more."""
     if not ip or reservation is None:
         return
     entry, count_before, last_before = reservation
@@ -443,6 +445,8 @@ def release_password_attempt(ip, reservation):
         if entry[0] <= 0:
             del _bad_ips[ip]
             return
+        # Always so - a blocked address is refused before it is counted -
+        # but kept as a guard.
         if entry[0] < MAX_PASSWORD_ATTEMPTS:
             entry[1] = 0.0
         if last_before is not None and entry[0] == count_before:
