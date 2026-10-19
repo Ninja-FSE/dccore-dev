@@ -37,6 +37,32 @@ import transfer_log
 # comments mean when they say "queue_lock".
 queue_lock = runtime.queue_lock
 
+
+def _requested_name_and_size(text):
+    """A file request's name and pasted size hint, from what the user typed.
+
+    A line copied from the list carries a "  ::INFO:: <size> ..." tail; it is
+    split off (#234), and the size is kept, lower case, for the list scan to
+    tell same-named copies apart.
+    """
+    requested_file, size_hint = list_mod.strip_info_suffix(text)
+    return str(requested_file), size_hint.lower().strip()
+
+
+def queued_name_of_request(text):
+    """The name a plain file request for `text` is queued under, from the text
+    alone: handle_download_request()'s own strip, then the last part of the
+    path, as the row's name is the base name of the path the request opens.
+    os.path.basename(), so "\\" separates on Windows only, as it does there;
+    a leading "/" (which the request strips) changes no base name.
+
+    `@<nick>-remove <file>` matches the queue with it (#1473), so a line
+    pasted from the list, or a name with its folder in front, finds the row
+    the same text queued.
+    """
+    return os.path.basename(_requested_name_and_size(text)[0])
+
+
 def names_a_remote_or_absolute_path(name, windows=None):
     """True for a requested name that points somewhere the library is not (#578).
 
@@ -4485,10 +4511,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # branding after the marker too). That size is the one thing that
         # tells two identically-named copies apart, so it is kept as a hint
         # for the list scan below instead of being thrown away.
-        requested_file, requested_size_hint = list_mod.strip_info_suffix(requested_file)
-        requested_size_hint = requested_size_hint.lower().strip()
-
-        requested_file = str(requested_file)
+        requested_file, requested_size_hint = _requested_name_and_size(requested_file)
         # Before the "/" strip: "//host/share" is a UNC path to Windows, and
         # once its slashes are stripped it would look like a harmless relative
         # one. Refused on the text, before any file system call (#578).
@@ -4739,6 +4762,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             announce.send_dcc_error(user, "file_not_found", target_chan)
             return
 
+        # The row's name. queued_name_of_request() works out the same name
+        # from the text, for `@<nick>-remove <file>` (#1473).
         file_name = os.path.basename(full_path)
 
         # The console feed (#528): the request is real and the file exists -

@@ -311,8 +311,13 @@ def handle_queue_remove_file(s, user, target, filename):
     import list as list_mod
     import dcc
 
-    wanted = list_mod.printable_text(str(filename)).strip()
-    shown = wanted[:120]
+    # The name the same text would have been queued under (#1473): a line
+    # copied from the list keeps its "::INFO::" tail, and a request strips it.
+    typed = list_mod.printable_text(str(filename)).strip()
+    wanted = dcc.queued_name_of_request(typed)
+    # The bare name when there is one; what was typed when it names no file
+    # ("/", "Album/"), so the notice never reads "" is not in your queue.
+    shown = (wanted or typed)[:120]
     sending = []
 
     def choose(rows):
