@@ -1731,8 +1731,43 @@ def start_announce_thread():
     threading.Thread(target=announce_worker, daemon=True).start()
     print("[ANNOUNCE] The advert and debug timer started in the background.")
 
-def send_pack_error_notice(irc_sock, user, channel=None):
-    """Send the user a private NOTICE, in the same colour theme, when a request is refused."""
+# Why a !rar request was refused (#1475). Each refusal in
+# dcc.handle_download_request() names its own, so the requester is told the
+# reason that applies rather than one fixed text for all of them.
+PACK_REFUSED_ARTIST_ROOT = "artist_root"
+PACK_REFUSED_NOT_OFFERED = "not_offered"
+PACK_REFUSED_NOTHING_PACKABLE = "nothing_packable"
+PACK_REFUSED_TOO_LARGE = "too_large"
+
+
+def pack_refusal_text(reason=PACK_REFUSED_ARTIST_ROOT, limit_bytes=None):
+    """The sentence a refused !rar request is told, for one refusal reason.
+
+    The too-large text names the configured limit (limit_bytes), never the
+    folder's measured size and never a path on the server. An unknown reason
+    gets a neutral text rather than one that might be untrue.
+    """
+    if reason == PACK_REFUSED_ARTIST_ROOT:
+        return "Artist root folders cannot be requested. Please select a specific album sub-folder."
+    if reason == PACK_REFUSED_NOT_OFFERED:
+        return "That folder is not one this bot offers."
+    if reason == PACK_REFUSED_NOTHING_PACKABLE:
+        return ("That folder holds nothing this bot packs. "
+                "Its files can still be requested by name.")
+    if reason == PACK_REFUSED_TOO_LARGE:
+        limit = f"the {format_size_human(limit_bytes)} limit" if limit_bytes else "the limit"
+        return (f"That folder is larger than {limit} for packed folders. "
+                f"Its files can still be requested one by one.")
+    return "That folder cannot be packed."
+
+
+def send_pack_error_notice(irc_sock, user, channel=None,
+                           reason=PACK_REFUSED_ARTIST_ROOT, limit_bytes=None):
+    """Send the user a private NOTICE, in the same colour theme, when a request is refused.
+
+    reason is one of the PACK_REFUSED_* names above; limit_bytes is the
+    MAX_RAR_FOLDER_SIZE a PACK_REFUSED_TOO_LARGE refusal names.
+    """
     import defaults as config
     import sys
 
@@ -1746,7 +1781,7 @@ def send_pack_error_notice(irc_sock, user, channel=None):
     msg = (
         f"NOTICE {user} :"
         f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} DCC-PACK: Access Denied "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Error: Artist root folders cannot be requested. Please select a specific album sub-folder. "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Error: {pack_refusal_text(reason, limit_bytes)} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
     )
     
