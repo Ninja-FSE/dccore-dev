@@ -4292,7 +4292,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # in the containment check below before it could be refused (#578).
             if names_a_remote_or_absolute_path(win_path, windows=False):
                 print(f"[SECURITY] Refused {user}'s pack request: {win_path!r} names a remote location.")
-                announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
+                announce_mod.send_pack_error_notice(irc_sock, user, target_chan, reason=announce_mod.PACK_REFUSED_NOT_OFFERED)
                 return
 
             # This used to be a third, differently-shaped copy of the same
@@ -4332,7 +4332,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # configured folder at all, which is not safe by definition.
             if source_folder is None or not is_safe_path(source_folder.path, true_source_dir):
                 print(f"[SECURITY] Blocked a traversal attempt from {user}: {raw_win_path!r} -> {true_source_dir}")
-                announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
+                announce_mod.send_pack_error_notice(irc_sock, user, target_chan, reason=announce_mod.PACK_REFUSED_NOT_OFFERED)
                 announce_mod.send_debug(
                     f"Path traversal denied for {config.C_BOLD}{user}{config.C_RESET}: request resolved outside the music root.",
                     category="HARDBAN")
@@ -4345,7 +4345,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             relative_to_root = os.path.relpath(true_source_dir, source_folder.path)
             if os.sep not in relative_to_root:
                 print(f"[SECURITY] Blocked an attempt to pack the root folder from {user}: {relative_to_root}")
-                announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
+                announce_mod.send_pack_error_notice(irc_sock, user, target_chan, reason=announce_mod.PACK_REFUSED_ARTIST_ROOT)
                 announce_mod.send_debug(f"Pack denied for {user}: {config.C_BOLD}{relative_to_root}{config.C_RESET} is an artist root folder.", category="PART")
                 return
             
@@ -4390,7 +4390,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 if not has_packable:
                     print(f"[PACK] Refused {relative_to_root!r} for {user}: "
                           f"it holds nothing in RAR_EXTENSIONS.")
-                    announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
+                    announce_mod.send_pack_error_notice(irc_sock, user, target_chan, reason=announce_mod.PACK_REFUSED_NOTHING_PACKABLE)
                     announce_mod.send_debug(
                         f"Pack denied for {user}: "
                         f"{config.C_BOLD}{relative_to_root}{config.C_RESET} "
@@ -4412,7 +4412,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             if over:
                 print(f"[PACK] Refused {relative_to_root!r} for {user}: over "
                       f"{size_cap:,} bytes (measured at least {measured:,}).")
-                announce_mod.send_pack_error_notice(irc_sock, user, target_chan)
+                announce_mod.send_pack_error_notice(irc_sock, user, target_chan, reason=announce_mod.PACK_REFUSED_TOO_LARGE, limit_bytes=size_cap)
                 announce_mod.send_debug(
                     f"Pack denied for {user}: "
                     f"{config.C_BOLD}{relative_to_root}{config.C_RESET} is "
@@ -4493,7 +4493,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             import db
             db.save_dcc_queue()  # Commit straight to dcc_queue.txt
 
-            print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
+            print(f"[RAR QUEUE] Queued folder pack {master_rar_filename} for {user} at position #{user_pos}.")
 
             # One single clean line to the debug channel, nothing more
             announce_mod.feed_event("REQUEST", f"{user} asked for the folder \"{clean_folder_name}\""
