@@ -1293,6 +1293,12 @@ def note_nick_change(old_nick, new_nick):
     # dcc.py never takes one inside the other.
     if dcc.carry_send_fails(old_key, new_key):
         moved.append("failed_transfers")
+    # The nicks of the never-connected streak follow the same way: one user
+    # renamed between two unanswered offers is one nick to
+    # dcc.never_connected_counts(), not two. Its own lock, also outside
+    # queue_lock.
+    if dcc.carry_never_connected_streak(old_key, new_key):
+        moved.append("never_connected_streak")
 
     # Unchanged behaviour, kept here so one function owns the whole rename.
     send_queue = getattr(config, "send_queue", None)
