@@ -719,7 +719,7 @@ def _room_left_locked(queue, free, exclude=None):
     return free
 
 
-def _has_room(size, room):
+def has_room(size, room):
     """Whether a file of `size` fits in `room` and still leaves MIN_FREE_BYTES.
     Nothing to fit, or a disk that cannot be measured, is not held back - the
     write itself still fails safely."""
@@ -1720,7 +1720,7 @@ def check_fetch_queue():
             # A file already known not to fit waits until it does (#964),
             # weighed exactly as handle_incoming_offer() weighs the offer -
             # asked for sooner, its offer would only be held again.
-            if not why and not _has_room(row.get("needs_bytes"), room):
+            if not why and not has_room(row.get("needs_bytes"), room):
                 why = "disk-full"
             if not why and (row.get("retry_at") or 0) > now:
                 why = "retry"
@@ -2870,7 +2870,7 @@ def _promote_clean_filename(dest_dir, stored_name, queue=None, row=None):
     downloading the zip and unzipping it on Windows produced a folder named
     after the ZIP FILE ITSELF (there is no folder recorded inside a plain
     list zip for Explorer to unpack "into", the way there would be for a
-    folder packed with rar's -ep1 - see dcc.py's own use of that flag), so
+    folder dcc.py packs, which keeps the folder by its own name), so
     the id rode all the way onto the operator's own disk.
 
     Never overwrites an existing file at the plain name - a fetch of the
@@ -3021,7 +3021,7 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         # count as low, and the loop never ended. Now it waits, pending,
         # until what it declared fits with MIN_FREE_BYTES to spare.
         room = _room_left_locked(queue, _free_bytes(), exclude=request_id)
-        if not _has_room(offer["size"], room):
+        if not has_room(offer["size"], room):
             _hold_for_space(row, offer["size"],
                             f"needs {_mb(offer['size'])} free and {_mb(room)} is - "
                             f"asking again once there is space")
@@ -3345,8 +3345,8 @@ def _handle_completed_list_fetch(row, zip_path):
     live: an operator downloaded one of these zips to their own machine and
     unzipped it, and the request id ended up in the resulting filename too
     - there is no folder recorded inside a plain list zip for an unzip tool
-    to extract "into" the way there would be for one packed with rar's
-    -ep1 (see dcc.py's own use of that flag), so Explorer named the result
+    to extract "into" the way there would be for a folder dcc.py packs
+    (it keeps the folder by its own name), so Explorer named the result
     after the zip itself. Removing the zip is the fix for that as much as
     for the disk space: the raw download was never the deliverable, the
     browsable list is, and it already exists on its own.

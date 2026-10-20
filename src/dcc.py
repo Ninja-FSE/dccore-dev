@@ -1512,7 +1512,8 @@ class _AlreadyHeld(Exception):
     the end of the file. See `already_held` in start_dcc_send()."""
 
 
-def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, shown_name=None):
+def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, shown_name=None, retry=True,
+                        told=None):
     """Settle the queue row for a finished attempt. Returns True if the row was kept.
 
     Removal is by IDENTITY, never by position. start_dcc_send's finally used to do
@@ -1548,6 +1549,13 @@ def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, 
     of the row, so nothing is charged to its retry budget. The row is removed
     - the user asks again if they still want it - and the notice says so in
     place of "Could not send", naming `shown_name` and no path.
+
+    `retry` False settles a failure on its first time: a folder pack refused
+    for a reason a retry would meet again (PackRefused, #1376).
+
+    `told` is what the user's notice says in place of `reason`, which then
+    goes to the log alone: a folder pack's reason can name paths and sizes
+    of this machine (PACK_FAILED_TO_USER, #1376).
     """
     import defaults as config
     import db
@@ -1622,7 +1630,7 @@ def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, 
             in_a_queue = any(row is next_file
                              for rows in list(config.dcc_queue.values()) if rows
                              for row in rows)
-    retryable = is_row and in_a_queue and not consumed_temp
+    retryable = is_row and in_a_queue and not consumed_temp and retry
 
     retained = False
     gave_up = False
@@ -1641,6 +1649,8 @@ def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, 
                 why = "temporary archive is gone from disk"
             elif is_row and not in_a_queue:
                 why = "sent directly, not queued - nothing to retry"
+            elif not retry:
+                why = reason or "it may not be tried again"
             else:
                 why = "row is not retryable"
             outcome = "failed (" + why + "), " + str(removed) + " row(s) removed"
@@ -1691,7 +1701,8 @@ def release_queue_entry(user, next_file, delivered, reason="", cancelled=False, 
             # what to do.
             def _build(shown_name):
                 return ("NOTICE " + str(user) + " :" + config.C_BOLD + "Error" + config.C_RESET +
-                        ": Could not send " + shown_name + " - " + str(reason) + ". " + tail + "\r\n")
+                        ": Could not send " + shown_name + " - " + str(reason if told is None else told) +
+                        ". " + tail + "\r\n")
 
             if oserve_mod:
                 import announce as announce_mod
@@ -2113,7 +2124,9 @@ def next_waiting_pack_owner(exclude_user=None):
             if user_key == exclude or not entries:
                 continue
             head = entries[0]
-            if isinstance(head, dict) and head.get('is_unpacked_rar_folder') is True:
+            # A row waiting for room is not woken: the watcher wakes it (#1376).
+            if (isinstance(head, dict) and head.get('is_unpacked_rar_folder') is True
+                    and _space_hold_for(head) is None):
                 return head.get('user_raw') or user_key
     return None
 
@@ -2135,9 +2148,22 @@ def redispatch_waiting_pack(irc_sock, just_finished=None):
     releases it before returning, but the send path this leads into is long
     (it packs an album), and running it inline would also make one completion
     recurse into the next.
+
+    While packs are held (pack_hold_reason(), #1376) nothing is woken: the
+    watcher is started instead, and wakes the queue once they are not.
     """
     if getattr(config, 'rar_inprogress', False):
         return None
+    with queue_lock:
+        held = pack_hold_reason()
+        waiting_for_room = bool(runtime.pack_space_holds)
+    if held is not None or waiting_for_room:
+        if waiting_for_room or next_waiting_pack_owner() is not None:
+            if held is not None:
+                print(f"[RAR-HOLD] Folder packs wait in the queue: {held}.")
+            _arm_pack_hold_watch(irc_sock)
+        if held is not None:
+            return None
     owner = next_waiting_pack_owner(exclude_user=just_finished)
     if not owner:
         return None
@@ -2348,6 +2374,520 @@ def wake_restored_queues(irc_sock):
         check_queue_and_send(irc_sock, "system_next_trigger_fallback")
 
 
+# WHAT A PACK HOLDS (#1376). A !rar archive holds the files the list lists
+# below the folder - update_list.pack_members() - and none the list leaves
+# out: LIST_IGNORED_EXTENSIONS and the list's own exclusions (#1295). A !rar
+# row records the list it was asked through (PACK_LIST_KEY), so its pack
+# follows that list's rule; a packed archive's row records the types it was
+# packed without (PACKED_WITHOUT_KEY), so a request through a list that
+# leaves out more is never handed an archive packed for one that leaves out
+# less.
+PACK_LIST_KEY = "served_list"
+PACKED_WITHOUT_KEY = "packed_without"
+
+
+def pack_leaves_out(row):
+    """The file types a pack of `row` leaves out: update_list.ignored_extensions() of its list.
+
+    A row with no list on it (queued before rows recorded one), or naming a
+    list that is gone, gets every list's left-out types together, so its pack
+    holds nothing any list leaves out.
+    """
+    name = row.get(PACK_LIST_KEY) if isinstance(row, dict) else None
+    if name is not None and library.list_by_name(name) is not None:
+        return update_list.ignored_extensions(name)
+    every = list(update_list.ignored_extensions())
+    for entry in library.lists():
+        every.extend(update_list.ignored_extensions(entry.name))
+    return tuple(dict.fromkeys(every))
+
+
+def _archive_packed_without(path, ignored):
+    """Was the archive at `path` packed leaving out every type in `ignored`? Caller holds queue_lock.
+
+    Asked of the queue rows that name it as a packed archive, and of the rows
+    of the sends sending it: one whose PACKED_WITHOUT_KEY covers `ignored`
+    says yes. An archive no row says that of is not handed to another request.
+    """
+    wanted = _archive_key(path)
+    wanting = set(ignored)
+    rows = [row for rows in list(config.dcc_queue.values()) for row in rows or ()]
+    rows += [tx.get("queue_row") for tx in config.active_transfers if isinstance(tx, dict)]
+    for row in rows:
+        if not isinstance(row, dict) or row.get("is_unpacked_rar_folder") or not row.get("path"):
+            continue
+        if _archive_key(row["path"]) != wanted:
+            continue
+        without = row.get(PACKED_WITHOUT_KEY)
+        if isinstance(without, (list, tuple)) and wanting <= set(without):
+            return True
+    return False
+
+
+def _archive_path_leaving_out(target_rar_path, ignored):
+    """Where an archive of a folder packed without `ignored` goes when the one at
+    `target_rar_path` was packed for another rule and is still wanted: beside
+    it, named with a digest of the types, so each rule has a path of its own."""
+    digest = hashlib.sha1("\n".join(sorted(ignored)).encode("utf-8")).hexdigest()[:8]
+    stem, ext = os.path.splitext(target_rar_path)
+    return f"{stem}-{digest}{ext}"
+
+
+def waiting_archive_count():
+    """How many packed archives wait in TMP_ZIP_DIR to be sent. Caller holds queue_lock.
+
+    By path, so the rows of two nicks that name one archive count once. One
+    being sent is not waiting. Nor is one behind a folder pack in its own
+    nick's queue: it cannot be sent before that pack is made, and counted, it
+    could hold that very pack at the cap for ever. In practice the count is
+    of queue heads, and of what follows a head that is not a pack.
+    """
+    sending = set()
+    for tx in config.active_transfers:
+        held = _transfer_path(tx) if isinstance(tx, dict) else None
+        if held:
+            sending.add(_archive_key(held))
+    waiting = set()
+    for rows in list(config.dcc_queue.values()):
+        for row in rows or ():
+            if isinstance(row, dict) and row.get("is_unpacked_rar_folder"):
+                break
+            if (isinstance(row, dict) and row.get("is_temporary_zip") is True
+                    and row.get("path")):
+                key = _archive_key(row["path"])
+                if key not in sending:
+                    waiting.add(key)
+    return len(waiting)
+
+
+def waiting_archive_cap():
+    """The most packed archives that may wait at once: MAX_DCC_SLOTS, and at least one."""
+    try:
+        return max(1, int(config.MAX_DCC_SLOTS or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _megabytes(size):
+    return f"{max(0, int(size or 0)) // (1024 * 1024)} MB"
+
+
+def _space_hold_for(row):
+    """The hold that keeps `row` waiting for room, or None. Caller holds queue_lock."""
+    for hold in runtime.pack_space_holds:
+        if hold["row"] is row:
+            return hold
+    return None
+
+
+def pack_hold_reason(row=None):
+    """Why a folder pack may not start now, or None. Caller holds queue_lock.
+
+    A FOLDER PACK WAITS, KEEPING ITS PLACE (#1376), while:
+      * waiting_archive_cap() packed archives already wait to be sent - every
+        pack waits then. A finished archive can wait for a slot, or for a
+        large send (#1435), while the packer moves on, so without this they
+        piled up, one per nick with a !rar row at its queue head;
+      * the disk TMP_ZIP_DIR is on had no room for `row`'s files when it was
+        about to be packed (_hold_packs_for_space()). That row alone waits:
+        a pack that fits goes ahead.
+    Without a `row`, the answer for folder packs in general: the cap.
+    """
+    if row is not None:
+        hold = _space_hold_for(row)
+        if hold is not None:
+            return (f"{_megabytes(hold['free'])} is free where archives are built, "
+                    f"and the pack needs {_megabytes(hold['needed'])}")
+    waiting = waiting_archive_count()
+    if waiting >= waiting_archive_cap():
+        return f"{waiting} packed archive(s) are already waiting to be sent"
+    return None
+
+
+def packs_can_start(row=None):
+    """Can a folder pack - `row`'s, or one in general - start now? Caller holds queue_lock.
+
+    No pack is being made (config.rar_inprogress) and none is held
+    (pack_hold_reason()). Every place that asks whether a waiting pack could
+    start asks this - the dispatcher, the sweep, the wake and the fairness
+    rule - so they cannot disagree.
+    """
+    return not getattr(config, 'rar_inprogress', False) and pack_hold_reason(row) is None
+
+
+def _room_where_archives_are_built():
+    """(free, total) bytes of the disk TMP_ZIP_DIR is on, or (None, None) when it cannot be measured."""
+    import shutil
+    try:
+        usage = shutil.disk_usage(platform_compat.long_path(os.path.abspath(config.TMP_ZIP_DIR)))
+    except OSError:
+        return None, None
+    return usage.free, usage.total
+
+
+def _has_room_to_pack(size, free):
+    """Does an archive of `size` fit in `free` and leave room to spare? The
+    rule fetching waits by (dcc_fetch.MIN_FREE_BYTES), for the same reason:
+    a disk filled to nothing fails everything that writes to it."""
+    import dcc_fetch
+    return dcc_fetch.has_room(size, free)
+
+
+def _room_needed_to_pack(size):
+    """What must be free for an archive of `size`: _has_room_to_pack()'s rule, as a number."""
+    import dcc_fetch
+    return int(size) + dcc_fetch.MIN_FREE_BYTES
+
+
+# What a user is told of a folder that could not be packed (#1376): one fixed
+# line. Why is in the log - the reason can name TMP_ZIP_DIR, a size or a path.
+PACK_FAILED_TO_USER = "the folder could not be packed"
+
+
+class PackRefused(RuntimeError):
+    """A folder pack that cannot be made however often it is tried. The
+    wrapper refuses it once: its row goes, and uses up no retries."""
+
+
+def _hold_packs_for_space(row, nick, folder_leaf, size, free):
+    """`row`'s files (`size`) do not fit in `free` with room to spare: it
+    waits, keeping its place, until they do or it leaves the queue."""
+    import announce as announce_mod
+    needed = _room_needed_to_pack(size)
+    hold = {"row": row, "total": int(size), "needed": needed, "free": int(free)}
+    with queue_lock:
+        runtime.pack_space_holds = tuple(
+            held for held in runtime.pack_space_holds if held["row"] is not row) + (hold,)
+    message = (f"{nick}'s pack of {folder_leaf} waits in the queue: {_megabytes(free)} is free where "
+               f"archives are built, and it needs {_megabytes(needed)}. Packing carries on by "
+               f"itself once there is room.")
+    print("[RAR-HOLD] " + message)
+    announce_mod.send_debug(message, category="PACK")
+
+
+def _end_space_hold(row):
+    """`row` no longer waits for room."""
+    with queue_lock:
+        runtime.pack_space_holds = tuple(
+            held for held in runtime.pack_space_holds if held["row"] is not row)
+
+
+# How often held folder packs are looked at again (#1376). A module constant,
+# read on every pass, like FREEZE_POLL_SECONDS, so a test can make it quick.
+PACK_HOLD_POLL_SECONDS = 30.0
+
+
+def _arm_pack_hold_watch(irc_sock):
+    """Start the watcher for held folder packs, unless one runs. Returns whether it started."""
+    with queue_lock:
+        if runtime.pack_hold_watch is not None:
+            return False
+        runtime.pack_hold_watch = True
+    try:
+        threading.Thread(target=_watch_held_packs, args=(irc_sock,), daemon=True).start()
+    except Exception as start_err:
+        with queue_lock:
+            runtime.pack_hold_watch = None
+        print(f"[RAR-HOLD] Could not start looking at the held folder packs again: {start_err}")
+        return False
+    return True
+
+
+def _watch_held_packs(irc_sock):
+    """Look at the held folder packs every PACK_HOLD_POLL_SECONDS until none
+    is held, then wake the queue.
+
+    A send ending wakes the queue anyway, and with it a pack that waited for
+    the archives to be sent. This is what wakes one when nothing else would -
+    disk freed by hand, a waiting archive's nick gone and its queue dropped -
+    so a held pack is never stranded. A row that stops waiting while others
+    still do is woken at once, not when the last one stops.
+    """
+    try:
+        while True:
+            # Whatever goes wrong in a look, the queue is still woken below:
+            # a watcher that died here would strand the packs it watched.
+            try:
+                time.sleep(PACK_HOLD_POLL_SECONDS)
+                still_held, stopped_waiting = _look_at_held_packs()
+                if not still_held:
+                    break
+                if stopped_waiting:
+                    check_queue_and_send(irc_sock, "system_next_trigger_fallback")
+            except Exception as look_err:
+                print(f"[RAR-HOLD] Looking at the held folder packs failed: {look_err}")
+                break
+    finally:
+        with queue_lock:
+            runtime.pack_hold_watch = None
+    print("[RAR-WAKE] Folder packs are no longer held; looking at the queue.")
+    check_queue_and_send(irc_sock, "system_next_trigger_fallback")
+
+
+def _look_at_held_packs():
+    """One look at the held folder packs. A row waiting for room stops
+    waiting once its files fit, or once it has left the queue. Returns
+    (whether a folder pack still waits on a hold, whether one stopped)."""
+    with queue_lock:
+        holds = runtime.pack_space_holds
+        queued = [held for held in holds if _row_is_still_queued(held["row"])
+                  and held["row"].get("is_unpacked_rar_folder") is True]
+    free = _room_where_archives_are_built()[0] if queued else None
+    done = [held for held in holds
+            if not any(held is waiting for waiting in queued) or _has_room_to_pack(held["total"], free)]
+    if done:
+        with queue_lock:
+            runtime.pack_space_holds = tuple(
+                held for held in runtime.pack_space_holds if not any(held is gone for gone in done))
+        print(f"[RAR-HOLD] {len(done)} folder pack(s) no longer wait for room where archives are built.")
+    with queue_lock:
+        holds_left = bool(runtime.pack_space_holds)
+        capped = pack_hold_reason() is not None
+    return holds_left or (capped and next_waiting_pack_owner() is not None), bool(done)
+
+
+def _rar_list_file_lines(parent, leaf, members, separator=None, windows=None):
+    """The lines of the list file rar takes a folder's files by, and how many files were left out.
+
+    `members` are update_list.pack_members()' paths, below the folder `leaf`
+    in `parent`. Each line is a file's absolute path, as rar finds it under
+    the folder it is given: `-n@` keeps exactly those files, and the archive
+    keeps the folder by its name as it always has (-ep1).
+
+    Files only, never a folder: a folder named to -n takes everything in it.
+
+    rar does not read every line as one exact name, so a path it would read
+    as more, or as another, is left out rather than written:
+      * * or ? in any part: a mask, and in a name it matches files in every
+        folder below too;
+      * a part that ends in a space or a tab, or on Windows in a dot: the end
+        of the line is trimmed, so `keep.flac ` takes `keep.flac` and a file
+        `Sub ` the whole folder `Sub`;
+      * a control character (a line break among them); with "/" as the
+        separator, a backslash, which rar may read as one; a path the list
+        file cannot hold (a POSIX name that is not valid text). U+0085,
+        U+2028 and U+2029 are not among them: rar 7.22 takes a name holding
+        one as it is, and lists it as one name.
+    Windows allows none of these in a name made the ordinary way.
+
+    `separator` and `windows` are for the tests, as in
+    update_list.has_backslash_component(): os.sep and this platform otherwise.
+    """
+    sep = os.sep if separator is None else separator
+    on_windows = platform_compat.IS_WINDOWS if windows is None else windows
+    trimmed = (" ", "\t", ".") if on_windows else (" ", "\t")
+    above = str(parent).rstrip(sep).split(sep)
+
+    lines = []
+    left_out = 0
+    for member in members:
+        below = [leaf] + [part for part in str(member).split(sep) if part]
+        parts = above + below
+        line = sep.join(parts)
+        unsafe = any(c < " " or c == "\x7f" for c in line) or (sep == "/" and "\\" in line)
+        unsafe = unsafe or any("*" in part or "?" in part for part in parts)
+        unsafe = unsafe or any(part.endswith(trimmed) for part in parts if part)
+        if not unsafe:
+            try:
+                line.encode("utf-16-le")
+            except UnicodeEncodeError:
+                unsafe = True
+        if unsafe:
+            left_out += 1
+        else:
+            lines.append(line)
+    return lines, left_out
+
+
+def _rar_environment(windows=None, darwin=None):
+    """The environment rar runs in: this process's own, and off Windows in a
+    UTF-8 locale, so that rar writes the names it lists as UTF-8 whatever
+    the bot's locale is. None on Windows, where -scfr says it instead.
+
+    A locale that already says UTF-8 (LC_ALL, else LC_CTYPE, else LANG, as
+    the C library picks them) is left as it is. Otherwise LC_ALL is set to
+    one that exists on the system: C.UTF-8 on Linux, en_US.UTF-8 on macOS,
+    which has no C.UTF-8 on every release. `windows` and `darwin` are for
+    the tests."""
+    on_windows = platform_compat.IS_WINDOWS if windows is None else windows
+    if on_windows:
+        return None
+    env = dict(os.environ)
+    in_force = env.get("LC_ALL") or env.get("LC_CTYPE") or env.get("LANG") or ""
+    if "utf-8" in in_force.lower() or "utf8" in in_force.lower():
+        return env
+    on_darwin = sys.platform == "darwin" if darwin is None else darwin
+    env["LC_ALL"] = "en_US.UTF-8" if on_darwin else "C.UTF-8"
+    return env
+
+
+def _listed_names(text):
+    """The names in rar's listing `text`, one a line, with "/" between their parts.
+
+    Split at "\\n" alone, one "\\r" off each line: str.splitlines() also
+    splits at U+0085, U+2028 and U+2029 - and at more - which a file name
+    may hold, and rar lists such a name as one."""
+    names = []
+    for line in str(text or "").lstrip("\ufeff").split("\n"):
+        if line.endswith("\r"):
+            line = line[:-1]
+        if line:
+            names.append(line.replace(os.sep, "/"))
+    return names
+
+
+def _archive_names(rar_bin, archive, timeout):
+    """(names, None) for what `rar lb` lists in `archive`, or (None, why) when
+    it cannot be listed.
+
+    Run as the pack is, by _run_rar(), which reads rar's output as UTF-8:
+    rar writes it so on Windows when -scfr says so (checked with rar 7.22,
+    Unicode names intact), and elsewhere in _rar_environment()'s locale.
+    The job is the listing's own, so nothing can cancel it - an operator's
+    cancel is for the pack, which is over - and only its timeout stops it.
+    """
+    cmd = [rar_bin, "lb"] + (["-scfr"] if platform_compat.IS_WINDOWS else []) + [archive]
+    try:
+        done = _run_rar({"cancelled": False, "process": None}, cmd, timeout)
+    except (OSError, subprocess.TimeoutExpired) as err:
+        return None, f"{type(err).__name__}: {err}"
+    if done.returncode != 0:
+        detail = (done.stderr or "").strip()
+        return None, f"rar lb exited {done.returncode}" + (f": {detail}" if detail else "")
+    return _listed_names(done.stdout), None
+
+
+def _what_the_archive_got_wrong(names, expected):
+    """(stray, missing) for an archive listing `names` that was to hold
+    `expected`: names nobody asked for, and asked-for files it does not hold.
+
+    THE LAST WORD ON WHAT A PACK HOLDS (#1376), whatever rar made of the list
+    it was given and whatever changed in the folder between the walk and
+    rar's - a file turned into a folder or a link. Both ways: the packer
+    refuses an archive with a stray name, or with none of what was asked for
+    (an empty listing misses all of it), and sends one short of a few asked-
+    for files, saying so. A folder above an asked-for file is not stray -
+    rar off Windows may store one, with no data in it.
+    """
+    folders = set()
+    for name in expected:
+        parts = name.split("/")
+        folders.update("/".join(parts[:end]) for end in range(1, len(parts)))
+    held = set(names)
+    stray = sorted(name for name in held if name not in expected and name not in folders)
+    missing = sorted(set(expected) - held)
+    return stray, missing
+
+
+def _members_inside_the_library(source_abs, members, islink=None, safe=None):
+    """(kept, left out): pack_members()' `members` of the folder `source_abs`,
+    less every file that is a link to somewhere outside the library folder
+    the folder is in.
+
+    rar packs what a file link points at. A request for the file on its own
+    is refused by is_safe_path(), which resolves it; a pack must not hand out
+    what the file would not be. Only links are resolved: the walk does not
+    go into a linked folder, so a file that is not a link is where it is.
+    `islink` and `safe` (is_safe_path()'s shape) are for the tests.
+    """
+    islink = os.path.islink if islink is None else islink
+    safe = is_safe_path if safe is None else safe
+    roots = [folder.path for folder in library.every_folder() if safe(folder.path, source_abs)]
+    kept, left_out = [], []
+    for member in members:
+        full = os.path.join(source_abs, member[0])
+        if islink(platform_compat.long_path(full)) and not any(safe(root, full) for root in roots):
+            left_out.append(member)
+        else:
+            kept.append(member)
+    return kept, left_out
+
+
+def _rar_list_file_bytes(lines, windows=None):
+    """(switch, bytes): the list file rar reads `lines` from, and the switch that
+    tells it the encoding.
+
+    UTF-16 with -scul on Windows, where rar 7.22 was checked with it. UTF-8
+    with -scfl elsewhere: rar 6.23 on Linux leaves out a name with a
+    character above U+FFFF read from a UTF-16 list (an emoji), and packs it
+    from a UTF-8 one, as it does U+2028. `windows` is for the tests."""
+    on_windows = platform_compat.IS_WINDOWS if windows is None else windows
+    if on_windows:
+        return "-scul", ("\ufeff" + "".join(line + "\r\n" for line in lines)).encode("utf-16-le")
+    return "-scfl", "".join(line + "\n" for line in lines).encode("utf-8")
+
+
+def _write_rar_list_file(lines):
+    """Write `lines` to a list file in TMP_ZIP_DIR (_rar_list_file_bytes())
+    and return (its path, the switch rar reads it with). The caller removes it.
+
+    One pack runs at a time, so a list file already there was left by a run
+    that never got to remove its own: it goes first."""
+    import glob
+    import tempfile
+    for stale in glob.glob(os.path.join(glob.escape(os.path.abspath(config.TMP_ZIP_DIR)), "pack-*.lst")):
+        try:
+            os.remove(stale)
+        except OSError:
+            pass
+    handle, path = tempfile.mkstemp(prefix="pack-", suffix=".lst",
+                                    dir=os.path.abspath(config.TMP_ZIP_DIR))
+    switch, data = _rar_list_file_bytes(lines)
+    with os.fdopen(handle, "wb") as out:
+        out.write(data)
+    return path, switch
+
+
+def _pack_again_if_packed_before(row):
+    """Turn a packed archive's row that says nothing of what it was packed
+    without back into its folder's row. Caller holds queue_lock. Returns
+    whether it did.
+
+    Such a row was packed before archives kept the list's left-out types out
+    (#1376) - restored from dcc_queue.txt, say - so it is not sent as it is:
+    the folder it was packed from (`source_path`) is packed again under the
+    list's rule when its turn comes, and the archive goes unless another row
+    or a send still needs it. A row being sent is left alone, as is one with
+    no folder on it.
+    """
+    if not (isinstance(row, dict) and row.get("is_temporary_zip") is True
+            and not row.get("is_unpacked_rar_folder") and PACKED_WITHOUT_KEY not in row):
+        return False
+    source = row.get("source_path")
+    if not isinstance(source, str) or not source:
+        return False
+    if any(isinstance(tx, dict) and tx.get("queue_row") is row for tx in config.active_transfers):
+        return False
+    archive = row.get("path")
+    row["path"] = source
+    row["is_unpacked_rar_folder"] = True
+    row.pop(QUEUED_SIZE_KEY, None)
+    if archive and _is_temp_zip_cache_file(archive) and not temp_archive_in_use(archive):
+        try:
+            os.remove(platform_compat.long_path(str(archive)))
+        except OSError:
+            pass
+    print(f"[DCC QUEUE] {row.get('user_raw') or 'A nick'}'s archive of {os.path.basename(source.rstrip('/' + chr(92)))} "
+          f"was packed by an earlier version; the folder is packed again.")
+    return True
+
+
+def pack_again_every_row_packed_before():
+    """Turn every packed archive's row that says nothing of what it was packed
+    without back into its folder's row (_pack_again_if_packed_before()), in
+    every queue and at every place. Called once the queue is loaded from
+    dcc_queue.txt; the dispatcher turns back a head it meets later as well.
+    Returns how many were turned back."""
+    turned = 0
+    with queue_lock:
+        for rows in list(config.dcc_queue.values()):
+            for row in list(rows or ()):
+                turned += bool(_pack_again_if_packed_before(row))
+    if turned:
+        print(f"[DCC QUEUE] {turned} queued archive(s) packed by an earlier version will be packed again.")
+    return turned
+
+
 def _row_is_still_queued(row):
     """Is `row` still in the queue? Caller holds queue_lock. By the row
     itself, under any nick: a rename moves it to another key (#1268).
@@ -2464,6 +3004,9 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         next_file['path'] = target_rar_path
         next_file['file'] = rar_filename
         next_file['is_unpacked_rar_folder'] = False
+        # What it was packed without (#1376): a later request is
+        # handed this archive only if its list leaves out no more.
+        next_file[PACKED_WITHOUT_KEY] = list(ignored)
 
     # THE ARCHIVE MAY ALREADY BE SOMEBODY ELSE'S (#1268). The
     # disk name comes from the folder, so a second nick's !rar
@@ -2474,15 +3017,31 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
     # as it is; nothing is packed. Decided, and the pack
     # registered, under one hold of queue_lock, so a send's
     # cleanup cannot remove it in between.
+    #
+    # AND IT IS REUSED ONLY IF IT HOLDS NOTHING THIS ROW'S LIST LEAVES
+    # OUT (#1376). Two lists can serve one folder with different
+    # exclusions, and an operator can change them while an archive
+    # waits. An archive packed for another rule is left to the request
+    # it was packed for, and this one is packed beside it, at a path of
+    # its rule's own (_archive_path_leaving_out()).
+    ignored = pack_leaves_out(next_file)
     long_target = platform_compat.long_path(target_rar_path)
     job = None
     with queue_lock:
         withdrawn = not _row_is_still_queued(next_file)
-        reuse = (not withdrawn and os.path.exists(long_target)
-                 and temp_archive_in_use(target_rar_path))
+        in_use = (not withdrawn and os.path.exists(long_target)
+                  and temp_archive_in_use(target_rar_path))
+        if in_use and not _archive_packed_without(target_rar_path, ignored):
+            target_rar_path = _archive_path_leaving_out(target_rar_path, ignored)
+            long_target = platform_compat.long_path(target_rar_path)
+            in_use = os.path.exists(long_target) and temp_archive_in_use(target_rar_path)
+        reuse = in_use and _archive_packed_without(target_rar_path, ignored)
+        # Wanted, and packed for another rule, at both paths: nothing
+        # may be packed over it.
+        taken = in_use and not reuse
         if reuse:
             point_row_at_archive()
-        elif not withdrawn:
+        elif not withdrawn and not taken:
             # `rar a` ADDS to an existing archive rather than
             # replacing it - a stale file left behind by an
             # earlier crashed run would otherwise silently have
@@ -2513,13 +3072,14 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_CANCELLED)
         return False
 
+    if taken:
+        raise PackRefused(f"an archive of {folder_leaf} packed for another list is "
+                          f"still waiting at {target_rar_path}")
+
     if reuse:
         print(f"[LINEAR RAR] {folder_leaf} is already packed and waiting for another "
               f"request; {owner_nick()} is sent the same archive: {target_rar_path}")
     else:
-        print(f"[LINEAR RAR] Starting to pack: {true_source_dir} -> {target_rar_path}")
-        announce_mod.send_debug(f"Packing {folder_leaf} for {owner_nick()}", category="PACK")
-
         # A timeout is essential: with timeout=None a hung rar blocks this
         # thread forever while config.rar_inprogress stays True, wedging folder
         # packing for EVERY user until the daemon is restarted.
@@ -2534,7 +3094,59 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         # so the operator can see how far it has got and stop
         # THAT process. The timeout stays: it is the backstop for
         # a rar nobody is watching.
+        list_file = None
         try:
+            # THE ARCHIVE HOLDS WHAT THE LIST LISTS (#1376): the files
+            # update_list.pack_members() finds by the scan's own rules,
+            # named to rar one by one in a list file. `rar a <folder>`
+            # took everything under it, the types the list leaves out
+            # included. Named rather than excluded with -x masks: a file
+            # a mask fails to match would go in, and whether *.flac
+            # matches Track.FLAC is rar's platform's rule, not the list's.
+            # Named as a filter (-n@) on the folder rar is given, as it
+            # always was: rar walks it by its own absolute path, so a
+            # folder deeper than Windows' 260 characters packs as before,
+            # and nothing it walks goes in unless it is named.
+            source_abs = os.path.abspath(true_source_dir)
+            parent, leaf = os.path.split(source_abs)
+            members = update_list.pack_members(source_abs, ignored)
+            members, outside = _members_inside_the_library(source_abs, members)
+            if outside:
+                print(f"[SECURITY] {len(outside)} file(s) in {folder_leaf} are links to somewhere outside "
+                      f"the library and are left out of its archive.")
+            packed_bytes = sum(size for _name, size in members)
+
+            # ROOM FIRST (#1376). Nothing else asks whether the archive
+            # fits, and finished archives can wait in TMP_ZIP_DIR while
+            # the packer moves on (#1435). Short, this row waits in the
+            # queue, keeping its place, until there is room
+            # (pack_hold_reason(row)); a pack that fits goes ahead. One
+            # that could never fit - more than the whole disk - is refused
+            # once rather than waiting for ever. The wrapper releases the
+            # packer, once (#714).
+            free, disk_total = _room_where_archives_are_built()
+            if not _has_room_to_pack(packed_bytes, free):
+                needed = _room_needed_to_pack(packed_bytes)
+                if disk_total is not None and needed > disk_total:
+                    raise PackRefused(f"{folder_leaf} needs {_megabytes(needed)} where archives are "
+                                      f"built, and that disk holds {_megabytes(disk_total)} in all")
+                _hold_packs_for_space(next_file, owner_nick(), folder_leaf, packed_bytes, free)
+                return None
+            _end_space_hold(next_file)
+
+            lines, left_out = _rar_list_file_lines(parent, leaf, [name for name, _size in members])
+            if left_out:
+                print(f"[LINEAR RAR] {left_out} file(s) in {folder_leaf} are left out of "
+                      f"its archive: rar could not be given their names exactly.")
+            if not lines:
+                raise PackRefused(f"nothing in {folder_leaf} is in the list")
+            # The names the archive may hold: each line from the folder's own name.
+            from_parent = len(parent.rstrip(os.sep)) + len(os.sep)
+            expected = {line[from_parent:].replace(os.sep, "/") for line in lines}
+
+            print(f"[LINEAR RAR] Starting to pack: {true_source_dir} -> {target_rar_path}")
+            announce_mod.send_debug(f"Packing {folder_leaf} for {owner_nick()}", category="PACK")
+
             # Arguments are passed as a list, never through a shell:
             work_dir_switch = f"-w{os.path.abspath(config.TMP_ZIP_DIR)}"
             # Resolve the binary rather than trusting a bare name on PATH:
@@ -2543,7 +3155,11 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
             if not rar_bin:
                 raise FileNotFoundError(
                     "rar executable not found - set config.RAR_BINARY or put rar on PATH")
-            cmd = [rar_bin, "a", "-ep1", work_dir_switch, os.path.abspath(target_rar_path), os.path.abspath(true_source_dir)]
+            # -ep1 keeps the folder by its own name in the archive;
+            # -scul or -scfl says how the list file is written.
+            list_file, list_charset = _write_rar_list_file(lines)
+            cmd = [rar_bin, "a", "-ep1", list_charset, "-n@" + list_file, work_dir_switch,
+                   os.path.abspath(target_rar_path), source_abs]
             process = _run_rar(job, cmd, rar_timeout)
         except subprocess.TimeoutExpired:
             # rar was killed mid-write: whatever it wrote sits at
@@ -2554,6 +3170,48 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
             raise
         finally:
             _end_pack_job(job)
+            if list_file is not None:
+                try:
+                    os.remove(list_file)
+                except OSError:
+                    pass
+
+        if process.returncode == 0 and os.path.exists(target_rar_path) and not job["cancelled"]:
+            names, unlisted = _archive_names(rar_bin, os.path.abspath(target_rar_path), rar_timeout)
+            if names is None:
+                # rar could not say what it made: tried again, as a pack
+                # that failed is (its retries).
+                print(f"[LINEAR RAR ERROR] The archive of {folder_leaf} could not be listed, "
+                      f"so it is not sent: {unlisted}")
+                _discard_partial_archive(target_rar_path, "could not be listed")
+                announce_mod.send_debug(
+                    f"Pack FAILED for {owner_nick()}: the archive of {folder_leaf} could not be listed.",
+                    category="PART")
+                release_queue_entry(owner_nick(), next_file, delivered=False,
+                                    reason="the archive could not be listed", told=PACK_FAILED_TO_USER)
+                _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_PACK_FAILED, job=job)
+                return False
+            stray, missing = _what_the_archive_got_wrong(names, expected)
+            if missing and not stray and len(missing) < len(expected):
+                # SHORT OF A LISTED FILE, NOTHING ELSE IN IT: sent, and said
+                # loudly. It holds nothing the list leaves out; what it lacks
+                # (a file gone since the walk, a name rar would not take) can
+                # still be asked for by name.
+                print(f"[LINEAR RAR ERROR] The archive of {folder_leaf} lacks {len(missing)} of the "
+                      f"{len(expected)} file(s) asked for, and is sent without them: {missing[:5]}")
+                announce_mod.send_debug(
+                    f"Pack of {folder_leaf} for {owner_nick()} lacks {len(missing)} file(s); sent without them.",
+                    category="PACK")
+            elif stray or missing:
+                # A name nobody asked for, or nothing that was: packing it
+                # again would make the same archive, holding every other
+                # pack meanwhile.
+                print(f"[LINEAR RAR ERROR] The archive of {folder_leaf} is not what was asked for, so it "
+                      f"is not sent: {len(stray)} name(s) nobody asked for {stray[:5]}, "
+                      f"{len(missing)} asked-for file(s) missing {missing[:5]}.")
+                _discard_partial_archive(target_rar_path, "was not what was asked for")
+                raise PackRefused(f"the archive of {folder_leaf} was not what was asked for "
+                                  f"({len(stray)} name(s) nobody asked for, {len(missing)} missing)")
 
     if job is not None and job["cancelled"]:
         _discard_partial_archive(target_rar_path, "was cancelled")
@@ -2702,7 +3360,7 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         return True
     else:
         error_msg = process.stderr.strip() if process.stderr else "Unknown RAR engine issue"
-        print(f"[LINJAR RAR ERROR] {error_msg}")
+        print(f"[LINEAR RAR ERROR] {error_msg}")
         _discard_partial_archive(target_rar_path, "rar exited " + str(process.returncode))
         announce_mod.send_debug(f"Pack FAILED in queue slot for {owner_nick()}: {error_msg}", category="PART")
         # Charge the failure to the retry budget instead of recursing. The old
@@ -2711,7 +3369,7 @@ def pack_folder_for_request(sock, next_file, owner_nick, target_chan, oserve):
         # inside this one - unbudgeted, and the wrapper finally would then strip
         # the interlocks that new thread had just claimed.
         release_queue_entry(owner_nick(), next_file, delivered=False,
-                            reason="rar exited " + str(process.returncode))
+                            reason="rar exited " + str(process.returncode), told=PACK_FAILED_TO_USER)
         _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_PACK_FAILED, job=job)
         return False
 
@@ -2794,6 +3452,7 @@ def claim_next_in_line(passed_over=None, paused=None):
             g_next = user_files[0]
             if not isinstance(g_next, dict):
                 continue
+            _pack_again_if_packed_before(g_next)
 
             # FIXED: section B had no admission control at all. It was dead code until the
             # [0] fix above woke it up, and nothing had ever audited what it does when it
@@ -2874,8 +3533,9 @@ def claim_next_in_line(passed_over=None, paused=None):
                     # time and the pack wait for ever again. While another pack
                     # is being made it could not start; the packer's release
                     # wakes it ([RAR-HOLD], redispatch_waiting_pack()), and the
-                    # sweep looks further, as it always did.
-                    if not getattr(config, 'rar_inprogress', False):
+                    # sweep looks further, as it always did. So while packs
+                    # are held (#1376): a send ending, or the watcher, wakes it.
+                    if packs_can_start(g_next):
                         if pack_to_wake is None:
                             pack_to_wake = real_username
                         continue
@@ -2906,7 +3566,7 @@ def claim_next_in_line(passed_over=None, paused=None):
                 # Counted by the cap only when the list took the slot from
                 # a nick that had waited longer (#1205).
                 if (lists_first and is_a_list_row(g_next)
-                        and a_list_passes_a_longer_wait(queue_key, not getattr(config, 'rar_inprogress', False))):
+                        and a_list_passes_a_longer_wait(queue_key, packs_can_start())):
                     claim["list_went_first"] = True
                 config.active_transfers.append(claim)
                 promoted = (real_username, g_path, g_name, g_chan, g_next)
@@ -3024,6 +3684,7 @@ def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
         if user_key and user_key in config.dcc_queue and config.dcc_queue[user_key]:
             if user_key not in config.frozen_queues and _send_fails_key(user_key) not in paused:
                 next_file = config.dcc_queue[user_key][0]  # FIXED: takes the top entry
+                _pack_again_if_packed_before(next_file)
 
     # THE FREED SLOT GOES TO WHO HAS WAITED LONGEST (#1032). Handing it straight
     # back to the nick that just finished meant a nick with a long queue took
@@ -3042,14 +3703,14 @@ def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
     list_went_first = False
     if next_file and not (isinstance(next_file, dict) and next_file.get('is_unpacked_rar_folder')):
         with queue_lock:
-            packs_can_start = not getattr(config, 'rar_inprogress', False)
+            packs_may_start = packs_can_start()
             lists_first = a_list_may_go_first()
             my_rank = list_first_rank(user_key, config.dcc_queue.get(user_key), lists_first)
             ranked = sorted((list_first_rank(k, config.dcc_queue.get(k), lists_first), k)
-                            for k in nicks_waiting_for_a_slot(user_key, plain_files_only=not packs_can_start))
+                            for k in nicks_waiting_for_a_slot(user_key, plain_files_only=not packs_may_start))
             waited_longer = [(rank, k) for rank, k in ranked if rank < my_rank]
             if not waited_longer and my_rank[0] == 0:
-                list_went_first = a_list_passes_a_longer_wait(user_key, packs_can_start)
+                list_went_first = a_list_passes_a_longer_wait(user_key, packs_may_start)
         if waited_longer:
             rank, ahead = waited_longer[0]
             why = "has a list waiting" if rank[0] == 0 else "has waited longer"
@@ -3109,10 +3770,15 @@ def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
                     pack_in_progress = getattr(config, 'rar_inprogress', False)
 
                     pack_turned_away = None
+                    # Held (#1376): the disk is short, or enough packed
+                    # archives already wait. The row keeps its place.
+                    pack_held = None if user_already_locked or pack_in_progress else pack_hold_reason(next_file)
                     if user_already_locked:
                         pack_turned_away = f"[RAR-BLOCK] {completed_user} is already locked in memory; blocking a stale thread."
                     elif pack_in_progress:
                         pack_turned_away = f"[RAR-HOLD] {completed_user} waits in the queue while another packing run is in progress..."
+                    elif pack_held is not None:
+                        pack_turned_away = f"[RAR-HOLD] {completed_user}'s folder pack waits in the queue: {pack_held}."
                     else:
                         config.rar_inprogress = True
                         if not hasattr(config, 'user_processing_lock'):
@@ -3129,6 +3795,9 @@ def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
                     # nick that has waited longest (#1038): nothing else would
                     # dispatch it, and a newcomer is kept out of it meanwhile.
                     print(pack_turned_away)
+                    if pack_held is not None:
+                        # Woken once it is not held (#1376).
+                        _arm_pack_hold_watch(irc_sock)
                     check_queue_and_send(irc_sock, "system_next_trigger_fallback")
                     return
 
@@ -3151,14 +3820,25 @@ def check_queue_and_send(irc_sock, completed_user, fill_pass=False):
                         # The packing itself is pack_folder_for_request() (#1300).
                         handed_off = pack_folder_for_request(
                             sock, next_file, owner_nick, target_chan, oserve)
-                    except Exception as packer_err:
-                        print("[LINJAR RAR ERROR] Packing failed for " + str(owner_nick()) + ": " + str(packer_err))
-                        try:
-                            announce_mod.send_pack_error_notice(sock, owner_nick(), next_file.get('channel') if isinstance(next_file, dict) else None)
-                        except Exception:
-                            pass
+                    except PackRefused as refused:
+                        # Refused once (#1376): trying again could only give
+                        # the same answer, so no retry is used up.
+                        # The user is told PACK_FAILED_TO_USER, once, by
+                        # release_queue_entry(); the reason names paths and
+                        # sizes of this machine, so it goes to the log.
+                        print("[LINEAR RAR] " + str(owner_nick()) + "'s pack is refused: " + str(refused))
                         release_queue_entry(owner_nick(), next_file, delivered=False,
-                                            reason="pack failed: " + str(packer_err))
+                                            reason="pack refused: " + str(refused), retry=False,
+                                            told=PACK_FAILED_TO_USER)
+                        _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_PACK_FAILED)
+                    except Exception as packer_err:
+                        print("[LINEAR RAR ERROR] Packing failed for " + str(owner_nick()) + ": " + str(packer_err))
+                        # As a refusal: the user is told PACK_FAILED_TO_USER
+                        # once the retries are spent, never the error, which
+                        # can carry a path (#1376).
+                        release_queue_entry(owner_nick(), next_file, delivered=False,
+                                            reason="pack failed: " + str(packer_err),
+                                            told=PACK_FAILED_TO_USER)
                         # A pack that raised - rar missing, a timeout, a full
                         # disk - is a request that ended unsent (#1203).
                         _record_pack_outcome(owner_nick(), next_file, transfer_log.STATUS_PACK_FAILED)
@@ -3814,6 +4494,7 @@ def _run_rar(job, cmd, timeout):
     cancel_pack() terminates. A timeout kills it and is raised, as before.
     """
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               env=_rar_environment(),
                                text=True, encoding="utf-8", errors="replace",
                                **platform_compat.no_console_window())
     with runtime.pack_lock:
@@ -4378,18 +5059,22 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # track, and checking only that level refused every one of them.
             # folder_holds_packable() is the rule update_list.rar_row_folder()
             # writes those rows by, so the list and this gate cannot drift.
+            #
+            # With the list's own left-out types (#1376, #1295), as the scan
+            # has them: a packable file the list leaves out gives its folder
+            # no row there, and none here either.
             packable = update_list.rar_extensions()
             if packable:
                 try:
                     has_packable = update_list.folder_holds_packable(
-                        true_source_dir, packable)
+                        true_source_dir, packable, update_list.ignored_extensions(wanted_list))
                 except OSError as scan_err:
                     print(f"[PACK] Could not read {true_source_dir!r} to check "
                           f"what is in it: {scan_err}")
                     has_packable = False
                 if not has_packable:
                     print(f"[PACK] Refused {relative_to_root!r} for {user}: "
-                          f"it holds nothing in RAR_EXTENSIONS.")
+                          f"it holds nothing in RAR_EXTENSIONS that the list lists.")
                     announce_mod.send_pack_error_notice(irc_sock, user, target_chan, reason=announce_mod.PACK_REFUSED_NOTHING_PACKABLE)
                     announce_mod.send_debug(
                         f"Pack denied for {user}: "
@@ -4479,7 +5164,9 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     "user_raw": user,
                     "is_unpacked_rar_folder": True,
                     "is_temporary_zip": True,
-                    "queued_at": time.time()
+                    "queued_at": time.time(),
+                    # Which list's rule the archive follows (#1376).
+                    PACK_LIST_KEY: wanted_list,
                 })
                 # Only on a private row (#1242): a channel row stays as it was.
                 if private:
@@ -5182,8 +5869,8 @@ def others_wait_for_a_slot():
     with queue_lock:
         if len(config.active_transfers) < config.MAX_DCC_SLOTS:
             return False
-        packs_can_start = not getattr(config, "rar_inprogress", False)
-        for key in nicks_waiting_for_a_slot(plain_files_only=not packs_can_start):
+        packs_may_start = packs_can_start()
+        for key in nicks_waiting_for_a_slot(plain_files_only=not packs_may_start):
             head = config.dcc_queue.get(key, [None])[0]
             if not (isinstance(head, dict) and head.get(STOPPED_FOR_SPEED)):
                 return True

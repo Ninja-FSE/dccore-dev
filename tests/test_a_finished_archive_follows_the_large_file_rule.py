@@ -240,9 +240,12 @@ class AReusedArchiveFollowsTheRuleToo(Case):
         target = self.target_archive()
         with io.open(target, "wb") as handle:
             handle.truncate(MB)
+        # Packed under the rule dave's request follows (#1376), so he may be
+        # handed it.
         config.dcc_queue["erin"] = [{"file": "Some_Album.rar", "path": target, "channel": CHANNEL,
                                      "user_raw": "erin", "is_unpacked_rar_folder": False,
-                                     "is_temporary_zip": True}]
+                                     "is_temporary_zip": True,
+                                     dcc.PACKED_WITHOUT_KEY: list(dcc.pack_leaves_out({}))}]
 
     def test_a_reused_large_archive_waits_while_a_large_send_runs(self):
         self.running(RUNNING_BIG)

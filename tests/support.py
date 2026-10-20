@@ -337,6 +337,10 @@ def reset_config(**overrides):
     # The bot's own JOINs one test saw echoed (irc.note_own_join()): a channel
     # left here would vouch for the next test's channel of the same name.
     runtime.joined_channels.clear()
+    # A folder pack held for room, and the watcher for held packs (#1376):
+    # one test's hold must not hold the next test's packs.
+    runtime.pack_space_holds = ()
+    runtime.pack_hold_watch = None
     for name, value in SETTINGS_DEFAULTS.items():
         setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():
@@ -555,12 +559,49 @@ class FakeRarProcess:
     kill = terminate
 
 
+def rar_names_packed(cmd):
+    """The archive names a `rar a -ep1 -n@<list> ... <archive> <folder>` asks
+    for: each line of the -n@ list file (UTF-8 with -scfl, else UTF-16), from the folder's own name
+    down, with "/" between the parts. None for a command with no such list."""
+    lists = [part[3:] for part in cmd if str(part).startswith("-n@")]
+    if not lists:
+        return None
+    base = os.path.dirname(os.path.abspath(cmd[-1]))
+    names = []
+    for path in lists:
+        with open(path, "rb") as handle:
+            # UTF-8 with -scfl (off Windows), UTF-16 with -scul (#1376).
+            lines = handle.read().decode("utf-8" if "-scfl" in cmd else "utf-16").split("\n")
+        for line in lines:
+            line = line[:-1] if line.endswith("\r") else line
+            if line:
+                names.append(os.path.relpath(line, base).replace(os.sep, "/"))
+    return names
+
+
 def fake_rar_runs(test, subprocess_module, run):
     """Make every Popen on `subprocess_module` a FakeRarProcess of `run`, until
     the test ends. The packer starts rar with Popen (#1202) so it can stop it;
-    these tests stand in for the binary, never for the packer."""
+    these tests stand in for the binary, never for the packer.
+
+    The listing the packer asks for once an archive is made (`rar lb`, #1376)
+    is answered here and never reaches `run`: with the names the pack's -n@
+    list asked for, as a rar that packed exactly those would list them. What
+    these stand-ins write is no archive rar could list."""
+    packed = {}
+
+    def answer(cmd, timeout=None):
+        if len(cmd) > 1 and cmd[1] == "lb":
+            names = packed.get(os.path.normcase(os.path.abspath(cmd[-1])), [])
+            return types.SimpleNamespace(returncode=0, stdout="".join(n + "\n" for n in names), stderr="")
+        names = rar_names_packed(cmd)
+        done = run(cmd, timeout=timeout)
+        if names is not None:
+            packed[os.path.normcase(os.path.abspath(cmd[-2]))] = names
+        return done
+
     real = subprocess_module.Popen
-    subprocess_module.Popen = lambda cmd, *a, **kw: FakeRarProcess(cmd, run)
+    subprocess_module.Popen = lambda cmd, *a, **kw: FakeRarProcess(cmd, answer)
     test.addCleanup(setattr, subprocess_module, "Popen", real)
 
 
