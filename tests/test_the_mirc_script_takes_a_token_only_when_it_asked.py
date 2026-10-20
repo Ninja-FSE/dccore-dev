@@ -236,7 +236,7 @@ class TheFlagsAreSetWhereTheyMeanSomething(unittest.TestCase):
         text = code()
         self.assertEqual(text.count("hadd dccore.live vetted 1"), 2)
         self.assertIn("if (!$dccore.peerok) { return }\n      hadd dccore.live vetted 1\n", text)
-        self.assertIn("if (!$dccore.peerok password) { return }\n      hadd dccore.live vetted 1\n", text)
+        self.assertIn("if (!$dccore.peerok(password)) { return }\n      hadd dccore.live vetted 1\n", text)
 
     def test_a_dial_starts_with_nothing_asked_and_nobody_vetted(self):
         body = block("alias dccore.connect {")
