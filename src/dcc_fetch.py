@@ -2734,13 +2734,30 @@ def fetched_dir_of(row):
 
 def bot_folder_name(bot):
     """`bot`'s nick as a folder name inside FETCHED_FILES_DIR (#1423), or None
-    when nothing usable is left of it. The same cleaning a fetched file's name
+    when there is no nick at all. The same cleaning a fetched file's name
     gets (_sanitize_offer_filename(): no separators, no "..", no control codes,
     Windows' reserved device names made safe), and never a name DCCore itself
-    uses there (_RESERVED_FETCHED_NAMES - "lists" holds every fetched list)."""
-    cleaned = _sanitize_offer_filename(str(bot or "").strip())
-    if not str(bot or "").strip() or cleaned == "fetched_file":
+    uses there (_RESERVED_FETCHED_NAMES - "lists" holds every fetched list).
+
+    A nick that cleans to nothing ("[]", "^|`") gets "bot (<digest>)", from
+    list_fetch's directory tag: its own folder rather than the top of
+    FETCHED_FILES_DIR. The space and the parentheses are not nick characters,
+    so no other nick's folder can have that name.
+
+    No folder name has a "." in it: one in the nick becomes "_". A fetched
+    file at the top of FETCHED_FILES_DIR is promoted to its plain name only
+    when that name has a dot (_promote_clean_filename()), so a file and a
+    bot's folder never want the same name there."""
+    raw = str(bot or "").strip()
+    if not list_mod.strip_control_codes(raw).strip():
         return None
+    cleaned = _sanitize_offer_filename(raw)
+    # Also the nick "fetched_file" itself, which the cleaning cannot tell
+    # from nothing, in any case: one nick, one folder.
+    if cleaned.casefold() == "fetched_file":
+        import list_fetch
+        return f"bot ({list_fetch._name_digest(raw)})"
+    cleaned = cleaned.replace(".", "_")
     cleaned = _fit_name_component(cleaned)
     if cleaned.casefold() in _RESERVED_FETCHED_NAMES:
         cleaned = cleaned + "_"
@@ -2897,6 +2914,14 @@ def _promote_clean_filename(dest_dir, stored_name, queue=None, row=None):
     # file FETCHED_FILES_DIR/lists, and every list fetch from every bot then
     # failed to make its directory there until someone deleted it by hand.
     if plain_name.rstrip(" .").lower() in _RESERVED_FETCHED_NAMES:
+        return stored_name
+    # Nor, at the top of FETCHED_FILES_DIR, onto a plain name with no "." in
+    # it. That is where each bot's own folder goes (bot_folder_name(), with
+    # FETCHED_FILES_PER_BOT on), and a folder name never has a dot (a dot in
+    # the nick becomes "_" there). A file under such a name keeps its id and
+    # leaves the name to the folder.
+    if ("." not in plain_name.rstrip(" .")
+            and os.path.normcase(os.path.abspath(dest_dir)) == os.path.normcase(fetched_files_root())):
         return stored_name
 
     old_path = os.path.join(dest_dir, stored_name)
@@ -3467,6 +3492,22 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     wall_deadline = time.time() + float(_fetch_transfer_timeout(row.get("request_type")))
     # For the panel's Downloading speed (#1019); this transfer's own clock.
     row["receiving_since"] = time.time()
+
+    # Something other than a folder already under the folder's name - a file
+    # kept there from an earlier version, say - is not moved or replaced
+    # here: the operator decides what happens to it. The reason names it.
+    if (os.path.lexists(platform_compat.long_path(dest_dir))
+            and not os.path.isdir(platform_compat.long_path(dest_dir))):
+        reason = (f"a file is where the fetch folder goes: {dest_dir} - "
+                  "move or rename that file, then fetch again")
+        _mark_failed_locked(row, reason)
+        print(f"[FETCH] {reason}")
+        try:
+            if sock is not None:
+                sock.close()
+        except Exception:
+            pass
+        return
 
     try:
         os.makedirs(platform_compat.long_path(dest_dir), exist_ok=True)
