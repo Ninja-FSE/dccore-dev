@@ -352,8 +352,8 @@ window under *General > Advertising*): channels separated by commas,
 each with its `#`, such as `#alpha, #beta`. Case does not matter. The advert
 still goes there; only the "sent" line does not. A channel's *Quiet* or
 *Request only* mode also stops the line, but stops the advert too. Empty,
-the default, announces in every channel. Your own debug line still records
-every send, as it does with the announcement off.
+the default, posts the "sent" line where the file was asked for. Your own debug line
+still records every send, as it does with the announcement off.
 
 ### Starting with the system
 

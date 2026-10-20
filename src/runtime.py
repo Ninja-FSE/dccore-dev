@@ -138,6 +138,11 @@ dcc_address_found_at = None
 # dcc.py's send-fail functions touch it, under failed_transfers_lock.
 failed_transfers = {}    # Failed sends per nick today (#1389)
 failed_transfers_lock = threading.Lock()
+# Where a rename carried a nick's failed sends today (#1477), so `unpause
+# <old nick>` finds the pause under the nick it sits on now:
+# {old_key: (day, new_nick)}, written by dcc.carry_send_fails() and read by
+# dcc.send_fails_renamed_to(), under failed_transfers_lock.
+send_fails_renamed = {}
 # The DAILY_SEND_FAILS_LIMIT circuit breaker (#1389), all under
 # send_connected_lock: whether any DCC send has connected since start-up; the
 # never-connected sends in a row since the last one that did, and the nicks

@@ -1975,10 +1975,42 @@ def unpause_send_fails(nick):
     return int(entry["fails"]) if entry and entry.get("day") == today else 0
 
 
-def carry_send_fails(old_key, new_key):
+def send_fails_renamed_to(nick):
+    """The nick `nick`'s failed sends today sit under now, after renames
+    (#1477): carry_send_fails() moved them, and `unpause <old nick>` found
+    nothing under the old one. A chain (a -> b -> c) is followed to the nick
+    that holds today's count. None when `nick` holds a count of its own
+    today, was not renamed with one today, or the trail ends at a nick whose
+    count is gone (unpaused, or a loop of renames back)."""
+    key = _send_fails_key(nick)
+    today = _send_fails_today()
+    with runtime.failed_transfers_lock:
+        entry = runtime.failed_transfers.get(key)
+        if entry and entry.get("day") == today:
+            return None
+        seen = {key}
+        while True:
+            renamed = runtime.send_fails_renamed.get(key)
+            if not renamed or renamed[0] != today:
+                return None
+            now = renamed[1]
+            key = _send_fails_key(now)
+            if key in seen:
+                return None
+            seen.add(key)
+            entry = runtime.failed_transfers.get(key)
+            if entry and entry.get("day") == today:
+                return now
+
+
+def carry_send_fails(old_key, new_key, new_nick=None):
     """Move today's failed sends, and the pause they made, from `old_key` to
     `new_key` on a rename (irc.note_nick_change(), #1437). Both are
     dcc_queue keys. True when the old nick had a count today.
+
+    A carry is also recorded, old key to `new_nick` (the new nick as the
+    server wrote it; `new_key` when not given), for send_fails_renamed_to()
+    (#1477). Records from an earlier day are dropped as one is written.
 
     Takes failed_transfers_lock only; call it outside queue_lock. An entry
     from an earlier day counts for nothing (send_fails_paused()), so it is
@@ -1994,6 +2026,10 @@ def carry_send_fails(old_key, new_key):
         old_entry = fails_store.pop(old_key, None)
         if not (old_entry and old_entry.get("day") == today):
             return False
+        renamed = runtime.send_fails_renamed
+        for stale in [k for k, (day, _now) in renamed.items() if day != today]:
+            del renamed[stale]
+        renamed[old_key] = (today, new_nick or new_key)
         new_entry = fails_store.get(new_key)
         if not new_entry or new_entry.get("day") != today:
             fails_store[new_key] = old_entry
@@ -6115,7 +6151,7 @@ SentFile = collections.namedtuple("SentFile", (
     "channel", "irc_sock", "owns_packer", "outcome_identity", "outcome_status", "acked",
     "never_connected", "assigned_port", "conn", "dcc_sock", "too_slow_bps",
     "receiver_failed"),
-    defaults=(None, None, False, None, None, 0, False, None, None, None, None, False))
+    defaults=(None, None, False, None, None, None, False, None, None, None, None, False))
 SentFile.__doc__ = """What start_dcc_send() knows about a send once it has ended (#1328): the
 transfer row, the nick, the queue row, the file and its size, where it
 resumed, the bytes sent, whether the receiver acknowledged the whole file or
@@ -6124,7 +6160,9 @@ already held it, and when it was offered, started and finished.
 Since #1336 also what finish_send() needs to wind it up: the channel and the
 IRC socket, whether it owns the packer, the outcome's identity and status,
 the bytes the receiver acknowledged, whether it never connected, the port,
-and the two sockets. record_completed_send() leaves those at their defaults.
+and the two sockets. record_completed_send() leaves those at their defaults,
+except the bytes acknowledged, which its "Not counted" line reports for a
+short send (#1477). `acked` defaults to None, which means not known, never 0.
 
 too_slow_bps (#1388) is the rate a send was stopped at for crawling while
 others waited for a slot, None for any other ending.
@@ -6208,8 +6246,18 @@ def record_completed_send(sent):
                 (sent.offered_at - _queued_at) if isinstance(_queued_at, (int, float)) else None,
                 nick=sent.user)
     except _ShortSend:
+        # What the receiver acknowledged, as the [DCC-FAIL] line above says
+        # (#1477): bytes_sent is what was written to the socket, which is the
+        # whole file for a receiver that closed early. Unknown is said so,
+        # rather than the written count shown as if it arrived.
+        if sent.acked is None:
+            _got = (f"short of its {sent.file_size:,} bytes (how many the "
+                    f"receiver acknowledged is not known)")
+        else:
+            _got = (f"short: the receiver acknowledged {sent.acked:,} of "
+                    f"{sent.file_size:,} bytes")
         print(f"[DB COUNTER] Not counted: {sent.file_name} for {sent.user} ended "
-              f"short at {sent.bytes_sent} of {sent.file_size} bytes. A partial send "
+              f"{_got}. A partial send "
               f"is not a completed transfer, so it is left out of the "
               f"totals, the download counter and the speed record.")
     except _AlreadyHeld:
@@ -6315,7 +6363,8 @@ def finish_send(sent):
         # active_transfers: a stop cutting it off now finds it claimed.
         # What reached the receiver is what it acknowledged, less what it
         # already held before a resume.
-        _acked = sent.acked
+        # None is "not known" (#1477): nothing is credited as delivered.
+        _acked = sent.acked if sent.acked is not None else 0
         _record_send_outcome(sent.row, sent.outcome_status, sent.outcome_identity, sent.file_size,
                              max(0, _acked - _skipped), sent.user)
 
@@ -7169,7 +7218,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file, own
         # Counting it is record_completed_send() (#1328).
         record_completed_send(SentFile(
             _row, user, next_file, file_path, file_name, file_size, resume_offset, bytes_sent,
-            transfer_completed, already_held, offered_at, start_time, transfer_finished_at))
+            transfer_completed, already_held, offered_at, start_time, transfer_finished_at,
+            acked=acks.acked))
 
         try: conn.close()
         except: pass

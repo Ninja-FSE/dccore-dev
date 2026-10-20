@@ -1,0 +1,1 @@
+- **Fixed: `unpause` with a paused nick's old name now lifts the pause on the nick it renamed to, and says so;** the log line for a send cut short now gives the bytes the receiver acknowledged, and the help for not announcing transfers in some channels no longer says an empty value posts in every channel.

@@ -1291,7 +1291,7 @@ def note_nick_change(old_nick, new_nick):
     # The failed sends today and the pause they made (#1437). dcc.py owns the
     # entry and takes its own lock, so this is after queue_lock is released:
     # dcc.py never takes one inside the other.
-    if dcc.carry_send_fails(old_key, new_key):
+    if dcc.carry_send_fails(old_key, new_key, new_nick):
         moved.append("failed_transfers")
     # The nicks of the never-connected streak follow the same way: one user
     # renamed between two unanswered offers is one nick to

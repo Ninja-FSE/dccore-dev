@@ -2204,6 +2204,15 @@ def _cmd_unpause(session, args):
         return
     fails = dcc.unpause_send_fails(nick)
     if not fails:
+        # Renamed since the count began (#1477): the pause went with the
+        # nick (#1437), so it is lifted where it sits now, and the reply
+        # names that nick.
+        now = dcc.send_fails_renamed_to(nick)
+        fails = dcc.unpause_send_fails(now) if now else 0
+        if fails:
+            session.send(f"{nick} is now {now}: {now}'s {fails} failed send(s) "
+                         f"today are forgotten; its requests are taken again.")
+            return
         session.send(f"{nick} has no failed sends counted today; nothing to lift.")
         return
     session.send(f"{nick}'s {fails} failed send(s) today are forgotten; "
