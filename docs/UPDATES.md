@@ -13282,7 +13282,7 @@ changing what channel users experience was not what was asked for.
 
 ### 🔍 The cross-list filter searches every list, and reports on every list
 
-From the beta, filtering with two lists held from one bot: *"why flacme - rar
+From the beta, filtering with two lists held from one bot: *"why [a serving bot on the test network] - rar
 shows like it has a result for amon a but i dont see any"*.
 
 Because it was never asked. A bot's archive can hold several lists, and since
@@ -13330,7 +13330,7 @@ reported from, six file rows were visible under a source list showing five.
     +--- fetch ---------------+         +--------+------------------+
     +--- filter --------------+         | fetch  | TITLE  SIZE  FMT |
     +--- bot list ------------+         | filter |------------------|
-    +--- file table ----------+         | FlacMe |  [ ] 01 Bleed... |
+    +--- file table ----------+         | (bot)  |  [ ] 01 Bleed... |
                                         | ...    |  [ ] 02 The L... |
 
 **The `minmax(0, 1fr)` is load-bearing**, and looks like a redundant zero. A
@@ -15964,7 +15964,7 @@ working feature on upgrade and one that passed everything would not be a cap.
 
 ### 🧹 A real bot's nick out of the fixtures, and a line nobody could act on
 
-**`Vibessono` is a real bot**, one of the 32 observed advertising in the
+**One of the bots in the fixtures is a real bot**, one of the 32 observed advertising in the
 channel #133 was written from - the issue discusses it by name, as the only one
 of the 32 publishing no list date. It was being used as an ordinary fixture
 nick in three test files, 33 times, and `tests/` ships. Renamed to `ReelBot`.
@@ -16937,7 +16937,7 @@ Three things it has to get right, each with a test:
 one line about the remaining verified findings.
 
 ### 🟡 The List Browser says when a bot's list has moved on (#133)
-The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.
+The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: one serving bot Apr 29th, another Feb 20th, and a serving bot on the test network Jan 2nd - and nothing said so.
 
 **Their advert then against their advert now.** Not their advert against our own parsed row count, which #133 settled explicitly: bots count differently, some including header lines and some counting album rows apart, so an off-by-a-few would leave a list permanently marked stale with nothing actually wrong. A bot compared against its own earlier claim has no such problem. `list_fetch` records what that bot was advertising at the moment we took the copy; `webserver` compares it with what they advertise now.
 
@@ -17341,7 +17341,7 @@ The advert loop was unaffected, because `announce.py` strips each entry as it go
 `join_target_list()` normalises before sending, so what an operator typed works as written. 10 tests, mutation-verified - putting `config.CHANNEL` back into the JOIN fails at once - and including a control that a list with no spaces passes through untouched, so this is a repair and not a change of behaviour.
 
 ### 📛 The bot takes its nickname from the server, not from config
-Found on a real install. A nickname longer than the server's `NICKLEN` is not refused - it is silently **shortened**. Undernet allows 12, so `Merlin-DCCore` registered as `Merlin-DCCor` and the daemon never noticed: it logged *"CURRENT_NICK settled as: Merlin-DCCore"*, advertised `@Merlin-DCCore` - a nick nobody could PM or DCC - and went on believing a name it had never had. `433` was handled because it announces itself; truncation does not, so nothing failed and nothing caught it.
+Found on a real install. A nickname longer than the server's `NICKLEN` is not refused - it is silently **shortened**. Undernet allows 12, so `DCCore-Server` registered as `DCCore-Serve` and the daemon never noticed: it logged *"CURRENT_NICK settled as: DCCore-Server"*, advertised `@DCCore-Server` - a nick nobody could PM or DCC - and went on believing a name it had never had. `433` was handled because it announces itself; truncation does not, so nothing failed and nothing caught it.
 
 **The nick now comes from the numeric's target field.** Every numeric reply is `:<prefix> <code> <target> ...` and for a registered client `<target>` *is* its nick - RFC 1459/2812 message structure rather than a courtesy, so every IRCd does it. What varies is RPL_WELCOME's *text*, which each network writes as it likes, so this reads the field and never the sentence.
 
