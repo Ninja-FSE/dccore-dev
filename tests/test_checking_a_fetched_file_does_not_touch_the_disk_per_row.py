@@ -31,7 +31,7 @@ import unittest
 from collections import Counter
 
 from tests import support  # noqa: F401  (path setup)
-from tests.support import DCCoreTestCase
+from tests.support import DCCoreTestCase, windows_path_rules
 
 import dcc  # noqa: E402
 import dcc_fetch  # noqa: E402
@@ -267,35 +267,16 @@ class OneRuleDecidesWhichFolderIsValid(FolderCase):
         """The same, with Windows' path rules (ntpath) in dcc_fetch's place:
         "C:bot" on a FETCHED_FILES_DIR on drive C: is the folder C:\\...\\bot
         to os.path.join, and absolute "C:\\t\\fetched\\BotA" is inside it.
-        dcc.is_safe_path() is stood in for by a lexical containment check:
-        the real one resolves the path with this host's own rules, which
-        cannot read a Windows path."""
-        import ntpath
+        dcc.is_safe_path() is the real one, under the same rules
+        (tests.support.windows_path_rules(), #1440): there its realpath() is
+        abspath(), which reads no disk."""
         root = "C:\\t\\fetched"
-
-        class WindowsOs:
-            path = ntpath
-            sep = "\\"
-            altsep = "/"
-
-            def __getattr__(self, name):
-                return getattr(os, name)
-
-        def inside(base, path, follow_symlinks=True):
-            return ntpath.normcase(ntpath.normpath(path)).startswith(ntpath.normcase(base) + "\\")
-
         self.set_config(FETCHED_FILES_DIR=root)
-        real_os, real_safe = dcc_fetch.os, dcc.is_safe_path
-        self.addCleanup(setattr, dcc_fetch, "os", real_os)
-        self.addCleanup(setattr, dcc, "is_safe_path", real_safe)
-        dcc_fetch.os, dcc.is_safe_path = WindowsOs(), inside
         folders = ("C:bot", "C:", "D:bot", "C:\\t\\fetched\\BotA", "\\t\\fetched\\BotA",
                    "\\\\server\\share", "..\\x", "a\\b", "a/b", "a\\..\\Bot", "BotA", "", None)
-        try:
+        with windows_path_rules(self, dcc_fetch, functions=[(dcc, "is_safe_path")]):
             answers = {folder: self.agree(folder) for folder in folders}
             plain = dcc_fetch.fetched_dir_of({"fetched_folder": "BotA"})
-        finally:
-            dcc_fetch.os, dcc.is_safe_path = real_os, real_safe
         self.assertEqual(plain, root + "\\BotA", "the stand-in reaches the real join")
         for folder, (refused_by_reader, refused_by_key) in answers.items():
             with self.subTest(folder=folder):
@@ -342,24 +323,11 @@ class TheFolderKey(unittest.TestCase):
         """The drive check bites only on Windows, so it is proven here with
         Windows' path rules (ntpath) in dcc_fetch's place for these calls only:
         on a POSIX host every absolute path already has a separator in it."""
-        import ntpath
-
-        class WindowsOs:
-            path = ntpath
-            sep = "\\"
-            altsep = "/"
-
-            def __getattr__(self, name):
-                return getattr(os, name)
-
-        real_os = dcc_fetch.os
-        dcc_fetch.os = WindowsOs()
-        self.addCleanup(setattr, dcc_fetch, "os", real_os)
         cases = {"C:bot": None, "C:": None, "C:\\bot": None, "\\bot": None, "/bot": None,
                  "\\\\server\\share": None, "a\\b": None, "a/b": None, "..\\x": None,
                  "a\\..\\Bot": "bot", "Bot\\": "bot", "Bot/": "bot", "BotA": "bota", "": ""}
-        answers = {folder: dcc_fetch._fetched_folder_key(folder) for folder in cases}
-        dcc_fetch.os = real_os
+        with windows_path_rules(self, dcc_fetch):
+            answers = {folder: dcc_fetch._fetched_folder_key(folder) for folder in cases}
         self.assertEqual(answers, cases)
 
 

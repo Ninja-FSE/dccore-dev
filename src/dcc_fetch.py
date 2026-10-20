@@ -2726,15 +2726,22 @@ def fetched_dir_of(row):
     Which folder strings are valid is decided by _fetched_folder_key() alone
     (#1439), the same rule files_other_rows_hold_locked() compares by: a
     folder it refuses (absolute, even one inside FETCHED_FILES_DIR, or with
-    a drive) is refused here too. The checks after it stay for symlinks."""
+    a drive) is refused here too. A folder that key accepts normalises to
+    one plain component, and that normalised name is what is joined, so the
+    path is directly inside FETCHED_FILES_DIR by construction: "a/../bot"
+    never resolves through "a", and "bot/" carries no trailing separator.
+    dcc.is_safe_path() stays, for symlinks. The lexical dirname comparison
+    that used to sit beside it never matched a share root (#1440):
+    the child of \\\\server\\share has the parent \\\\server\\share\\, with
+    a separator normpath(root) does not have, so every fetch failed."""
     root = fetched_files_root()
     folder = (row or {}).get("fetched_folder")
     if not folder:
         return root
     if _fetched_folder_key(folder) is None:
         return None
-    path = os.path.join(root, str(folder))
-    if os.path.dirname(os.path.normpath(path)) != os.path.normpath(root) or not dcc.is_safe_path(root, path):
+    path = os.path.join(root, os.path.normpath(str(folder)))
+    if not dcc.is_safe_path(root, path):
         return None
     return path
 
@@ -2867,19 +2874,31 @@ def _fetched_folder_key(folder):
     return key.casefold()
 
 
+def _same_folder_form(path):
+    """`path` in the form two folders are compared in (#1440): normalised,
+    case-folded where the platform folds case, and with any trailing
+    separator stripped. A root keeps one after normpath and other folders
+    do not, and the dirname of a share root's child is "\\\\server\\share\\"
+    while normpath of the share root is "\\\\server\\share". Stripping both
+    sides alike keeps "/" and "C:\\" equal to their children's dirname too.
+    normpath has already turned any alternative separator into os.sep."""
+    return os.path.normcase(os.path.normpath(path)).rstrip(os.sep)
+
+
 def _directory_folder_key(directory):
     """Which folder key (_fetched_folder_key()) `directory` is (#1439),
     lexically: "" for FETCHED_FILES_DIR itself, a folder directly inside it
     for that folder's name, and None for anywhere else, where no row's file
     is. A trailing separator, mixed separators or (on Windows) case do not
-    change the answer."""
+    change the answer, nor does a FETCHED_FILES_DIR that is a share root
+    (#1440, through _same_folder_form())."""
     if not directory:
         return None
     here = os.path.normpath(os.path.abspath(str(directory)))
-    root = os.path.normcase(os.path.normpath(fetched_files_root()))
-    if os.path.normcase(here) == root:
+    root = _same_folder_form(fetched_files_root())
+    if _same_folder_form(here) == root:
         return ""
-    if os.path.normcase(os.path.dirname(here)) != root:
+    if _same_folder_form(os.path.dirname(here)) != root:
         return None
     return _fetched_folder_key(os.path.basename(here))
 

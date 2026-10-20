@@ -1450,3 +1450,96 @@ def changelog_entry(test, number, public, opening=None):
         following = re.search(r"^#{2,3} ", rest, re.M)
         return text[match.start():match.end() + (following.start() if following else len(rest))]
     raise AssertionError(f"#{number}'s entry is neither in docs/changes/ nor in {changelog}")
+
+
+def _host_resolves_windows_paths():
+    """Whether ntpath here resolves a path on disk: only where `nt` is, i.e. on
+    Windows. Elsewhere ntpath.realpath() is abspath(), and abspath() is
+    normpath() for an absolute path: string work alone."""
+    try:
+        import nt  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+class _LexicalNtpath:
+    """ntpath with realpath() as abspath(), for a Windows host. There the real
+    realpath() asks the disk, and for \\\\server\\share the network, where
+    a share that is not there can take seconds to fail. abspath() is
+    GetFullPathNameW there, which reads no disk. Everything else is ntpath."""
+
+    @staticmethod
+    def realpath(path, *args, **kwargs):
+        import ntpath
+        return ntpath.abspath(path)
+
+    def __getattr__(self, name):
+        import ntpath
+        return getattr(ntpath, name)
+
+
+class WindowsOs:
+    """Windows' path rules (ntpath) in place of a module's `os`, wherever the
+    suite runs, so a Windows path - a drive, a share root - can be checked
+    on a Linux or macOS runner. Only the path rules change: every other
+    attribute is this host's own os.
+
+    The path rules are ntpath itself on a host without `nt`: there its
+    realpath() is abspath(), lexical, so code that "resolves" a path through
+    it (dcc.is_safe_path()) runs unchanged and never reaches the disk. On
+    Windows they are ntpath with realpath() made lexical the same way
+    (_LexicalNtpath), so no test reaches for \\\\server\\share on a network.
+    Shared by every test that needs it (#1439, #1440): import it, do not copy
+    it."""
+
+    sep = "\\"
+    altsep = "/"
+
+    def __init__(self):
+        import ntpath
+        self.path = _LexicalNtpath() if _host_resolves_windows_paths() else ntpath
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+class windows_path_rules:
+    """Context manager: Windows' path rules (WindowsOs()) for the code under
+    test while it is open, wherever the suite runs.
+
+    `modules` get WindowsOs() as their `os`. `functions`, pairs of (owner,
+    name), are each rebound to a copy of the function whose globals see
+    WindowsOs() as `os` and nothing else changed: the real code, with
+    Windows' rules, and the rest of its module untouched. That is how
+    dcc.is_safe_path() is put under them (#1440) rather than all of dcc,
+    whose send threads can outlive a test and must keep this host's `os`:
+    dcc's own `os` is untouched, and only is_safe_path() - for every caller,
+    dcc's own included - follows Windows' rules while the context is open.
+
+    Restored on exit, and through test.addCleanup() as well, so a failure
+    between the two can never leave anything on Windows' rules for the tests
+    after it."""
+
+    def __init__(self, test, *modules, functions=()):
+        self.os = WindowsOs()
+        self.swaps = [(module, "os", module.os, self.os) for module in modules]
+        for owner, name in functions:
+            real = getattr(owner, name)
+            stand_in = types.FunctionType(real.__code__, {**real.__globals__, "os": self.os},
+                                          real.__name__, real.__defaults__, real.__closure__)
+            stand_in.__kwdefaults__ = real.__kwdefaults__
+            stand_in.__doc__ = real.__doc__
+            self.swaps.append((owner, name, real, stand_in))
+        for owner, name, real, _ in self.swaps:
+            test.addCleanup(setattr, owner, name, real)
+
+    def __enter__(self):
+        for owner, name, _, stand_in in self.swaps:
+            setattr(owner, name, stand_in)
+        return self.os
+
+    def __exit__(self, *exc):
+        for owner, name, real, _ in self.swaps:
+            setattr(owner, name, real)
+        return False
