@@ -174,7 +174,11 @@ class PromotionAtTheTopAndInAFolder(DCCoreTestCase):
 
     def setUp(self):
         super().setUp()
-        self.root = os.path.join(self.make_temp_dir(prefix="dccore-promote-top-"), "fetched")
+        # The real path: on macOS the temp folder is under /var, a link to
+        # /private/var, which is what os.getcwd() reports - and a relative
+        # FETCHED_FILES_DIR is resolved against that (the test below).
+        self.root = os.path.join(os.path.realpath(self.make_temp_dir(prefix="dccore-promote-top-")),
+                                 "fetched")
         os.makedirs(self.root)
         self.set_config(FETCHED_FILES_DIR=self.root)
 
@@ -194,6 +198,9 @@ class PromotionAtTheTopAndInAFolder(DCCoreTestCase):
         self.assertEqual(self.promote("alfa"), f"{RID}_alfa")
         self.assertEqual(sorted(os.listdir(self.root)), [f"{RID}_alfa"])
 
+    @unittest.skipIf(platform_compat.IS_WINDOWS,
+                     "Windows drops a trailing dot or space from a name, so no such file "
+                     "can be made here; a fetched name never has one (windows_safe_name())")
     def test_a_dot_or_space_at_the_end_does_not_count_as_a_dot(self):
         for plain in ("alfa.", "alfa ", "alfa. .", "alfa.."):
             with self.subTest(plain=plain):
