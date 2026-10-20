@@ -1842,6 +1842,11 @@ def _cmd_checkupdates(session, args):
     if not arg:
         session.send(_checkupdates_reply(session, getattr(config, "CHECK_FOR_UPDATES", True)))
         return
+    # With an argument this saves a setting, so a token session needs
+    # `unlock <password>` first, as `set` does. Reporting it does not.
+    import console_settings
+    if console_settings.refused_while_locked(session, "checkupdates"):
+        return
     wanted = arg == "on"
 
     def apply():
@@ -1893,6 +1898,10 @@ def _cmd_consolefeed(session, args):
         return
     if not arg:
         session.send(_consolefeed_reply(session, getattr(config, "DEBUG_TO_CONSOLE", True)))
+        return
+    # Saves a setting, so locked as checkupdates is.
+    import console_settings
+    if console_settings.refused_while_locked(session, "consolefeed"):
         return
     wanted = arg == "on"
 

@@ -881,6 +881,13 @@ alias dccore.structured {
   ; A save's rehash that failed (#1434), when the settings window is not
   ; waiting for it - closed, or the set typed here: said here, never dropped.
   if (%type == SETAPPLYERR) && (!$dccore.sw.wants(%type)) { dccore.alert $dccore.tag(SETTINGS,fail) $dccore.bot $+ : the settings were saved to settings.conf. $2- | return }
+  ; checkupdates and consolefeed with an argument save a setting, so a
+  ; locked console is refused them. Said here, never through the settings
+  ; window's unlock: that sends the refused command again without the
+  ; on|off it carried, and once the window is closed it would say nothing
+  ; at all. The window's console feed box, refused, is put back as the bot
+  ; has it, and the window says why (dccore.sw.locked.toggle).
+  if (%type == LOCKED) { if ($istok(checkupdates consolefeed,$2,32)) { dccore.sys $dccore.bot $+ : $3- | if ($2 == consolefeed) { if ($dialog(dccore.set)) { dccore.sw.locked.toggle } } | return } }
   ; The settings window's lines (#1264), but only the ones it is waiting
   ; for (and, for a few seconds after it closes, its late replies): the
   ; same lines answering a command typed in this window - settings, set,
@@ -2386,6 +2393,15 @@ alias dccore.sw.opt.save {
   if (%retheme) { dccore.theme.refresh }
   hadd dccore.sws opt.sig $dccore.sw.opt.sig
   return %n
+}
+; The console feed box sent by Apply and refused on a locked console:
+; back to what the bot has, as dccore.sw.opt.fill shows it, and the
+; baseline taken again so the box is not counted as an unsaved change.
+alias dccore.sw.locked.toggle {
+  if ($dccore.st(consolefeed) == on) { did -c dccore.set 1685 }
+  else { did -u dccore.set 1685 }
+  hadd dccore.sws opt.sig $dccore.sw.opt.sig
+  dccore.sw.status Console feed not changed: type unlock <password> in @DCCore, then Apply again.
 }
 ; Pair again, Forget token: the window closes and the pairing takes over
 alias dccore.sw.opt.pair {
