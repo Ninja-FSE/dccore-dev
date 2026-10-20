@@ -1494,7 +1494,11 @@ block lives in memory only. The limit is per address, not per chat: a password i
 counted before it is checked, so chats opened side by side share the three, and a
 chat that was already open when the address was blocked is closed at its next
 attempt with "Too many failed password attempts from this address." An
-`unlock <password>` counts the same way, against the same three.
+`unlock <password>` counts the same way, against the same three. Only the
+admin password, at the prompt or in `unlock`, clears the count: a login with
+a paired token, full or read-only, is not counted as a wrong password, but it
+leaves the address's earlier wrong ones as they were, and a blocked address
+is refused with a token too.
 
 **Locked out entirely.**
 Edit `admin_config.py` and restart. While `ADMIN_CHANNEL_COMMANDS` is on (it
