@@ -4,10 +4,9 @@
   name has a "." in it. A name without one keeps its request id, because that is where each bot's own folder goes
   (`FETCHED_FILES_PER_BOT`, #1423), and a folder named after a nick never has a dot. This also covers `lists`, which
   stays in `_RESERVED_FETCHED_NAMES`. Inside a bot's own folder nothing changes.
-- **No dot in a bot's folder name:** `bot_folder_name()` turns a "." left in the cleaned nick into "_" (`a.b` gives
-  `a_b`), so the rule above holds for any nick, not only for valid ones. That name is not the nick, so on its own it
-  could match another nick's folder, as `[Alfa]` and `Alfa` can today; the tag #1438 adds for a cleaned name covers
-  it.
+- **No dot in a bot's folder name:** `bot_folder_name()` turns a "." left in the cleaned nick into "_", so the rule above holds
+  for any nick, not only for valid ones. That name is not the nick, so it carries the tag a cleaned name gets (#1438):
+  `a.b` gives `a_b-<digest>` and never shares the folder of the nick `a_b`.
 - **A file where a bot's folder goes:** when something other than a folder is already at a fetch folder's name - a
   file kept at the top from an earlier version - `_run_transfer()` fails the fetch with a reason that names it and
   asks the operator to move or rename it, instead of a bare `could not create destination dir: [Errno 17]`. The
