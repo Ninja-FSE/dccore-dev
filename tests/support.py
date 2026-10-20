@@ -118,6 +118,9 @@ RUNTIME_CONTAINERS = {
     "muted_until": dict,
     "whois_status": dict,
     "failed_transfers": dict,
+    # #1477: where a rename carried a nick's failed sends. A leftover is a
+    # rename the next test never made, followed by its `unpause <old nick>`.
+    "send_fails_renamed": dict,
     "vip_queue": list,
     "fetch_request_queue": list,
     "send_queue": dict,

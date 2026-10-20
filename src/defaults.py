@@ -566,7 +566,7 @@ ANNOUNCE_TRANSFERS: bool = True
 # compares them, so case does not matter. A channel's Quiet or Request only
 # mode stops the announcement too, but stops the advert with it.
 #
-# Empty announces in every channel.
+# Empty posts it where the file was asked for.
 ANNOUNCE_TRANSFERS_EXCLUDE: list = []
 
 # ---------------------------------------------------------------------
@@ -1182,6 +1182,7 @@ C_ITALIC       = "\x1D"     # Italic
 # this name from the object runtime.py still holds, and the two silently drift
 # apart. tests/test_runtime_state.py fails the build if anything does.
 failed_transfers  = runtime.failed_transfers   # Failed sends per nick today (#1389)
+send_fails_renamed = runtime.send_fails_renamed  # Where a rename carried them (#1477)
 channel_users     = runtime.channel_users      # Users currently seen in the channels
 banned_users      = runtime.banned_users       # Currently banned users, in memory
 user_requests     = runtime.user_requests      # Command timestamps per user, anti-flood
