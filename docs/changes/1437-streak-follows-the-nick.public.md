@@ -1,1 +1,0 @@
-- **Fixed (security): `DAILY_SEND_FAILS_LIMIT` now treats a user who changes nick between downloads that never connected as one downloader, not two.**

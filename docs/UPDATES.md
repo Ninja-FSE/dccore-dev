@@ -2,6 +2,1670 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟩 v1.18.0 (2026-10-20) - "The Fair Share Release"
+
+### 🐛 A refused `!rar` request is told why it was refused (#1475)
+
+- **What was wrong:** `announce.send_pack_error_notice()` had one fixed text, "Artist root folders cannot be requested. Please select a specific album sub-folder.", and all five refusals in `dcc.handle_download_request()` sent it. A folder refused for being over `MAX_RAR_FOLDER_SIZE`, or for holding nothing in `RAR_EXTENSIONS`, was told it was an artist root; only the debug channel had the real reason.
+- **The fix:** `send_pack_error_notice()` takes a `reason` (one of the `announce.PACK_REFUSED_*` names) and, for the size refusal, `limit_bytes`. `announce.pack_refusal_text()` builds the sentence; the frame, colours, `notices_allowed()` and the VIP queue path are unchanged. Each refusal passes its own reason:
+  - a folder that is not in the library: "That folder is not one this bot offers."
+  - an artist root: the old text, unchanged.
+  - nothing packable: "That folder holds nothing this bot packs. Its files can still be requested by name."
+  - over `MAX_RAR_FOLDER_SIZE`: "That folder is larger than the `<limit>` limit for packed folders. Its files can still be requested one by one." The limit comes from `format_size_human()` (10 GB shows as `10.0GB`); the folder's measured size and server paths are never named.
+- **Default:** without a `reason` the notice keeps the artist-root text. A pack that fails while it runs is not a refusal and is never told it is an artist root.
+- **Also:** the console line `[RAR QUEUE] Added virtuell mapp ...` is now `[RAR QUEUE] Queued folder pack ...` (CONVENTIONS rule 7).
+
+### 🐛 `@<nick>-remove` with a line copied from the list removes that file (#1473)
+
+- **What was wrong:** a request strips the `  ::INFO:: <size> ...` tail before it queues the row (`dcc.py`, `list.strip_info_suffix()`, #234), and the row's name is the base name of the path the request opens. `commands.handle_queue_remove_file()` compared the whole argument with `_same_file_name()`. So `@<nick>-remove Some Artist - 13 - Love.flac  ::INFO:: 36.82MB 3m1s 1681/44.1/S` matched nothing, and the user was told the whole line "is not in your queue" while the file was sent anyway. The same happened with a name that has its folder in front (`Album/track.flac`), whose row is `track.flac`.
+- **The fix:** one derivation for both. `dcc._requested_name_and_size()` does the request's strip (the name, and the size hint in lower case), and `handle_download_request()` calls it in place of its own three lines; what it queues is unchanged. `dcc.queued_name_of_request()` takes the base name of that (`os.path.basename()`, so `\` separates on Windows only, as for the request's own path), and `handle_queue_remove_file()` matches with it after `printable_text()`. Any spacing round the marker, any branding after it, the `---- <size>` form and a leading folder are handled as on a request. The NOTICE (removed, being sent, not in your queue) and the `[COMMANDS]` log line name the bare file. Space/underscore and case matching are unchanged. The CTCP `REMOVE <file>` form goes through the same function.
+- **Not changed:** the `!rar` branch, and the operator's remove on the Queue page and in the console (`remove_queued_file()`), which picks a row by position and row id, not by a typed name.
+
+### 🧪 Tests no longer depend on run order, port state or the source text (#1469)
+
+Test-only.
+- Two tests that run a `DCCoreTestCase` by hand inside a plain one failed when their module ran on its own: `AfterTheHarness` (`tests/test_a_login_test_never_reads_the_operators_token_store.py`) and `TheFixtureLeavesNoPackerBehind` (`tests/test_a_rehash_keeps_the_interlocks_of_a_running_pack.py`). The harness's teardown points `DCC_QUEUE_FILE`, `DOWNLOAD_COUNTS_FILE` and `TRANSFER_LOG_FILE` at dead paths on purpose, and the leak check counted that against the plain test. Both name the harness's settings as `SETTINGS_THE_HARNESS_SETS`, as the other classes that run a harness case do, and pass alone and in any order.
+- One loopback probe, `loopback_is_usable(port_start, port_end)` in `tests/test_dcc_resume_end_to_end.py`, now takes the port window and sets the address-reuse option the daemon's own listener sets (`platform_compat.prepare_listener()`). Two copies set none and skipped their modules when the window was only in TIME_WAIT; two set `SO_REUSEADDR` on Windows too; and five modules probed 51200-51210 while sending on 51300-51370. Every module now asks about the window its sends use. `tests/test_the_loopback_probes_survive_time_wait.py` checks the probe on a port in TIME_WAIT, and that each guarded class's probe tries exactly the ports its setUp gives its sends.
+- Tests that read `src/` to check the slot handling, the send buffer and the rehash now drive the code instead: `tests/test_rehash_config_window.py`, `tests/test_audit_rar_pack_and_slots.py`, `tests/test_a_rehash_keeps_the_interlocks_of_a_running_pack.py`, `tests/test_a_rehash_forgets_where_files_were.py`, `tests/test_the_rehash_channel_sync_takes_its_turn.py` and `tests/test_the_list_rebuilds_on_a_schedule.py`. `tests.support.rehash_with_the_reload_stood_in()` runs the real `handle_rehash_request()` with only its module reload stubbed. Driven instead: a real send over loopback applies the send buffer to the accepted connection; the dispatcher and packer take the pack's slot in the same `queue_lock` hold as the count, release the interlocks of a refused pack and wake the next one for the current holder, and refuse a full house at each of the three checks before a dispatch; the Settings payload waits for a reload holding `config_reload_lock`; a request during the quiesce is told the bot is reloading; and a rehash waits before it reloads, resumes sends before it wakes the queue and when the reload raises, keeps the interlocks of a pack still running, clears stale ones, forgets the lookup memories after the reload, queues its channel sync instead of writing to the socket, survives a sync that raises, keeps a debug channel that the reload left blank, and starts the rebuild schedule, as a real boot does (run through `tests/test_startup.py`'s `BootCase`). Each fails with the old behaviour restored, including mutants the source checks let through.
+
+### 🐛 A nick paused while its own `!rar` folder is being packed stops that pack (#1468)
+
+- **What was wrong:** when a nick was paused by `DAILY_SEND_FAILS_LIMIT` while its own folder row was being packed (a rename merging a pause onto it, or the limit lowered during the day), `_pause_for_send_fails()` dropped the row but left rar running. The outcome was right (nothing sent, the pack recorded as cancelled, the archive removed), but rar ran to the end, holding `rar_inprogress` for every other nick for up to `RAR_TIMEOUT`, and the packer then logged "`<nick>` removed `<folder>` while it was being packed", which the user had not done.
+- **The fix:** `_pause_for_send_fails()` keeps the rows it drops and, once `queue_lock` is released, stops a running pack of any of them with `cancel_pack(row=..., reason=...)`, as the user's own remove does (`commands._stop_withdrawn_packs()`, #1268). `cancel_pack()` takes an optional `reason`, stored on the job as `stop_reason`; the packer logs "The pack of `<folder>` for `<nick>` is stopped: `<nick>` is paused for failed sends today." Without a reason the #1268 path and its line are unchanged. The withdrawn path is kept: the row is not settled again, no NOTICE beyond the pause's own, one `CANCELLED` record.
+- **The other two "removed" lines** say the same when the owner is paused: a row gone before the pack began ("`<folder>` is not packed: ..."), and a row gone after rar finished but before the hand-off ("The packed `<folder>` is not sent: ..."). The second reuses the paused count the hand-off already reads before `queue_lock`.
+- **The packer's own drop** (the hand-off to an owner paused while rar ran, #1460) passes `stop_pack=False`: that thread is the packer of the row, its job has already ended, and it still holds `rar_inprogress`, so there is no other pack to stop.
+- **Lock order (#1452):** `_pause_for_send_fails()` takes `runtime.pack_lock` (in `cancel_pack()`) only after `queue_lock` is released; `_begin_pack_job()` nests `pack_lock` inside `queue_lock`, so the reverse must never happen, and does not. Every caller holds none of `queue_lock`, `pack_lock` or `failed_transfers_lock` at the call: `note_failed_send()` calls it after releasing `failed_transfers_lock`, `drop_queues_of_paused_nicks()` after releasing `queue_lock`, and the packer's hand-off with no lock held.
+
+### 📋 The project board archives finished items, and a release closes itself on the board (#1463)
+
+- **`docs/PROJECT-BOARD.md`:** a new section, "Archiving: one board for every release". It covers:
+  - why the board stays one project, with each release's milestone as its history, rather than a new project
+    named after a version;
+  - that the built-in Auto-archive items workflow is on;
+  - that archived items are not deleted and can be found and restored under Archived items;
+  - that open items are never archived;
+  - how to see what the next release carries.
+- **`docs/PUBLIC-REPO-WORKFLOW.md`:** a release-checklist step that the checklist did not have:
+  - rename "Next release" to the tag, close it and open a new one;
+  - move the shipped PRs from Ready for release to Done, from where they archive themselves.
+
+### 🩹 The dashboard's Settings save says whether its rehash went through (#1462)
+
+Follow-up from #1434. The console and `dccore.mrc` pass `on_applied` and say `SETAPPLYERR` when the rehash after a
+save fails, but the dashboard's own Settings save passed none: it said "Rehash started", re-fetched `/api/settings`
+and never learned how the rehash went. With `admin_config.py` holding a syntax error, the dashboard operator had no
+sign that the saved values were not what the bot runs.
+
+- **`runtime.save_rehash`**, a `SaveRehashOutcome`: the latest save's number (`seq`), `ok` (`True`/`False` once its
+  rehash finished, `None` while it runs) and `finished_at`, under a lock of its own. In `runtime.py` so a rehash does
+  not forget it; it is not a container, so it needs no `defaults.py` binding and no place in `PRESERVE_RUNTIME`.
+  `begin()` numbers a save after it is written, `finish(seq, ok)` records the outcome only while `seq` is still the
+  latest - an older rehash finishing after a newer save began is dropped, since the newer one read both saves.
+- **`_save_settings_and_rehash()`** numbers every save that reaches its rehash (dashboard, password change,
+  console) and records the outcome in the rehash thread's `finally`, before `on_applied(ok)`; it fails closed as
+  before. The record is bound when the save starts, so a record replaced meanwhile never gets the outcome of a save
+  it did not number. Its answer gains `rehash_seq` and `rehash_wait` (`REHASH_TRANSFER_WAIT`, read under
+  `runtime.config_reload_lock`).
+- **`GET /api/settings/rehash`** (`build_save_rehash_payload()`), behind the login like every route: `seq`, `ok`,
+  `finished_at`, and `message` when `ok` is `False`. `build_save_rehash_payload()` reads `runtime` only and takes
+  no config lock, but the login gate in front of the route reads the password hash under `config_reload_lock`
+  (#1433), so a request may still wait out the reload's few milliseconds.
+- **The Settings page** polls it every 1.5 s after a save until the outcome for its number, or a later one, is
+  known, for at most 2 × `rehash_wait` + 60 s: the rehash waits its turn for `rehash_lock`, and the rehash holding
+  it may be in its own transfer wait, so the worst case is two waits and the reloads (60 s when the wait is
+  unusable). Then it says the settings are in effect (`settings.rehashAppliedRestart`, "except those that need a
+  restart to apply", when the save named some), or "Rehash failed." and the server's sentence, and reloads the
+  page to show what the bot runs; at the cap, that the rehash has not finished and the log will say. The outcome
+  has a note of its own (`#settings-rehash-note`), so it never covers a refusal or a folders- or lists-only save's
+  note. Only a newer save the server accepts ends the older wait; a refused one (a 400, or no answer) and a save of
+  folders or lists alone leave it running. A save with no `rehash_seq` waits for nothing.
+  Known limit: the record only holds what a settings save's own rehash did, so it is not shown again when the page
+  is reopened - a later `!rehash` from IRC or the console does not update it, and an old failure could be stale.
+- **One sentence:** the console's failure sentence moved to `web_settings.REHASH_FAILED_WHY` /
+  `REHASH_FAILED_SAID`; the console's `SETAPPLYERR` line and plain-console sentence and the dashboard all use it.
+  New page strings (`settings.rehashApplied`, `settings.rehashAppliedRestart`, `settings.rehashFailed`,
+  `settings.rehashNotFinished`) in en, es and fr.
+- **Docs:** `docs/INSTALL.md` (a save starts a rehash and says whether it worked) and the `SETAPPLYERR` row in
+  `docs/ADMIN-CONSOLE.md`.
+- **Tests:** `tests/test_the_dashboard_says_whether_a_save_took_effect.py` (49), and `tests/support.py` gives every
+  test a fresh `runtime.save_rehash`.
+  - the record: numbers in order and distinct under eight threads, only an explicit `True` is `True`, a late
+    `finish()` for an older save or a number never handed out is dropped, the snapshot is a copy;
+  - `build_save_rehash_payload()` directly: before any save, running, `True`, `False` with the shared sentence, and
+    an answer while another thread holds `config_reload_lock` (bounded join, with a control that the lock is held);
+  - the dashboard's save as the route calls it, no `on_applied`: a rehash answering `True`, `False`, `None` or
+    raising records `True`, `False`, `False`, `False`; `None` while it is held; overlapping saves keep the newer
+    one's outcome; a refused save (a bad value, `ADMIN_PASSWORD_HASH`, an empty body) leaves the record alone;
+    a rehash whose record is replaced while it runs, by one that has handed out the same number, records into the
+    record it was numbered in and leaves the new one untouched; `rehash_wait` is `REHASH_TRANSFER_WAIT`; a raising
+    `on_applied` keeps the record, a raising record still calls `on_applied`;
+  - the route through the Flask test client after login: the same four answers, running then known, a 400 save,
+    401 without login, GET only;
+  - the console, run for real: its `SETAPPLYERR` line and plain sentence are the shared constants, and follow them
+    when they are patched;
+  - the Settings page's `awaitSettingsRehash()`, `saveTheSettings()` and `saveSettingsPage()` under node, with the
+    page's own `showSettingsStatus()`, a fake clock, timers and server: no poll without `rehash_seq`; asking on
+    while the record is an older save's, running, or the request failed; "in effect" or the error with the server's
+    sentence in `#settings-rehash-note`, never in the save's note, then a reload; a later save's answer taken;
+    `rehashAppliedRestart` when `restart_required` names settings, `rehashApplied` when it is empty or missing, a
+    failure unchanged by it (also through the save, beside the restart note); the cap at 2 × `rehash_wait` + 60 s
+    (80 s and 120 s for 10 and 30), 60 s for a missing, negative or non-numeric wait, asking all the way there; an
+    accepted newer save ends the older wait with its poll in flight, also with no `rehash_seq`, and hides the older
+    outcome's note; a newer save refused with a 400 or never answered, and a folders-only or lists-only save, leave
+    the older wait running: its outcome lands in the rehash note and the refusal, or the editor's note, stays in
+    `settingsSaveStatus`; a finished "in effect" is taken down when a newer save starts, so a refusal of that one is
+    not read under it, while a finished failure stays.
+  - `tests/test_one_save_for_the_settings_page.py`: its harness had no `awaitSettingsRehash`, so the settings save
+    there threw inside its `.then()` and said "could not reach" unseen. It now has a stand-in, and the folders-and-
+    settings and lists-and-settings saves are checked to show no error and to wait once.
+- **Mutants:** 35 of 35 caught: no `finish()`; `ok` recorded raw; `seq != self._seq` as `<`, and the check deleted;
+  `begin()` before `settings_file.save()`; `not ok` for `ok is False` in the payload; `finish()` after
+  `on_applied` and before it, each without the nested `finally`; `config_reload_lock` taken in the payload; the
+  console with its own copy of the sentence; no reset in `tests/support.py`; `src/` reverted to `origin/main`; the
+  thread calling `runtime.save_rehash.finish()` instead of the bound record; and in `app.js`: no token check after
+  the fetch, no `seq >= rehash_seq`, no cap, `null` taken as known, the save not waiting, an accepted save not
+  ending an older wait, no `rehash_seq` check, a failure shown as success, the cap as `wait + 60`, no fallback for
+  an unusable wait, and none for a negative one, the outcome shown in `settingsSaveStatus`, the older note not
+  hidden, any newer save ending the older wait (the old decision), a 400 ending it, an unanswered POST ending it,
+  a folders- or lists-only save ending it, the restart variant never used, used for an empty list, and used for a
+  failure; a finished success left up under a newer save, and a finished failure taken down with it.
+
+### 🐛 Every send under the upload cap takes the same chunk after DCC_BLOCK_SIZE changes (#1461)
+
+- **What was wrong:** `stream_the_file()` read `dcc_block_size()` once per transfer, and `speed_cap.chunk_size()` bounds a chunk under a cap by that block. #1436 holds a send under a full cap only while it moves `SLOW_SEND_CAP_NEAR` of the even split, which rests on every send taking the same chunk from the shared clock. After a rehash lowered `DCC_BLOCK_SIZE` below the cap's tenth-of-a-second chunk, a send started before it kept the bigger chunk and the newer sends moved less than an even split (285 / 57 / 57 KB/s at a 400 KB/s cap with one 64 KB and two 8 KB blocks). They were not held, so with `SLOW_SEND_MIN_KB` above their rate, every slot full and a nick waiting, one could be stopped as a crawler although only the cap slowed it. Raising the block did the same to the older send.
+- **The fix:** the send loop reads `dcc_block_size()` every pass, and sets the socket timeout again (`_send_timeout()`) only when the block changed, before the chunk it covers goes out. Chosen over sizing capped chunks without the transfer's block inside `speed_cap.chunk_size()`: that needs a bound of its own, and a capped chunk bigger than the block the timeout was set for would break the 64 KB-a-minute slow-receiver floor (#1139); reading the block per pass keeps the chunk, the timeout and the cap on one value. The cost is one getattr and a clamp per pass, beside a file read and a `sendall()`. DCC acks and resume offsets are byte counts, so a block that changes mid-file changes nothing for the receiver.
+- **Fetches:** unchanged. `dcc_fetch` receives in `RECV_CHUNK`, a constant, so every fetch under the download cap already asks for the same chunk.
+- **Tests:** 12 new, one source-grep test retired:
+  - `tests/test_the_send_loop_on_its_own.py`, `TheBlockIsReadEveryPass` (8 tests): the real `stream_the_file()` with the setting changed between two passes. 8 KB lowered to 4 KB sends 8, 4, 4 (it was 8, 8), and 4 KB raised to 8 KB sends 4, 8, 4. 128 KB raised to 256 KB has its 240 s timeout before the 256 KB `sendall()`, and 256 KB lowered to 128 KB comes back to 120 s. A resumed send keeps the bytes, acks, row and bot total exact across a change. A new value is clamped to 4 KB or 1 MB, with its timeout. A rehash window moves one pass at the default 64 KB with 60 s, and the next pass is back on 128 KB with 120 s. A block that never changes sets the timeout once. The file's harness is now a base class, `LoopHarness`, so the new class does not run `StreamTheFile`'s tests twice.
+  - `tests/test_a_send_that_crawls_while_others_wait.py`, `TheSharedClock` (3 tests): each `ChunkSender` may ask for its own blocks. With one 64 KB send and two at a smaller block, the issue's three cases (400 KB/s with 8 KB, 400 with 16 KB, 150 with 4 KB) give the newer sends what the chunks split to: 57 KB/s at 400 with 8 KB. They are not held by `upload_cap_holds_this_send()`, while the older send is. The same three sends at one block share the cap evenly and are all held. The third test reads off the real `stream_the_file()` the blocks it asks for when the setting goes from 64 KB to 8 KB after the first chunk: 64 KB, then 8 KB every pass. Fed to the shared clock beside two 8 KB sends, those blocks give three even, held shares.
+  - `tests/test_rehash_config_window.py`: `test_it_is_resolved_once_per_transfer_not_once_per_pass` grepped the loop for the opposite of this fix. It is replaced by `test_a_rehash_reaches_a_send_already_running`, which drives `stream_the_file()`.
+  - Mutants of `src/dcc.py`, each run against the seven related modules (204 tests). 6 of 6 turned them red:
+    1. no re-read (10 failures);
+    2. re-read without `conn.settimeout()` (4);
+    3. `settimeout()` with the old block (4);
+    4. `!=` turned into `==` (11);
+    5. `chunk_size(..., 65536)` hard-coded (20);
+    6. `src/dcc.py` from origin/main (10, including the shared-clock test fed by the real loop).
+
+### 🐛 A nick paused by DAILY_SEND_FAILS_LIMIT is sent nothing from its queue (#1460)
+
+- **What was wrong:** only the request gate asked `send_fails_paused()`. The dispatcher sent whatever was queued, so a nick paused while it still held queue rows kept getting them. Two ways in: a rename merged a pause onto a nick that had a queue of its own (or, on a tie after the limit changed mid-day, the merged entry was paused for a queue that was never removed), and a NICK landing between `note_failed_send()` counting the failure and `_pause_for_send_fails()` removing the queue, which moved the queue and the pause to the new nick while the removal looked under the old one.
+- **The fix:** the dispatcher asks too. `check_queue_and_send()` starts with `drop_queues_of_paused_nicks()`, which reads `paused_for_send_fails()` and drops what is still queued for each paused nick through `_pause_for_send_fails(..., queued_only=True)`: the same removal, archive cleanup, log line, debug line and notice the pause gives, and nothing said when there is nothing left to drop. Section A does not pick the finishing nick's head when it is paused, `claim_next_in_line()` (section B) passes a paused nick over and goes on to the next in line, before it can take the slot kept for a waiting pack, and a finished `!rar` archive is not handed to a send when its owner is paused while rar ran: the queue goes, the archive with it unless another row names it, and the pack is recorded as cancelled. Every queued send reaches a slot through one of these three; a request that would be sent at once is already refused by the request gate.
+- **Lowering the limit during the day** (a rehash or a Settings save) now has the same effect at the next dispatch: a
+  nick already at the new limit was refused new requests but its queue was still sent; its queue is now removed, with
+  one notice, as `settings_help` already said.
+- **One known nuisance:** for a NICK between the count and the removal, the pause's own removal still logs a debug line
+  ("0 queued file(s) removed") under the old nick before the dispatcher's drop logs the real one; the user gets one
+  notice.
+- **Dropped, not kept for midnight:** the pause leaves a nick no queue, and would have left this one none had the removal found the rows. Kept rows would also count as waiting in `nicks_waiting_for_a_slot()`, sending other nicks to the back of the line for rows that are never sent.
+- **Lock order:** the paused set is read under `failed_transfers_lock`, which is released before `queue_lock` is taken; the two are never held together (#1452). A pause that lands after the read and before a claim lets that one claim through, as a failure counted just after a claim always did; the next dispatch drops the rest.
+- **Tests:** `tests/test_a_paused_nicks_queue_is_not_sent.py` (44 tests), through the real NICK line, the real
+  failure count and the real dispatcher, with the threads recorded and rar a stand-in. They cover:
+  - a paused nick renamed onto a nick with a queue, and the tie after the limit was lowered during the day: neither
+    the sweep nor a dispatch for that nick claims or sends, the queue is dropped, one notice and one debug line;
+  - a NICK between the count and the removal: the new nick holds the queue and the pause, and the next dispatch
+    drops it and sends nothing;
+  - rows under a paused nick when the claim looks (a NICK after the drop): a plain file or a folder pack first in
+    line does not hold up the next nick, no pack is woken for it, and section A does not pick it;
+  - `claim_next_in_line()` on its own, with `paused` given and read by itself;
+  - `drop_queues_of_paused_nicks()` and `_pause_for_send_fails(..., queued_only=True)` on their own: the return
+    values, the notice to the nick as the rows name it, the archive kept when another row names it, and silence,
+    the freeze kept and no save when nothing is left to drop;
+  - the `!rar` hand-off to an owner paused while rar ran (by a rename, or by the limit lowered): no slot and no send,
+    the queue and its archive dropped unless another row names it, `False` returned, the interlocks released, and
+    one cancelled pack recorded; an owner who is not paused is still sent the archive;
+  - nothing held back with the limit off, for an admin, under the limit, or for another nick's pause;
+  - with tracked locks, `failed_transfers_lock` and `queue_lock` never held together in a dispatch, the sweep or
+    the hand-off.
+  `tests/test_audit_rar_pack_and_slots.py`: the pack's slot re-check after rar is now evaluated (slots filled while
+  rar ran are not overshot) instead of searched for in the source.
+- **Mutation checks, 17/17 caught:** no drop at the start of the dispatch (with no paused set, and with the skips
+  kept); no skip in `claim_next_in_line()`; the skip moved below the slot kept for a pack; no section A condition;
+  no `room = False` in the hand-off; the hand-off not dropping the queue, or recording nothing; no `queued_only`
+  early return; the freeze lifted with nothing dropped; `_pause_for_send_fails()` returning nothing; the notice sent
+  to the queue key instead of the nick; the paused set read inside `queue_lock` in the drop, and in the hand-off; the
+  pack's capacity test removed, and its append unguarded; and `src/dcc.py` from main.
+
+### 📋 A guide to the project board, kept out of the public tree (#1457)
+
+- **`docs/PROJECT-BOARD.md`** describes how the two of us use the project board (users/Ninja-FSE/projects/1):
+  - the four columns, and which moves happen by themselves;
+  - the two gaps to fill by hand: a "Taken." comment moves nothing, and a new PR lands in Todo;
+  - the steps from claiming an issue to the "Next release" milestone;
+  - labels, including the gh 2.4.0 `labels[]` pitfall;
+  - stacked PRs, and what happens at a release;
+  - why security fixes never go on the board;
+  - the IDs for setting a Status from a script.
+- **Not shipped:** an `export-ignore` rule in `.gitattributes` keeps the file out, and it is in
+  `tests/test_internal_files_do_not_ship.py`'s `INTERNAL`, so `git archive` itself is asked.
+
+### 🔕 Channels where a finished transfer is not announced (#1444)
+
+An operator asked for it: `ANNOUNCE_TRANSFERS` is all or nothing, and some channels do not allow the "sent" line.
+A channel's Quiet or Request only mode (#1204) stops it too, but stops the advert with it, so nothing expressed
+"advertise here, but do not announce transfers".
+
+- **`ANNOUNCE_TRANSFERS_EXCLUDE`** (`list`, empty by default: announce everywhere, as before) names the channels.
+  It is on the Settings page under *Advertising & search*, after the tickbox, as "Don't announce finished transfers
+  in these channels", and in the mIRC settings window under *General > Advertising > Advert*, after the advert
+  interval (General Settings is the page of the on/off switches used most).
+- **`announce._channel_excluded_from_announce(channel, excluded)`** sits beside `_channel_may_be_told()` and compares the
+  names under the server's casemapping (`irc.irc_lower()`, #1271), so `#Alpha` in the setting matches `#alpha` from
+  the server, and `#a[1]` matches `#a{1}` on an RFC 1459 network. `irc` is imported inside it, as the rest of the
+  module does: a top-level import would be a cycle (irc imports dcc, which imports announce).
+- **`send_transfer_complete()`** checks it after a private request and before the channel mode, only while
+  `ANNOUNCE_TRANSFERS` is on, and logs `[ANNOUNCE] ... - #alpha is not told (ANNOUNCE_TRANSFERS_EXCLUDE).`; with the
+  tickbox off the log still names `ANNOUNCE_TRANSFERS`. The `SENT` feed event goes out as before, either way.
+- **Both settings are read under `runtime.config_reload_lock`**, once, at the top of the gate. Every Settings save is
+  a rehash, and `importlib.reload(defaults)` re-runs `ANNOUNCE_TRANSFERS_EXCLUDE: list = []` a moment before
+  `settings_file.apply_to()` restores the operator's list: a transfer finishing in that window would have been
+  announced in an excluded channel. A blocking acquire (the reload takes milliseconds, and the value wanted is the one
+  after it); only the two reads are inside. The one caller, `dcc.finish_send()` on the send's own thread, releases
+  `queue_lock` before it calls, so it holds nothing the reload waits for. The channel gate reads the snapshot:
+  `elif announce_on and _channel_may_be_told(channel, user):` in place of
+  `elif getattr(config, "ANNOUNCE_TRANSFERS", True) and _channel_may_be_told(channel, user):`, which also closes the
+  same window for the tickbox. `_channel_excluded_from_announce()` takes the snapshot as a required argument and
+  never reads the setting itself, so the locked read is written once.
+- **Validation:** `settings_file.channel_names()` reads the value for every setting in the new
+  `CHANNEL_NAMES_SETTINGS`: blanks dropped, every entry a channel by `channel_problem()` - the rule `CHANNEL`
+  has had since #1272, so an entry without its `#` is refused rather than given one - and an entry repeated in
+  another case kept once, as first written. Empty is allowed. Read from `settings.conf`, a list with an entry that
+  is not a channel keeps the ones that are and logs the rest, as `CHANNEL` does: `load_value()` runs one helper,
+  `_keep_the_channels()`, for both, and `CHANNEL`'s note is unchanged. This one's names the Settings page, the
+  console and the mIRC settings window, since `configure.py` does not offer it.
+- **Docs:** `docs/INSTALL.md` has a section for it and names it with `CHANNEL`'s validation; `docs/FUTURE.md` with
+  the adverts. Labels in en/es/fr, help in `settings_help.PLAIN_HELP` and es/fr; `conf/settings.conf.sample` and
+  the generated block of `dccore.mrc` regenerated (the ids after the new row moved by four). The help gives the
+  format first (commas, each with its `#`, an example), as `CHANNEL`'s does: the mIRC settings window shows only
+  the first three whole sentences that fit (`build_settings_window.help_for()`), and it is the part an operator
+  needs there.
+- **Tests:** `tests/test_a_channel_can_be_left_out_of_the_sent_line.py` (37 tests), driving the real code:
+  - `send_transfer_complete()`: a listed channel gets no channel line and the `ANNOUNCE_TRANSFERS_EXCLUDE` log line,
+    while the `SENT` feed event still goes out; another channel, an empty list and a comma-separated string value;
+    the tickbox off, a private request and a Quiet channel not in the list log what they logged before;
+  - the names under the server's casemapping: `#Alpha` matches `#alpha`, `#a[1]` matches `#a{1}` under rfc1459 and
+    not under ascii;
+  - the lock, with the test thread playing the rehash (it holds the real lock, sets the shipped value, puts the
+    operator's back, lets go) and a stand-in that reports when a thread asks for it, so nothing waits on a sleep: a
+    send for `#alpha` waits, then reads the list put back and does not tell `#alpha`; the same for the tickbox; the
+    list read under the lock is the one used even when the next rehash starts right after the read;
+  - `channel_names()`, `coerce()`, `check_change()`, `save()` and a `settings.conf` line (`load_value()`): no `#`,
+    a space or a bare `#` refused, blanks and case-repeats dropped, `&` accepted, empty allowed, a mixed file line
+    keeping its channels; its note names the Settings page, the console and the mIRC settings window and not
+    `configure.py`, and `CHANNEL`'s note is pinned word for word; the shipped default is `[]`, declared `list`;
+  - the Settings page (right after the tickbox, en/es/fr labels, `apply_settings_changes()` refusing and saving)
+    and the mIRC window (placed once, in *General > Advertising > Advert* after `ANNOUNCE_INTERVAL`, a `list` row in
+    the generated block).
+  `tests/test_the_channel_need_not_be_told.py`'s gate test read the source on main (it looked for the gate's
+  text and checked what sat under it); it now runs `send_transfer_complete()` with the tickbox on and off and counts
+  the channel lines (one, none) and the `SENT` events (one either way), as CONVENTIONS #5 asks. Its unused
+  `sent_to_channel()` helper, which unpacked the stub's queue entries as pairs, reads the triples it holds.
+  `tests/test_runtime_state.py` and `tests/test_commands.py` list the setting with `WEBUI_ALLOWED_HOSTS`: a setting a rehash re-reads, not runtime state.
+- **Mutation checks, 25/25 caught** (the last four, and the helper ignoring its snapshot, rerun after review):
+  the new branch dropped, or ignoring the tickbox, or after the mode gate;
+  `str.lower()` for `irc_lower()`; a string value not split; `channel_names()` adding a missing `#`, keeping
+  repeats, or repeats only in the same case; `coerce()` skipping it; `load_value()`'s branch dropped; the key out of
+  the Settings category or without its Spanish label; a non-empty default; both settings, or the tickbox alone, read
+  outside the lock; the helper ignoring the snapshot and reading the setting unlocked; the mIRC row before the
+  interval or back on General Settings; `CHANNEL`'s note with its verb or its writers changed; the new note naming
+  `configure.py`; and, against the evaluation tests that replaced the source-reading gate test, the tickbox read
+  outside the lock, the whole function returning early with the tickbox off (so no `SENT` event), the channel send
+  moved out of the gate, and the tickbox ignored. A 26th, dropping the blank-channel guard, is equivalent: blank
+  entries are skipped anyway.
+
+### 🧪 The identifier and conflict-marker sweeps read every file, not a list of text suffixes (#1443)
+
+`tests/test_no_personal_identifiers_ship.py` scanned only files whose suffix was on `TEXT_SUFFIXES`, and
+`tests/test_no_conflict_marker_is_left_behind.py` imported the same list. A suffix missing from it was a file nobody
+scanned: `.mrc` and `.command` shipped that way until each was added, and an audit found the mIRC DLL's C sources
+(`scripts/mirc/dll/src/*.c`), `.gitattributes`, `.gitignore` and `LICENSE` still unscanned. A name pasted into a C
+comment would have shipped with every guard green. All of them were clean.
+
+- **The rule is inverted.** `TEXT_SUFFIXES` is gone. Every file is read unless its suffix is on `BINARY_SUFFIXES`
+  (DLLs and executables, images, audio, fonts, archives), and `read_text_files()` is the one definition both sweeps
+  use. Every `*.<suffix> binary` line in `.gitattributes` has its suffix on `BINARY_SUFFIXES`, and a test keeps it so.
+- **It fails closed.** A file that does not decode, as UTF-8 or as UTF-16 with a byte-order mark, is reported, and
+  both sweeps fail on it: a binary's suffix belongs on `BINARY_SUFFIXES` (or, with no suffix, its path in
+  `UNDECODABLE_BY_DESIGN`, which is empty), and text belongs in UTF-8. Text containing a NUL counts as undecodable,
+  because UTF-16 without a byte-order mark decodes as UTF-8 with every letter its own word.
+- **A symlink is read as its link text**, which is what git stores and `git archive` ships. Opening the path followed
+  the link instead: to another file's content, to a directory, or - for a dangling link - to nothing, which was
+  skipped as if the file had been deleted. Only a path with nothing at it is skipped now; anything else that cannot
+  be opened raises, and a tracked name that is not UTF-8 (so its decoded path does not exist) is reported.
+- **One root.** `read_text_files(names, root)` takes the directory the caller asked git in, with no default, so the
+  conflict sweep no longer lists files in its own `REPO_ROOT` and reads them from the other module's.
+- **No more `errors="replace"`.** A file only half read no longer counts as scanned.
+- **Faster.** The identifier sweep reads each file once for all its tests instead of once per test.
+- **Tests:** `tests/test_every_shipped_text_file_is_swept.py` (41 tests). `decode_text()` on UTF-8 with an accent and
+  with a byte-order mark, UTF-16 LE and BE with a mark (a planted placeholder name is still found by `words()`),
+  and `None` for UTF-16 without a mark, Latin-1, a NUL and truncated UTF-16; an empty file is empty text.
+  `is_binary_name()` in any case, and never for `.c`, `.h`, `.rc`, `LICENSE`, dotfiles or an invented suffix.
+  `read_text_files()` against a temporary tree: a file of an invented suffix is read; the root passed is the root
+  read; a binary name is never opened (a directory under that name, and a recording `open`); an undecodable file is
+  reported unless listed in `UNDECODABLE_BY_DESIGN`; a deleted file is skipped but a non-UTF-8 name is reported; a
+  file that cannot be opened raises (a directory, permission bits where the platform has them, and a refusing
+  `open` everywhere), as do a path that exists but opens as missing and a missing path whose error is not "not
+  found". Symlinks - to a file, to a directory, dangling, and with a binary name - are read as their link text,
+  with `islink`/`readlink` faked everywhere and with real links where they can be created. The real
+  `NothingIdentifyingShips` and `NothingTrackedCarriesOne` methods pointed at temporary trees, each patched only
+  where it really looks: a placeholder name in a C comment, a file of an invented suffix, `LICENSE`, `.gitignore`
+  and a UTF-16 `.rc`, an address in a C file, and conflict markers in a C file, an extensionless file and a file of
+  an invented suffix are caught, and an undecodable file fails both sweeps; the conflict sweep also against a real
+  `git init` tree. On the real tree: the C sources, dotfiles and `LICENSE` are read, every tracked file skipped by
+  suffix really does not decode, and every binary type in `.gitattributes` is on `BINARY_SUFFIXES`.
+- **Mutation:** 25 of 25 caught, on Python 3.14 and 3.13: the text-suffix whitelist back, and a whitelist of today's
+  types plus dotfiles and extensionless files; `is_binary_name()` always true, and not lowercased; `.mp3` removed
+  from `BINARY_SUFFIXES`; the NUL rule dropped; the byte-order-mark branch dropped; UTF-16 always decoded as
+  little-endian; `errors="replace"` back; an undecodable file skipped without being reported; `UNDECODABLE_BY_DESIGN`
+  inverted; an empty file reported as undecodable; extensionless files skipped; the `islink` check dropped, and
+  moved after the binary-suffix check; the `lexists` check dropped; a non-UTF-8 name skipped silently; `except
+  OSError` for `FileNotFoundError`; `read_text_files()` reading a module-level root again; the conflict sweep reading
+  the other module's root; each sweep's `assertEqual(unread, [])` removed; `setUpClass` reading nothing; `files()`
+  empty; the conflict sweep back on its own suffix list.
+
+### 📦 The mIRC zip is built from a git revision, not the working tree (#1442)
+
+`scripts/build_mirc_zip.py` walked `scripts/mirc/dcx` and `dll` on disk and read the bytes from the working tree,
+so `dccore-mirc.zip` - the release asset `releases/latest/download/dccore-mirc.zip` links - could carry a
+`.DS_Store`, a log, a `.bak` or locally rebuilt DLL, or an uncommitted `dccore.mrc` edit, and differ from the committed
+tree CI tested. Its test compared the zip against the same disk walk, so it passed in exactly those cases.
+
+- **Built from one commit.** `--rev` (default `HEAD`) is resolved once to a sha; the members and their bytes come
+  from `git archive` of `scripts/mirc` at that sha, so the commit's own `.gitattributes` line endings apply
+  (`dccore.mrc` CRLF, the rest as checked out). The version in the README is read from the same bytes. The member
+  rule is unchanged: `dccore.mrc`, and `dcx/` and `dll/` except `dll/src/` and the icon preview. The `--source`
+  option is gone; the build prints the sha it packed.
+- **Same bytes as before for a clean checkout:** the old and new builder give the identical zip (same SHA-256) at
+  the same commit.
+- **Refuses rather than guesses:** `NotACheckout` (what the zip tests skip on) only when the folder has no `.git` of
+  its own - an extracted copy inside another repository included, and git is not asked - or git cannot be started
+  at all. A `.git` that git fails on (dubious ownership, a broken worktree link, a corrupt repository), a toplevel
+  that is not the folder, a git call that times out (120 s, the first one included), a bad revision, a missing
+  folder or a non-regular file is a failed build.
+- **Machine-local attributes:** `git archive` also reads `.git/info/attributes`, `core.attributesFile` and the
+  system attributes. A local `export-ignore` would drop a file silently, so the archive's names are checked against
+  `git ls-tree` of the commit and a difference refuses the build. A local `export-subst`, filter or eol rule that
+  rewrites bytes is not caught - a latent risk the builder's docstring names. The working tree's own `.gitattributes`
+  is not read (no `--worktree-attributes`): the commit's decides. The archive's names are decoded as UTF-8, as
+  `ls-tree`'s are, not with the file system encoding, so a name outside ASCII matches under a C locale too.
+- **Release step:** `docs/PUBLIC-REPO-WORKFLOW.md` builds the zip with `--rev <sha>`, the sha the extraction printed
+  beside the revision it read (#1441), and checks that the sha the build prints is that one: a fetch in between would
+  otherwise pack a different commit under the name `origin/main`. The extraction command stays in one place, under
+  "The extraction".
+- **Tests:** `tests/test_the_mirc_zip_is_built_from_a_revision.py` (39 tests), in throwaway git repositories under
+  the temp folder with no global or system git config: the member rule and the committed bytes (`dccore.mrc` CRLF
+  from an LF blob, other text LF, binaries untouched, the same zip with `core.autocrlf=true`); untracked files, a
+  rebuilt DLL, an uncommitted or a staged edit, a deleted file, and an uncommitted `.gitattributes` with
+  `* text eol=crlf` and then an `export-ignore` under `scripts/mirc/dcx/` leave the zip byte for byte the same;
+  `--rev` packs that commit and its version; resolved once (a branch moved between resolving and reading does not
+  mix two commits, `git archive` gets the sha); the archive against `git ls-tree` (a local `export-ignore` in
+  `.git/info/attributes` refused; a file missing, an extra one, or another name at the same count refused on
+  hand-made answers; a name outside ASCII still matches, also with tarfile's encoding forced to ASCII and in a
+  Python started under the C locale with neither UTF-8 mode nor locale coercion, which skips on Windows and macOS,
+  where the file system encoding is always UTF-8); `NotACheckout` only for no `.git` (a copy inside another
+  checkout, a subfolder like `scripts`, a plain folder - git never called) and git not starting, while a `.git`
+  file pointing nowhere, an empty `.git` folder git walks past, a toplevel elsewhere and a hang on any git call are
+  failed builds, and a `git worktree` (its `.git` a file) builds the same zip; a bad revision or a tree refused, an
+  option-like revision never reaching git; a missing `dccore.mrc`, `dcx/`, `dll/` or `scripts/mirc` and a
+  committed symlink (made through the index, so on every system) a failed build with no zip; link and device tar
+  entries refused without git; `SOURCE` is `SOURCE_IN_GIT` under the repository; `main()` prints the sha and
+  writes `--out`. `tests/test_the_mirc_zip_holds_what_you_install.py` compares the zip against `git ls-tree` and
+  the blobs at `HEAD`, reads the README's version from `HEAD`, and skips only where there is no checkout. It asks
+  `git check-attr --cached` for each member's line ending, which works on git before 2.40 (`--source` does not) and
+  answers as `HEAD` in a clean checkout.
+- **Mutation checks, 28/28 caught:** bytes from the working tree, blobs without the eol conversion, the pathspec
+  and the prefix check both dropped, `dll/src/` shipped, `__pycache__` shipped, the version from the disk, the rev
+  passed to `git archive`, the toplevel check passing, the `-` guard removed, the missing-folder check inverted,
+  the missing-script check removed, the non-regular refusal removed, a timeout as `NotACheckout`, git not
+  starting as a plain `SystemExit`, the rev printed for the sha, no `^{commit}` peel, the `ls-tree` comparison
+  removed, by count only, or one side only (each side), a toplevel mismatch back to `NotACheckout`, the `.git`
+  check as `isdir` (a worktree's `.git` is a file), a failing `--show-toplevel` wrapped as `NotACheckout`, `-z`
+  dropped (with the NUL split kept, and with a split into lines), the `.git` check removed, `git archive` given
+  `--worktree-attributes` (both new `.gitattributes` dirt cases fail: every member CRLF, then the licence dropped),
+  the tar names decoded with the file system encoding (both forced-ASCII cases fail). Equivalent, so not
+  counted: the pathspec or the prefix check alone (each covers the other).
+
+### 🧰 The extracted public tree keeps its launchers executable (#1441)
+
+`scripts/extract_public_tree.py` (#1418) unpacks `git archive` with `tarfile`. NTFS has no executable bit, so on Windows
+the 100755 modes of `scripts/linux/*.sh` and `scripts/macos/*.command` were lost, with two effects:
+
+- **`--test` failed on every Windows release run.** `test_it_is_executable` asked `git ls-files -s` in a tree with no
+  `.git`, got nothing, and failed - a check that cried wolf (CONVENTIONS rule 6).
+- **Step 4 would have shipped the launchers as 100644.** `git init` + `git add` on Windows (`core.filemode` false)
+  records what the filesystem says. Pushed like that, macOS refuses `start-dccore.command` and `./start-dccore.sh` says
+  Permission denied.
+
+The fix:
+
+- **`<rev>` is resolved once**, by `git rev-parse --verify <rev>^{commit}`, and `git archive` and `git ls-tree` both
+  read that sha. A fetch in between cannot pair one commit's tree with another's modes. A revision that is not a commit
+  refuses before anything is written.
+- **`executables(sha, tree)`** reads the 100755 paths from `git ls-tree -r`, kept to the files in the tree (DEV_ONLY
+  and export-ignored ones drop out). A 100755 path outside `[A-Za-z0-9._/-]` refuses, naming it. On Windows a
+  non-ASCII name would otherwise drop out without a word, and the printed line needs nothing quoted on any shell.
+- **On POSIX the extraction sets the bit on them** (`+x` wherever `+r`), so the mode no longer rests on `tarfile`'s
+  own chmod.
+- **`extract()` returns `(out, paths, sha)`**, inside its all-or-nothing. `main()` prints from that list and never asks
+  git again, so no refusal can come after `<out>` exists. Its first line names the commit it read
+  (`origin/main (<sha>) extracted into ...`), the one #1442's mIRC zip is compared against.
+- **The command ends by printing `git update-index --chmod=+x -- <those paths>`**, after the suite with `--test` so it
+  is not scrolled away. It pastes the same into cmd, PowerShell and bash: an executable outside `[A-Za-z0-9._/-]`, or starting with
+  `-` (Windows PowerShell 5.1 splits a bare `-n.sh` at the dot), refuses. `--` is there as well. Nothing is
+  written into the tree.
+- **`docs/PUBLIC-REPO-WORKFLOW.md` step 4 runs that line after `git add`, on every OS** (a no-op where the bit
+  survived). Before the commit, `git ls-files -s | grep ^100755` (or `Select-String`) must list exactly the paths it
+  named.
+- **`test_it_is_executable` skips on Windows when its folder is not a git work tree of its own** (`git rev-parse
+  --show-toplevel` is not `REPO_ROOT`), instead of asserting on empty output. The skip says what git said, so a
+  `safe.directory` refusal is not reported as an extracted tree. git's output is read as UTF-8, with a 30 s timeout;
+  git that cannot run skips. It is still a real check in a checkout, and on POSIX it reads the bit itself.
+- **Tests:** 48 new ones.
+  - `tests/test_the_public_tree_is_extracted_by_a_script.py` (35 new). On the shared extraction of HEAD, which on
+    POSIX now comes out of the archive with no executable bit at all, as it does on NTFS, and with every git command
+    recorded:
+    - `executables()` names exactly the launchers there, sorted, with forward slashes;
+    - the bit is set once, on the scratch tree, for the paths `extract()` returns;
+    - `rev-parse`, `archive` and `ls-tree` run in that order, the last two on the same full sha of HEAD;
+    - on POSIX the launchers are executable in the result;
+    - `main()` ends with their `update-index ... --` line.
+  - The same file, on a faked `git ls-tree`:
+    - only 100755 counts (not 100644, 120000 or 160000);
+    - a path that is not a file in the tree drops out;
+    - an executable named with a space, a quote, `$`, `;`, `&`, `"` or a non-ASCII letter refuses, naming it with
+      `ascii()`, also when it is not in the tree; a plain file may be called anything; a leading `-` and dots pass;
+    - a failing `ls-tree`, git that cannot run and an unknown revision refuse, and inside `extract()` leave no tree
+      and no `.partial`.
+  - `<rev>` itself: asked as `<rev>^{commit}` with a timeout. A non-commit (a fake, and real git on
+    `HEAD:README.md`), an empty answer and git that cannot run all refuse before any folder is made.
+  - `_keep_the_executable_bit` gives `+x` wherever `+r` on a faked POSIX and nothing on `nt`, and on POSIX also on a
+    real file. `--` keeps `-n.sh` a path. `main()` prints the line last, after the suite with `--test`, returns the
+    suite's code, says so when there is nothing to mark, prints none after a refusal, and never asks git again.
+  - `tests/test_the_launcher_is_the_install.py` (13 new): `test_it_is_executable` run with git and `os.name` faked,
+    so its guard is checked on every runner. The fake decodes git's bytes as subprocess would with the arguments
+    given, and a bare `text=True` as cp1253.
+    - These skip: no `.git` (the skip carries git's stderr), another repository's toplevel (it names it), a toplevel
+      that is not there, git timing out or not starting (with the error), and no git.
+    - This checkout still passes on 100755 and fails on 100644 or empty output, also at a non-ASCII path.
+    - Every git call has a timeout, and POSIX never asks git.
+- **Mutation checks, 39/39 caught:**
+  - 100755 read as 100644;
+  - the mode filter or the in-the-tree filter removed;
+  - the in-the-tree filter before the portability check;
+  - `fullmatch` as `match` or `search`;
+  - the refusal without `ascii()`;
+  - `ls-tree` without `-r`;
+  - unsorted;
+  - a failing or unrunnable `ls-tree` tolerated;
+  - `rev-parse` without `^{commit}` or its timeout;
+  - a failing or unrunnable `rev-parse` tolerated;
+  - `_commit` after the scratch folder is made;
+  - the `<rev>` instead of the sha in the `archive` or the `ls-tree` call;
+  - the chmod call removed from `extract()`, or moved after its all-or-nothing;
+  - `extract()` returning other paths than it marked;
+  - the `nt` test inverted;
+  - `+x` for everyone;
+  - `--` dropped;
+  - `main()` asking git again, printing no line, nothing at all, the line before the suite, or returning 0 over the
+    suite's code;
+  - in the launcher test:
+    - `samefile` always true, or never;
+    - either skip turned into a pass;
+    - the guard removed (the old test);
+    - the skip without git's stderr or the toplevel;
+    - `TimeoutExpired` not caught;
+    - no timeout;
+    - `text=True` back in place of UTF-8.
+
+### 🩹 A share root as FETCHED_FILES_DIR works with FETCHED_FILES_PER_BOT (#1440)
+
+`ntpath.normpath(r"\\server\share")` has no trailing separator, but `ntpath.dirname(r"\\server\share\alfa")` is
+`\\server\share\`, with one. Two "directly inside the root" checks compared those two strings, so neither ever matched
+when `FETCHED_FILES_DIR` was a share root. A drive root (`C:\`), a folder inside a share, and a share root written with
+a trailing backslash were not affected. `FETCHED_FILES_PER_BOT` (#1423) is not in a release yet, so no user met this.
+
+- **`fetched_dir_of()`** returned None for every bot folder, so with `FETCHED_FILES_PER_BOT` on every fetch failed
+  with "unsafe destination path", and the log blamed the file name for escaping `FETCHED_FILES_DIR`. Its lexical
+  dirname comparison is gone: since #1439, `_fetched_folder_key()` already refuses any folder that is not one plain
+  component, so that check was redundant. `dcc.is_safe_path()` stays, for symlinks; it already handled a share root as
+  its base.
+- **The folder is joined normalised:** `fetched_dir_of()` joins `os.path.normpath(folder)`, the very name the key
+  accepted, rather than the raw string. "Directly inside `FETCHED_FILES_DIR`" is then true of the path itself, not
+  only of its lexical form: on POSIX `x/../y` no longer resolves through `x`, and `bot/` loses its trailing separator.
+  It also closes an edge on Python 3.10, where `ntpath.normpath` leaves `\\?\` paths alone: with a `\\?\C:\f` or
+  `\\?\UNC\...` root, dropping the dirname check alone would have let a hand-edited folder `a\` through, joined as
+  `<root>\a\`, which `_directory_folder_key()` does not recognise - the unsafe direction. Plain bot names give the same path as before.
+- **`_directory_folder_key()`** (#1439) returned None for a bot folder under a share root, so
+  `files_other_rows_hold_locked()` saw no other row holding the file. That is the unsafe direction for a Delete and
+  for the promotion to the plain name. As hardening, the root-equality check goes through the same form, so the root
+  also matches when a caller passes it in another form than `fetched_files_root()` (`\\server\share\` against
+  `\\server\share`); every caller today passes `fetched_dir_of()`'s output, which has the same form.
+- **One comparison form (CONVENTIONS #2):** `_same_folder_form()` normalises a path, applies `normcase`, and strips a
+  trailing separator. It is used on both sides of both comparisons in `_directory_folder_key()`, so `/`, `C:\` and
+  `\\server\share` each still equal the dirname of their children.
+- **Tests:** `tests/test_a_share_root_can_hold_a_folder_for_each_bot.py` (29 tests). Windows paths are checked on
+  every runner with Windows' path rules: `tests.support.windows_path_rules()` puts `WindowsOs` in place of `os` in
+  `dcc_fetch`, and rebinds `dcc.is_safe_path()` alone to the real function with `WindowsOs` as its `os`, so `dcc`'s own
+  `os` is untouched and only `is_safe_path()` is under Windows' rules while the context is open. `WindowsOs`'s `realpath()` is `abspath()`, which reads no disk:
+  off Windows that is ntpath's own, and on Windows the stand-in makes it so. #1439's tests use the same helper, not a
+  copy of it, and their Windows-rules check now runs the real `is_safe_path()` instead of a lexical stand-in. The
+  tests cover:
+  - the stand-in itself: its `realpath()` reads no disk, off Windows it is ntpath unchanged, `is_safe_path()` gives
+    Windows' answers under it, and only `dcc_fetch.os` and `dcc.is_safe_path` change and are put back afterwards;
+  - `fetched_dir_of()` gives `<root>\alfa` under `\\server\share`, `\\server\share\`, `C:\` and `C:\fetched`, and
+    under POSIX `/` and `/srv/fetched` with the host's own `os`. A folder that climbs, nests, is absolute or names a
+    drive is still None;
+  - the folder is joined normalised: `a\`, `a/`, `x\..\a`, `a\.` and `.\a` give `<root>\a`, which
+    `_directory_folder_key()` reads back as `a`, under every Windows root and under `\\?\C:\f` and
+    `\\?\UNC\server\share`. On the host's own root `bot/`, `a/../bot` and `./bot` give `<root>/bot`. A Delete of a
+    row whose folder is `a/../bot`, with no `a` on disk, removes its file;
+  - a bot folder that is a symlink to a folder outside `FETCHED_FILES_DIR` is refused by `fetched_dir_of()` (a plain
+    folder beside it is not), no fetch is written through it, and a dashboard Delete or batch delete of a row in it
+    leaves the file outside alone. The test skips with a reason where a directory symlink cannot be made;
+  - `_directory_folder_key()`: the root, with or without a trailing separator or with `/`, is `""`. `<root>\alfa`,
+    `<root>\ALFA\`, mixed separators and upper case are `alfa`. A nested folder, another drive, another share or
+    server, a sibling (`\\server\share-x`, `C:\fetched-x`, `/srv/fetched-x`) and the root's parent are None;
+  - end to end under a share root:
+    - `_resolve_destination_path()` puts a bot's file in its folder;
+    - a real `handle_incoming_offer()` saves into `\\server\share\ServerOne` instead of failing as "unsafe
+      destination path", and reaches for no share;
+    - `files_other_rows_hold_locked()` and `another_row_holds_file_locked()` report a file another row in the same
+      bot folder names, and at the root a root row's file, with no disk call (`stat`, `lstat`, and ntpath's and the
+      host's `exists()`, `isdir()` and the like, counted on their own);
+    - the promotion to the plain name leaves such a file alone. A control shows that the promotion goes ahead when
+      only another folder holds the name.
+- **Mutation checks, 8 of 9 caught, 1 equivalent** (Python 3.10 and 3.13, the same results):
+  - caught: the dirname check back in `fetched_dir_of()`; `is_safe_path()` removed from it (by the symlink tests);
+    the raw `str(folder)` joined again (by the exact paths, on every version, and the Delete through `a/../bot`);
+    the `rstrip` dropped from `_same_folder_form()`; the helper on the directory side only, on the root side only, or
+    missing from the parent comparison only; the whole `src/` change reverted to #1439.
+  - equivalent, and survived: the old root-equality check (`normcase(here) == normcase(normpath(root))`) left in
+    place. When it and the new form disagree, `here` is a root, a root's dirname is itself and its basename is `""`,
+    so the parent check after it gives `""` as well. 32,266 generated directories under Windows (including `\\?\`)
+    and POSIX roots gave no difference, on both versions.
+  - #1439's 13 mutants are still caught by its own tests.
+
+### 🩹 "Another row holds this file" no longer touches the disk for every row (#1439)
+
+Since #1423, `files_other_rows_hold_locked()` called `fetched_dir_of()` for every history row with a stored file, and
+for a row with a folder that is `dcc.is_safe_path()`: two `os.path.realpath` calls. It runs under `_fetch_lock()` on
+every completed fetch (the promotion to the plain name), every dashboard Delete, and once per folder in a batch delete,
+while `handle_bot_reply()` waits for the same lock on the IRC read thread. With 500 rows that was 1000 `realpath`
+calls, about 0.35 s on a local disk and far longer on a NAS share.
+
+- **Folder strings, not paths:** the folder being checked is worked out once, lexically, as a key relative to
+  `FETCHED_FILES_DIR` (`_directory_folder_key()`): the root itself, a folder directly inside it, or nowhere a row's
+  file can be. Each row's `fetched_folder` becomes a key the same way (`_fetched_folder_key()`), with no filesystem
+  call. The keys are compared casefolded, which can only keep a file, never delete one.
+- **A hand-edited folder matches nothing:** one that climbs (`../x`), nests, is absolute or names a drive.
+  `a/../bot` is `bot`, as before.
+- **One rule for a valid folder (CONVENTIONS #2):** `fetched_dir_of()` now refuses those folders too, through the same
+  key. Before, it accepted an absolute folder that pointed inside `FETCHED_FILES_DIR` (and `C:bot` on Windows) and
+  deleted that row's file through it. A history row with an absolute or drive-qualified folder now fails closed: its
+  Delete removes the row and leaves the file, the way `../x` already did. Its dirname and `is_safe_path()` checks stay, for symlinks.
+- `names_one_file()` is unchanged, so the only filesystem call left in the check is its `samefile`, for names that
+  differ only in case.
+- **Tests:** `tests/test_checking_a_fetched_file_does_not_touch_the_disk_per_row.py` (38 tests), which cover:
+  - one check over 20 and over 200 rows makes the same number of disk calls (`stat`, `lstat`, `exists`, `isdir`,
+    `realpath`, `samefile`), and no `is_safe_path()` or `fetched_dir_of()` call at all;
+  - which rows hold the file: the same bot folder, another bot's, the root against the root and against a bot
+    folder, the row itself, a folder differing only in case, a folder of the same name outside `FETCHED_FILES_DIR`;
+  - hand-edited folders (`../x`, `..`, `.`, `a/b`, an absolute one, even inside the root) match nothing, `a/../bot`
+    is `bot`, `""` and None are the root, and both key functions on their own;
+  - `fetched_dir_of()` refuses a folder exactly when the key does, both ways, on this platform and with Windows'
+    path rules (`C:bot`, `C:\t\fetched\BotA`), and a Delete through an absolute folder inside the root removes
+    nothing;
+  - a dashboard Delete and a batch delete keep a file another row in the same bot folder names, and the promotion
+    to the plain name leaves it alone.
+- **Mutation checks, 13/13 caught:** the old `fetched_dir_of()` loop, a per-row `isdir`, no casefold, `..`, `.`, a
+  separator or an absolute path or drive let through, no folder taken as None rather than the root, no early return
+  for a folder outside, a directory's parent not checked, the row itself counted, the root's key taken as None,
+  `fetched_dir_of()` without the key check.
+
+### 🩹 Two bots never share one per-bot fetch folder (#1438)
+
+Found by audit. With `FETCHED_FILES_PER_BOT` on (#1423), `bot_folder_name()` cleaned the nick with
+`_sanitize_offer_filename()`, which drops the nick characters a file name cannot hold, `` []{}|^` ``. The cleaning is not
+one-to-one: `[Alfa]` and `Alfa` both got the folder `Alfa`, `Good|Bot` and `GoodBot` both `GoodBot`. Two bots' files
+landed in one folder the operator reads as one bot's. No file was lost: promotion refuses a name that exists, and a
+delete is per row.
+
+- **A folder name that is not its own proof of being unique is tagged**, the way the list directories already are
+  (previous audit, fetch-7): `-` and the list directories' digest of the lower-cased nick
+  (`list_fetch._DIR_TAG_DIGITS` hex digits), `[Alfa]` -> `Alfa-1d8be4d71c298166`. The rule and the digest are
+  `list_fetch._needs_dir_tag()` and `list_fetch._name_digest()` themselves, imported where they are used as everywhere
+  else in `dcc_fetch.py`, so the two cannot drift apart. Tagged:
+  - a nick the cleaning changed (dropped characters, separators, trailing dots, a "." made "_", a Windows device name
+    made safe): `a.b` gets `a_b-<digest>`, never the folder of the nick `a_b`;
+  - a nick that already looks tagged (`Alfa-0123456789abcdef`, or the older six-digit form), so a nick that copies
+    another bot's tagged folder name letter for letter is tagged again;
+  - `lists`, which used to become `lists_` - the folder the nick `lists_` gets;
+  - a nick longer than one path component: the stem is cut to make room and the tag is kept;
+  - `_channels`, a name the list directories keep for themselves: harmless here, and one rule for both.
+- **The tag is the list directories' own:** `list_fetch._name_digest()`, as long as theirs.
+- **Nothing usable is still no folder; `fetched_file` is not nothing.** A nick of nothing but control codes has no
+  folder; the nick `fetched_file`, which the cleaning cannot tell from nothing, keeps its `bot (<digest>)` folder.
+- **A nick that cleans to itself keeps exactly its folder**, and two spellings of one nick that differ only in case
+  still share one: the digest is of the lower-cased nick, as for list directories.
+- **The folder reuse folds case as the digest does.** `_bot_folder_for_locked()` compared with `casefold()`, which
+  folds further than `str.lower()`: `Strasse` reused the folder of the same name spelled with an eszett, and a nick
+  with a long s (U+017F) reused `SomeBot`'s - two nicks, one folder, and no filesystem safety bought, since NTFS
+  keeps those names apart. It now compares the folder names with `str.lower()`, so a tagged name also never reuses
+  an untagged folder a row has from before the tag.
+- **No migration.** #1423 is not released yet, so no install has a folder under the old name.
+- The help text (dashboard, en/es/fr), the sample and `docs/FUTURE.md` say a nick a folder name cannot hold gets a
+  tag. The mIRC settings window shows three lines of help, so it keeps the text it had.
+- **Tests:** `tests/test_two_bots_never_share_a_fetch_folder.py` (22 tests), on the real code:
+  - a nick that cleans to itself keeps exactly its name, up to 255 bytes;
+  - nicks the cleaning used to merge (`[Alfa]`/`Alfa`, `Good|Bot`/`GoodBot`, `{Alfa}`/`[Alfa]`, ...) get folders of
+    their own, and the tag is `list_fetch._name_digest()` of the real nick;
+  - a nick that copies another bot's tagged folder name letter for letter is tagged again;
+  - a "." made "_" is tagged: `Some.Bot` and `a.b` never get the folders of `Some_Bot` and `a_b` (here and in
+    `test_each_bot_gets_a_fetch_folder_of_its_own.py`);
+  - `_bot_folder_for_locked()`'s reuse: `[Alfa]` and `[ALFA]` share one folder, `Strasse` and the eszett spelling
+    get two, and so do `SomeBot` and its long-s spelling, either way round; `[Alfa]` and `Alfa` do not reuse each
+    other's; a row for `[Alfa]` gets its tagged folder even with a row from before the tag in the untagged `Alfa`;
+  - `lists` is tagged and is not `lists_`'s folder, `CON` is not `CON_`'s;
+  - a long nick fits 255 bytes, keeps its tag, and two with one prefix differ;
+  - end to end through `handle_incoming_offer()`: the files land in different folders, nothing is created at
+    `lists` - over real loopback sockets, and again with the transfer stood in for so it runs without them;
+  - `test_each_bot_gets_a_fetch_folder_of_its_own.py`'s test that the folder equals `_sanitize_offer_filename()` of
+    the nick asserted the defect itself; it now asserts the tagged name.
+- **Mutation checks, 11/11 caught:** the pre-fix function, the `_needs_dir_tag()` call dropped, the reserved-name
+  tagging dropped, the digest of the cleaned name, `.lower()` removed from `_name_digest()`, the tag added without
+  making room, `_needs_dir_tag()` given the unfitted name, the nick left unstripped, the reuse comparing nicks with
+  `casefold()`, the reuse comparing folder names with `casefold()`, the reuse comparing the other row's nick
+  instead of its folder. A digest of the unstripped nick is not a mutant: `_name_digest()` strips it itself.
+
+### 🩹 The never-connected streak follows a nick change, as the daily failure count does (#1437)
+
+Security advisory GHSA-6q93-cf73-24wv (low), fixed in its private fork and merged with this release.
+
+Found in review. `DAILY_SEND_FAILS_LIMIT` (#1389) stops counting sends that never connected once a run of them with no
+connect in between reaches `NEVER_CONNECTED_STREAK` sends to `NEVER_CONNECTED_STREAK_NICKS` different nicks
+(`dcc.never_connected_counts()`), since several downloaders failing the same way at once is the bot's own address.
+The nicks are kept in `runtime.never_connected_streak_nicks`, keyed like `dcc_queue` (`dcc._send_fails_key()`), and
+`irc.note_nick_change()` carried the daily count (`dcc.carry_send_fails()`) but not that entry: one user renamed
+between two unanswered offers counted as two nicks.
+
+- **`note_nick_change()` moves the old key to the new key in the streak** through
+  `dcc.carry_never_connected_streak()`, beside `carry_send_fails()`, so only dcc.py knows the streak's layout. It
+  takes only `send_connected_lock`, after `queue_lock` is released; nothing is taken while that lock is held. A new
+  key already in the streak stays there once. The streak's length is unchanged. `"never_connected_streak"` is
+  reported among what moved whenever the old nick was in the streak.
+- A case-only rename moves nothing (the key is case-folded, so it is the same key). `runtime` is not reloaded by a
+  rehash, so the streak survives it as before.
+- A NICK that lands between `finish_send()` reading the nick and `never_connected_counts()` adding it can still leave the
+  old key in; the window is microseconds, the same kind of race as #1460's.
+- **Tests:** `tests/test_the_never_connected_streak_follows_a_nick_change.py` (20 tests):
+  - through the real NICK line (`irc.answer_nick_change()`) between sends that never connect, with some send
+    connected and the limit at 3: one unanswered offer to a nick, a rename, and two more to the new nick count all
+    three and pause the new nick with one notice and its queue removed - driven through the real `start_dcc_send()`
+    with a listener nobody dials and through `finish_send()`; one short of the limit it is still served; a mixed-case
+    NICK line, two renames in a row and a case-only rename (nothing moved) are each still one nick;
+  - a renamed user and a second user still make two nicks, and the third offer is not counted, with the log line;
+  - the move on its own: the old key moves to the new one and says so; a new key already there is kept once; an old
+    key not in the streak and an empty streak move nothing and are not reported; the run length and its log flag are
+    unchanged; "never_connected_streak" is among what moved; a connect after a move still clears everything;
+  - the move looks and changes under `send_connected_lock` and not inside `queue_lock`, with recording locks, and the
+    lock is free afterwards.
+  The related modules (`test_a_paused_nick_stays_paused_under_a_new_nick`, `test_a_rename_carries_the_users_state`,
+  `test_a_nick_whose_sends_keep_failing_is_paused` and others) are unchanged and green.
+- **Mutation checks, 13/13 caught:** the call in `note_nick_change()` removed, no `discard`, no `add`, the membership
+  guard inverted, the guard removed, always returning True, no `moved.append`, the move without its lock, the call
+  inside `queue_lock`, the keys swapped at the call, the keys swapped in the move, the move also resetting the run
+  length, and `src/` back at the base (there the renamed nick stays at 2 failures, unpaused).
+
+### 🩹 A nick paused for failed sends stays paused under a new nick (#1437)
+
+Found by the audit. `DAILY_SEND_FAILS_LIMIT` (#1389) keeps its count and its pause in `runtime.failed_transfers`, keyed
+like `dcc_queue` by the lowercased nick, and the request gate (`dcc.send_fails_paused()`, from
+`handle_download_request()` and the list request in `list.py`) reads only the asking nick's key.
+`irc.note_nick_change()` carried the queue, the slot lock, the freeze and the transfer rows to the new nick, but not
+that entry: a nick paused at its last failed send that typed `/nick` was served again at
+once, its count back at 0. The operator decided the pause follows the nick.
+
+- **`note_nick_change()` moves the old key's entry to the new key** through `dcc.carry_send_fails()`, next to
+  `unpause_send_fails()`, so only dcc.py knows the entry's layout and what "today" is. It is called after the queue
+  block and takes only `failed_transfers_lock`, not inside `queue_lock` (dcc.py never nests the two). An entry from
+  an earlier day counts for nothing and is dropped, not carried. When the new key holds today's entry too (the nick was someone else's earlier today, or
+  this user's before an earlier rename), the larger count wins with its own `paused` flag, since that flag records
+  whether that count has already paused; never the sum, which would charge one person with another's failures. Equal
+  counts keep a pause either entry had. The old key is left with nothing. `"failed_transfers"` is reported among what
+  moved whenever the old nick had a count today.
+- A nick with no entry moves nothing. The rehash keep-list
+  already keeps `failed_transfers`, and the midnight reset is unchanged.
+- The docstring of `note_nick_change()` says why the pause follows the nick while mutes and bans do not. The setting's
+  help (now "A restart forgives, a new nick does not."), its comment in `defaults.py`, `conf/settings.conf.sample` and
+  `docs/INSTALL.md` say a nick change does not lift it. The mIRC settings window's block is regenerated (its help is
+  cut at three lines, before that sentence).
+- **Tests:** `tests/test_a_paused_nick_stays_paused_under_a_new_nick.py` (29 tests): a nick paused at the limit is
+  still paused under its new one and the old name is free (the next failure there starts from one); one short of the
+  limit, the next failure under the new nick pauses it with one notice, and a nick already paused is not told again;
+  `unpause` under the new nick lifts it; mixed case, a second rename, and "failed_transfers" among what moved. A nick
+  with no count, a case-only rename and an empty store move nothing. A count from yesterday is dropped on the old nick
+  and replaced on the new one, even by a smaller count today. Both today: the larger count wins whole either way,
+  equal counts keep either pause, and never the sum. The move holds `failed_transfers_lock` and not `queue_lock`.
+  Through the real NICK line (`irc.answer_nick_change()`) and the real gate: the renamed nick's file request
+  (`dcc.handle_download_request()`) and `!list` (`list.send_file_list()`) are refused with the pause notice, a
+  failure before and one after the rename pause it, one failure and a rename is still served, and someone who takes
+  the old name is served. The exact moved-list test in `tests/test_a_rename_carries_the_users_state.py` is unchanged
+  and green.
+- **Mutation checks, 12/12 caught:** the block removed, the old entry's day check dropped, `>` turned into `<`, the
+  sum instead of the larger count, `get` instead of `pop`, the tie branch dropped, its `or` turned into `and`, a
+  today-and-larger new entry overwritten, the new entry's day check dropped, "failed_transfers" reported
+  unconditionally, the move without its lock, and the move inside `queue_lock`.
+
+### 🩹 A full upload cap no longer shields a send that crawls on its own link (#1436)
+
+An audit finding against #1388 x #1352. `_SlowSendWatch.check()` kept every send while `upload_cap_binds()` said
+all sends together moved at least 90% of `MAX_UPLOAD_KB`. That exemption is for the cap being what makes a send slow,
+but a receiver held by its own link stays slow while the fast receivers take the rest of the cap, so the cap stays
+full and the exemption held for the whole send. With `MAX_UPLOAD_KB=300`, `SLOW_SEND_MIN_KB=60`, three slots, two
+receivers at about 140 KB/s and one at 20 KB/s, the slow one kept its slot for hours while nicks waited; with the cap
+off it was stopped after the minute's grace.
+
+- **`upload_cap_holds_this_send(speed, total_bps)`** replaces the bare `upload_cap_binds(total_bps)` test in
+  `check()`. It is true while the cap binds AND this send moves at least `SLOW_SEND_CAP_NEAR` (0.9) of an even split
+  of what every send together moved over the same window (`total_bps / len(active_transfers)`). Every send reserves
+  from one shared clock under the cap (`speed_cap.take()`), so a send the cap holds back gets at least that split; one
+  under it is held by its own link. Under the split a send is judged as with no cap, by the same rules (another send
+  at the floor, the slowest, someone waiting). Sends at an even share of a full cap - the case #1388 documented -
+  are still kept. A row that moves nothing yet (a claimed send still connecting, or one whose offer is not accepted
+  yet) counts as running and only lowers the split, the safe side.
+- **Why the measured total and not the cap, and not "the cap's share is under the floor":** the total over the
+  window is what the cap actually let through, so an even split always passes whatever share of the cap it reached.
+  A rule exempting whenever `cap / sends < SLOW_SEND_MIN_KB` would still shield a 2 KB/s crawler for as long as an
+  operator's cap is below slots x floor. Units: `speed_cap.rate()` and `slow_send_floor()` are both KB x 1024 in
+  bytes per second, and `total_bps` and `speed` are bytes per second over the same window.
+- `upload_cap_binds()` is unchanged and still used. The comment above the constants, the `SLOW_SEND_MIN_KB` comment
+  in `src/defaults.py` (and so `conf/settings.conf.sample`) and the INSTALL.md section say the new rule. The
+  settings help never named the cap, so it, the es/fr help and the mIRC settings window are unchanged.
+- **Tests:** `tests/test_a_send_that_crawls_while_others_wait.py` (49 -> 57 tests). Its cap test that asserted
+  a 1 KB/s send beside one filling a cap of 100 is KEPT was the defect itself; it is now asserted stopped, and
+  the kept case is equal shares of a full cap. New, driving every send's watch with each acknowledged byte also
+  on the wire: the audit case (300 / 60, 140 + 140 + 20: the 20 stopped at 60 s, as with the cap off); about
+  even shares of a full cap (48/50/52 of 150) and of exactly 90% of it (42/45/48 of 135) kept, and the same
+  slowest stopped with the cap off; three even shares under the floor kept; exactly the split (90 KB/s of a
+  full 300 by three) kept and a byte per second under it stopped; a connecting row with no rate lowering the
+  split to total / 4; a cap that is not full (1000, or none) shielding nobody, even a send over its even
+  share. `upload_cap_holds_this_send()` is tested directly: the edge, the measured total split rather than
+  the cap, the 90% guard, an idle fourth row, one row and none, and no cap. `TheSharedClock` runs the real
+  `speed_cap.take()` clock, single-threaded with a fake clock, for three sends only the cap slows and one on a
+  20 KB/s link at caps of 150, 400 and 1000: each capped send moves at least `SLOW_SEND_CAP_NEAR` of total / 4
+  and `upload_cap_holds_this_send()` holds those three and not the slow one, so the assumption the fix rests on
+  is tested, not only assumed. Mutants of `take()` (one caller never waits, jumps the line, or has its own
+  clock) and a per-caller chunk size fail it.
+- **Mutation checks, 8/8 caught**, each in a fresh interpreter: `>=` to `>`; the split dropped
+  (`speed >= NEAR * total`); dividing by `len - 1`; dividing by the rated rows only; the `upload_cap_binds()`
+  guard removed; `check()` calling `upload_cap_binds()` again (the #1436 code); splitting the cap instead of
+  the measured total; `and` to `or`.
+
+### 🩹 A finished `!rar` archive follows the one-large-file rule (#1435)
+
+Found by an audit. #1387 (`LARGE_FILE_MB`) says every path that hands out a slot follows the rule, but the packer's
+hand-off in `pack_folder_for_request()` asked only whether the row was withdrawn and whether a slot was free. With
+`LARGE_FILE_MB = 1024` and one nick receiving a 4 GB file, another nick's `!rar` of a 2 GB folder was sent the moment
+it was packed: two large files at once. The archive's real size was known two lines earlier and never recorded on
+the row either, so an archive that found every slot busy and waited as a plain row still counted as small when the
+sweep reached it later.
+
+- **The row records the archive's size** (`QUEUED_SIZE_KEY`) in the hold of `queue_lock` that points it at the
+  archive, for a fresh pack and a reused archive alike. The size is the `stat()` already taken outside the lock
+  (#605). From then on the row is a large file like any other: the sweep, a direct dispatch and the request path's
+  "a nick that waited longer has a large file next" all see it, and the hand-off's claim counts as large until the
+  send reads its size.
+- **A large archive waits while another large file is being sent**, asked in the same hold that claims the slot,
+  with `waits_for_a_large_send()` as section A's direct dispatch asks it. It is the "no room" outcome: the archive
+  stays queued, keeping its place, the wrapper releases the packer, and the log says
+  `[DCC QUEUE] <nick>'s next file is large ...`, the line the sweep prints when it passes a large file over. When
+  the large send ends, the trigger its `finally` starts reaches the archive row through the sweep, as it does any
+  held-back file.
+- **A folder pack waiting to be packed is still never held back**: its size is not known until it is made. The
+  comment in `dcc.py`, the `LARGE_FILE_MB` help (and `conf/settings.conf.sample`, regenerated) and the roadmap now
+  say the finished archive is.
+- **Tests:** `tests/test_a_finished_archive_follows_the_large_file_rule.py` (13), driving
+  `pack_folder_for_request()` with a stand-in rar that writes an archive of the size a test asks for. A large
+  archive beside a large send is not claimed, returns `None`, starts no send and stays queued with its size and
+  the `[DCC QUEUE]` line, also when the large send is a fresh claim with no `size` yet. Sent: with no large send
+  running, a small archive beside a large send, and `LARGE_FILE_MB = 0`, the size recorded each time; right after
+  the claim, `_a_large_send_is_running()` is true through its queue row. A reused archive (rar never runs) waits,
+  is sent, and records its size with no room. No room: the `[DCC-BLOCK]` line, the size recorded, and a later
+  `claim_next_in_line()` passes the archive over while the large send runs and claims it once it ends. A row
+  withdrawn while rar ran returns `False` and is not sent. Through `check_queue_and_send()`: the hold-back exit
+  releases the packer interlocks once (#714's woken-claim model), and the trigger the large send's end starts
+  sends the waiting archive without packing it again.
+- **Mutation checks, 9/9 caught:** the size assignment deleted, moved inside `if room:`, or set only on the
+  fresh-pack path; `waits_for_a_large_send()` replaced with `False` or with `_row_is_large()` alone; the append
+  outside the guard; the new exit falling through or returning `True`; and the whole pre-fix `dcc.py`.
+
+### 🩹 A settings save whose rehash failed no longer says the settings are in effect (#1434)
+
+From an audit. `_save_settings_and_rehash()` called `on_applied()` in a `finally` once
+`commands.handle_rehash_request()` returned, and `_handle_rehash_request()` catches every reload error itself - it
+prints `[REHASH CRITICAL ERROR]`, says "Rehash FAILED" to the debug channel and returns like a success. So the
+console's `set`/`setcommit` always sent `DCCORE SETAPPLIED`, and the mIRC settings window said "Saved and applied"
+(or "The saved settings are in effect now.") and reloaded the page. With `admin_config.py` holding a half-finished
+edit, applying `MAX_DCC_SLOTS=7` wrote `settings.conf`, the reload failed, and mIRC still said it was in effect.
+
+- **The rehash says whether it worked.** `_handle_rehash_request()` returns `True` after the reload and `False` from
+  its failure handler; a channel sync that fails after the reload still counts as `True` (as its own comment has
+  it). `handle_rehash_request()` passes it through, and returns `False` for an unauthorised caller instead of
+  `None`. Every other caller (`irc.py`'s `!rehash` thread, the console's `rehash`, `consolefeed`, `checkupdates`)
+  ignores the return, as before.
+- **`on_applied(ok)`.** `_save_settings_and_rehash()` calls it with `ok`: `False` when the rehash returned `False` or
+  raised. It fails closed: only an explicit `True` is success, so a bare `return` added one day somewhere in the
+  rehash's several hundred lines says "not applied" instead of bringing this bug back - and a stand-in returning
+  `None` counts as a failure too. The console's `applied(ok=True)` keeps a call without the argument working.
+- **`DCCORE SETAPPLYERR <message>`**, a new line type, instead of `SETAPPLIED` when the rehash failed, and the same
+  sentence on a plain console. Not a field of `SETAPPLIED`: a `dccore.mrc` from before this change (v1.17.0
+  included) reads every `SETAPPLIED` as success whatever follows it, and shows a type it does not know as
+  `[SETAPPLYERR] <message>` in `@DCCore`, its window then saying after five minutes that the bot has not said it
+  applied them. New types do not move the protocol minor (`docs/ADMIN-CONSOLE.md`).
+- **`dccore.mrc`:** the settings window awaits `SETAPPLYERR` as it awaits `SETAPPLIED`. On it, the window's one-line
+  status (about 75 characters) says "Saved N setting(s) - could not apply them: the rehash failed. See @DCCore.", and
+  an alert in `@DCCore` carries the bot's whole sentence, which the status control would cut. It does not reload the
+  page: the page keeps what was saved, which is what `settings.conf` holds, and Reload shows what the bot runs. Not
+  awaited (the window closed, or a `set` typed in `@DCCore`), it is the same alert - routed before the window's
+  lines, so the ten seconds after the window closes do not swallow it.
+- **`docs/ADMIN-CONSOLE.md`:** the `SETAPPLIED` row, a `SETAPPLYERR` row, and the settings window's "After a save".
+- The dashboard's own Settings save does not pass `on_applied` and still reports only "rehash started"; it never
+  learns how the rehash went. Unchanged here; tracked as #1462.
+- **Tests:** `tests/test_a_failed_rehash_is_not_said_to_be_in_effect.py` (30 tests): the real rehash, its module
+  reload stood in for, returns `False` when the reload raises a `SyntaxError`, `True` when it goes through and when
+  only the channel sync after it fails, and `False` for an unauthorised caller, which reloads nothing;
+  `handle_rehash_request()` passes the body's answer through and releases the lock; `on_applied` gets `True`,
+  `False`, `False` for a rehash returning `True`, `False`, `None` (fails closed), and `False` when it raises (the
+  raise still reaches the thread); over the real console path (`set`, and `setbegin` ... `setcommit`) a failing
+  rehash sends `DCCORE SETAPPLYERR <message>` after `SETDONE ok` and no `SETAPPLIED`, held or fast, and so does the
+  real rehash with a reload that raises, while one that works still says `SETAPPLIED`; the line's type token is
+  `SETAPPLYERR`; a plain console gets a sentence that names `settings.conf` and does not say "in effect". In
+  `dccore.mrc`, read with its comments dropped: `SETAPPLYERR` is one of the window's types; `dccore.sw.wants` and the
+  routing in `dccore.structured` are evaluated from the script's own conditions - awaited while a save applies, the
+  line goes to the window, otherwise (the window's ten-second tail included) to the `@DCCore` alert; the window's
+  block ends the wait, reads the count before it drops `applying`, neither reloads the page nor claims success, puts
+  the bot's sentence (`$2-`) in its `@DCCore` alert and not in the status, and its status, with a two-digit count,
+  is at most 80 characters and fits control 1018 (one line, 310 dialog units) on one line; its `var` holds no
+  literal comma; `docs/ADMIN-CONSOLE.md` has the row. `tests/test_the_mirc_settings_window.py` gains a script-wide
+  lint, `NoVarHoldsALiteralComma` (2 tests): no `var` in `dccore.mrc` - after a `|` or opening a one-line block
+  too, 424 of them - holds a literal comma outside an identifier's parentheses. `hold_the_rehash()` in
+  `tests/test_console_settings_need_the_password.py` now answers `True`, as a reload that worked does.
+- **Mutation checks, 26/27 caught:** `is True` back to `is not False`, `ok` starting `True`, `on_applied()` without
+  `ok`, the failure handler's `return False` as `True` or deleted, the success `return True` deleted, `if ok:`
+  inverted, the failure sent as `SETAPPLIED error ...`, the plain sentence saying "in effect", a channel-sync failure
+  re-raised, an unauthorised caller answered `True`; in `dccore.mrc` `dccore.sw.load` added to the block, the guard
+  moved after the routing line or not gated on `!$dccore.sw.wants`, `SETAPPLYERR` dropped from `sw.wants` or
+  `sw.types`, a comma in the new `var` or in another one inside a one-line block, `hdel ... applying` dropped or
+  moved above the `var`, `dccore.sw.waited applied` dropped, `$2-` put back into `%said`, the alert dropped from
+  the block, the old long status sentence; the doc row removed; `hold_the_rehash()` back to answering `None`. Not
+  caught, and cannot be: the success `return True` moved after the `try`/`except` - the handler's own
+  `return False` still answers a failure, so it behaves the same.
+
+### 🔍 A dashboard request during a rehash keeps its session (#1433)
+
+`session_is_live()` and `login()` read `config.ADMIN_PASSWORD_HASH` without `runtime.config_reload_lock`. A rehash's
+`importlib.reload(defaults)` puts that hash back to `""` for about a millisecond, until `settings_file.apply_to()`
+applies `settings.conf` again. A request in that window got a stamp that did not match: `require_login()` answered
+401, cleared the cookie, and the browser went to `/login`. The likeliest request to land there is the Settings page's
+own re-fetch of `/api/settings` right after a save. A correct password checked in the window was refused and counted
+as a failed attempt. Found in an audit: a poll during repeated rehashes was logged out in 19 of 20 trials.
+
+- **`web_login._admin_password_hash()`** reads the hash under the lock, as `build_settings_payload()` already does, so a
+  request waits for the reload instead of reading its halfway state. All four dashboard reads use it: the login
+  check, `start_session()`, `session_is_live()` and `restamp_session()`.
+- Every dashboard request now waits briefly for a reload in progress, as `/api/settings` already did.
+- **Tests:** `tests/test_a_rehash_does_not_log_the_operator_out.py` (7 tests in 4 classes):
+  - the helper waits for the reload and returns the configured hash;
+  - a thread holds the lock while the hash is `""`, as a rehash does: an open session stays open, and a correct
+    password logs in and is not counted as a failure;
+  - the window opens part-way through a request: a session opened by a login in the window is stamped with the
+    configured hash, and the tab that changed the password stays logged in (the re-stamp waits for the reload);
+  - the request is sent from inside a real `commands.reload_modules_in_order(("defaults",))`: an open session stays
+    open, and a correct login is not counted. `admin_config` is blanked for the test, so an operator's
+    `conf/admin_config.py` cannot change the result.
+- **Mutants:** 6 of 6 caught: an unlocked `_admin_password_hash()`, unlocked reads in `session_is_live()`, `login()`,
+  `restamp_session()` and `start_session()`, and `src/` reverted to `origin/main`.
+
+### 🩹 A NAMES reply for a channel the bot is not in is not a rejoin (#1432)
+
+Found in the 2026-10-17 audit. `answer_any_end_of_names()` (#1424) took every 366 as proof the bot was in that
+channel. The rehash's `sync_channels()` asks NAMES of every `CHANNEL`, one the bot was kicked from or banned out of
+included, and a server answers NAMES for a channel the client is not on as well: 366 always, 353 too when the channel
+is public. So any Save on the dashboard, with the bot out of a channel:
+
+- cleared its kick, its give-up, or its #1415 join wait, and said "Rejoined";
+- stopped every attempt to get back in, and sent adverts there again (the 404s #631 removed);
+- filled its member list from the 353, with people whose PART and QUIT the bot never sees, so the queue treated them
+  as present.
+
+The fix:
+
+- **The server's echo of the bot's own JOIN is the proof (`note_own_join()`).** `irc_loop()` passes the echo on, and
+  `runtime.joined_channels` holds the channels it vouches for on this connection. A kick of the bot
+  (`note_kicked_from()`) and its own PART (`answer_part()`) take a channel out again (`note_own_leave()`), and a new
+  connection starts with none (`forget_join_waits()`).
+- **`_known_out(name)`:** a channel in `kicked_channels` or `join_waits` that no echo vouches for. `answer_names()`
+  learns no members for it, and `answer_any_end_of_names()` and `answer_end_of_names()` do not confirm it.
+- **#1424's case still holds:** a channel the watchdog called never confirmed, whose JOIN was echoed, is confirmed by
+  its late 366 as before.
+- **Tests:** `tests/test_a_names_reply_is_not_a_rejoin.py` (19 tests):
+  - the rehash's sync does ask NAMES of a kicked channel;
+  - a kicked, a given-up and a waiting channel stay out after a NAMES reply, and learn no members; so does a channel
+    with a join wait and no retry entry (a 439 to the connect-time JOIN); before activation it does not count either;
+  - a channel the bot is in is confirmed as before;
+  - a real rejoin (echo, 353, 366) is cleared, said, and its member list replaced; a join wait ends with the join;
+  - a late 366 after an echo still confirms (#1424); a kick or the bot's own PART after the echo takes it back,
+    someone else's PART does not; a kick from a channel not in `CHANNEL` drops its echo as well, so adding it to
+    `CHANNEL` later does not make a NAMES reply a rejoin;
+  - `irc_loop()` against a scripted server: the bot's own JOIN is recorded and no one else's, a KICK on the wire
+    takes it back, and a new connection starts with none.
+  - `test_a_join_nobody_checked`'s retried-channel test now has the echo before its late 366.
+- **Mutation checks, 13/13 caught:** each of the three gates removed, `_known_out()` ignoring `join_waits`, a kick
+  or the bot's own PART keeping the echo, anyone's PART dropping it, a new connection keeping the echoes, the echo
+  ignored or not recorded, the loop not passing it on, the echo's name not folded, `note_kicked_from()` dropping the
+  echo only for a channel in `CHANNEL`.
+
+### 🏷️ The project page shows the release's version, and links the mIRC script (#1430)
+
+- **The overview's "Download the latest release" says which release it is** (v1.17.0). Beside it, "Download the mIRC
+  script" (dccore.mrc 1.20.0) goes to the release asset `releases/latest/download/dccore-mirc.zip` (#1412).
+- **Written into the page,** since the site loads nothing (#1309). `tests/test_the_site_page.py` holds the figures to
+  their one source: the bot's version to `defaults.SCRIPT_VERSION`, the script's to `dccore.ver` (read by
+  `build_mirc_zip.script_version()`). A release roll that bumps either fails until the page follows, and
+  PUBLIC-REPO-WORKFLOW's release checklist says so.
+- **Tests:** 3 new in `tests/test_the_site_page.py`. **Mutation checks, 3/3 caught:** a stale release version, a stale
+  script version, the script link not the asset.
+
+### 🩹 The debug channel is joined first, and a late member list still confirms (#1424)
+
+A follow-up to #1421, seen live after #1422. The bot joined its debug channel and was opped there. 20 s later the
+watchdog said the channel was never confirmed, and the bot has asked to rejoin it every advert since: the server
+ignores a JOIN to a channel one is on, so nothing cleared it.
+
+The debug channel was joined last. Its 366 came after the last `CHANNEL`'s had activated the advert, and only
+`answer_end_of_names()` - which `irc_loop()` calls until activation - recorded a 366 in `conn.channels_confirmed`.
+Before #1422 nothing read that set after activation, so it never showed.
+
+- **`answer_any_end_of_names(line, conn, sock, epoch)`** takes every 366, before activation and after. It holds the
+  block `irc_loop()` already ran for each one - clearing a retried channel with "Rejoined", the late channel sync
+  (#1271) - and now records the channel as confirmed, whenever its reply comes: a server owes no order. It is
+  anchored at the command's position, and a name that is no one target confirms nothing.
+- **`channels_we_should_be_in()` puts the debug channel first.** The operator's channel is in before anything can go
+  wrong, and it is no longer the JOIN a server cuts (#510) or an ircu target limit refuses at the end of the burst
+  (#1415). Activation still does not wait for it. The order matters only to the JOIN burst; the rehash's sync and
+  `configured_spelling()` compare names.
+- **Tests:**
+  - in `tests/test_a_join_nobody_checked.py` (5 new tests, on its `WelcomeHarness`):
+    - a late 366 is recorded, and the watchdog then reports nothing and rejoins nothing, in the order from the live
+      log;
+    - a forged 366 in channel text does not confirm;
+    - a name that is no one target confirms nothing;
+    - a retried channel is cleared, with "Rejoined".
+  - Three tests now expect the debug channel first, and `announce.NOTICE_EVENTS` names the "Rejoined" notice where
+    it moved.
+- **Mutation checks, 4/4 caught:** a late 366 not recorded, the debug channel last again, a retried channel not cleared,
+  no target check.
+
+### 📁 Longer directory tags, and plain names at the top of the fetch folder keep their id (#1423)
+
+Security advisory GHSA-92w2-hwhv-qr3v (low), fixed in its private fork and merged with this release.
+
+- **Plain names at the top of `FETCHED_FILES_DIR`:** a fetched file is promoted to its plain name there only when that
+  name has a "." in it. A name without one keeps its request id, because that is where each bot's own folder goes
+  (`FETCHED_FILES_PER_BOT`, #1423), and a folder named after a nick never has a dot. This also covers `lists`, which
+  stays in `_RESERVED_FETCHED_NAMES`. Inside a bot's own folder nothing changes.
+- **No dot in a bot's folder name:** `bot_folder_name()` turns a "." left in the cleaned nick into "_", so the rule above holds
+  for any nick, not only for valid ones. That name is not the nick, so it carries the tag a cleaned name gets (#1438):
+  `a.b` gives `a_b-<digest>` and never shares the folder of the nick `a_b`.
+- **A file where a bot's folder goes:** when something other than a folder is already at a fetch folder's name - a
+  file kept at the top from an earlier version - `_run_transfer()` fails the fetch with a reason that names it and
+  asks the operator to move or rename it, instead of a bare `could not create destination dir: [Errno 17]`. The
+  file is left as it is, and no other folder is used instead.
+- **A nick that cleans to nothing** (`[]`, `` ^|` ``, or `fetched_file` in any case) now gets a folder of its own,
+  `bot (<digest>)`, instead of the top of `FETCHED_FILES_DIR`. The space and parentheses are not nick characters, so
+  no other nick's folder can take that name. A nick of nothing but control codes still has no folder.
+- **Longer digest:** the tag `list_fetch._name_digest()` puts on a cleaned or reserved directory name is now 16 hex
+  digits (64 bits) instead of 6, for a bot's list directory and a secondary channel's. A name that looks tagged in
+  either the new or the old six-digit form is tagged again, so no nick spells out a directory under either name.
+- **Held lists move once at startup:** `migrate_held_list_directories()` moves a held list, and its secondary
+  channels' lists, from the six-digit name to the longer one, under the same safety rules as before. The old
+  `lists/_channels/<bot>/` folder is removed once the last channel has moved out and it is empty.
+- **Tests:** on the real code, in temp trees:
+  - `tests/test_a_plain_name_at_the_top_keeps_its_id.py`: through `handle_incoming_offer()` and a real loopback
+    transfer, a no-extension file `alfa` fetched with `FETCHED_FILES_PER_BOT` off keeps its id at the top, and a
+    later fetch from bot alfa with the setting on completes in `alfa/`; the same when the first file comes from the
+    nick `[]` with the setting on. `_promote_clean_filename()` on its own: `alfa`, `alfa.`, `alfa ` keep their id at
+    the top, `a.b` is promoted there, a no-dot name is promoted inside a bot's folder, and a relative
+    `FETCHED_FILES_DIR` or a trailing separator is still the top. A real transfer from bot alfa with a file
+    already at `alfa` fails with a reason naming that file and asking for it to be moved or renamed, not an errno,
+    and leaves the file as it was; an existing `alfa/` folder is used as before.
+  - `tests/test_each_bot_gets_a_fetch_folder_of_its_own.py`: `[]`, `` ^|` ``, `fetched_file` and `FETCHED_FILE` give
+    `bot (<16 hex>)`, one folder for both cases and one per nick; `""`, None, blanks and control codes alone give
+    None; `fetched_dir_of()` and `_bot_folder_for_locked()` accept the name; no nick-shaped string gives it. No
+    folder name has a "." for 17 dotted nicks (dots inside, leading, trailing, `a.` repeated 200 times, `aux.txt`,
+    `lists.`, `fetched.file`, with control codes), and each is still one component of at most 255 bytes and not
+    `lists`.
+  - `tests/test_a_cleaned_name_carries_a_longer_digest.py`: the digest is 16 hex digits on a bot's and a channel's
+    directory; a name tagged in the 6- or 16-digit form is tagged again, 15 digits is not; two names that clean
+    alike, with digests standing in that agree in their first six digits, get two list directories, two channel
+    directories and two fetch folders. The migration moves a main list and two channels from 6 to 16 digits,
+    rewrites and saves their paths, removes the emptied old `_channels/<bot>/`, keeps one with anything else in
+    it and a bot's own channels folder, moves nothing on a second run, still refuses a shared directory or an
+    existing target, and renames or removes nothing outside `lists/` (nor `_channels/` itself).
+- **Mutants:** 24 of 27 caught: the dot rule removed, applied in every folder, with the root comparison inverted
+  or not normalised, or without `rstrip(" .")`; `_name_digest()` back to six digits; `_DIR_TAG_RE` without the
+  16 or without the 6 form; `bot_folder_name()` giving None for `[]`, `bot-<digest>`, or no casefold; the rmdir
+  guard dropped, without its "not the new parent" clause, cut to its "not `_channels/` itself" clause alone,
+  widened to `lists/`, or aimed at `_channels/`; rmdir on the new parent; the "." to "_" in `bot_folder_name()`
+  removed, or only for the first dot; the file-in-the-way check removed, made to fire on any existing path (a
+  folder too), aimed at `FETCHED_FILES_DIR` instead of the bot's folder, or without its `return` (so `makedirs()`
+  overwrote the reason); and `src/` reverted to `main`. The three that live are equivalent: the old parent is only
+  ever `lists/` (excluded as the new parent) or `lists/_channels/<bot>/`, so dropping the "not `_channels/` itself"
+  clause, or widening the guard to any folder under `lists/` but `lists/`, changes nothing; and the "." to "_"
+  moved after the length fit still gives a name with no dot, of the same length, only cut at another place when a
+  long nick has a dot near its end.
+
+### 📁 Each bot's fetched files in a folder named after it (#1423)
+
+An operator asked for what mIRC does with its downloads: a folder per sender. With `FETCHED_FILES_PER_BOT` on (off by
+default), a file or a packed folder fetched from SomeBot is saved in `FETCHED_FILES_DIR/SomeBot/`. Fetched lists keep
+their own place (`lists/<bot>/`).
+
+- **The row remembers its folder** (`fetched_folder`), and everything that reads a row's file goes through
+  `dcc_fetch.fetched_dir_of(row)`. That covers the transfer, the promotion to the plain name, the dashboard's delete,
+  batch delete and download. A row fetched before the setting changed still finds its file, and a row resumed after a
+  restart keeps the folder its first part is in.
+- **The folder name** (`bot_folder_name()`) is the nick cleaned exactly as a fetched file's name is
+  (`_sanitize_offer_filename()`): no separators, no `..`, no control codes, Windows device names made safe. It is
+  never `lists`.
+- **One bot, one folder:** a nick that differs only in case reuses the folder a row of that bot already has. This is
+  read from the rows in memory, since it runs under `_fetch_lock()`, which a slow mount must never hold.
+- **`fetched_dir_of()` refuses a folder** that climbs, nests or is absolute, from a hand-edited history: nothing is
+  read or deleted through it.
+- **"Another row holds this file" (#1269) is per folder:** the same name in two bots' folders is two files.
+- **The setting is on every surface:**
+  - the dashboard (Advanced: file locations, beside `FETCHED_FILES_DIR`), with en/es/fr labels and help;
+  - the console;
+  - the control panel (Downloads > Fetch tuning > *Where files go*, block rebuilt);
+  - the sample.
+- `docs/FUTURE.md` lists it.
+- **Tests:** `tests/test_each_bot_gets_a_fetch_folder_of_its_own.py` (26 tests), which cover:
+  - the folder name;
+  - which rows get one;
+  - the shipped default;
+  - a row's folder staying inside;
+  - a real `handle_incoming_offer()` saving into the bot's folder, off and on, and resumed;
+  - per-folder holding;
+  - the dashboard's delete, batch delete and download.
+- **Mutation checks, 12/12 caught:** the offer ignoring the setting, the destination ignoring the folder, a climbing
+  folder accepted, holding across folders, the single delete, batch delete or download at the top, a list into the
+  bot's folder, case making two folders, a bot named `lists`, on by default, a resumed row moving folder.
+
+### 🔍 A set DEBUG_CHANNEL is checked even when every CHANNEL answered (#1421)
+
+`activation_watchdog()` asked "which channels never confirmed via NAMES" only when it was the one activating the
+advert. When every `CHANNEL` channel answered, `answer_end_of_names()` activated first, the question was never asked,
+and the debug channel - in the wider set (#510) but deliberately not in what activation waits on - went unchecked.
+One the bot did not get into was not reported, not handed to the rejoin, and its messages went nowhere. Seen at two
+restarts of a real bot on 2026-10-17.
+
+- **The watchdog always asks.** The missing set is computed whether or not the advert is running. When it activates,
+  nothing changes. When the 366s already did, the missing channels - the debug channel - are reported and handed to
+  `note_join_unconfirmed()`, so `channels_to_rejoin()` asks for them again. The advert is not started a second time.
+- **`report_unconfirmed_channels(missing, activating)`** holds what both paths do: the log line, the retry and the
+  dashboard notice (`notice="error"`). Once activated the log says
+  `[WARNING] N channel(s) never confirmed via NAMES, though the advert is running: ...`.
+- Activation still does not wait for the debug channel.
+- **Tests:** in `tests/test_a_join_nobody_checked.py` (6 new tests):
+  - a debug channel with no 366 is reported, marked and retried;
+  - the dashboard notice;
+  - the advert not started twice;
+  - a confirmed debug channel, no debug channel and a dead connection say nothing.
+- **Mutation checks, 5/5 caught:** the old gate, reported but not retried, no dashboard notice, the advert started
+  twice, the narrow CHANNEL-only set.
+
+### 🧰 The public-tree extraction is a script (#1418)
+
+`docs/PUBLIC-REPO-WORKFLOW.md`'s extraction was done by hand at every release. For v1.17.0 it was a throwaway shell
+script, and running the suite in what it made caught fourteen failures (#1409) before anything reached `dccore`.
+
+- **`scripts/extract_public_tree.py <rev> <out> [--test]`** runs steps 1-3:
+  - `git archive`;
+  - strips `DEV_ONLY` and the one `.gitattributes` line that is wrong in the public repo;
+  - renames `UPDATES-PUBLIC.md` onto `UPDATES.md` and rewrites its two links.
+
+  `--test` runs step 4's suite in the result.
+- **All or nothing:** it works in a scratch folder that becomes `<out>` only when every step found exactly what it
+  expected. A `DEV_ONLY` file that is gone, a `.gitattributes` line or a link not where the step says, or an `<out>`
+  that is already there refuses, naming it, and leaves nothing behind. A stale list fails loudly instead of shipping.
+- **The strip list lives only in the script** (CONVENTIONS rule 2). The workflow document points to it and keeps the
+  reasons. The script and its test are dev-only themselves.
+- **Tests:** `tests/test_the_public_tree_is_extracted_by_a_script.py` (13 tests), on a real extraction of HEAD:
+  - no dev-only or internal file is in it, and nothing else is missing;
+  - the changelog is the public one, and its links are rewritten;
+  - `.gitattributes` loses exactly one line and keeps `tests/exported_tree.py`'s signal;
+  - each refusal leaves no tree, and the command returns 2;
+  - every `tests/test_preflight*.py` is in `DEV_ONLY`, and every `DEV_ONLY` name is a file.
+- **Mutation checks, 8/8 caught:**
+  - nothing stripped;
+  - the `.gitattributes` line kept;
+  - the internal name kept beside the public one;
+  - links not rewritten;
+  - a stale list tolerated;
+  - a refused run leaving its scratch;
+  - an existing tree written into;
+  - a preflight test left out of the list.
+
+### 🧪 Four tests that failed now and then on the CI runners (#1417)
+
+Each cost a rerun. One was a real edge in the code.
+
+- **The first failure after an upgrade could still fall out of the success rate.** `transfer_log._record()` lifted a
+  row timed just before the open that stamps `outcomes_began` (#1203), but only within a fixed two seconds; an open
+  slower than that - a loaded Windows runner, an old file's migration - left the row before the stamp. Now a row is
+  lifted when the stamp was written during this very call and the row was timed in the second the call began, or
+  the one before, however long the open took. A row that really is older keeps its time.
+- **`test_concurrent_sends_lose_nothing`** made 400 commits in a row under one lock, which outlasted its joins on a
+  loaded runner. Eight threads still race; five sends each instead of 25.
+- **The pack tests** waited for `runtime.packer_thread` to be set, and a pack with no rar to run ends - clearing it -
+  within one poll. They wait for the packer to start or its row to be written.
+- **`test_it_returns_quickly_rather_than_blocking_in_accept`** timed `start_dcc_send()` against 5 s, and a runner
+  took 12 s. It now checks the real condition: `accept()` is never reached after a handshake that did not go out.
+- **Tests:** two new ones - an open taking five seconds still counts the row, a day-old row is not lifted.
+- **Mutation checks, 3/3 caught:** the old two-second window, any earlier row lifted, the #430 return removed. The
+  pack race is a scheduling race and has no deterministic mutant.
+
+### ⏱️ The List Browser's filter does not wait out the startup backfill (#1416)
+
+Since #1296 the bot connects while the search index is filled on a thread of its own, and the index's readers waited
+for it with no timeout: `_prepare_to_read()` began with `runtime.list_index_backfill_done.wait()`. On a large index
+that was about ten minutes, and each keystroke of the filter held a dashboard request thread for all of them.
+
+- **`_prepare_to_read()` waits `FILL_WAIT_SECONDS` (2 s) at most.** Still filling, it answers as if there were no
+  index: `bots_with_a_match()` gives no claim either way, and `search()` gives nothing. It never answers from the
+  half-filled index, which would report every list it has not reached as having no match.
+- **`list_index.index_filling()`** says whether the backfill runs. `build_crosslist_search_payload()` then answers at
+  once with `filling: true`, calls no held list empty (only the offline ones, as always), and asks the index nothing.
+- **The List Browser says** "The search index is still being filled after the bot started" (en/es/fr) instead of
+  "no matches".
+- **Tests:** `tests/test_the_filter_does_not_wait_for_the_backfill.py` (6 tests):
+  - a real index holding a match, while the backfill is said to run: the readers answer at once, and not from it;
+  - the payload says `filling` and dims nothing;
+  - once filled, the index is asked as before.
+- **Mutation checks, 5/5 caught:** the old unbounded wait, answering from the half-filled index, the filter not
+  saying so, every held list called empty, never filling.
+
+### ⏳ A JOIN refused for "target change too fast" waits for the server (#1415)
+
+Seen on an ircu network after a restart for v1.17.0. ircu remembers a client's free targets per IP across a
+reconnect, so a bot that had advertised in 14 channels for 15 hours came back with almost none. Two JOINs were
+refused (439). The advert worker asked again 25 s later, inside the server's wait, and the two JOINs went out
+together when the pacer's hold ended. One was refused again, and the last channel got in only on the advert
+after that, about 6 minutes after the restart.
+
+- **`note_join_target_wait()`:** `_answer_target_change()` hands it every 439/707. For a channel the bot should be
+  in and is not, the refusal was a JOIN. The channel may be asked for again at the server's wait plus
+  `JOIN_WAIT_MARGIN` (5 s), and a second refused channel waits for the first's turn and then a wait of its own:
+  one target frees per wait. A 439 for a nick, or for a channel the bot is in, only holds the pacer, as before.
+  The log says `[JOIN WAIT] #chan: ... Asking again in N s, at HH:MM:SS.`
+- **`channels_to_rejoin()`** leaves a channel out until its wait is over, so the advert's rejoin no longer asks early.
+- **`ask_again_after_join_waits()`:** `irc_loop()` calls it on every pass. It asks for a channel as soon as its
+  wait is over - within one read timeout - and once. It is only for a channel the bot never got into: one it was
+  kicked from keeps the advert's rhythm, and one it is in by then is not asked for.
+- **`delayed_join()`:** after a refusal, the rest of the JOIN burst waits its turn behind it
+  (`defer_joins_after_a_refusal()`) instead of spending the targets it is waiting for.
+- **The waits live in `runtime.py`** (`runtime.join_waits`, bound in `defaults.py` and in `!rehash`'s preserved
+  containers in `commands.py`, as `kicked_channels` is), so a rehash keeps them. A new connection forgets them, and
+  a confirmed JOIN clears its own.
+- **`docs/INSTALL.md`** says so, under "How fast the bot talks".
+- **Tests:** `tests/test_a_refused_join_waits_for_the_server.py` (22 tests), which cover:
+  - what is a refused JOIN, the turns, and the margin;
+  - the advert's rejoin and the asking again;
+  - a kicked channel, and a channel already joined;
+  - a real `delayed_join()` burst cut short by a 439 that arrives in its gap;
+  - a new connection, and the handler.
+- **Mutation checks, 12/12 caught:** the handler not noting it, the advert ignoring the wait, no turns, a kicked
+  channel or a joined one asked at once, asked before the wait, asked every pass, the burst never deferring, waits
+  kept across a connection or a confirmed join, a message taken for a JOIN, no margin.
+- **Not covered by a test:** the one-line call in `irc_loop()`, which no test drives, like the loop's other wiring.
+
+### 📦 The mIRC script as one zip, attached to each release (#1412)
+
+Installing the script meant finding `scripts/mirc/` and copying `dccore.mrc` with its `dcx` and `dll` folders,
+and not the build files beside them. Now there is one download.
+
+- **`scripts/build_mirc_zip.py`** builds `dccore-mirc.zip`:
+  - `dccore.mrc`, and everything under `dcx/` and `dll/` except `dll/src/` and the icon preview. It is a rule, so
+    a file added to either folder ships without being listed;
+  - a short `dccore-mirc-README.txt`, CRLF, with the steps and the version read from `dccore.ver`;
+  - no top folder and no `dccore.ini`: extracted where `dccore.mrc` is, an update keeps the settings and the token;
+  - the same bytes every build: sorted members, one fixed timestamp and mode;
+  - a missing `dcx/` or `dll/` stops it rather than shipping a smaller zip.
+- **A release asset with a fixed name**, so `releases/latest/download/dccore-mirc.zip` is always the newest script.
+  ADMIN-CONSOLE's "First time" and "Updating the script", and the project page's mIRC install step, link it.
+  `docs/PUBLIC-REPO-WORKFLOW.md` gets the release step, with the check that `releases/latest` names the new tag
+  (#1404).
+- **Tests:** `tests/test_the_mirc_zip_holds_what_you_install.py` (13 tests): what is in it and what is not, each
+  member byte for byte its source, no top folder or `.ini`, the README's version and steps, identical rebuilds, a
+  missing folder. The site test allows the asset's address.
+- **Mutation checks, 9/9 caught:** the preview or the sources shipped, `dcx/` left out, the checkout time in the
+  members, a fixed README version, a top folder, unsorted members, a missing folder tolerated, LF line ends.
+
+### 🧪 The extracted public tree's suite passes again (#1409)
+
+Running the suite in the v1.17.0 scratch tree (`docs/PUBLIC-REPO-WORKFLOW.md`, step 4) turned up 14 failures that
+this repository never shows. All of them test tooling that extraction strips, or read files that do not ship:
+
+- **`tests/test_uncovered_daemon_functions.py`:** the classes from #1384 load `scripts/function_coverage.py`, which
+  step 2 strips. They skip in an export now, and `function_coverage.py` joins `STRIPPED_AT_EXPORT_ONLY` in
+  `tests/test_referenced_files_exist.py`, beside `preflight.py`.
+- **`tests/test_changelog_fragments.py`:** the two checks of "this tree" skip in an export, which has no
+  `docs/changes/` and no `docs/UPDATES-PUBLIC.md`. The roll's own tests use temp trees, and still run there.
+- **`tests.support.changelog_entry()`** takes the test, and skips it in an export.
+
+Every skip uses `tests/exported_tree.py`'s signal and gives its reason (CONVENTIONS rule 6). In this repository
+all of them run as before.
+
+### 🎨 dccore.mrc: the Connection row's shade is the control panel's theme, not the live one (#1406)
+
+`dccore.sw.home.ink` (#1396) picked the Connection row's green, amber or red shade from the live
+`$dccore.theme.dialogsdark`. The rest of the control panel reads the theme cached when the window was made,
+`$dccore.sw.s(dark)`, because a theme changed while the panel is open applies the next time it opens. So
+switching to dark (or mIRC's own dark mode switching) with the panel open made the next status burst draw the
+row in the dark theme's lighter shade on a face that was still light, and the reverse gave the darker shade on
+a dark face, until the panel was reopened.
+
+- `dccore.sw.home.ink` reads `$dccore.sw.s(dark)`, as the rest of the panel does.
+- Tests: the start page's tests now cache the window's theme as `dccore.sw.start` does, and a live switch with
+  the panel open leaves the shade as the cached face's, for every state and both faces. Reading the live theme
+  again fails them.
+
+### 🩹 A `!rar` archive holds what the list holds, and a pack waits while there is no room for it (#1376 follow-up)
+
+Security advisory GHSA-84jr-495f-w93p (medium), fixed in its private fork and merged with this release.
+
+Since #1376 a file type the list leaves out (`LIST_IGNORED_EXTENSIONS`, or a list's own file types to leave out,
+#1295) is not served by name. A pack now follows the same rule, and waits rather than filling the disk.
+
+- **One rule for the row and the gate.** `update_list.folder_holds_packable()` takes the list's left-out types
+  (`ignored`, `ignored_extensions(<list>)`) and counts a file only where the scan gives its folder a `!rar` row:
+  `is_listed_file()` and `is_packable_file()` both say yes, its size can be read, and no disc folder on the way
+  has a backslash in its name (#464). `handle_download_request()` passes the left-out types of the list the
+  request was answered from. A folder whose only packable files are left out has no row and is refused, the same
+  notice as a folder with nothing packable.
+- **The archive holds the files the list lists.** `update_list.pack_members()` walks the folder by the scan's own
+  rules (`walk_with_sizes()`: no links or junctions followed; a folder with a backslash in its name left out; a
+  file whose size cannot be read left out; `is_listed_file()` for the rest). A file that is a link to somewhere
+  outside the library folder the album is in is left out too, and logged (`_members_inside_the_library()`): rar
+  packs what a link points at. rar is run as it always was, `rar a -ep1 -w<dir> <archive> <folder>`, with `-n@<list>`: a list file of those files'
+  absolute paths, which keeps only them (`_rar_list_file_bytes()`): UTF-16 with `-scul` on Windows, UTF-8 with
+  `-scfl` elsewhere - rar 6.23 on Linux leaves out a name with a character above U+FFFF (an emoji) read from a
+  UTF-16 list, and packs it, and U+2028, from a UTF-8 one. rar walks the folder by its own absolute path, so a
+  folder deeper than Windows' 260 characters packs as before (starting rar in the folder's parent was refused by
+  Windows for such a folder, `WinError 267`, with or without `\\?\`). Checked with RAR 7.22 on Windows, on a
+  320-character folder too, and with RAR 6.23 on Linux (a review run); macOS was not checked. The UTF-8
+  charset switches (`-scfl` for the list off Windows, `-scfr` for the listing on Windows) need RAR 5.50 or later
+  ("Version 5.50: 'f' charset value in -sc", rar's whatsnew.txt): an older rar refuses them, and every pack would
+  fail where the folder form worked. The archive's file names are the old form's exactly, Unicode, hidden and leading-space names included, less what the list leaves out; folders are no
+  longer stored as entries of their own (they come back with their files). Named rather than excluded with `-x`
+  masks, because a mask that fails to match lets the file in, and rar's case rule is its platform's, not the
+  list's.
+- **Only paths rar reads as that one exact file are named** (`_rar_list_file_lines()`). rar 7.22 does not read
+  every `-n@` line as an exact name: it trims the end of a line (`keep.flac ` took `keep.flac`, a file `Sub ` the
+  whole folder `Sub`, and on Windows `keep.flac.` took `keep.flac`), a `*` or `?` in a name also matches files
+  in every folder below, and a folder named takes everything in it. So a path is left out of the archive, and the
+  log counts it, when any part has a `*` or `?`, ends in a space or a tab (or a dot, on Windows), or holds a
+  control character, a backslash where `/` is the separator, or a name the list file cannot hold; only files are ever
+  named. A name holding U+0085, U+2028 or U+2029 is kept: rar 7.22 takes it as named and lists it as one name.
+- **The archive is checked before it is sent**, both ways. `rar lb` lists it (`_archive_names()`, through
+  `_run_rar()` like the pack, with `-scfr` on Windows so rar writes UTF-8 to the pipe - checked with rar 7.22,
+  Unicode names intact - and in a UTF-8 locale elsewhere, `_rar_environment()`: one already in force is kept,
+  else `C.UTF-8` on Linux and `en_US.UTF-8` on macOS, the rest of the environment kept, for the pack too). The
+  listing is read at line ends alone (`_listed_names()`): `str.splitlines()` also splits at U+2028 and the like,
+  and made every pack of a folder holding such a name fail. `_what_the_archive_got_wrong()` compares it with the
+  names asked for. A name nobody asked for, or none of what was asked for (an empty listing), and the archive is
+  deleted and the pack refused once, the names logged; a pack made again would make the same archive and hold
+  every other pack meanwhile. Short of some asked-for files and holding nothing else, it is sent, with a loud
+  `[LINEAR RAR ERROR]` line naming what it lacks: it holds nothing the list leaves out, and what it lacks (a file
+  gone since the walk) can still be asked for by name. A folder above an asked-for file is not counted against
+  it: rar off Windows may store one, with no data. An archive that cannot be listed (rar's exit code, its stderr
+  in the log, an OSError or the timeout) is deleted and the pack tried again, with its retries.
+- **The row records its list** (`PACK_LIST_KEY`, `served_list`); `pack_leaves_out()` follows that list's rule. A
+  row with none, queued before this, or naming a list that is gone, follows every list's left-out types together.
+- **A waiting archive is handed on only under the same rule.** A packed archive's row records what it was packed
+  without (`PACKED_WITHOUT_KEY`). The packer reuses an archive another request is waiting on (#1268) only when that
+  covers this row's left-out types; otherwise it packs beside it, at a path named with a digest of the types
+  (`_archive_path_leaving_out()`). An archive no row says that of is never handed to another request.
+- **An archive packed before this is packed again.** A packed archive's row with no `PACKED_WITHOUT_KEY` and a
+  `source_path` (restored from `dcc_queue.txt`, say) is turned back into its folder's row: every such row, at any
+  place in its queue, once the queue is loaded at start-up (`pack_again_every_row_packed_before()`, from
+  `oserve.py`), and a head the dispatcher or the sweep meets later (`_pack_again_if_packed_before()`); its archive
+  goes unless another row or a send still needs it. A row being sent is left alone; a row with no folder on it
+  (from before #1077) is not turned back.
+- **Refused once.** A pack that cannot be made however often it is tried - nothing in the folder is listed any
+  more, the archive's paths are both wanted under other rules, the folder is bigger than the whole disk, or the
+  archive is not what was asked for - raises `PackRefused`: the wrapper drops the row without using up its
+  retries (`release_queue_entry(..., retry=False)`).
+- **What the user is told.** One fixed line for any folder that could not be packed, `PACK_FAILED_TO_USER`
+  ("the folder could not be packed"), once, in release_queue_entry()'s notice (`told`); the reason - which can
+  name `TMP_ZIP_DIR`, a size or a path, and for an error once the retries are spent an OSError's path - goes to
+  the log alone. The packer's failures no longer send `send_pack_error_notice()`, whose text is about artist
+  root folders.
+- **Upper bounds now:** `MAX_RAR_FOLDER_SIZE` (`pack_size_over()`) and the dashboard's total for a running pack
+  still count every file in the folder, the left-out ones too, so both are at least what is packed.
+- **A pack waits while its files do not fit.** Before rar runs, the listed files must fit in what is free on
+  `TMP_ZIP_DIR`'s disk with `dcc_fetch.MIN_FREE_BYTES` to spare, the rule fetching waits by
+  (`_has_room_to_pack()`, through `dcc_fetch.has_room()`, public now). Short, that row waits, keeping its place (`runtime.pack_space_holds`, one entry per
+  row), and a pack that fits goes ahead; the log and the debug channel say `[RAR-HOLD]`.
+- **No more packed archives wait than `MAX_DCC_SLOTS`** (`waiting_archive_count()`, by path, an archive being sent
+  not counted, nor one behind a folder pack in its own nick's queue - counted, it held that very pack at the cap
+  for ever, with a pack and its own archive behind it in one queue, as a moved row or a restored queue can leave
+  them; `waiting_archive_cap()`, at least one). Since #1435 a finished archive can wait for a slot or a
+  large send while the packer moves on; at the cap every pack waits in the queue like one behind a running pack.
+- **One answer to "can a pack start".** `packs_can_start(row)` (no pack running; `pack_hold_reason(row)`: the
+  cap, or that row waiting for room) is what the dispatcher's gate, `claim_next_in_line()`,
+  `redispatch_waiting_pack()` (through `next_waiting_pack_owner()`, which passes a row waiting for room over) and
+  the fairness rule (#1032, `others_wait_for_a_slot()`) ask, so a held pack is not woken into a refusal over and
+  over.
+- **A held pack is woken.** A send's end wakes the queue as before. And a hold starts `_watch_held_packs()` (one at
+  a time, `runtime.pack_hold_watch`, unmarked again if its thread cannot start), which looks every
+  `PACK_HOLD_POLL_SECONDS` (30 s): a row stops waiting once its files fit or it has left the queue, and is woken
+  at once even while others still wait; the queue is woken again when nothing is held, and also when a look
+  fails. The packer interlocks are released once, by the wrapper (#714). No new setting.
+- **The `[LINJAR RAR ERROR]` log tag is `[LINEAR RAR ERROR]`** in the packer's two lines that had it.
+- **Left as they are:** a pack waiting for disk room has no ageing - under steady small packs it is looked at
+  again only every 30 s by the watcher. An archive already queued is not looked at again when a list's exclusions
+  tighten, as a queued single file is not.
+- **Stale list files:** a `pack-*.lst` a crashed run left in `TMP_ZIP_DIR` goes when the next pack writes its own.
+- **Docs:** `docs/INSTALL.md` (the list is what the bot serves; `RAR_EXTENSIONS` and `MAX_RAR_FOLDER_SIZE`).
+- **Tests:** `tests/test_a_pack_holds_what_the_list_holds.py` (59) and
+  `tests/test_a_pack_waits_for_room_where_archives_are_built.py` (24). The list build and the real request
+  handler agree, folder by folder, with types left out for every list, by the primary alone and by a second list
+  bound to its own channel; the archive a stand-in rar packs - one that reads `-n@` the way rar 7.22 does, trims
+  and wildcards included, and refuses a start folder longer than 260 characters on every platform, as Windows
+  does - holds the listed files only, upper-case extensions and subfolders included; names that end in a space
+  or a dot, or hold a wildcard or a control character, take nothing left out, and one holding U+2028 is packed;
+  an archive holding a name nobody asked for, or listed empty, is refused once, and one
+  that cannot be listed is tried again; the listing is read at line ends alone, both rar runs get the
+  environment, and `LC_ALL=C.UTF-8` off Windows; the user is told one fixed line, once, with no path, size or
+  `TMP_ZIP_DIR` in it, for refusals and for an error that names a path; with a real rar where there is one: the
+  listed files with a Unicode and a U+2028 name, a folder deeper than 260 characters, names rar would trim, and a
+  folder line caught by the check; reuse under the same rule, not under another; an archive packed before this
+  is packed again, in the dispatcher and the sweep, but not while it is being sent; the room hold, its margin, a
+  pack that fits going ahead, a folder bigger than the disk refused once, the wake of one row while another still
+  waits, and a failed look still waking the queue; the cap, at and below it, and its wake when an archive is
+  sent; the interlocks released once (#714's model). Also: the list file's bytes and switch on both platforms, and
+  a pack read from a UTF-8 list on any platform with a name above U+FFFF; an archive short of an asked-for
+  file sent with the log line, and refused when it also holds a stray name; a file link out of the library
+  left out (a real link where links can be made, the decision with fakes everywhere); every earlier archive
+  row of a loaded queue turned back, and a start-up (`oserve.startup()`) that loads a saved queue turning back
+  both the head and one behind a pack, their archives gone; an archive behind its own nick's
+  pack not counted - the pack starts - also after move_queued_file() puts it there, and one behind a plain
+  file still counted. A rename does not merge two queues (note_nick_change() leaves the new nick's alone),
+  so it cannot put an archive behind a pack. `support.fake_rar_runs()` answers the listing with the
+  names the pack's `-n@` list asked for, and the real-process fake rars in
+  `tests/test_a_running_pack_can_be_seen_and_cancelled.py` and
+  `tests/test_every_transfer_ending_is_recorded_with_how_it_ended.py` list what they packed, so every stand-in
+  pack goes through the check; `tests/support.py` resets `runtime.pack_space_holds` and `runtime.pack_hold_watch`
+  between tests. The waiting archives in `tests/test_serving_keeps_shared_archives_and_claims_straight.py` and
+  `tests/test_a_finished_archive_follows_the_large_file_rule.py` now say what they were packed without, and
+  `tests/test_path_security.py`'s control checks that rar is given the `-n@` list.
+- **Mutation checks, 59/59 caught**, among them: the gate without the list's types; `folder_holds_packable()`
+  or `pack_members()` ignoring them; rar given the folder without the `-n@` list; rar started in the folder's
+  parent again (the long-path tests fail, the real rar with `WinError 267`); the wildcard guard removed or reduced
+  to the entries beside a part; the trailing space and dot guard removed or limited to the last part; control
+  characters kept; the check after the pack removed, accepting names nobody asked for, missing names or an empty
+  listing, refusing the folders rar off Windows stores, retrying what it refuses, reading the listing with
+  `splitlines()`, run without `-scfr`, or sending what cannot be listed; `LC_ALL` not set or the environment not
+  passed; the refusal's reason sent to the user; the room hold back to one for every pack; a folder bigger than
+  the disk left to wait; a refusal using up retries; an earlier archive sent as it is, or only the head of a loaded
+  queue turned back, or the start-up call removed or put behind `if False:`; a UTF-16 list file off Windows; an archive short of a listed file refused again; the count
+  taking archives behind their own pack; a file link out of the library packed; the room check removed or
+  without its margin; the cap removed or off by one either way; a held pack never woken (six ways); and the whole
+  earlier code.
+
+### 🩹 `checkupdates` and `consolefeed` with an argument ask for unlock, as `set` does (#1264 follow-up)
+
+Security advisory GHSA-7rq6-p92x-jm65 (low), fixed in its private fork and merged with this release.
+
+Since the settings window came to the console (#1264), a console session that logged in with a paired token reads
+the settings and changes them only after `unlock <password>` once in that session: `set`, `setcommit`,
+`served commit`, `folders commit`, `onconnect`, `pair` and `unpair` answer `DCCORE LOCKED <command> <sentence>`
+until then. Two older commands that save a setting were not on that list: `checkupdates on|off` writes
+`CHECK_FOR_UPDATES` and `consolefeed on|off` writes `DEBUG_TO_CONSOLE`, each through `settings_file.save()` and a
+rehash.
+
+- **`src/adminchat.py`:** `_cmd_checkupdates` and `_cmd_consolefeed` call `console_settings.refused_while_locked()`
+  once the argument is known to be `on` or `off`, before anything is said or saved - the same check, reply and
+  sentence as the other commands, no second copy. With no argument they only report the setting and stay allowed;
+  a bad argument still gets its usage line. A session that logged in with the password, and the dashboard's own
+  Console (behind its password login, `unlocked = True`), are not affected. A read-only token is refused both with
+  an argument before the handler runs, as before.
+- **`dccore.mrc`:** a `LOCKED checkupdates` or `LOCKED consolefeed` line is said in `@DCCore` (the bot's sentence,
+  "Type unlock <password> first ..."), routed before the settings window's lines. The window's unlock sends the
+  refused command word again without its `on|off`, and with the window closed the ten seconds of late replies
+  would have taken the line and said nothing. The menu's "Daily update check" and "Console feed" items are refused
+  the same way on a locked console; type `unlock <password>` in `@DCCore` and send it again. The control panel's
+  "Console feed on" box (1685), which Apply sends as `consolefeed on|off`, would have kept the refused state with
+  the window's baseline (`opt.sig`) taken with it, so it showed as saved and the status could say "Nothing has
+  changed." until the window was reopened: on `LOCKED consolefeed` with the window open, the routing line also
+  calls the new `dccore.sw.locked.toggle`, which ticks the box from the bot's live value as `dccore.sw.opt.fill`
+  does, takes the baseline again, and sets the status "Console feed not changed: type unlock <password> in
+  @DCCore, then Apply again."; the `@DCCore` line is said as well.
+- **`docs/ADMIN-CONSOLE.md`:** both commands in the token paragraph, in "Settings over the console" and in the
+  `LOCKED` row's list of command words; the settings window's password paragraph names the console-feed box as
+  the exception (unlock in `@DCCore`, Apply again), and the `/dccore consolefeed on|off` row says a token login
+  unlocks first.
+- An audit of every other console command for `settings_file.save`, `_save_settings_and_rehash`,
+  `apply_settings_changes` and the other `apply_*_changes`, and writes to `conf/`: none saves a setting outside
+  the lock.
+- **Tests:** `tests/test_two_toggles_ask_for_unlock_as_set_does.py` (20 tests), through `handle_command()` with the
+  save, the rehash and the background run recorded: a token session that has not unlocked gets one
+  `DCCORE LOCKED checkupdates|consolefeed <sentence>` for `on`, `off`, `OFF` and ` on `, and no "Turning ..." line, no
+  save, no rehash, no background run, the setting and settings.conf unchanged; a person gets the sentence; with no
+  argument both still report, a bad argument still gets its usage line; a password login, a session after `unlock`
+  and the dashboard's Console save as before, a wrong password does not unlock; a read-only token is answered its own
+  LOCKED line before the handler runs. dccore.mrc's dispatcher is evaluated on the bot's own LOCKED lines (full and
+  read-only): said once in @DCCore with the sentence, whether or not the settings window waits for it or is in its
+  tail, and `dccore.sw.locked.toggle` called for `consolefeed` only, only with the window open; `setcommit`, `set`,
+  `served commit`, `onconnect` and `pair` go where they went. `dccore.sw.locked.toggle` is run on the window as
+  Apply left it, the bot's value `on` and `off`: the box shows the bot's value, the baseline equals it, and the one
+  status line names `unlock <password>`, `@DCCore` and Apply and fits control 1018. `handling()` in
+  `tests/test_a_failed_rehash_is_not_said_to_be_in_effect.py` now runs a one-line body, a nested inline `if`,
+  `$istok(<words>,$N,32)` and `$N == <word>` on the line's fields and `$dialog(dccore.set)`, and stops at the
+  `return` (`route()` reads from it); the doc's
+  `LOCKED` row names both; `TheAuditOfBothHalves.LOCKABLE` gains both.
+- **Mutants:** 25 of 25 caught: either `refused_while_locked()` call deleted; either check moved above the no-argument
+  report; the check above the usage check; the two command words swapped; `set` and `consolefeeds` for the words; in
+  dccore.mrc the `return` dropped, `$3` for `$2`, `$2-` said for `$3-`, `consolefeed` left out of the list, the line
+  moved below the settings window's routing; `src/adminchat.py`, dccore.mrc, and both, put back as on main; the
+  box reset dropped, the baseline not taken again, the baseline taken before the reset, `did -c` and `did -u`
+  swapped, the box ticked from its own state rather than the bot's, the status line dropped, the reset not called,
+  called with the window closed, called for `checkupdates` too.
+
+### 🔐 A token login no longer clears the address's failed-password count (#1264, #1374 follow-up)
+
+Security advisory GHSA-r2fc-p22c-hr8f (medium), fixed in its private fork and merged with this release.
+
+The DCC console counts wrong passwords per address, at the login prompt and in `unlock` (#1264), and blocks the
+address for 15 minutes at `MAX_PASSWORD_ATTEMPTS` (3). `_check_password()` called `clear_bad_ip()` for a paired
+token (full or read-only, #1374) as for the password; only the admin password clears it now.
+
+- **The password clears, a token takes back its own attempt.** At the prompt, `clear_bad_ip()` runs only when the
+  admin password itself verified (as typed or as `DCCORE PASSWORD <value>`), as in `unlock` already. A token login
+  calls the new `release_password_attempt(ip, reservation)`, which takes back the one attempt counted for it, on the
+  record it was counted on only: a record cleared since (by the password, or as stale) and made again by a later
+  attempt is left alone. The count goes down by one, a block is lifted when, without this attempt, the count is
+  under the limit, and the last-failure time goes back to what it was when no other attempt was counted meanwhile
+  (token logins side by side can still move it forward, which only keeps the failures longer). A right token is
+  still not counted as a wrong password.
+- **`_reserve_attempt(ip)`** is `reserve_password_attempt()` answering `(counted, reservation)`: `None` when nothing
+  was counted, otherwise the record the attempt was counted on with its count and last-failure time ahead of it.
+  `reserve_password_attempt()` wraps it and still answers a bool, so `cmd_unlock()` and every caller are unchanged.
+- **Unchanged:** `unlock` already counted on the address and refused a blocked one; a token login on a blocked
+  address is refused, as before; the 1 s delay, the block length, and the dashboard's own login limit
+  (`web_login.py`).
+- **`docs/ADMIN-CONSOLE.md`:** "address is temporarily blocked" says only the admin password clears the count.
+- **Tests:** `tests/test_a_token_login_keeps_the_failed_password_count.py` (24 tests), over the real
+  `_check_password()`, `cmd_unlock()` (through `handle_command()`), `reserve_password_attempt()`,
+  `release_password_attempt()` and `clear_bad_ip()`, with only `_promote()` and the delay stood in for: wrong
+  unlocks and wrong passwords spread over full and read-only token logins reach the block after 3; a blocked
+  address is refused at the prompt with either token and at `unlock`, the right password included; the password
+  still clears the record at the prompt and in `unlock`; a token login leaves an existing count, block and
+  last-failure time exactly as they were and adds no record to an address without one; an `_IN_USE` or
+  `_SUPERSEDED` token login leaves it too; wrong unlocks add up on the address across sessions; the release on its
+  own (no record, a block its attempt set, another attempt counted meanwhile, a record cleared meanwhile, a record
+  cleared or dropped as stale and made again, a refused attempt, no address). The code before this fails 23 of
+  the 24.
+- **Mutation checks, 14/14 caught:** a token login clearing the record again; the token's reservation not taken
+  back; `unlock` checking the block without counting; `clear_bad_ip()` kept before `_promote()`; a read-only token
+  clearing; the block not applied at `unlock`; the release not lifting the block, not restoring the time, always
+  deleting the record, restoring the time after another attempt, getting no earlier count and time, dropping the
+  same-record check, or acting on whatever record is there now; a right `unlock` password not clearing.
+
+### 🌐 Failed dashboard logins over IPv6 are counted per /64 network, and per /48 (#609 follow-up)
+
+Security advisory GHSA-jhr2-gm74-h4gh (low), fixed in its private fork and merged with this release.
+
+The dashboard's failed-login pool (`_web_bad_ips`) and its count of logins in flight (`_web_logins_in_flight`) count
+an IPv6 client under its /64 network and its /48, and an IPv6 address that carries an IPv4 one under that IPv4
+address. An IPv4 client is counted as before.
+
+- **`web_login._login_counts(ip)`** is the one list of `(key, limit)` pairs every pool function works through:
+  - IPv4: `(("192.0.2.1", MAX_PASSWORD_ATTEMPTS),)`, as before.
+  - IPv6: its /64 (`2001:db8:1:2::/64`) with `MAX_PASSWORD_ATTEMPTS`, and its /48 (`2001:db8:1::/48`) with
+    `WEB_LOGIN_WIDE_ATTEMPTS` (30). A zone id (`fe80::1%eth0`) never reaches a key: the networks are built from the
+    address's integer (`_network_key()`).
+  - An IPv6 address carrying an IPv4 one is that IPv4 address (`_client_address()`): IPv4-mapped (`::ffff:192.0.2.1`,
+    what a dual-stack bind reports for an IPv4 client), NAT64's well-known `64:ff9b::/96` (the last 32 bits), 6to4
+    (`address.sixtofour`) and Teredo (the client half of `address.teredo`). 6to4 and Teredo are one line each, so
+    they are in: a 6to4 /48 is one IPv4 host's, and without unwrapping every Teredo client of one server would share
+    one /64.
+  - Anything else that is not empty (a name) is one count under itself; `None` and `""` are no count, so a login
+    without an address is not limited here, as before.
+- `web_login._login_key(ip)` is the narrowest of those keys (derived from `_login_counts()`), unchanged for every
+  input it answered before.
+- `_reserve_web_login()` checks every key and claims at every key or at none, in one step under
+  `_web_bad_ips_lock`: "blocked" when any key is blocked, "busy" when at any key the failures plus the logins in
+  flight reach that key's limit. `_settle_web_login()` releases at every key; a right password clears every key, a
+  wrong one is counted at every key by `_note_bad_web_login_locked()`. `_is_bad_web_ip()` is true while any key is
+  blocked (each expired block is forgotten), and `_clear_bad_web_ip()` clears every key. One counting function, one
+  block check (`_blocked_locked()`), one pool: the /64 and /48 keys never collide, and the existing expiry
+  (`adminchat.forget_stale_failures()`, `BAD_IP_BLOCK_SECONDS`) applies to both. `login()` is unchanged.
+- The prefixes and the wide limit are `WEB_LOGIN_IPV6_PREFIX` (64), `WEB_LOGIN_IPV6_WIDE_PREFIX` (48) and
+  `WEB_LOGIN_WIDE_ATTEMPTS` (30) in `web_login.py`, not settings. IPv4 has no wide count.
+- The 429 reply now reads "Another login from this address or network is still being checked."
+- Not changed: the web console's session label (`build_console_command_result(command, remote_addr)` names the
+  session `web:<address>` for the log and command attribution; it counts nothing, and runs behind the login). The DCC
+  console's pool (`adminchat._bad_ips`) only ever sees IPv4: `parse_offer()` reads the CTCP address as an IPv4 long,
+  the dial-out goes to that address, and the listener binds `AF_INET` `0.0.0.0`.
+- No count across every address: it would refuse the operator's own login once others had failed (#609). The /48
+  count blocks only its /48, and the global cap on password checks at once (`runtime.WEB_PASSWORD_CHECKS_AT_ONCE`)
+  stays the bound across networks.
+- `docs/ADMIN-CONSOLE.md` says how the web login counts wrong passwords: per address for IPv4, per /64 and per /48
+  for IPv6, an IPv6 address carrying an IPv4 one as that address, and behind a reverse proxy every client as the
+  proxy's address.
+- **Tests:** `tests/test_failed_dashboard_logins_over_ipv6_are_counted_per_network.py` (49 tests in 7 classes; the
+  clock is patched only in `web_login`, with `mock.patch.object(web_login, "time", ...)`). Through the real app
+  (`create_app()`, POST /login with `REMOTE_ADDR` set, `_check_web_password` counted): three wrong passwords from three
+  addresses of one /64 block a fourth unchecked, while the next /64 logs in; thirty wrong passwords from thirty /64s
+  of one /48 block a fresh /64 of it unchecked, while another /48 logs in; twenty-nine leave it open; a NAT64 client
+  and a plain IPv4 client share one count, as do a mapped and a plain one; a right password from another address of
+  the /64 forgets its failures; a login turned away while others are checked gets the 429 text. The pools directly:
+  thirty failures block, twenty-nine do not; a /64 still blocks at three inside a /48; a right password clears both
+  the /64 and the /48 (and both counts start again); `_clear_bad_web_ip()` clears the /48; thirty claims in flight,
+  or twenty-eight failures plus two claims, make the next /64 "busy"; a turned-away claim takes nothing at either
+  key; forty parallel claims from forty /64s get exactly thirty "ok", twelve from one /64 exactly three; both blocks,
+  and the /48 block alone, run out after `BAD_IP_BLOCK_SECONDS`; plus the /64 cases from before (shared in-flight
+  count, settled failures, failures counted under the lock, different IPv4 clients apart, no address counts
+  nothing). `_login_key()` and `_login_counts()` cases: IPv4 unchanged; `2001:DB8:1:2::9` -> `2001:db8:1:2::/64` and
+  `2001:db8:1::/48`; zone ids dropped (also `fe80::%eth0`); mapped, NAT64 (`64:ff9b::c000:201` -> `192.0.2.1`, not
+  `64:ff9b:1::/48`), 6to4 and Teredo addresses unwrapped; non-addresses and non-text values unchanged; every key
+  unchanged when passed in again.
+- **Mutants:** 24 of 24 caught, each run against the file above: the claim taken without the lock (the burst tests read the counts slowly, so they need it); no wide count; the wide limit at 31 and at 29;
+  blocking at `>` instead of `>=`; the /48 not cleared by a right password; the wide prefix at 64; the wide limit
+  set to `MAX_PASSWORD_ATTEMPTS`; NAT64, 6to4, Teredo and IPv4-mapped unwrapping each removed; `_is_bad_web_ip()`,
+  `_clear_bad_web_ip()`, the reserve's blocked check, its busy check and the settle's release each limited to the
+  first key; the claim taken key by key (a turned-away claim keeps its /64 claim); the network key built from the
+  address object or the text instead of the integer; `_login_key()` returning its argument; the `isinstance` guard
+  removed; the 429 text reverted; and `src/web_login.py` + `src/webserver.py` at upstream main.
+
+### 🔐 dccore.mrc: the login line counts only once the password prompt was answered (#585 follow-up)
+
+Security advisory GHSA-4mm3-288v-xvmg (high), fixed in its private fork and merged with this release.
+
+The bot always sends `Enter Your Password:`, and `Entering DCC Chat Admin Interface` only once that prompt has been
+answered. The chat's state is `auth` only then: the script's prompt branch sent the token after the peer check
+(#585), or the operator typed the password. `password` means the prompt was shown and nothing has answered it yet. The
+login branch now goes on to state `in` only from `auth`.
+
+- **Any other state** (`password`, `banner`, `opening`, `waiting`, `closed`, `taken`, none): the login line is
+  ignored, the window says "Ignored a login line that came before the password prompt was answered", and the chat is
+  given up with `dccore.abandon`, as for a peer that fails the check: closed, no redial until `/dccore connect`. No
+  `hello`, no `pair`, and no `DCCORE` line after it is read, as the structured feed still needs state `in`. A second
+  login line in a chat already `in` changes nothing.
+- **A typed password answers the prompt on every way of typing it:** the new `dccore.typedpass` (state `auth`,
+  `typed`, then `dccore.sendpass`) is what `@DCCore` ran inline, and `@DCCore-console`, `/dccore raw` and the menu's
+  console command use it too at the prompt. `@DCCore-console` showed and sent a password typed there as it was; it
+  now shows `********`, as `@DCCore` does. Once logged in, all four send a line as before.
+- **Each route keeps what it can of a spaced password (#1273):** `dccore.typedpass` and `dccore.sendpass` take the
+  window the password was typed in (`-` for none), and `dccore.sendpass` reads that window's editbox, so
+  `@DCCore-console` keeps runs of spaces as `@DCCore` does. `/dccore raw` and the menu have no editbox holding the
+  password alone, and send it as mIRC gives it, closed up; `docs/ADMIN-CONSOLE.md` says so, and that
+  `/dccore raw <password>` stays in mIRC's editbox history.
+- **The menu's console command hides what is typed at the password prompt:** `dccore.askraw` asks with `$input`'s
+  `p` flag (`eop`) in state `password`, and with the plain box (`eo`) otherwise.
+- **Unchanged:** a token login, a typed password in a chat the script dialled after the check, a typed password in a
+  chat opened with `/dccore connect` or `/dccore pair`, and a refused token followed by a typed password all reach
+  `in` as before.
+- `docs/ADMIN-CONSOLE.md` says what "the login" means for the script.
+- The prompt branch calls the peer check as `$dccore.peerok(password)`, so the peer check before the prompt now stops
+  the prompt branch when it says no. Written without the parentheses, mIRC passes an identifier no parameters, and
+  the if-line read `$false password`, which is true.
+- **Tests:** `tests/test_the_login_line_follows_the_prompt.py` runs `on ^*:CHAT`, `dccore.line`, `dccore.peerok`,
+  `dccore.abandon`, `dccore.typedpass`, both `on *:INPUT` handlers, `/dccore` and `dccore.askraw` statement by
+  statement with the evaluator of `tests/test_the_start_page_says_when_the_bot_is_offline.py`.
+  `tests/test_a_refused_token_is_not_sent_again.py` and `tests/test_a_typed_password_keeps_its_spaces.py` follow the
+  typed password into `dccore.typedpass`.
+- **Mutation checks, all caught:** the guard removed, `banner` allowed, `password` allowed again, the abandon dropped,
+  the `in` early return dropped, the negation dropped, the guard's `return` dropped, the `DCCORE` gate removed, the
+  peer check written without parentheses, each typing route (`@DCCore-console`, `/dccore raw`, the menu) left
+  without the move to `auth`, the menu's `p` flag dropped, and the console window reading `@DCCore`'s editbox.
+
+### 🧪 The identifier denylist is not tracked; CI writes it from a secret (#518)
+
+Security advisory GHSA-g7x3-f4mf-w873 (medium), fixed in its private fork and merged with this release.
+
+`tests/forbidden_identifiers.py`, the hashed denylist `tests/test_no_personal_identifiers_ship.py` reads, is no longer
+part of the repository. Each maintainer keeps a local copy, and CI writes one before the suite runs.
+
+- **Untracked, and in `.gitignore`.** Its `export-ignore` line in `.gitattributes` is gone with it: there is no
+  tracked file left for it to apply to.
+- **CI gets it from the `FORBIDDEN_IDENTIFIERS` secret.** A step in `.github/workflows/tests.yml`, under bash on all
+  three runners, base64-decodes the secret into the file and checks that it imports and holds entries; a bad value
+  fails the step naming only the kind of error. The value reaches Python through the environment and is never
+  echoed. With no secret the step does nothing and the sweep skips - unless the repository variable
+  `REQUIRE_IDENTIFIER_SWEEP` is set, where it fails instead; a pull request from a fork, which gets no secrets,
+  still skips.
+- **Absent still skips, and now says the sweep did not run.** The denylist test's skip reason says the file is
+  absent or defines no `FORBIDDEN`, and where it comes from. `scripts/preflight.py` prints the same under its skip
+  report (`identifier_sweep_note()`), without failing. It asks the guard rather than checking the path itself: a
+  child process imports the guard and prints whether its `FORBIDDEN` is None, plus the guard's `DENYLIST` path, so
+  a file without `FORBIDDEN` is reported too. If that import fails, the note says the sweep will skip and prints
+  nothing the import raised.
+- **Every tracked file is swept, not only what ships.** New `NothingIdentifyingIsTracked` runs the same denylist
+  over every tracked text file, export-ignored ones included (the internal changelog, the workflow and
+  project-board notes, the changelog fragments), since the development repository is public too. In export-ignored
+  files only, the repository's own name and the maintainers' public account names are allowed
+  (`ALLOWED_OUTSIDE_THE_RELEASE`, held as word hashes). It skips where git cannot list the tracked files, as in the
+  extracted public tree. `shipped_paths()` now derives from the new `tracked_paths()`.
+- **`export-ignore` is described as what it is.** `.gitattributes`, the guard's comments and
+  `docs/PUBLIC-REPO-WORKFLOW.md` say it keeps a file out of the release tree and nothing more: every file tracked in
+  `dccore-dev` can be read by anyone. The workflow document has the secret and variable setup, how new entries
+  reach each copy, why the reference copy lives outside the work tree (checking out an older commit overwrites the
+  ignored copy, and switching back deletes it), and the one-time step that keeps a local copy across the pull that
+  stops tracking it.
+- **Older entries in this changelog** describe a bot by its role rather than by its nick, or use the
+  placeholder nick the public changelog already uses for the same story.
+- **Tests:** the denylist test now reports a hit on GitHub Actions (`GITHUB_ACTIONS` is `true`) by file:line and "a
+  listed identifier" alone, ungrouped, because the CI logs are public; elsewhere it still names the entry's label.
+  It fails with `self.fail()`, since `assertEqual()` would print the labels with the dict. New,
+  `tests/test_the_identifier_denylist_is_a_local_file.py`, every value a planted placeholder:
+  - the file is not in the index and `git check-ignore --no-index` matches it;
+  - imported with no denylist, the guard reads `FORBIDDEN` as None and its denylist test skips saying the sweep did
+    not run, with no failure or error; given a denylist, the same copy runs;
+  - a planted word in a temp tree, found by the guard's own test: no label with `GITHUB_ACTIONS=true`, the label
+    without it or with `false`;
+  - the CI step comes before the suite, runs under bash, and takes the secret only in `env:`, cross-checked with
+    PyYAML where it is installed. Its own `run:` text, run with bash: no secret, empty or blank passes and writes
+    nothing; valid, line-wrapped and CRLF-wrapped base64 write the exact bytes; bad base64, a stray character in
+    good base64, a syntax error, a file whose error message would quote it, and an empty or non-dict `FORBIDDEN`
+    fail, naming only the error type. No output holds the secret or a line of what it decodes. With no secret, the
+    secret (missing, empty, blank) × variable (missing, empty, blank, set) × fork test (missing, true, false, other casings) matrix
+    fails exactly when the variable is set and the run is not from a fork; values set on the host change nothing.
+    The step's whole `env:` mapping is checked, from the text and, where installed, with PyYAML.
+
+  In `tests/test_preflight_counts_what_was_skipped.py`, `identifier_sweep_note()` is given each kind of answer
+  (ready, absent with the guard's path, a non-zero exit, empty or unexpected output, an `OSError`), and a marker
+  planted in the probe's stderr never reaches the note. The real probe runs in a temp tree with the file absent,
+  without `FORBIDDEN`, as a folder, valid, and with a syntax error on the marker's line; run as a child, preflight
+  prints the marker on neither stream. `main()`, with every pass stubbed and the probe's answer faked, prints the note in the skip report.
+  In `tests/test_every_shipped_text_file_is_swept.py`, the tracked sweep on a temp tree: an allowed word passes in
+  an export-ignored file and fails in one that ships, any other entry fails anywhere, no labels on GitHub Actions,
+  and it skips when git cannot run or lists nothing; every allowed hash is a key of the real denylist. In an
+  extracted public tree the new tests pass or skip, and the denylist test skips.
+- **Mutation checks, 31/31 caught:** the `.gitignore` line deleted; the skip turned into a failure; the ImportError
+  fallback removed; the note's print dropped; `echo "$FORBIDDEN_IDENTIFIERS"` added; `validate=False`; `err`
+  printed instead of its type; a non-zero exit on an empty secret; the label printed in CI; `assertEqual(found, {})`
+  restored; `shell: bash` removed; the secret pasted into `run:`; the file tracked again; the step moved after the
+  suite; the step ignoring `REQUIRE_IDENTIFIER_SWEEP`, ignoring `FROM_A_FORK`, passing when
+  `FROM_A_FORK` is missing, or counting a blank variable as set; the variable's or the fork test's `env:` line
+  dropped or changed; preflight putting the probe's stderr in the note, or letting it through to its own stderr;
+  the probe checking the path, so a file without `FORBIDDEN` reads as ready; the note printing a path of its own
+  rather than the guard's; the probe's exit code or an `OSError` ignored; `tracked_hits()` applying the allowance to
+  files that ship, or ignoring it; the tracked sweep using `assertEqual(found, {})`, or running on an empty file
+  list; the guard's `DENYLIST` naming another path than the one it imports.
+
 ## 🟩 v1.17.0 (2026-10-16) - "The Control Panel Release"
 
 ### 🔗 The bot's project link is the project page (#1407)

@@ -1,1 +1,0 @@
-- **Fixed (security): logging in to the admin console with a paired token no longer clears the address's count of wrong passwords.** Only the admin password, at the login prompt or in `unlock`, clears it now. A token login is still not counted as a wrong password, but the wrong ones before it still add up to the three that block the address for 15 minutes.
