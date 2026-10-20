@@ -1,5 +1,7 @@
 ### 🩹 The never-connected streak follows a nick change, as the daily failure count does (#1437)
 
+Security advisory GHSA-6q93-cf73-24wv (low), fixed in its private fork and merged with this release.
+
 Found in review. `DAILY_SEND_FAILS_LIMIT` (#1389) stops counting sends that never connected once a run of them with no
 connect in between reaches `NEVER_CONNECTED_STREAK` sends to `NEVER_CONNECTED_STREAK_NICKS` different nicks
 (`dcc.never_connected_counts()`), since several downloaders failing the same way at once is the bot's own address.

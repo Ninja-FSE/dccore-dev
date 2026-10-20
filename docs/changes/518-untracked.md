@@ -1,5 +1,7 @@
 ### 🧪 The identifier denylist is not tracked; CI writes it from a secret (#518)
 
+Security advisory GHSA-g7x3-f4mf-w873 (medium), fixed in its private fork and merged with this release.
+
 `tests/forbidden_identifiers.py`, the hashed denylist `tests/test_no_personal_identifiers_ship.py` reads, is no longer
 part of the repository. Each maintainer keeps a local copy, and CI writes one before the suite runs.
 

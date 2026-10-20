@@ -1,5 +1,7 @@
 ### 📁 Longer directory tags, and plain names at the top of the fetch folder keep their id (#1423)
 
+Security advisory GHSA-92w2-hwhv-qr3v (low), fixed in its private fork and merged with this release.
+
 - **Plain names at the top of `FETCHED_FILES_DIR`:** a fetched file is promoted to its plain name there only when that
   name has a "." in it. A name without one keeps its request id, because that is where each bot's own folder goes
   (`FETCHED_FILES_PER_BOT`, #1423), and a folder named after a nick never has a dot. This also covers `lists`, which

@@ -1,5 +1,7 @@
 ### 🩹 `checkupdates` and `consolefeed` with an argument ask for unlock, as `set` does (#1264 follow-up)
 
+Security advisory GHSA-7rq6-p92x-jm65 (low), fixed in its private fork and merged with this release.
+
 Since the settings window came to the console (#1264), a console session that logged in with a paired token reads
 the settings and changes them only after `unlock <password>` once in that session: `set`, `setcommit`,
 `served commit`, `folders commit`, `onconnect`, `pair` and `unpair` answer `DCCORE LOCKED <command> <sentence>`

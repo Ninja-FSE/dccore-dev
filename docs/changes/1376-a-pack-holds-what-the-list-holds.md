@@ -1,5 +1,7 @@
 ### 🩹 A `!rar` archive holds what the list holds, and a pack waits while there is no room for it (#1376 follow-up)
 
+Security advisory GHSA-84jr-495f-w93p (medium), fixed in its private fork and merged with this release.
+
 Since #1376 a file type the list leaves out (`LIST_IGNORED_EXTENSIONS`, or a list's own file types to leave out,
 #1295) is not served by name. A pack now follows the same rule, and waits rather than filling the disk.
 

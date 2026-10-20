@@ -1,5 +1,7 @@
 ### 🔐 dccore.mrc: the login line counts only once the password prompt was answered (#585 follow-up)
 
+Security advisory GHSA-4mm3-288v-xvmg (high), fixed in its private fork and merged with this release.
+
 The bot always sends `Enter Your Password:`, and `Entering DCC Chat Admin Interface` only once that prompt has been
 answered. The chat's state is `auth` only then: the script's prompt branch sent the token after the peer check
 (#585), or the operator typed the password. `password` means the prompt was shown and nothing has answered it yet. The

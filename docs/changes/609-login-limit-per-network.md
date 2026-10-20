@@ -1,5 +1,7 @@
 ### 🌐 Failed dashboard logins over IPv6 are counted per /64 network, and per /48 (#609 follow-up)
 
+Security advisory GHSA-jhr2-gm74-h4gh (low), fixed in its private fork and merged with this release.
+
 The dashboard's failed-login pool (`_web_bad_ips`) and its count of logins in flight (`_web_logins_in_flight`) count
 an IPv6 client under its /64 network and its /48, and an IPv6 address that carries an IPv4 one under that IPv4
 address. An IPv4 client is counted as before.

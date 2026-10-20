@@ -1,5 +1,7 @@
 ### 🔐 A token login no longer clears the address's failed-password count (#1264, #1374 follow-up)
 
+Security advisory GHSA-r2fc-p22c-hr8f (medium), fixed in its private fork and merged with this release.
+
 The DCC console counts wrong passwords per address, at the login prompt and in `unlock` (#1264), and blocks the
 address for 15 minutes at `MAX_PASSWORD_ATTEMPTS` (3). `_check_password()` called `clear_bad_ip()` for a paired
 token (full or read-only, #1374) as for the password; only the admin password clears it now.
