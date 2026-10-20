@@ -2761,7 +2761,25 @@ def bot_folder_name(bot):
     No folder name has a "." in it: one in the nick becomes "_". A fetched
     file at the top of FETCHED_FILES_DIR is promoted to its plain name only
     when that name has a dot (_promote_clean_filename()), so a file and a
-    bot's folder never want the same name there."""
+    bot's folder never want the same name there.
+
+    THE CLEANING IS NOT ONE-TO-ONE (#1438). It drops the nick characters a
+    file name cannot hold, []{}|^`, so "[Alfa]" and "Alfa" both cleaned to
+    "Alfa": two bots' files in one folder the operator reads as Alfa's. So a
+    name that is not its own proof of being unique - cleaned (a "." made "_"
+    included), cut short, reserved, or already looking tagged - carries "-"
+    and a digest of the real nick: the rule and the digest the list
+    directories use (list_fetch._needs_dir_tag(), _name_digest()), so the two
+    cannot drift apart. A nick that cleans to itself keeps exactly its name.
+    The digest is of the lower-cased nick: two spellings of one nick that
+    differ only in case still share a folder.
+
+    The tag is the nick's digest as the list directories use it
+    (list_fetch._name_digest(), list_fetch._DIR_TAG_DIGITS hex digits).
+
+    list_fetch is imported here, not at module top, as everywhere else in this
+    module (see _handle_completed_list_fetch())."""
+    import list_fetch
     raw = str(bot or "").strip()
     if not list_mod.strip_control_codes(raw).strip():
         return None
@@ -2769,13 +2787,14 @@ def bot_folder_name(bot):
     # Also the nick "fetched_file" itself, which the cleaning cannot tell
     # from nothing, in any case: one nick, one folder.
     if cleaned.casefold() == "fetched_file":
-        import list_fetch
         return f"bot ({list_fetch._name_digest(raw)})"
     cleaned = cleaned.replace(".", "_")
-    cleaned = _fit_name_component(cleaned)
-    if cleaned.casefold() in _RESERVED_FETCHED_NAMES:
-        cleaned = cleaned + "_"
-    return cleaned
+    fitted = _fit_name_component(cleaned)
+    if (list_fetch._needs_dir_tag(fitted, raw)
+            or fitted.casefold() in _RESERVED_FETCHED_NAMES):
+        tag = "-" + list_fetch._name_digest(raw)
+        fitted = _truncate_utf8(cleaned, MAX_NAME_BYTES - len(tag)) + tag
+    return fitted
 
 
 def _bot_folder_for_locked(queue, row):
@@ -2783,15 +2802,25 @@ def _bot_folder_for_locked(queue, row):
     off or for a list, otherwise its bot's folder. One bot, one folder: a nick
     that differs only in case reuses the folder a row of the same bot already
     has - read from the rows in memory, not from the disk, since this runs
-    under _fetch_lock(), which a slow mount must never hold. Caller holds it."""
+    under _fetch_lock(), which a slow mount must never hold. Caller holds it.
+
+    The FOLDER NAMES are compared, with str.lower() as _name_digest() and the
+    bot's identity fold case (#1438). casefold() went further than either: a
+    nick spelled with "ss" reused the folder of the same nick spelled with an
+    eszett, and one with a long s (U+017F) reused the folder of the one with
+    an "s" - two nicks in one folder, and no filesystem safety bought, since
+    NTFS keeps those names apart.
+    Comparing folder names, not nicks, also means a tagged name never reuses
+    an untagged folder some row has from before the tag."""
     if not getattr(config, "FETCHED_FILES_PER_BOT", False) or row.get("request_type") == "list":
         return None
     name = bot_folder_name(row.get("bot"))
     if name is None:
         return None
+    key = name.lower()
     for other in queue.values():
         folder = other.get("fetched_folder")
-        if folder and other is not row and str(folder).casefold() == name.casefold():
+        if folder and other is not row and str(folder).lower() == key:
             return str(folder)
     return name
 
@@ -2986,9 +3015,9 @@ def _promote_clean_filename(dest_dir, stored_name, queue=None, row=None):
     # it. That is where each bot's own folder goes (bot_folder_name(), with
     # FETCHED_FILES_PER_BOT on), and a folder name never has a dot (a dot in
     # the nick becomes "_" there). A file under such a name keeps its id and
-    # leaves the name to the folder.
-    if ("." not in plain_name.rstrip(" .")
-            and os.path.normcase(os.path.abspath(dest_dir)) == os.path.normcase(fetched_files_root())):
+    # leaves the name to the folder. "The top" is _directory_folder_key()'s
+    # answer, so a trailing separator or a share root (#1440) is the top too.
+    if "." not in plain_name.rstrip(" .") and _directory_folder_key(dest_dir) == "":
         return stored_name
 
     old_path = os.path.join(dest_dir, stored_name)

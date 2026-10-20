@@ -290,6 +290,9 @@ FETCHED_FILES_DIR: str = "./data/fetched"
 # SomeBot is saved in FETCHED_FILES_DIR/SomeBot/. Off by default - turned on,
 # it applies to new fetches only, and files already fetched stay where they
 # are. Fetched lists are not affected: they have their own place (lists/).
+# The folder's name is dcc_fetch.bot_folder_name(): tagged when the name
+# alone could be another nick's - cleaned, reserved, cut short, or already
+# looking tagged - so two bots do not share one by accident (#1438).
 FETCHED_FILES_PER_BOT: bool = False  # Save each bot's files in a folder named after it, inside the fetched files directory
 
 # Safe, normalised paths into the data/ subdirectory
