@@ -259,7 +259,10 @@ class TheFlagsAreSetWhereTheyMeanSomething(unittest.TestCase):
         self.assertIn("return", gate)
 
     def test_the_version_is_bumped(self):
-        self.assertIn("alias dccore.ver { return 1.20.0 }", code())
+        """The change shipped in 1.20.0 or later; a release moves it on."""
+        found = re.search(r"alias dccore\.ver \{ return ([0-9.]+) \}", code())
+        self.assertIsNotNone(found, "dccore.ver has no plain version")
+        self.assertGreaterEqual(tuple(int(n) for n in found.group(1).split(".")), (1, 20, 0))
 
 
 if __name__ == "__main__":
