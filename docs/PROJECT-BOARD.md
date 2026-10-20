@@ -48,8 +48,12 @@ to change them.
    ```bash
    gh issue comment 1234 -R Ninja-FSE/dccore-dev -b "Taken."
    ```
-3. **By hand: set the issue's Status to In Progress.** On the issue page, open the right-hand sidebar and go to
-   **Projects → DCCore → Status**. You can also drag the card on the board.
+3. **By hand: set the issue's Status to In Progress, and its milestone to "Next release".** On the issue page,
+   open the right-hand sidebar: **Projects → DCCore → Status**, and **Milestone**. You can also drag the card on the
+   board. The milestone is what puts the issue in the board's **Next release** view, from now until it ships.
+   ```bash
+   gh api -X PATCH repos/Ninja-FSE/dccore-dev/issues/1234 -F milestone="$(gh api repos/Ninja-FSE/dccore-dev/milestones --jq '.[] | select(.title == "Next release") | .number')"
+   ```
 4. **Build it on a branch from `main`.** Write a changelog fragment, `docs/changes/1234.md`, plus `1234.public.md`
    when users see the change (`docs/changes/README.md`). Run `python scripts/preflight.py` before you push.
 5. **Open the PR.** Start the body with `Fixes #1234`, so the issue is linked and closes on merge. Add a type label
@@ -58,9 +62,10 @@ to change them.
 7. **Merge when CI is green and the review is done.** CI runs nine jobs: Linux, Windows and macOS, each with
    Python 3.10, 3.12 and 3.14. On merge, the PR goes to Ready for release, and the issue closes and goes to Done.
 8. **By hand: put the merged PR in the "Next release" milestone.** That milestone is the list of what the next release
-   carries, and the release PR's map is built from it.
+   carries, and the release PR's map is built from it. Its number changes at every release (#2 since v1.18.0), so
+   look it up by name, as in step 3:
    ```bash
-   gh api -X PATCH repos/Ninja-FSE/dccore-dev/issues/1235 -F milestone=1
+   gh api -X PATCH repos/Ninja-FSE/dccore-dev/issues/1235 -F milestone="$(gh api repos/Ninja-FSE/dccore-dev/milestones --jq '.[] | select(.title == "Next release") | .number')"
    ```
 
 ## Labels
@@ -99,7 +104,8 @@ The operator does this. It is listed here so you know what the columns mean afte
 
 - Every PR in Ready for release moves to Done.
 - The "Next release" milestone is renamed to the version (`v1.18.0`, say) and closed, and a new "Next release" is
-  opened.
+  opened. Before the rename, its issues that are still open move to the new one, so unfinished work carries over to
+  the next release instead of being closed with this one.
 - Issues labelled `release` are done or decided as part of the release.
 
 ## Archiving: one board for every release
@@ -116,7 +122,10 @@ for a while: an issue a while after it closes, a PR a while after the release mo
 - **An archived item is not deleted.** The issue or PR is untouched. It only leaves the board's views. The board's
   `...` menu, **Archived items**, lists them, and one can be restored from there.
 - **Open items are never archived,** whatever their age, so nothing in Todo or In Progress disappears.
-- **To see what the next release carries,** filter a view with `milestone:"Next release"`.
+- **The board has two views.** **Next release** is a board with the four columns, filtered with
+  `milestone:"Next release"`: what the next release carries, from Todo to Ready for release. It never needs
+  changing, because the milestone of that name is always the next one. **All items** is every item on the board,
+  unfiltered. A view of one shipped release is the filter `milestone:v1.18.0`, as long as its items are not archived.
 
 ## Security fixes never go on the board
 
@@ -137,6 +146,8 @@ Setting a Status from the command line goes through GraphQL. gh 2.4.0 has no `gh
 | In Progress | `359fad9a` |
 | Ready for release | `bcc7b117` |
 | Done | `ed189220` |
+| View "All items" | `PVTV_lAHOAPs-PM4Bnc-9zgMGtBY` (view 1) |
+| View "Next release" | `PVTV_lAHOAPs-PM4Bnc-9zgMJz3Y` (view 3) |
 
 Find the item's ID, then set its Status. This moves PR #1235 to In Progress. For an issue, use `issue(number:...)`
 instead of `pullRequest`.
