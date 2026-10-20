@@ -406,13 +406,17 @@
 # Save what you download from each bot in a folder named after it, inside the
 # fetched files directory - files from SomeBot go to SomeBot/. Applies to new
 # downloads; files already downloaded stay where they are. Fetched lists keep
-# their own place.
+# their own place. A nick a folder name cannot hold gets a tag: [Bot] is Bot-
+# de3914ffb39e4938.
 #
 # EACH BOT'S FILES IN A FOLDER OF ITS OWN (#1423), the way mIRC can file a
 # download under its sender's name: a file or a packed folder fetched from
 # SomeBot is saved in FETCHED_FILES_DIR/SomeBot/. Off by default - turned on,
 # it applies to new fetches only, and files already fetched stay where they
 # are. Fetched lists are not affected: they have their own place (lists/).
+# The folder's name is dcc_fetch.bot_folder_name(): tagged when the name
+# alone could be another nick's - cleaned, reserved, cut short, or already
+# looking tagged - so two bots do not share one by accident (#1438).
 # Save each bot's files in a folder named after it, inside the fetched files directory
 #FETCHED_FILES_PER_BOT = false
 

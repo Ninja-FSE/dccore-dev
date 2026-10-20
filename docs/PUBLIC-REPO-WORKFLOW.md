@@ -329,6 +329,62 @@ that later sweeps caught by design, not luck. Specifically:
   `docs/UPDATES.md` (internal) — should carry `export-ignore`, verified by
   a test that runs a real `git archive` and checks the output, not by
   trusting the rule is there.
+- **`export-ignore` is not a privacy boundary.** It keeps a file out of the
+  release tree and does nothing else: `dccore-dev` is public, so a file
+  tracked here can be read by anyone whether it is export-ignored or not.
+  Anything strangers must not read is not tracked at all.
+- **The identifier denylist is not tracked.** `tests/forbidden_identifiers.py`
+  is in `.gitignore`; each of us keeps a local copy, and CI writes one from
+  the `FORBIDDEN_IDENTIFIERS` repository secret before the suite runs
+  (`.github/workflows/tests.yml`). Without the file the denylist tests in
+  `tests/test_no_personal_identifiers_ship.py` skip and say the sweep did
+  not run, and `scripts/preflight.py` says the same under its skip report -
+  put the copy back and run it again before pushing. The guard sweeps every
+  tracked file, not only what ships: in the export-ignored files it allows
+  the repository's own name and our public account names, and nothing else.
+  - **The owner's copy is the reference, and it lives outside the work
+    tree** - `../forbidden_identifiers.py`, next to the checkout - for both
+    of us. Copy it into `tests/` before running the tests. A copy that only
+    lives in `tests/` is one checkout away from gone: **checking out any
+    commit from before the file was untracked - an old branch, a release
+    tag, a bisect step - overwrites the ignored local copy with the old
+    tracked one, and switching back deletes it.**
+  - **New entries go three places**, since git no longer carries the list
+    between us: the owner's copy, the other maintainer's (sent privately,
+    never through an issue, PR or commit), and the secret. Setting the
+    secret from the reference copy without the value ever reaching the
+    terminal, and the variable that makes CI insist on it (`py` on Windows):
+
+    ```bash
+    python -c "import base64;print(base64.b64encode(open('../forbidden_identifiers.py','rb').read()).decode())" | gh secret set FORBIDDEN_IDENTIFIERS --repo Ninja-FSE/dccore-dev
+    gh variable set REQUIRE_IDENTIFIER_SWEEP --body 1 --repo Ninja-FSE/dccore-dev
+    ```
+
+    With `REQUIRE_IDENTIFIER_SWEEP` set, a CI run that has no secret fails
+    at the step that writes the file instead of skipping the sweep - except
+    a pull request from a fork, which GitHub gives no secrets: that run
+    skips the sweep and says so, and the run on `main` after the merge
+    sweeps. Without the variable, every run without the secret skips.
+  - **Once, on every checkout that had the file tracked** (both of ours and
+    the live bot's): the pull that stops tracking it deletes it from the
+    working tree. Copy it aside first, put the tracked copy back to what
+    the last commit holds so that `git pull` does not refuse over local
+    entries (they are safe in the copy aside), and copy it back after:
+
+    ```bash
+    cp -n tests/forbidden_identifiers.py ../forbidden_identifiers.py
+    git checkout -- tests/forbidden_identifiers.py
+    git pull
+    cp ../forbidden_identifiers.py tests/forbidden_identifiers.py
+    ```
+
+    The `git checkout --` line is only needed while the pull still crosses
+    the commit that stops tracking the file; after that the file is not
+    tracked and there is nothing to put back. `cp -n` keeps a reference
+    copy that is already there (a second checkout under the same parent
+    folder); merge any new local entries into it by hand. `git clean -x`
+    deletes the ignored copy too. If your checkout lost its copy, ask the
+    owner for one.
 - Read the scrubbing/test code itself during a sweep, not just the
   production code and docs. The scrubber is shipped too.
 - **`dccore-dev` is public as well.** A name in a commit, an issue, a PR

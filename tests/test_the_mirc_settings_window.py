@@ -793,8 +793,12 @@ class TheExamplesAreInvented(unittest.TestCase):
 
 class TheVersion(unittest.TestCase):
 
-    def test_the_script_is_1_20_0(self):
-        self.assertIn("\nalias dccore.ver { return 1.20.0 }\n", code())
+    def test_the_script_is_at_least_1_20_0(self):
+        """The window came with 1.20.0: a later release moves the version on,
+        and this only refuses one that went back."""
+        found = re.search(r"\nalias dccore\.ver \{ return ([0-9.]+) \}\n", code())
+        self.assertIsNotNone(found, "dccore.ver has no plain version")
+        self.assertGreaterEqual(tuple(int(n) for n in found.group(1).split(".")), (1, 20, 0))
 
 
 class TheReviewOfTheFirstVersion(unittest.TestCase):
@@ -1178,7 +1182,7 @@ class TheAuditOfBothHalves(unittest.TestCase):
     #    until `unlock <password>`.
 
     LOCKABLE = ("setcommit", "set", "served commit", "folders commit", "onconnect commit", "onconnect resend",
-                "onconnect", "pair", "unpair")
+                "onconnect", "checkupdates", "consolefeed", "pair", "unpair")
 
     def locked_line(self, what):
         session = FakeSession()

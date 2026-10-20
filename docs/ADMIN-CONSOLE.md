@@ -210,7 +210,7 @@ Waiting for acknowledgement...
 DCC Chat connection established
 
 Welcome to DCCore
-DCCore v1.17.0 - platform=posix python=3.10 rar=/usr/bin/rar
+DCCore v1.18.0 - platform=posix python=3.10 rar=/usr/bin/rar
 
 Enter Your Password:
 ```
@@ -673,12 +673,29 @@ host the bot is known to have (`bothost`); otherwise the window says so and the
 script stops reconnecting until you `/dccore connect`. A script with no
 `bothost` yet learns the host the first time it is known, as for the token.
 
+"The login" above means one thing: the bot's `Entering DCC Chat Admin
+Interface`, read only once `Enter Your Password:` in the same chat has been
+answered - the script sent the token after this check, or you typed the
+password. A password counts as typed wherever you type it: in `@DCCore`, in
+`@DCCore-console`, with `/dccore raw` or with the menu's console command, and
+the line is never echoed (the windows show `********`). At the prompt the
+menu's box hides what you type. `/dccore raw <password>` is a command line, so
+it stays in mIRC's editbox history like any other: type the password on its own
+in either window instead. Typed on its own there, a password with runs of
+spaces or a space at either end arrives as typed (#1273); through
+`/dccore raw` or the menu, mIRC hands the script the line with those spaces
+closed up. The bot always asks first and logs in only after the
+answer. A login line in a chat whose prompt was not answered is ignored: the
+window says so, the chat is closed, and the script stops reconnecting until
+you `/dccore connect`. Until a login counts, no `DCCORE` line is read.
+
 What a token does **not** do is open the dashboard, or change the bot's
 settings. The web login checks the admin password hash and nothing else - the
 token store is never read there. In the console, a session that logged in
 with a token can read the settings, the served lists, the folders and the
 bans, and drive the feed and the queue commands as before; changing a
-setting, the lists, the folders or the on-connect commands, reading or
+setting (`checkupdates` and `consolefeed` with an argument among them, as
+`set`), the lists, the folders or the on-connect commands, reading or
 resending the on-connect commands (an X login among them holds a password),
 and pairing or revoking another script need the password, once per session:
 `unlock <password>` (see "Settings over the console"). A token paired
@@ -703,6 +720,17 @@ dashboard for fifteen minutes, again and again. If you reach the dashboard
 through a reverse proxy, the proxy must pass the `Host` header through
 unchanged (`proxy_set_header Host $host;` in nginx), or every login is refused
 with "This login was sent by another site".
+
+Three wrong passwords at the web login block the address they came from for
+fifteen minutes. Over IPv6 they are counted per /64 network: every device that
+shares a /64 shares the three. Wrong passwords from anywhere in one /48 also
+add up, and thirty of them block that whole /48 for fifteen minutes. A right
+password clears both counts. An IPv6 address that carries an IPv4 one
+(`::ffff:192.0.2.1` from a dual-stack socket, NAT64 `64:ff9b::192.0.2.1`, 6to4
+or Teredo) counts as that IPv4 address; a translator with a prefix of its own
+counts as an IPv6 network. Behind a reverse proxy every client
+counts as the proxy's address, since the proxy's is the address the dashboard
+sees.
 
 ```
 unpair                    list the paired clients and when they were paired
@@ -774,7 +802,9 @@ with a paired token - kept in clear text in `dccore.ini` - can read `settings`,
 `set` lines in a transaction, but is answered `DCCORE LOCKED <command>` for
 `setcommit`, a lone `set`, `served commit`, `folders commit`, `onconnect commit`,
 `onconnect resend`, the `onconnect` listing itself (an X login holds a
-password), `pair`, and `unpair` of anything but its own token - until
+password), `checkupdates on|off` and `consolefeed on|off` (each saves a
+setting; with no argument they only report it and stay allowed), `pair`, and
+`unpair` of anything but its own token - until
 `unlock <password>` succeeds once in that session. A refused commit leaves its
 transaction open, so the window can ask for the password, unlock, and send the
 commit again. The dashboard's own Console is behind the dashboard login, which
@@ -853,7 +883,7 @@ first field, and its last field is always a sentence to show.
 |---|---|---|
 | `DCCORE CAPS <name>:<version> ... machine:<name>` | `consolecaps` | today `settings:1 preview:1 served:1 folders:1 onconnect:1 banlist:1 unlock:1 library:1`, then `machine:` and this computer's name (spaces and colons as `-`), which a client compares with its own to know whether the bot is on the same machine - the console's address cannot tell, since a DCC chat to a bot on the same PC arrives from the public address. A bot without these commands answers `DCCORE OUT Unknown command: consolecaps. Type 'help'.` - say "update the bot" then. A version goes up when a field of that part moves; a part added later is a new name |
 | `DCCORE SETBEGIN <n>` / `DCCORE SETF <KEY> <type> <value>` / `DCCORE SETEND <n>` | `settings [<word>]` | one `SETF` per setting, in the Settings page's order; `type` is `str`, `int`, `float`, `bool` or `list`, the value last (empty: the line ends after the type - for `WEBUI_CONSOLE_ENABLED` that means "not set"). `ADMIN_PASSWORD_HASH` is never among them. Labels, help, units and choices are the dashboard's metadata, not sent here |
-| `DCCORE LOCKED <command> <sentence>` | any of the commands above that change something, on a session that logged in with a token and has not unlocked; and any command at all that a read-only token may not run ("Read-only tokens" above) | `command` is what was refused, one or two words (`setcommit`, `set`, `served commit`, `folders commit`, `onconnect commit`, `onconnect resend`, `onconnect`, `pair`, `unpair`; on a read-only session, the command word, `unlock` included); the sentence says to unlock, or on a read-only session that only the password can do this. Nothing was saved or run; an open transaction stays open |
+| `DCCORE LOCKED <command> <sentence>` | any of the commands above that change something, on a session that logged in with a token and has not unlocked; and any command at all that a read-only token may not run ("Read-only tokens" above) | `command` is what was refused, one or two words (`setcommit`, `set`, `served commit`, `folders commit`, `onconnect commit`, `onconnect resend`, `onconnect`, `checkupdates`, `consolefeed`, `pair`, `unpair`; on a read-only session, the command word, `unlock` included); the sentence says to unlock, or on a read-only session that only the password can do this. Nothing was saved or run; an open transaction stays open |
 | `DCCORE UNLOCKED` | `unlock <password>` | the session may change settings now (also the answer when it already could) |
 | `DCCORE UNLOCK error <message>` | `unlock` with a wrong password | still locked; the third wrong one closes the session instead |
 | `DCCORE SETOPEN <dropped>` | `setbegin` | `dropped`: changes buffered by a transaction that was still open, now gone (0 normally) |
@@ -1085,7 +1115,10 @@ tests DCX in this mIRC and writes what it found in `@DCCore`.
 - **The admin password, once per connection.** The script logs in with its
   paired token, which may read the settings but not change them. The first
   time a save needs it, the window asks for the admin password (masked), sends
-  `unlock` with it, and saves; the password is not kept, shown or logged. No
+  `unlock` with it, and saves; the password is not kept, shown or logged. The
+  **Console feed on** box is the exception: refused, it goes back to what the
+  bot has and the status line says so - type `unlock <password>` in `@DCCore`,
+  then Apply again. No
   password, or a wrong one, saves nothing and keeps your edits. The on-connect
   commands, which may hold a login, show only after **Unlock** beside them. A
   new connection starts locked again.
@@ -1177,7 +1210,7 @@ theme the next time it opens; the other windows change at once.
 /dccore downloads            open @DCCore-Downloads: what the bot is fetching from other bots (needs 1.10)
 /dccore weburl [addr]        where the bot's dashboard is, for that window's menu
 /dccore status               ask the bot for its status
-/dccore consolefeed on|off   what this window shows beyond STATUS - requests, sends, searches...
+/dccore consolefeed on|off   what this window shows beyond STATUS - requests, sends, searches... (a token login: unlock <password> first)
 /dccore lists                the bots' lists we hold, and which have changed
 /dccore fetch [bot]          ask the bots whose lists changed, or one bot
 /dccore raw <command>        send any console command
@@ -1478,7 +1511,11 @@ block lives in memory only. The limit is per address, not per chat: a password i
 counted before it is checked, so chats opened side by side share the three, and a
 chat that was already open when the address was blocked is closed at its next
 attempt with "Too many failed password attempts from this address." An
-`unlock <password>` counts the same way, against the same three.
+`unlock <password>` counts the same way, against the same three. Only the
+admin password, at the prompt or in `unlock`, clears the count: a login with
+a paired token, full or read-only, is not counted as a wrong password, but it
+leaves the address's earlier wrong ones as they were, and a blocked address
+is refused with a token too.
 
 **Locked out entirely.**
 Edit `admin_config.py` and restart. While `ADMIN_CHANNEL_COMMANDS` is on (it

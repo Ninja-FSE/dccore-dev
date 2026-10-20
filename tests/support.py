@@ -337,6 +337,10 @@ def reset_config(**overrides):
     # The bot's own JOINs one test saw echoed (irc.note_own_join()): a channel
     # left here would vouch for the next test's channel of the same name.
     runtime.joined_channels.clear()
+    # A folder pack held for room, and the watcher for held packs (#1376):
+    # one test's hold must not hold the next test's packs.
+    runtime.pack_space_holds = ()
+    runtime.pack_hold_watch = None
     for name, value in SETTINGS_DEFAULTS.items():
         setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():
@@ -555,12 +559,49 @@ class FakeRarProcess:
     kill = terminate
 
 
+def rar_names_packed(cmd):
+    """The archive names a `rar a -ep1 -n@<list> ... <archive> <folder>` asks
+    for: each line of the -n@ list file (UTF-8 with -scfl, else UTF-16), from the folder's own name
+    down, with "/" between the parts. None for a command with no such list."""
+    lists = [part[3:] for part in cmd if str(part).startswith("-n@")]
+    if not lists:
+        return None
+    base = os.path.dirname(os.path.abspath(cmd[-1]))
+    names = []
+    for path in lists:
+        with open(path, "rb") as handle:
+            # UTF-8 with -scfl (off Windows), UTF-16 with -scul (#1376).
+            lines = handle.read().decode("utf-8" if "-scfl" in cmd else "utf-16").split("\n")
+        for line in lines:
+            line = line[:-1] if line.endswith("\r") else line
+            if line:
+                names.append(os.path.relpath(line, base).replace(os.sep, "/"))
+    return names
+
+
 def fake_rar_runs(test, subprocess_module, run):
     """Make every Popen on `subprocess_module` a FakeRarProcess of `run`, until
     the test ends. The packer starts rar with Popen (#1202) so it can stop it;
-    these tests stand in for the binary, never for the packer."""
+    these tests stand in for the binary, never for the packer.
+
+    The listing the packer asks for once an archive is made (`rar lb`, #1376)
+    is answered here and never reaches `run`: with the names the pack's -n@
+    list asked for, as a rar that packed exactly those would list them. What
+    these stand-ins write is no archive rar could list."""
+    packed = {}
+
+    def answer(cmd, timeout=None):
+        if len(cmd) > 1 and cmd[1] == "lb":
+            names = packed.get(os.path.normcase(os.path.abspath(cmd[-1])), [])
+            return types.SimpleNamespace(returncode=0, stdout="".join(n + "\n" for n in names), stderr="")
+        names = rar_names_packed(cmd)
+        done = run(cmd, timeout=timeout)
+        if names is not None:
+            packed[os.path.normcase(os.path.abspath(cmd[-2]))] = names
+        return done
+
     real = subprocess_module.Popen
-    subprocess_module.Popen = lambda cmd, *a, **kw: FakeRarProcess(cmd, run)
+    subprocess_module.Popen = lambda cmd, *a, **kw: FakeRarProcess(cmd, answer)
     test.addCleanup(setattr, subprocess_module, "Popen", real)
 
 
@@ -1409,3 +1450,96 @@ def changelog_entry(test, number, public, opening=None):
         following = re.search(r"^#{2,3} ", rest, re.M)
         return text[match.start():match.end() + (following.start() if following else len(rest))]
     raise AssertionError(f"#{number}'s entry is neither in docs/changes/ nor in {changelog}")
+
+
+def _host_resolves_windows_paths():
+    """Whether ntpath here resolves a path on disk: only where `nt` is, i.e. on
+    Windows. Elsewhere ntpath.realpath() is abspath(), and abspath() is
+    normpath() for an absolute path: string work alone."""
+    try:
+        import nt  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+class _LexicalNtpath:
+    """ntpath with realpath() as abspath(), for a Windows host. There the real
+    realpath() asks the disk, and for \\\\server\\share the network, where
+    a share that is not there can take seconds to fail. abspath() is
+    GetFullPathNameW there, which reads no disk. Everything else is ntpath."""
+
+    @staticmethod
+    def realpath(path, *args, **kwargs):
+        import ntpath
+        return ntpath.abspath(path)
+
+    def __getattr__(self, name):
+        import ntpath
+        return getattr(ntpath, name)
+
+
+class WindowsOs:
+    """Windows' path rules (ntpath) in place of a module's `os`, wherever the
+    suite runs, so a Windows path - a drive, a share root - can be checked
+    on a Linux or macOS runner. Only the path rules change: every other
+    attribute is this host's own os.
+
+    The path rules are ntpath itself on a host without `nt`: there its
+    realpath() is abspath(), lexical, so code that "resolves" a path through
+    it (dcc.is_safe_path()) runs unchanged and never reaches the disk. On
+    Windows they are ntpath with realpath() made lexical the same way
+    (_LexicalNtpath), so no test reaches for \\\\server\\share on a network.
+    Shared by every test that needs it (#1439, #1440): import it, do not copy
+    it."""
+
+    sep = "\\"
+    altsep = "/"
+
+    def __init__(self):
+        import ntpath
+        self.path = _LexicalNtpath() if _host_resolves_windows_paths() else ntpath
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+class windows_path_rules:
+    """Context manager: Windows' path rules (WindowsOs()) for the code under
+    test while it is open, wherever the suite runs.
+
+    `modules` get WindowsOs() as their `os`. `functions`, pairs of (owner,
+    name), are each rebound to a copy of the function whose globals see
+    WindowsOs() as `os` and nothing else changed: the real code, with
+    Windows' rules, and the rest of its module untouched. That is how
+    dcc.is_safe_path() is put under them (#1440) rather than all of dcc,
+    whose send threads can outlive a test and must keep this host's `os`:
+    dcc's own `os` is untouched, and only is_safe_path() - for every caller,
+    dcc's own included - follows Windows' rules while the context is open.
+
+    Restored on exit, and through test.addCleanup() as well, so a failure
+    between the two can never leave anything on Windows' rules for the tests
+    after it."""
+
+    def __init__(self, test, *modules, functions=()):
+        self.os = WindowsOs()
+        self.swaps = [(module, "os", module.os, self.os) for module in modules]
+        for owner, name in functions:
+            real = getattr(owner, name)
+            stand_in = types.FunctionType(real.__code__, {**real.__globals__, "os": self.os},
+                                          real.__name__, real.__defaults__, real.__closure__)
+            stand_in.__kwdefaults__ = real.__kwdefaults__
+            stand_in.__doc__ = real.__doc__
+            self.swaps.append((owner, name, real, stand_in))
+        for owner, name, real, _ in self.swaps:
+            test.addCleanup(setattr, owner, name, real)
+
+    def __enter__(self):
+        for owner, name, _, stand_in in self.swaps:
+            setattr(owner, name, stand_in)
+        return self.os
+
+    def __exit__(self, *exc):
+        for owner, name, real, _ in self.swaps:
+            setattr(owner, name, real)
+        return False

@@ -271,6 +271,47 @@ def skip_report(output):
     return skipped, reasons
 
 
+# The identifier denylist tests/test_no_personal_identifiers_ship.py reads is
+# not tracked (.gitignore): each maintainer keeps a local copy, and CI writes
+# one from a secret. Without it the guard's denylist test skips, which is
+# legitimate - but a push should not go out on that skip unnoticed.
+#
+# ASKED OF THE GUARD, not re-derived here. The guard reads FORBIDDEN as None -
+# and skips - when the file is absent AND when it is there but defines no
+# FORBIDDEN; a path check of its own would stay quiet about the second. So
+# this imports the guard and prints its answer and the denylist's path, in a
+# child process: whatever the import does, a broken local copy included,
+# cannot stop preflight, and nothing of what it raised is printed.
+GUARD_MODULE = "tests.test_no_personal_identifiers_ship"
+SWEEP_PROBE = (f"import {GUARD_MODULE} as guard; "
+               "print('READY' if guard.FORBIDDEN is not None else 'ABSENT', guard.DENYLIST)")
+
+
+def identifier_sweep_note(answer=None):
+    """The lines to print when the guard's identifier sweep skips, else [].
+
+    `answer` is what running SWEEP_PROBE gave (returncode, stdout), or None
+    to run it now. Its stderr is never read: an import error there can quote
+    a line of the local denylist."""
+    if answer is None:
+        try:
+            answer = capture([sys.executable, "-c", SWEEP_PROBE])
+        except OSError:
+            answer = None
+    said = (answer.stdout or "").split() if answer is not None else []
+    if answer is not None and answer.returncode == 0 and len(said) == 2:
+        if said[0] == "READY":
+            return []
+        if said[0] == "ABSENT":
+            return [f"    ({said[1]} is absent or defines no FORBIDDEN: the identifier",
+                    "     sweep did not run. Put the maintainers' local copy there and run",
+                    "     preflight again to include it - docs/PUBLIC-REPO-WORKFLOW.md,",
+                    "     \"Identity scrubbing\".)"]
+    return [f"    ({GUARD_MODULE} could not be imported to ask whether its",
+            "     denylist is in place: the identifier sweep will skip. Run",
+            f"     python -c \"import {GUARD_MODULE}\" to see why.)"]
+
+
 def main():
     py = sys.executable
     checks = [
@@ -344,6 +385,8 @@ def main():
     if any(reason.startswith("no POSIX shell on PATH") for reason in reasons):
         print("    (no bash/sh on PATH: the POSIX launcher tests did not run. From")
         print("     Windows, run preflight from Git Bash to include them.)")
+    for line in identifier_sweep_note():
+        print(line)
     if skipped > MAX_SKIPPED:
         print(f"--- skipped FAILED: {skipped} tests ran nothing. A whole family of tests")
         print("    is dark on this machine, and PASS would not cover it.")

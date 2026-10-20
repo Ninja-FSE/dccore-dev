@@ -387,17 +387,72 @@ class APersonHearsItInASentence(ConsoleCase):
 # dccore.mrc
 # ---------------------------------------------------------------------------
 
-def _condition(statement):
-    """The condition of `if (...) ... {`: from after "if " to the brace that
-    opens the body."""
+def _if_split(statement):
+    """`if (...) { ... }` as (condition, body): the condition from after
+    "if " to the brace that opens the body, and the body inside that brace -
+    None when the block goes on over the lines below. Anything after the
+    closing brace (an `else`) is an error, so it is never skipped unread."""
     assert statement.startswith("if "), statement
     text, depth = statement[3:], 0
     for i, ch in enumerate(text):
         depth += ch == "("
         depth -= ch == ")"
         if depth == 0 and text[i:i + 2] == " {":
-            return text[:i].strip()
+            condition, rest = text[:i].strip(), text[i + 1:].strip()
+            break
+    else:
+        raise AssertionError(statement)
+    if rest == "{":
+        return condition, None
+    depth = 0
+    for j, ch in enumerate(rest):
+        depth += ch == "{"
+        depth -= ch == "}"
+        if depth == 0:
+            if rest[j + 1:].strip():
+                raise AssertionError("not understood after the block: %r" % statement)
+            return condition, rest[1:j].strip()
     raise AssertionError(statement)
+
+
+def _condition(statement):
+    """The condition of `if (...) ... {`: from after "if " to the brace that
+    opens the body."""
+    return _if_split(statement)[0]
+
+
+def _pieces(body):
+    """The statements of a one-line body, split at its own `|`s - not those
+    inside a nested block."""
+    found, depth, start = [], 0, 0
+    for i, ch in enumerate(body):
+        depth += ch == "{"
+        depth -= ch == "}"
+        if depth == 0 and body[i:i + 3] == " | ":
+            found.append(body[start:i].strip())
+            start = i + 3
+    found.append(body[start:].strip())
+    return [piece for piece in found if piece]
+
+
+def _run_body(body, atoms, ran):
+    """Run a one-line body: the statements it carries out go to `ran`, a
+    nested inline `if` is evaluated with `atoms`. True once a `return` is
+    reached."""
+    for piece in _pieces(body):
+        if piece == "return":
+            return True
+        if piece.startswith(("else", "elseif")):
+            raise AssertionError("not understood: %r" % piece)
+        if piece.startswith("if "):
+            condition, inner = _if_split(piece)
+            if inner is None:
+                raise AssertionError("not understood: %r" % piece)
+            if _evaluate(condition, atoms) and _run_body(inner, atoms, ran):
+                return True
+            continue
+        ran.append(piece)
+    return False
 
 
 def _evaluate(condition, atoms):
@@ -426,19 +481,63 @@ def sw_types():
     return statements(alias("dccore.sw.types"))[0].split()[1:]
 
 
-def route(kind, wants, tail):
-    """The statement of `alias dccore.structured` a line of type `kind` is
-    handled by, the window waiting for it (`wants`) or in its tail."""
+def handling(kind, wants, tail, line=None, dialog=False):
+    """What `alias dccore.structured` does with a line of type `kind`, the
+    window waiting for it (`wants`) or in its tail, and open (`dialog`) or
+    not: [(statement, ran)] for
+    each statement of the alias, in order, that carried something out, up to
+    the one whose `return` ended it. `ran` is what that statement carried
+    out; None for a block over lines of its own, which is taken as the end.
+
+    `line` is the line as the alias gets it ($1-, without "DCCORE "), for a
+    condition that reads its fields ($2 ...); a field the line does not have
+    is $null, as in mIRC."""
+    fields = (line if line is not None else kind).split(" ")
+
+    def field(m):
+        number = int(m.group("n"))
+        return fields[number - 1] if number <= len(fields) else ""
+
+    def field_in(m):
+        return field(m).lower() in [word.lower() for word in m.group("a").split()]   # $istok ignores case
+
     atoms = {
         r"%type == (?P<a>\w+)": lambda m: m.group("a") == kind,
         r"\$istok\(\$dccore\.sw\.types,%type,32\)": lambda m: kind in sw_types(),
+        r"\$istok\((?P<a>[\w ]+),\$(?P<n>\d),32\)": field_in,
+        r"\$(?P<n>\d) == (?P<a>\w+)": lambda m: field(m).lower() == m.group("a").lower(),   # == ignores case
+        r"\$dialog\(dccore\.set\)": lambda m: dialog,
         r"\$dccore\.sw\.wants\(%type\)": lambda m: wants,
         r"\$dccore\.st\(sw\.tail\)": lambda m: tail,
     }
+    path = []
     for statement in top_level("dccore.structured"):
-        if statement.startswith("if ") and _evaluate(_condition(statement), atoms):
-            return statement
-    return None
+        if statement == "}" or statement.startswith("var "):
+            continue
+        if not statement.startswith("if "):
+            path.append((statement, [statement]))       # the catch-all at the end
+            continue
+        condition, body = _if_split(statement)
+        if not _evaluate(condition, atoms):
+            continue
+        if body is None:
+            path.append((statement, None))
+            return path
+        ran = []
+        returned = _run_body(body, atoms, ran)
+        if ran or returned:
+            path.append((statement, ran))
+        if returned:
+            return path
+    return path
+
+
+def route(kind, wants, tail, line=None, dialog=False):
+    """The statement of `alias dccore.structured` a line of type `kind` is
+    handled by - the one whose `return` ends it - the window waiting for it
+    (`wants`) or in its tail."""
+    path = handling(kind, wants, tail, line, dialog)
+    return path[-1][0] if path else None
 
 
 def wants(kind, applying):

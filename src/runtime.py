@@ -85,6 +85,17 @@ pack_lock = threading.Lock()
 # !rehash reloads dcc.py while a pack runs.
 pack_owner = None
 
+# The folder packs waiting for room on the disk TMP_ZIP_DIR is on (#1376):
+# a tuple of {"row", "total", "needed", "free"}, one per queue row whose
+# files did not fit - dcc.py's pack_hold_reason(row) reads it, and that row
+# waits while other packs go ahead. A tuple, rebound under queue_lock, not a
+# list kept in place: nothing outside dcc.py holds on to it. And the watcher
+# that looks at held packs again (dcc._watch_held_packs()), while one runs,
+# so a second is not started. Here because a !rehash reloads dcc.py while a
+# pack waits, and the new copy must see both.
+pack_space_holds = ()
+pack_hold_watch = None
+
 # The stop-file watcher (#1065, stopping.py): one per process, kept here so a
 # !rehash cannot start a second.
 stop_watcher_thread = None

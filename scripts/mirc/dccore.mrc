@@ -105,7 +105,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.20.0 }
+alias dccore.ver { return 1.21.0 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -347,7 +347,11 @@ alias dccore {
   ; whose feed was off to run this, and it did not exist - there was no
   ; %cmd branch for it, so it fell through to the help text instead.
   if (%cmd == consolefeed) { dccore.send consolefeed $2- | return }
-  if (%cmd == raw) { dccore.send $2- | return }
+  if (%cmd == raw) {
+    if ($dccore.st(state) == password) { dccore.typedpass - $2- | return }
+    dccore.send $2-
+    return
+  }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
   if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for the DCCore it ships with and later. Pairs as $dccore.client $+ . $iif($dccore.opt(net),Bot on $dccore.opt(net) $+ .,) | return }
   if (%cmd == font) {
@@ -583,20 +587,36 @@ alias dccore.send {
   .msg $+(=,$dccore.bot) $1-
 }
 
-; A password typed at the prompt (#1273). $1- has its runs of spaces closed
-; up and its leading and trailing ones dropped, so a password that has them
-; never arrived as typed. Such a password is read from the editbox as it
-; was typed and sent as DCCORE PASSWORD <value>, its spaces escaped as the
-; settings window escapes a value; the bot decodes it. Nested, never put in
-; a /var, which would close the spaces up again. Every other password goes
-; as it always did, which a bot from before this still accepts - and so
-; does one whose editbox does not hold the line $1- came from.
+; A password typed at the prompt (#1273). $1 is the window it was typed
+; in, - for none; $2- is the line. $2- has its runs of spaces closed up and
+; its leading and trailing ones dropped, so a password that has them never
+; arrived as typed. Such a password is read from that window's editbox as
+; it was typed and sent as DCCORE PASSWORD <value>, its spaces escaped as
+; the settings window escapes a value; the bot decodes it. Nested, never
+; put in a /var, which would close the spaces up again. Every other
+; password goes as it always did, which a bot from before this still
+; accepts - and so does one whose editbox does not hold the line $2- came
+; from. /dccore raw and the menu's console command have no editbox that
+; holds the password alone (mIRC gives them the line as parameters, and
+; $input's answer as a /var), so from there a password with runs of
+; spaces, or a space at either end, goes closed up.
 alias dccore.sendpass {
-  if ($gettok($editbox(@DCCore),1-,32) === $1-) && ($len($editbox(@DCCore)) > $len($1-)) {
-    dccore.send DCCORE PASSWORD $dccore.sw.enc($editbox(@DCCore))
+  if ($gettok($editbox($1),1-,32) === $2-) && ($len($editbox($1)) > $len($2-)) {
+    dccore.send DCCORE PASSWORD $dccore.sw.enc($editbox($1))
     return
   }
-  dccore.send $1-
+  dccore.send $2-
+}
+; A line typed while the bot waits for the password is the password,
+; whichever way it was typed (@DCCore, @DCCore-console, /dccore raw, the
+; menu's console command): the prompt is answered (state auth, typed by
+; hand) and the line goes through dccore.sendpass. $1 is the window it
+; was typed in (- for none), $2- the line. Never echoed, never stored;
+; the caller shows ******** where it echoes what was typed.
+alias dccore.typedpass {
+  hadd dccore.live state auth
+  hadd dccore.live typed 1
+  dccore.sendpass $1-
 }
 
 ; ---------------------------------------------------------------------
@@ -633,7 +653,7 @@ alias dccore.line {
     ; bot is known to have. (Nested: mIRC evaluates every identifier in an
     ; if-line, and peerok closes the chat when it says no.)
     if (!$dccore.st(byhand)) {
-      if (!$dccore.peerok password) { return }
+      if (!$dccore.peerok(password)) { return }
       hadd dccore.live vetted 1
     }
     hadd dccore.live state password
@@ -641,6 +661,20 @@ alias dccore.line {
     return
   }
   if (%text == Entering DCC Chat Admin Interface) {
+    ; The bot sends this only once its own "Enter Your Password:" has
+    ; been answered. The state is auth only then: the token went out
+    ; after the peer check in the prompt branch above, or a password
+    ; was typed at the prompt (dccore.typedpass). In password the prompt
+    ; was shown and nothing has answered it; in any other state there
+    ; was no prompt. So the login counts only in auth, and in any other
+    ; state the chat is left as it is for a peer that fails the check.
+    ; In a chat that is already logged in, a second one changes nothing.
+    if (%state != auth) {
+      if (%state == in) { return }
+      dccore.sys Ignored a login line that came before the password prompt was answered. The chat is closed and not reopened by itself; /dccore connect opens it again.
+      dccore.abandon
+      return
+    }
     hadd dccore.live state in
     hdel dccore.live mode
     dccore.sys Logged in to $dccore.bot $+ . Saying hello...
@@ -847,6 +881,13 @@ alias dccore.structured {
   ; A save's rehash that failed (#1434), when the settings window is not
   ; waiting for it - closed, or the set typed here: said here, never dropped.
   if (%type == SETAPPLYERR) && (!$dccore.sw.wants(%type)) { dccore.alert $dccore.tag(SETTINGS,fail) $dccore.bot $+ : the settings were saved to settings.conf. $2- | return }
+  ; checkupdates and consolefeed with an argument save a setting, so a
+  ; locked console is refused them. Said here, never through the settings
+  ; window's unlock: that sends the refused command again without the
+  ; on|off it carried, and once the window is closed it would say nothing
+  ; at all. The window's console feed box, refused, is put back as the bot
+  ; has it, and the window says why (dccore.sw.locked.toggle).
+  if (%type == LOCKED) { if ($istok(checkupdates consolefeed,$2,32)) { dccore.sys $dccore.bot $+ : $3- | if ($2 == consolefeed) { if ($dialog(dccore.set)) { dccore.sw.locked.toggle } } | return } }
   ; The settings window's lines (#1264), but only the ones it is waiting
   ; for (and, for a few seconds after it closes, its late replies): the
   ; same lines answering a command typed in this window - settings, set,
@@ -1701,9 +1742,7 @@ on *:INPUT:@DCCore: {
   }
   if ($dccore.st(state) == password) {
     ; the password, typed by hand: never shown, never stored
-    hadd dccore.live state auth
-    hadd dccore.live typed 1
-    dccore.sendpass $1-
+    dccore.typedpass @DCCore $1-
     dccore.echo $dccore.prompt ********
     halt
   }
@@ -1714,6 +1753,11 @@ on *:INPUT:@DCCore: {
 }
 on *:INPUT:@DCCore-console: {
   if ($left($1,1) == /) && ($left($1,2) != //) { return }
+  if ($dccore.st(state) == password) {
+    dccore.typedpass @DCCore-console $1-
+    echo -ti2 @DCCore-console $dccore.prompt ********
+    halt
+  }
   echo -ti2 @DCCore-console $dccore.prompt $iif($1 == unlock,unlock ********,$1-)
   dccore.send $1-
   halt
@@ -1739,10 +1783,15 @@ alias dccore.ask {
   var %v = $input($2-,eo,DCCore)
   if (%v != $null) { dccore.send $1 %v }
 }
-; The same for a console command typed in full.
+; The same for a console command typed in full. At the password prompt
+; what is typed is the password, so the box hides it (p) as it is typed.
 alias dccore.askraw {
-  var %v = $input(Console command (see help),eo,DCCore)
-  if (%v != $null) { dccore.send %v }
+  var %how = $iif($dccore.st(state) == password,eop,eo)
+  var %v = $input(Console command (see help),%how,DCCore)
+  if (%v != $null) {
+    if ($dccore.st(state) == password) { dccore.typedpass - %v | return }
+    dccore.send %v
+  }
 }
 ; Cancel the running pack (#1202): top of the right-click menu while one runs; named, so the prompt can say whose.
 alias dccore.packcancel {
@@ -2344,6 +2393,15 @@ alias dccore.sw.opt.save {
   if (%retheme) { dccore.theme.refresh }
   hadd dccore.sws opt.sig $dccore.sw.opt.sig
   return %n
+}
+; The console feed box sent by Apply and refused on a locked console:
+; back to what the bot has, as dccore.sw.opt.fill shows it, and the
+; baseline taken again so the box is not counted as an unsaved change.
+alias dccore.sw.locked.toggle {
+  if ($dccore.st(consolefeed) == on) { did -c dccore.set 1685 }
+  else { did -u dccore.set 1685 }
+  hadd dccore.sws opt.sig $dccore.sw.opt.sig
+  dccore.sw.status Console feed not changed: type unlock <password> in @DCCore, then Apply again.
 }
 ; Pair again, Forget token: the window closes and the pairing takes over
 alias dccore.sw.opt.pair {

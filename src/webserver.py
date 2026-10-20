@@ -39,8 +39,9 @@ authentication, not the workaround kind the module docstring used to warn
 against (an API key in a query string, a cookie nobody checks) - the password
 is verified against ADMIN_PASSWORD_HASH via adminchat.verify_password() on
 every login attempt, and nothing downstream trusts a request that has not
-passed require_login(). Repeated failures from one address are temporarily
-blocked (_note_bad_web_login()/_is_bad_web_ip(), same attempt-count and
+passed require_login(). Repeated failures from one address (for IPv6, one
+/64 network, and many from one /48: _login_counts()) are temporarily blocked
+(_note_bad_web_login()/_is_bad_web_ip(), same attempt-count and
 block-duration policy as adminchat.py's own DCC CHAT console tracker, reused
 from there directly) - in a POOL SEPARATE FROM adminchat.py's, on purpose:
 since the password is shared, a shared block budget would let a web attacker
@@ -553,18 +554,27 @@ from web_on_connect import (  # noqa: F401
 # name, so webserver.<name> still answers for each of them.
 from web_login import (  # noqa: F401
     LOGIN_PAGE,
+    WEB_LOGIN_IPV6_PREFIX,
+    WEB_LOGIN_IPV6_WIDE_PREFIX,
+    WEB_LOGIN_WIDE_ATTEMPTS,
     WEB_MAX_LIVE_SESSIONS,
     WEB_PASSWORD_CHECK_WAIT_SECONDS,
+    _NAT64_PREFIX,
     _admin_password_hash,
+    _blocked_locked,
     _check_web_password,
     _clear_bad_web_ip,
+    _client_address,
     _configured_dashboard_names,
     _dashboard_host_ok,
     _host_name,
     _is_bad_web_ip,
+    _login_counts,
+    _login_key,
     _login_origin_ok,
     _machine_name_cache,
     _machine_names,
+    _network_key,
     _note_bad_web_login,
     _note_bad_web_login_locked,
     _origin_netloc,
@@ -896,8 +906,8 @@ if HAVE_FLASK:
                 if claim == "blocked":
                     error, status = "Too many failed attempts. Try again later.", 401
                 elif claim == "busy":
-                    error, status = ("Another login from this address is still being "
-                                     "checked. Try again in a moment."), 429
+                    error, status = ("Another login from this address or network is "
+                                     "still being checked. Try again in a moment."), 429
                 else:
                     outcome = None
                     try:

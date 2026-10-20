@@ -777,7 +777,7 @@
   "settings.field.MAX_RAR_FOLDER_SIZE.help": "La taille maximale d'un dossier que le bot accepte de compresser, en octets. Empêche de demander un dossier de plusieurs centaines de Go. 10 Go suffit à n'importe quel album ou coffret ; 0 : sans limite.",
   "settings.field.LOCAL_LIST_DIR.help": "Où vos fichiers de liste publiés sont conservés.",
   "settings.field.FETCHED_FILES_DIR.help": "Où sont enregistrés les fichiers que vous téléchargez depuis d'autres bots. Séparé de vos dossiers partagés pour qu'ils ne soient pas proposés aux autres.",
-  "settings.field.FETCHED_FILES_PER_BOT.help": "Enregistre ce que vous téléchargez depuis chaque bot dans un dossier à son nom, dans le répertoire des fichiers récupérés - les fichiers de SomeBot vont dans SomeBot/. S'applique aux nouveaux téléchargements ; les fichiers déjà téléchargés restent où ils sont. Les listes récupérées gardent leur propre place.",
+  "settings.field.FETCHED_FILES_PER_BOT.help": "Enregistre ce que vous téléchargez depuis chaque bot dans un dossier à son nom, dans le répertoire des fichiers récupérés - les fichiers de SomeBot vont dans SomeBot/. S'applique aux nouveaux téléchargements ; les fichiers déjà téléchargés restent où ils sont. Les listes récupérées gardent leur propre place. Un pseudo qu'un nom de dossier ne peut pas contenir, comme [Bot], reçoit une étiquette : Bot-de3914ffb39e4938.",
   "settings.field.BANS_FILE.help": "Où sont enregistrés les bannissements temporaires.",
   "settings.field.STATS_FILE.help": "Où sont enregistrés les totaux, le record de vitesse et les chiffres du jour.",
   "settings.field.HARD_BANS_FILE.help": "Où sont enregistrés les bannissements permanents (de !ban).",

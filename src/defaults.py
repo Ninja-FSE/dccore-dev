@@ -21,7 +21,7 @@ import runtime
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE: bool    = False        # Print every raw line the bot sends to the server in its own window; noisy, for chasing a protocol problem
-SCRIPT_VERSION: str = "DCCore v1.17.0"
+SCRIPT_VERSION: str = "DCCore v1.18.0"
 
 # Where this bot came from. Defined once because two things say it: the CTCP
 # VERSION reply, and the header of every generated list. Before this there was
@@ -290,6 +290,9 @@ FETCHED_FILES_DIR: str = "./data/fetched"
 # SomeBot is saved in FETCHED_FILES_DIR/SomeBot/. Off by default - turned on,
 # it applies to new fetches only, and files already fetched stay where they
 # are. Fetched lists are not affected: they have their own place (lists/).
+# The folder's name is dcc_fetch.bot_folder_name(): tagged when the name
+# alone could be another nick's - cleaned, reserved, cut short, or already
+# looking tagged - so two bots do not share one by accident (#1438).
 FETCHED_FILES_PER_BOT: bool = False  # Save each bot's files in a folder named after it, inside the fetched files directory
 
 # Safe, normalised paths into the data/ subdirectory
