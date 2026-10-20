@@ -207,12 +207,12 @@ class TheNoticeIsStillGatedByTheChannelMode(RefusalCase):
                                  [("dave", framed(text), True)])
 
 
-class ThePackTimeFailureKeepsTheOldText(RefusalCase):
-    """dcc.py's packer thread calls send_pack_error_notice() without a reason
-    when the pack itself raises; that path is untouched and sends what it
-    sent before."""
+class APackThatRaisesIsNotCalledAnArtistRoot(RefusalCase):
+    """A pack that fails while it runs is not a refused request: the packer
+    tells the requester through the queue's own failure path, never with the
+    artist-root refusal, which named a reason that was not the one."""
 
-    def test_a_pack_that_raises_sends_the_golden_notice(self):
+    def test_a_pack_that_raises_sends_no_artist_root_notice(self):
         config.channel_users = {"#dccore-test": {"dave"}}
         config.bot_joined_channel = True
         config.dcc_queue["dave"] = [{
@@ -232,7 +232,8 @@ class ThePackTimeFailureKeepsTheOldText(RefusalCase):
         with quiet():
             dcc.check_queue_and_send(self.sock, "dave")
 
-        self.assertIn(("dave", GOLDEN_LINE, True), self.oserve.queued)
+        self.assertFalse([q for q in self.oserve.queued if OLD_TEXT in str(q[1])],
+                         self.oserve.queued)
 
 
 class TheTextForEachReason(unittest.TestCase):
